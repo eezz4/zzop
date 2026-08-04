@@ -256,6 +256,45 @@ fn disabled_rules_skips_by_exact_id() {
 }
 
 #[test]
+fn an_empty_only_packs_is_no_allowlist_not_an_empty_one() {
+    // The absent-is-not-a-claim direction. If this ever flipped to "allow nothing", every default run
+    // would go silent with no config saying so — the loudest possible regression, and the reason the
+    // emptiness check comes before the membership check in `is_pack_enabled`.
+    let config = RuleConfig::default();
+    assert!(is_pack_enabled(&config, "security"));
+    assert!(is_pack_enabled(&config, "typescript"));
+}
+
+#[test]
+fn only_packs_selects_by_pack_id_and_leaves_the_native_id_space_alone() {
+    let config = RuleConfig {
+        only_packs: vec!["security".to_string()],
+        ..Default::default()
+    };
+    assert!(is_pack_enabled(&config, "security"));
+    assert!(!is_pack_enabled(&config, "typescript"));
+    // The scoping that keeps this from being a kill switch: a native analysis is not a pack, so the
+    // allowlist must not answer for it. `is_enabled` is what native call sites use, and it never reads
+    // `only_packs` — so `dead-candidates` keeps running under a pack allowlist that never names it.
+    assert!(is_enabled(&config, "dead-candidates"));
+    assert!(is_enabled(&config, "scores"));
+}
+
+#[test]
+fn only_packs_composes_with_disabled_rules_rather_than_overriding_it() {
+    // "The allowlist selects, `disabled_rules` still subtracts" — a pack named in BOTH is off, which is
+    // what the two keys read like together and the only order that lets `only` be a coarse selection
+    // with a fine exception carved out of it.
+    let config = RuleConfig {
+        only_packs: vec!["security".to_string(), "sql".to_string()],
+        disabled_rules: vec!["sql".to_string()],
+        ..Default::default()
+    };
+    assert!(is_pack_enabled(&config, "security"));
+    assert!(!is_pack_enabled(&config, "sql"));
+}
+
+#[test]
 fn disabled_rules_skips_by_full_pack_slash_rule_id_without_affecting_sibling_rules() {
     // A `"<pack>/<rule>"` entry disables only that one rule, leaving the bare pack id and every
     // other rule in the same pack enabled. The per-rule pack filtering that makes this id shape

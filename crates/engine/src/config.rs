@@ -119,9 +119,12 @@ pub struct EngineConfig {
     /// `VocabularyConfig::built_in()` — the visible, replaceable starting point a library embedder gets,
     /// exactly as `zzop init`'s starter file is the one a config author gets.
     ///
-    /// The two are separate paths and do not interfere: `zzop-facade` assigns this field from the request
-    /// unconditionally, so a request that declared nothing carries nothing, and this default never leaks
-    /// into a product run.
+    /// The two are separate paths and do not interfere: `zzop-facade` assigns this field
+    /// unconditionally on BOTH of its lanes — the tree lane copies the request's declaration whole
+    /// (a request that declared nothing carries nothing), and the envelope lane
+    /// (`analyze_envelope_json`) assigns the declared vocabulary or, when the request declares none,
+    /// the product default (`built_in()`) explicitly — so this default never reaches a product run
+    /// by accident; it serves only the direct Rust embedder.
     ///
     /// `vocabulary.skipDirs` is the one entry that does NOT live here: it lands in `dispatch.skip_dirs`,
     /// which already owned that list.

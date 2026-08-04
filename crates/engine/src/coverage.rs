@@ -62,6 +62,19 @@ pub struct CoverageCensus {
     /// graph-derived metrics (`fanIn`/`fanOut`/`degree`/`blastRadius`) disclose instead of renaming,
     /// since those terms are correct ABOUT the graph they describe.
     pub resolved_import_edges: usize,
+    /// F4 declared-import denominator for [`resolved_import_edges`](Self::resolved_import_edges): per
+    /// extension (the facade coverage table's own lowercased-tail grain), the sum over that extension's
+    /// parsed files of each file's DISTINCT declared import specifiers — import bindings, re-exports and
+    /// dynamic `import()`s, counted BEFORE resolution drops the ones that fail. Definition, the
+    /// measured/unmeasured contract (an ABSENT key means "never measured" — a channel-less parser like
+    /// prisma/sql, an SFC, or a lexical-only file — never 0), and the deliberate non-1:1 with the edge
+    /// count all live in `analyze::assemble::declared`'s docs; this field only carries the result.
+    ///
+    /// NOT set by [`compute`](Self::compute) (which reads only the IR, where declared specifiers no
+    /// longer exist): the native assemble path stamps it after `compute` returns. The Mode A envelope
+    /// path never stamps it, so an envelope-ingested tree carries an EMPTY map — every extension reads
+    /// as unmeasured there, which is the honest value (nothing on that path counts declarations).
+    pub declared_imports_by_ext: std::collections::BTreeMap<String, usize>,
     /// io provides (all kinds).
     pub io_provides: usize,
     /// io consumes with a resolved `key` (all kinds).
@@ -122,6 +135,9 @@ impl CoverageCensus {
             parser_dispatched: parser_dispatched_count,
             symbols,
             resolved_import_edges,
+            // Empty here by contract (see the field doc): declared counts are not derivable from `ir`,
+            // and only the native assemble path stamps them after this returns.
+            declared_imports_by_ext: std::collections::BTreeMap::new(),
             io_provides,
             io_consumes_keyed,
             io_consumes_unresolved,

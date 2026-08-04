@@ -68,6 +68,10 @@ pub fn const_map_fragment(text: &str) -> HashMap<String, String> {
                 .or_insert_with(|| attrs);
         }
     }
+    #[allow(
+        clippy::iter_over_hash_type,
+        reason = "iteration order cannot reach the result: the emitted keys are `{class}.{attr}`, unique across the whole fold, so `or_insert_with` never resolves a collision"
+    )]
     for (class_name, attrs) in &by_class {
         for (attr, value) in attrs {
             out.entry(format!("{class_name}.{attr}"))

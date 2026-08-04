@@ -80,6 +80,20 @@ fn function_body_start_end_from_first_last_statement() {
     assert_eq!(f.body_end, Some(3));
 }
 
+/// Regression pin for the 2026-08-02 `body_end` fix (module doc): a MULTI-LINE last statement — most
+/// commonly a loop sitting as the fn's final statement — must contribute its END line, or the
+/// `MethodScan` scan region truncates to the statement's first line and a `trigger_in_loop` probe
+/// inside that loop can never fire (measured: this exact shape was the engine-level failure that
+/// surfaced the bug the day `lang::loop_spans` landed).
+#[test]
+fn function_body_end_covers_a_multi_line_last_statement() {
+    let src = "fn f(xs: &[u32]) {\n    for x in xs {\n        use_it(*x);\n    }\n}\n";
+    let out = parse_symbols("a.rs", src);
+    let f = sym(&out, "f");
+    assert_eq!(f.body_start, Some(2));
+    assert_eq!(f.body_end, Some(4));
+}
+
 #[test]
 fn empty_function_body_has_no_start_end() {
     let out = parse_symbols("a.rs", "fn f() {}\n");

@@ -324,7 +324,7 @@ fn analyze_with_usage_signals_add_dead_model_field_and_churn_issues() {
         Some(SchemaUsage::default()),
         &churn_attrs(&[("Ghost", 12)]),
     );
-    // Ghost is unbound -> unreferenced-model-name; churn 12 -> schema-churn critical. unreferenced-field-name is skipped under unreferenced-model-name.
+    // Ghost is unbound -> unreferenced-model-name; churn 12 -> model-churn critical. unreferenced-field-name is skipped under unreferenced-model-name.
     assert!(analysis
         .issues
         .iter()
@@ -332,7 +332,7 @@ fn analyze_with_usage_signals_add_dead_model_field_and_churn_issues() {
     assert!(analysis
         .issues
         .iter()
-        .any(|i| i.rule == "schema-churn" && i.severity == Severity::Critical));
+        .any(|i| i.rule == "model-churn" && i.severity == Severity::Critical));
 }
 
 #[test]

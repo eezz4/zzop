@@ -94,8 +94,11 @@ mod tests {
     }
 
     /// Pins the ninth resource: `rule-pack-schema` serves the exact bytes of the authored
-    /// `docs/contracts/rule-pack.schema.json`, as JSON that names all four matcher kinds — the
-    /// machine-readable twin of the `validate_rule_pack` tool.
+    /// `docs/contracts/rule-pack.schema.json`, as JSON that names every matcher kind — the
+    /// machine-readable twin of the `validate_rule_pack` tool. The kind list below is DERIVED from
+    /// nothing, so it is the one place a new matcher must be added by hand; the compiler-backed twin
+    /// (`zzop_facade`'s `every_struct_in_the_matcher_source_is_covered_by_the_parity_pin`) is what
+    /// actually forces the schema definition to exist.
     #[test]
     fn rule_pack_schema_resource_is_the_dsl_pack_shape_contract() {
         let doc = zzop_summary::contracts::CONTRACT_DOCS
@@ -105,7 +108,14 @@ mod tests {
         assert_eq!(doc.mime, "application/json");
         let json: serde_json::Value = serde_json::from_str(doc.content).unwrap();
         assert_eq!(json["$schema"], "http://json-schema.org/draft-07/schema#");
-        for kind in ["lineScan", "methodScan", "symbolScan", "ioScan"] {
+        for kind in [
+            "lineScan",
+            "methodScan",
+            "symbolScan",
+            "ioScan",
+            "callScan",
+            "literalScan",
+        ] {
             assert!(
                 json["definitions"][kind].is_object(),
                 "missing matcher definition {kind}"

@@ -1,8 +1,15 @@
 //! Rule-skip diagnostics — a rule the evaluator cannot compile must SAY so, not vanish.
 //!
-//! Pins all four matcher families (line-scan, method-scan, symbol-scan, io-scan), plus the two
+//! Pins five matcher families (line-scan, method-scan, symbol-scan, io-scan, call-scan) plus the two
 //! invariants that make the channel safe to wire into a user-facing warnings list: a healthy pack emits
 //! NOTHING, and one broken rule is reported once even across many files.
+//!
+//! ⚠ **`literal-scan` has no case here** and this header used to say "every matcher family", which was
+//! the same closed-enumeration-behind-a-totality-quantifier defect the v0.29.0 release audit found in
+//! the shipped contract descriptions. The gap is partly covered elsewhere — `pack_loader::rule_issues`
+//! checks that family's two regex fields on the LOADER path — so an uncompilable `name_pattern` is not
+//! wholly silent; what is unpinned is the EVALUATOR-side skip diagnostic. Backlog owns closing it; this
+//! header states the real coverage until then rather than claiming the set.
 
 use crate::attributes::AttributeStore;
 use crate::finding::Finding;
@@ -25,6 +32,10 @@ fn file(rel: &str, text: &str, symbols: Vec<SourceSymbol>) -> SourceFile {
     SourceFile {
         loop_spans: Vec::new(),
         function_spans: Vec::new(),
+        test_spans: Vec::new(),
+        call_sites: Vec::new(),
+
+        string_literals: Vec::new(),
         rel: rel.into(),
         text: text.into(),
         symbols,
@@ -47,9 +58,26 @@ fn assert_actionable(message: &str, rule_id: &str, field: &str) {
         message.contains("SKIPPED"),
         "diagnostic must say the rule was skipped: {message}"
     );
+    assert_points_at_the_validator(message);
+}
+
+/// The validator pointer must name BOTH host dialects, never one.
+///
+/// This sink is a public embedder channel, so the crate cannot know whether a CLI or an MCP host will
+/// render the line — naming one spelling hands the other audience a command it cannot type. Until
+/// 2026-08-01 both messages said only `` `zzop validate-rule-pack` ``, and the pin above asserted only
+/// the CLI half, so the reword that fixed it could have been undone without a red. Contract 16
+/// (`crates/engine/tests/rule_contracts/host_vocabulary.rs`) is the cross-crate guard on the same fact;
+/// this is the unit-level pin, and both message shapes below go through it.
+fn assert_points_at_the_validator(message: &str) {
     assert!(
-        message.contains("validate-rule-pack"),
-        "diagnostic must point at the validator: {message}"
+        message.contains("`zzop validate-rule-pack <pack.json>`"),
+        "diagnostic must point at the validator's CLI spelling: {message}"
+    );
+    assert!(
+        message.contains("`validate_rule_pack` MCP tool"),
+        "diagnostic must point at the validator's MCP twin — an MCP host cannot type a subcommand: \
+         {message}"
     );
 }
 
@@ -136,6 +164,9 @@ fn a_line_scan_rule_with_no_pattern_field_at_all_is_reported_as_malformed() {
         "{}",
         diags[0]
     );
+    // The `malformed` message is the OTHER shape this module ships and never went through
+    // `assert_actionable` (it names no field), so its validator pointer needs its own pin.
+    assert_points_at_the_validator(&diags[0]);
 }
 
 #[test]
@@ -159,6 +190,7 @@ fn method_scan_bad_pattern_and_unknown_trigger_are_both_reported() {
         "{}",
         diags[0]
     );
+    assert_points_at_the_validator(&diags[0]);
 }
 
 #[test]
@@ -174,6 +206,26 @@ fn symbol_scan_bad_name_pattern_is_reported() {
     assert!(findings.is_empty());
     assert_eq!(diags.len(), 1, "{diags:?}");
     assert_actionable(&diags[0], "t/bad", "name_pattern");
+}
+
+#[test]
+fn call_scan_bad_callee_pattern_is_reported() {
+    // The site is present and would otherwise match — so the silence here is caused by the skip, not by
+    // an empty channel, which is the distinction the diagnostic exists to make visible.
+    let mut f = file("f.ts", "console.error('x');\n", Vec::new());
+    f.call_sites = vec![crate::CallSite {
+        kind: crate::CALL_KIND_CONSOLE_WRITE.to_string(),
+        line: 1,
+        callee: "console.error".to_string(),
+        algorithm: None,
+    }];
+    let (findings, diags) = eval(
+        r#"{"id":"bad","severity":"info","message":"m","matcher":{"type":"call-scan","file_pattern":"\\.ts$","callee_pattern":"("}}"#,
+        vec![f],
+    );
+    assert!(findings.is_empty());
+    assert_eq!(diags.len(), 1, "{diags:?}");
+    assert_actionable(&diags[0], "t/bad", "callee_pattern");
 }
 
 #[test]

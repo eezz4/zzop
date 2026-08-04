@@ -160,8 +160,8 @@ fn rule_ids_are_kebab_case() {
 // ---------------------------------------------------------------------------------------------
 
 /// Every `LabeledPattern::label` a shipped pack declares, tagged with the matcher field it came from.
-/// `SymbolScan`/`IoScan` carry no `LabeledPattern` at all, so the two matcher arms below are the whole
-/// population — see the test doc.
+/// `SymbolScan`/`IoScan`/`CallScan` carry no `LabeledPattern` at all, so the two matcher arms below are
+/// the whole population — see the test doc.
 fn labeled_pattern_sites(rule: &zzop_core::RuleDef) -> Vec<(&'static str, &str)> {
     let mut out = Vec::new();
     match &rule.matcher {
@@ -178,7 +178,12 @@ fn labeled_pattern_sites(rule: &zzop_core::RuleDef) -> Vec<(&'static str, &str)>
                 out.push(("absent[].label", lp.label.as_str()));
             }
         }
-        Matcher::SymbolScan(_) | Matcher::IoScan(_) => {}
+        // These four carry no `LabeledPattern` at all — `CallScan` selects by an exact `kind` and one
+        // `callee_pattern`, `LiteralScan` by name/entropy gates; none of it is labeled.
+        Matcher::SymbolScan(_)
+        | Matcher::IoScan(_)
+        | Matcher::CallScan(_)
+        | Matcher::LiteralScan(_) => {}
     }
     out
 }

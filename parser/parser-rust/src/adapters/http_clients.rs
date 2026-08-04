@@ -19,21 +19,51 @@
 //!   `{...}` placeholder collapsed to `{}` (else unresolved). `/`-headed -> keyed via
 //!   `http_consume_interface_key`; `http(s)://` -> `"METHOD <url>"`; else `IoConsume{key: None, raw:
 //!   Some(<source>), method: Some(<VERB>), ...}` — witnessed, never guessed. No arg skips the call.
+//!   Lives in the `url` submodule; nothing there sees the AST's call shape.
+//!
+//! ## Test surface is excluded (2026-08-02 — it was not, and that was silent)
+//! A `#[cfg(test)] mod tests { reqwest::get("/api/admin/reset") }` inside `src/client.rs` minted a
+//! DEPLOYED egress consume: it entered the cross-layer join as real traffic and printed in a single
+//! tree's `ir.io`. Neither gate its `raw_sql` sibling carries was here — not even the PATH one, so
+//! `tests/it.rs` was counted too. The engine's `trees::filter_join_io` could not compensate: that filter
+//! judges the PATH, and `src/client.rs` is a shipped path by every reading of it.
+//!
+//! The same three gates `adapters::raw_sql` documents apply here, in the same order and through the same
+//! predicate: `zzop_core::is_test_file` on the path, the file's own `#![cfg(test)]` inner attributes, and
+//! a subtree skip on every test-gated `Item`/`ImplItem`/`TraitItem`. Only the EMITTING walk is gated —
+//! see [`CallCollector::visit_item`] for why the binding pass deliberately is not.
 
 use std::collections::HashSet;
 
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
-use syn::{Expr, ExprCall, ExprMethodCall, Field, FnArg, Lit, Local, Macro, Member, Pat, Type};
-use zzop_core::{http_consume_interface_key, ImportMap, IoConsume};
+use syn::{
+    Expr, ExprCall, ExprMethodCall, Field, FnArg, ImplItem, Item, Local, Member, Pat, TraitItem,
+    Type,
+};
+use zzop_core::{ImportMap, IoConsume};
+
+use crate::lang::test_spans::{
+    impl_item_is_test_gated, is_test_gated, item_is_test_gated, trait_item_is_test_gated,
+};
+
+mod url;
+use url::{consume_key_for, resolved_url_literal};
 
 pub(crate) const VERB_METHODS: &[&str] = &["get", "post", "put", "delete", "patch"];
 
 /// Extract this file's `reqwest` HTTP egress consumes — see module doc. Empty on parse failure or import.
 pub fn extract_rust_http_consumes(rel: &str, text: &str) -> Vec<IoConsume> {
+    // Test surface — see the module doc's "Test surface is excluded". Path first (no parse needed).
+    if zzop_core::is_test_file(rel) {
+        return Vec::new();
+    }
     let Some(file) = crate::parse_file(text) else {
         return Vec::new();
     };
+    if is_test_gated(&file.attrs) {
+        return Vec::new();
+    }
     let imports = crate::lang::imports::parse_imports(text);
     let names = reqwest_local_names(&imports);
     if names.is_empty() {
@@ -148,6 +178,32 @@ struct CallCollector<'a> {
 }
 
 impl<'a, 'ast> Visit<'ast> for CallCollector<'a> {
+    /// Skips every test-gated subtree, on the same three node axes `lang::test_spans` walks. Only the
+    /// EMITTING walk is gated: `BindingCollector` above still sees the whole file, keeping the
+    /// deliberately FLAT name-binding approximation flat — narrowing it would make a shipped
+    /// `client.get(...)` invisible whenever the only visible binding of `client` sat in a test module,
+    /// which is the losing direction (a real egress fact deleted, not a fixture one suppressed).
+    fn visit_item(&mut self, i: &'ast Item) {
+        if item_is_test_gated(i) {
+            return;
+        }
+        visit::visit_item(self, i);
+    }
+
+    fn visit_impl_item(&mut self, i: &'ast ImplItem) {
+        if impl_item_is_test_gated(i) {
+            return;
+        }
+        visit::visit_impl_item(self, i);
+    }
+
+    fn visit_trait_item(&mut self, i: &'ast TraitItem) {
+        if trait_item_is_test_gated(i) {
+            return;
+        }
+        visit::visit_trait_item(self, i);
+    }
+
     fn visit_expr_call(&mut self, node: &'ast ExprCall) {
         if let Some((method, url_arg)) = match_free_fn_call(node) {
             self.emit(method, url_arg);
@@ -222,78 +278,6 @@ fn match_free_fn_call(call: &ExprCall) -> Option<(String, &Expr)> {
         return None;
     }
     Some((verb.to_ascii_uppercase(), call.args.first()?))
-}
-
-/// Resolves a URL argument to a literal string, if statically knowable.
-fn resolved_url_literal(expr: &Expr) -> Option<String> {
-    match expr {
-        Expr::Lit(el) => match &el.lit {
-            Lit::Str(s) => Some(s.value()),
-            _ => None,
-        },
-        Expr::Reference(r) => resolved_url_literal(&r.expr),
-        Expr::Macro(em) => format_macro_literal(&em.mac),
-        _ => None,
-    }
-}
-
-/// `format!("template", args...)` -> the template with every `{...}` placeholder collapsed to `{}`.
-/// `None` for any other macro or unparseable/non-literal first argument.
-fn format_macro_literal(mac: &Macro) -> Option<String> {
-    if !mac.path.is_ident("format") {
-        return None;
-    }
-    let exprs = mac
-        .parse_body_with(syn::punctuated::Punctuated::<Expr, syn::Token![,]>::parse_terminated)
-        .ok()?;
-    let Expr::Lit(el) = exprs.first()? else {
-        return None;
-    };
-    let Lit::Str(s) = &el.lit else { return None };
-    Some(normalize_placeholders(&s.value()))
-}
-
-/// Collapses every `{...}` placeholder to `{}`, leaving an escaped `{{`/`}}` literal brace untouched.
-fn normalize_placeholders(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut chars = s.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '{' {
-            if chars.peek() == Some(&'{') {
-                chars.next();
-                out.push_str("{{");
-                continue;
-            }
-            for nc in chars.by_ref() {
-                if nc == '}' {
-                    break;
-                }
-            }
-            out.push_str("{}");
-        } else if c == '}' && chars.peek() == Some(&'}') {
-            chars.next();
-            out.push_str("}}");
-        } else {
-            out.push(c);
-        }
-    }
-    out
-}
-
-/// Mirrors `zzop_parser_python_3::adapters::http_clients::consume_key_for` exactly.
-fn consume_key_for(method: &str, url: &str) -> Option<String> {
-    if url.starts_with('/') {
-        Some(http_consume_interface_key(method, url))
-    } else if is_external(url) {
-        Some(format!("{} {}", method.to_uppercase(), url))
-    } else {
-        None
-    }
-}
-
-fn is_external(u: &str) -> bool {
-    let l = u.to_ascii_lowercase();
-    l.starts_with("http://") || l.starts_with("https://")
 }
 
 #[cfg(test)]

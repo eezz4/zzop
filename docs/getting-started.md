@@ -55,6 +55,7 @@ zzop analyze .          # analyzes the current directory and prints a report
 zzop cross ./frontend ./backend   # cross-layer join across 2+ trees
 zzop analyze . --severity critical --limit 10   # narrow the findings LIST (counts still cover everything)
 zzop analyze --config ./ci/zzop.config.jsonc    # a config that does not sit at the tree root
+zzop analyze . --profile-rules                  # which rules cost what (cold cache only — the report says why)
 zzop analyze --help     # that one subcommand's line, on stdout, exit 0 — `zzop help` prints them all
 ```
 
@@ -109,6 +110,21 @@ remaining packs report, and, because the disabled list is part of the analysis c
 fingerprint, the first run after you edit it re-runs rules over every file once before the cache is warm
 again.
 
+If what you want is one subject area rather than "everything except", say it the other way round —
+`packs.only` is the same gate read as an allowlist, so you name what you want instead of enumerating
+eleven packs you don't:
+
+```jsonc
+{ "packs": { "only": ["security", "sql"] } }
+```
+
+The two compose in the order they read: `only` selects, `disabled` still subtracts, so
+`only: ["security"]` with `disabled: ["security/hardcoded-secret"]` means what it looks like. An absent
+or empty `only` is **no allowlist at all** (every loaded pack runs) — never "allow nothing", so a
+half-written config fails loud rather than going silently quiet. And both keys are about *packs*: the
+native analyses (dead-candidates, unimported-export, the score channels) are not packs, so an allowlist
+never switches them off — those are `rules` entries by id.
+
 zzop never does this for you, and that is deliberate. Which stacks a repo has is something you declare;
 an engine that inferred it from a `package.json` would sometimes infer wrong, and the failure mode of a
 wrong inference is security rules that silently do not run.
@@ -121,11 +137,12 @@ rather than changing them. It refuses to overwrite an existing config unless you
 surface, and says so with a pointer to that same document. This is not ceremony: the `vocabulary` block
 the starter file writes is the set of names zzop would otherwise have to GUESS about your project — what
 you call your auth guards, which banners mark your generated files, how you name your data-access
-receivers — and a key you do not declare is a judgment zzop does not make. Measured across 17 open-source
-repositories, running with none of it declared changes 69 findings. The lanes that exist to GET you a
+receivers — and a key you do not declare is a judgment zzop does not make. The lanes that exist to GET you a
 config, or to describe the binary, still run without one: `init`, `contract`, `explain`, `version`,
 `help`, `validate-envelope`, `validate-rule-pack`, and `analyze-envelope` (an envelope carries no
-filesystem location, so there is no tree for a config to describe). The same document prints without writing anything as `zzop contract
+filesystem location, so there is no tree for a config to describe). `diff` joins them for the same
+reason as `analyze-envelope`: it compares two manifest files that were already written, and never
+touches a tree. The same document prints without writing anything as `zzop contract
 config-template`, and the full key vocabulary is `zzop contract config-surface`. Writing one by hand is
 equally fine (the smallest useful config on a monorepo is `{ "trees": "auto" }`) — then pass it
 explicitly:

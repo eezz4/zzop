@@ -144,6 +144,88 @@ fn line_scan_dsl_rule_never_fires_in_envelope_mode() {
     assert!(!out.findings.iter().any(|f| f.rule_id == "t/r"));
 }
 
+/// `EngineConfig::profile_rules` in Mode A — the wiring that ended the "envelope path runs outside
+/// the timing accumulator" era (and the CLI's exit-2 refusal that guarded it). One symbol-scan rule
+/// (fires per-file) + one io-scan rule (fires whole-tree), both against envelope-injected facts.
+fn profiling_fixture() -> (zzop_core::NormalizedEnvelope, RulePackDef) {
+    let pack: RulePackDef = serde_json::from_str(
+        r#"{"id":"t","framework":"any","rules":[
+            {"id":"sym","severity":"info","message":"m","matcher":{"type":"symbol-scan","file_pattern":"\\.jsp$","name_pattern":"^Bad"}},
+            {"id":"io","severity":"warning","message":"m","matcher":{"type":"io-scan","file_pattern":"\\.jsp$","direction":"provides","kind":"http","key_pattern":"/admin(/|$)"}}
+        ]}"#,
+    )
+    .unwrap();
+    let mut a = projection("a.jsp", 5);
+    a.symbols.push(SourceSymbol {
+        id: "a.jsp#BadName".to_string(),
+        file: "a.jsp".to_string(),
+        name: "BadName".to_string(),
+        kind: SourceSymbolKind::Function,
+        line: 4,
+        exported: true,
+        is_default: false,
+        body_start: None,
+        body_end: None,
+        write_sites: Vec::new(),
+    });
+    a.io.provides.push(zzop_core::IoProvide {
+        response: None,
+        kind: "http".to_string(),
+        key: "GET /admin/users".to_string(),
+        file: "a.jsp".to_string(),
+        line: 2,
+        symbol: None,
+        body: None,
+    });
+    (envelope(vec![a]), pack)
+}
+
+#[test]
+fn profile_rules_off_leaves_envelope_rule_timings_none() {
+    let (env, pack) = profiling_fixture();
+    let mut cfg = config();
+    cfg.packs = vec![pack];
+    let out = analyze_envelope(&env, &cfg);
+    assert!(out.rule_timings.is_none(), "{:?}", out.rule_timings);
+    // The fixture genuinely fires both rule classes — otherwise the profiled twin below could pass
+    // by timing rules that never produce anything.
+    assert!(out.findings.iter().any(|f| f.rule_id == "t/sym"));
+    assert!(out.findings.iter().any(|f| f.rule_id == "t/io"));
+}
+
+#[test]
+fn profile_rules_on_times_envelope_dsl_rules_and_whole_graph_analyses() {
+    let (env, pack) = profiling_fixture();
+    let mut cfg = config();
+    cfg.packs = vec![pack.clone()];
+    cfg.profile_rules = true;
+    let out = analyze_envelope(&env, &cfg);
+    let timings = out
+        .rule_timings
+        .as_ref()
+        .expect("profiled Mode A run must populate rule_timings");
+    assert!(!timings.is_empty());
+    let find = |id: &str| timings.iter().find(|t| t.rule_id == id);
+    // Per-file DSL pass: symbol-scan timed under its "{pack}/{rule}" id, with its real finding count.
+    assert_eq!(find("t/sym").expect("symbol-scan rule timed").findings, 1);
+    // Whole-tree io-scan pass: same shared `eval_pack_timed` evaluator, real whole-tree count (the
+    // per-file placeholder alone would leave this at 0 — see `assemble::rules::io_scan`'s tests).
+    assert_eq!(find("t/io").expect("io-scan rule timed").findings, 1);
+    // Whole-graph native analyses ride the same accumulator, same ids as the native path.
+    assert!(
+        find("circular").is_some() && find("dead-candidates").is_some(),
+        "{timings:?}"
+    );
+    // Profiling never changes findings — same rule ids fire either way.
+    let mut cfg_off = config();
+    cfg_off.packs = vec![pack];
+    let unprofiled = analyze_envelope(&env, &cfg_off);
+    assert_eq!(
+        serde_json::to_value(&out.findings).unwrap(),
+        serde_json::to_value(&unprofiled.findings).unwrap()
+    );
+}
+
 #[test]
 fn two_runs_over_the_same_envelope_are_byte_for_byte_identical() {
     let mut a = projection("a.jsp", 5);

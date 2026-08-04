@@ -307,3 +307,114 @@ fn struct_field_typed_reqwest_client_receiver_resolves() {
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].key.as_deref(), Some("GET /x"));
 }
+
+// --- test surface is excluded (2026-08-02) ------------------------------------------------------------
+// Until this batch there was NO gate here at all — not the path one its `raw_sql` sibling has had since
+// it was written, and not the `#[cfg(test)]` one. A fixture's `reqwest::get("/api/admin/reset")` inside
+// `src/client.rs` therefore entered the cross-layer join as deployed egress, and `crates/engine`'s
+// path-based `filter_join_io` could not compensate because `src/client.rs` IS a shipped path.
+
+/// `(name, source)` — the ATTRIBUTE-gated shapes, all at the same shipped path (`src/client.rs`), so
+/// that nothing here can pass because of the path gate instead of the gate it names. The path gate has
+/// its own test below.
+const TEST_GATED_EGRESS: &[(&str, &str)] = &[
+    (
+        "#[cfg(test)] mod inside a shipped file",
+        "use reqwest;\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn t() {\n        reqwest::get(\"/api/admin/reset\");\n    }\n}\n",
+    ),
+    (
+        "file-level inner #![cfg(test)]",
+        "#![cfg(test)]\nuse reqwest;\nfn t() {\n    reqwest::get(\"/api/admin/reset\");\n}\n",
+    ),
+    (
+        "#[test] fn inside an impl block",
+        "use reqwest::Client;\nstruct S;\nimpl S {\n    #[test]\n    fn t(c: Client) {\n        c.get(\"/api/admin/reset\");\n    }\n}\n",
+    ),
+    (
+        "#[cfg(all(test, not(miri)))] mod",
+        "use reqwest;\n#[cfg(all(test, not(miri)))]\nmod tests {\n    fn t() {\n        reqwest::get(\"/api/admin/reset\");\n    }\n}\n",
+    ),
+];
+
+/// The one shipped path every fixture above sits at.
+const SHIPPED_REL: &str = "src/client.rs";
+
+#[test]
+fn a_fixtures_request_is_not_deployed_egress() {
+    for (name, src) in TEST_GATED_EGRESS {
+        let out = extract_rust_http_consumes(SHIPPED_REL, src);
+        assert!(
+            out.is_empty(),
+            "{name}: fixture egress leaked — got {out:?}"
+        );
+    }
+}
+
+#[test]
+fn a_test_path_file_yields_nothing() {
+    // The gate every sibling adapter already had and this one did not: `tests/it.rs` was counted as
+    // deployed egress on nothing but a missing `is_test_file` call.
+    let out = extract_rust_http_consumes(
+        "tests/it.rs",
+        "use reqwest;\nfn t() {\n    reqwest::get(\"/api/admin/reset\");\n}\n",
+    );
+    assert!(out.is_empty(), "got {out:?}");
+}
+
+#[test]
+fn the_same_request_in_shipped_code_still_yields_its_consume() {
+    // The BIDIRECTIONAL half — without it the assertions above pass just as well on a dead extractor.
+    let out = consumes("use reqwest;\nfn ship() {\n    reqwest::get(\"/api/admin/reset\");\n}\n");
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].key.as_deref(), Some("GET /api/admin/reset"));
+
+    // ...including under `cfg(any(test, feature))`, which SHIPS whenever the feature is on. Gating it
+    // would be the over-suppression this predicate exists to avoid.
+    let shipped_helper = extract_rust_http_consumes(
+        "src/client.rs",
+        "use reqwest;\n#[cfg(any(test, feature = \"testkit\"))]\npub mod helpers {\n    pub fn h() {\n        reqwest::get(\"/api/admin/reset\");\n    }\n}\n",
+    );
+    assert_eq!(shipped_helper.len(), 1, "got {shipped_helper:?}");
+}
+
+#[test]
+fn a_client_bound_only_in_a_test_module_still_resolves_a_shipped_call() {
+    // Why only the EMITTING walk is gated. `BindingCollector` stays flat over the whole file, so the
+    // shipped `client.get(...)` below is still keyed even though the only `let client = ...` visible to
+    // this extractor sits inside a `#[cfg(test)]` module. Narrowing the binding pass would delete a real
+    // egress fact — the opposite direction from the one this gate is for.
+    let src = concat!(
+        "use reqwest;\n",
+        "fn ship(client: Http) {\n",
+        "    client.get(\"/api/ship\");\n",
+        "}\n",
+        "#[cfg(test)]\n",
+        "mod tests {\n",
+        "    fn t() {\n",
+        "        let client = reqwest::Client::new();\n",
+        "        client.get(\"/api/admin/reset\");\n",
+        "    }\n",
+        "}\n",
+    );
+    let keys: Vec<String> = extract_rust_http_consumes("src/client.rs", src)
+        .into_iter()
+        .filter_map(|c| c.key)
+        .collect();
+    assert_eq!(keys, vec!["GET /api/ship"]);
+}
+
+#[test]
+fn the_gate_agrees_with_the_test_span_axis_line_for_line() {
+    // Same seam pin `adapters::raw_sql`'s suite carries: this adapter SKIPS where `lang::test_spans`
+    // RECORDS, and the two must call the same regions test-only.
+    for (name, src) in TEST_GATED_EGRESS {
+        assert!(
+            !crate::extract_test_spans(SHIPPED_REL, src).is_empty(),
+            "{name}: no test span, so the two axes disagree about this region"
+        );
+        assert!(
+            extract_rust_http_consumes(SHIPPED_REL, src).is_empty(),
+            "{name}"
+        );
+    }
+}

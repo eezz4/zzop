@@ -3,7 +3,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use zzop_core::{is_enabled, IoProvide, Matcher, SourceSymbol};
+use zzop_core::{is_pack_enabled, IoProvide, Matcher, SourceSymbol};
 
 use crate::EngineConfig;
 
@@ -46,6 +46,10 @@ pub(super) fn assemble_decorator_guarded(
         all_symbols,
         &mut guarded,
     );
+    #[allow(
+        clippy::iter_over_hash_type,
+        reason = "iteration order cannot reach the result: the loop only inserts into `guarded`, a set, so the fold is commutative"
+    )]
     for (rel, text) in file_texts {
         for line in zzop_parser_typescript::extract_controller_guarded_lines(rel, text) {
             guarded.insert((rel.clone(), line));
@@ -80,7 +84,7 @@ pub(super) fn packs_read_io_scan_attrs(config: &EngineConfig) -> bool {
     config
         .packs
         .iter()
-        .filter(|p| is_enabled(&config.rule_config, &p.id))
+        .filter(|p| is_pack_enabled(&config.rule_config, &p.id))
         .map(|p| crate::pipeline::gate_pack_rules(p, &config.rule_config))
         .any(|gated| {
             gated.rules.iter().any(|r| {

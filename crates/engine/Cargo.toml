@@ -40,3 +40,15 @@ ignore = "=0.4.27"
 # gap entirely, with no functional difference (`ignore` only uses winapi-util's small stat/hardlink helpers).
 [target.'cfg(windows)'.dependencies]
 winapi-util = "=0.1.7"
+
+[dev-dependencies]
+# `skip_notice!` — the one stderr writer this crate's git-dependent integration tests are allowed. An
+# integration test is its own crate root, so the crate-level `#![allow]` that covers every other
+# stderr writer in the workspace cannot reach `tests/`; a dev-dependency can.
+zzop-test-support = { path = "../test-support" }
+
+# Inherit the workspace lint policy (root Cargo.toml [workspace.lints.clippy]) — every member does,
+# with no exceptions. Where a single target legitimately violates one, the exemption is a crate-level
+# #![allow] at that target's entry point, never a hole in this table.
+[lints]
+workspace = true

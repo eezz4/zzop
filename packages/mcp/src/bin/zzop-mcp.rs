@@ -13,6 +13,12 @@
 //!
 //! See `lib.rs` for the module map and the mcp-distribution decision doc for the host design.
 
+// This target PRINTS BY DESIGN — on BOTH streams — so the workspace `print_stdout`/`print_stderr`
+// lints are exempted here rather than being weakened for everyone. See root Cargo.toml
+// [workspace.lints.clippy]: both measured zero in every library `src/`, and Cargo's lint table
+// cannot be scoped to a single target.
+#![allow(clippy::print_stdout, clippy::print_stderr)]
+
 const USAGE: &str =
     "usage: zzop-mcp [mcp | version [--verbose] | help]  — serve MCP over stdio (JSON-RPC 2.0). Run the 'zzop' binary for CLI subcommands.";
 
@@ -31,9 +37,17 @@ fn main() {
             // decision (see the mcp-distribution doc), so "is there a newer one?" belongs to the
             // delivery layer, never here.
             eprintln!(
-                "zzop-mcp {} — serving MCP over stdio. Newer releases: https://github.com/eezz4/zzop/releases",
-                zzop_mcp::server::version()
+                "zzop-mcp {} — serving MCP over stdio. Newer releases: {}",
+                zzop_mcp::server::version(),
+                zzop_mcp::staleness::RELEASES_URL
             );
+            // The operator half of the staleness self-report; the agent half rides `initialize`'s
+            // `instructions` (see `zzop_mcp::staleness`). Both read the same function, so they cannot
+            // disagree about whether this build is old, and both print NOTHING on a current build —
+            // a banner that always warned would be a banner nobody reads.
+            if let Some(notice) = zzop_mcp::staleness::notice() {
+                eprintln!("zzop-mcp: {notice}");
+            }
             zzop_mcp::server::run_stdio()
         }
         // The bare version stays the default (a one-token line scripts parse); `--verbose` adds every

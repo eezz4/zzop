@@ -7,6 +7,12 @@
 //! Extra args after the root are appended to the dispatch skip-dir list (e.g. `corpus` to keep the
 //! RealWorld fixtures out of a scan of zzop itself).
 
+// This target PRINTS BY DESIGN — on BOTH streams — so the workspace `print_stdout`/`print_stderr`
+// lints are exempted here rather than being weakened for everyone. See root Cargo.toml
+// [workspace.lints.clippy]: both measured zero in every library `src/`, and Cargo's lint table
+// cannot be scoped to a single target.
+#![allow(clippy::print_stdout, clippy::print_stderr)]
+
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 

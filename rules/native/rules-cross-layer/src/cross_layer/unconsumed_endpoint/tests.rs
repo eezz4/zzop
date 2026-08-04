@@ -7,6 +7,7 @@ fn dead(key: &str, source: &str, file: &str, line: u32) -> TaggedProvide {
     TaggedProvide {
         source: source.to_string(),
         provide: zzop_core::IoProvide {
+            response: None,
             body: None,
             kind: "http".to_string(),
             key: key.to_string(),
@@ -21,6 +22,7 @@ fn dead_kind(kind: &str, key: &str, source: &str, file: &str, line: u32) -> Tagg
     TaggedProvide {
         source: source.to_string(),
         provide: zzop_core::IoProvide {
+            response: None,
             body: None,
             kind: kind.to_string(),
             key: key.to_string(),
@@ -105,7 +107,7 @@ fn dead_http_provide_is_flagged_with_source_and_anchor() {
     assert_eq!(out[0].line, 12);
     assert!(out[0].message.contains("GET /orphan"));
     assert!(out[0].message.contains("source `be`"));
-    assert!(out[0].message.contains("disabled_rules"));
+    assert!(out[0].message.contains("disabledRules"));
     assert!(!out[0].message.contains("near-miss"));
 }
 

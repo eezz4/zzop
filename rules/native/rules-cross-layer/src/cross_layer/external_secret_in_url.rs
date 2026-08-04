@@ -153,7 +153,7 @@ mod tests {
         assert_eq!(out[0].file, "Client.ts");
         assert_eq!(out[0].line, 10);
         assert!(out[0].message.contains("`token`"));
-        assert!(out[0].message.contains("disabled_rules"));
+        assert!(out[0].message.contains("disabledRules"));
         let data = out[0].data.as_ref().unwrap();
         assert_eq!(data["hasLiteralValue"], true);
         assert_eq!(data["host"], "api.vendor.com");

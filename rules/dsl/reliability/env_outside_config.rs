@@ -249,6 +249,85 @@ fn an_env_read_in_a_private_helper_of_a_route_file_fires() {
     );
 }
 
+// --- what the call-scan migration changed, in all three directions ---
+//
+// The tests above are the PARITY set — every one of them passed against the line-scan version and must
+// keep passing, which is what makes the delta below attributable. These pin the three ways the reach
+// moved when "what counts as a read" became a projected fact instead of a regex.
+
+#[test]
+fn the_bracket_forms_the_old_regex_could_not_see_now_fire() {
+    // The WIDENING, and the one the migration's detection delta has to account for. `\bprocess\.env\.`
+    // required a dot and a bare identifier, so a quoted key and a computed key were both invisible. The
+    // producer emits for both: the callee (`process.env`) is fully resolved and only the KEY is dynamic,
+    // and the key is not a field of this channel — so emitting guesses nothing.
+    fires(
+        "src/handler.ts",
+        "export const port = process.env[\"PORT\"];\n",
+        1,
+    );
+    fires(
+        "src/handler.ts",
+        "export function read(k: string) {\n  return process.env[k];\n}\n",
+        2,
+    );
+}
+
+#[test]
+fn two_reads_on_one_line_are_now_two_findings() {
+    // A per-SITE rule where the old one was per-LINE. Worth pinning rather than discovering from a
+    // corpus count that moved: the same source produces a different NUMBER of findings, with no change
+    // in which files are implicated.
+    let dir = TempDir::new("zzop-be-rel");
+    dir.write(
+        "src/handler.ts",
+        "export const dsn = `${process.env.HOST}:${process.env.PORT}`;\n",
+    );
+    let out = scan_with(&dir, env_config_overlay(&["src/config"]));
+    let h = hits(&out, "env-outside-config");
+    assert_eq!(h.len(), 2, "{:?}", out.findings);
+    assert!(h.iter().all(|f| f.line == 1), "{:?}", out.findings);
+}
+
+#[test]
+fn a_bare_process_env_with_no_key_is_still_not_a_read() {
+    // The boundary that did NOT move, asserted so the widening above is not read as "everything now
+    // fires". `const e = process.env` names no key at the site; the producer is silent, exactly as the
+    // old regex was, so this population is neither gained nor lost.
+    exempt(
+        "src/handler.ts",
+        "const all = process.env;\nexport const keys = Object.keys(all);\n",
+    );
+}
+
+#[test]
+fn python_env_reads_now_fire_in_all_three_spellings() {
+    // The REACH gain. One rule covers both languages because the channel does; the three spellings are
+    // the producer's recognized set, and `os.environ[...]` is the Python twin of the TypeScript bracket
+    // form above.
+    fires("src/handler.py", "PORT = os.getenv(\"PORT\")\n", 1);
+    fires("src/handler.py", "PORT = os.environ.get(\"PORT\")\n", 1);
+    fires("src/handler.py", "PORT = os.environ[\"PORT\"]\n", 1);
+}
+
+#[test]
+fn a_python_hash_ok_marker_suppresses_the_finding() {
+    exempt(
+        "src/handler.py",
+        "# zzop-env-outside-config-ok: bootstrap shim, migration tracked\nPORT = os.getenv(\"PORT\")\n",
+    );
+}
+
+#[test]
+fn a_read_named_only_in_a_string_or_a_comment_is_no_longer_a_read() {
+    // The NARROWING, and the honest half of the trade. The old regex had `skip_comment_lines` for the
+    // first of these and nothing at all for the second; neither is a site now.
+    exempt(
+        "src/handler.ts",
+        "// process.env.PORT is read in config/env.ts\nexport const hint = \"set process.env.PORT before boot\";\n",
+    );
+}
+
 // --- suppression + rule interplay ---
 
 #[test]

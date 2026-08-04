@@ -98,6 +98,10 @@ pub fn compute_criticality(
 /// Reverse the import graph: imported file -> set of files that import it directly.
 fn build_dependents(dep: &DepGraph) -> HashMap<&str, HashSet<&str>> {
     let mut rev: HashMap<&str, HashSet<&str>> = HashMap::new();
+    #[allow(
+        clippy::iter_over_hash_type,
+        reason = "iteration order cannot reach the result: `rev` is a map of sets and its only reader (`transitive_dependents`) returns a visited-set size"
+    )]
     for (importer, imports) in dep {
         for imported in imports {
             rev.entry(imported.as_str())
@@ -116,6 +120,10 @@ fn transitive_dependents(start: &str, dependents: &HashMap<&str, HashSet<&str>>)
     queue.push_back(start);
     while let Some(cur) = queue.pop_front() {
         if let Some(deps) = dependents.get(cur) {
+            #[allow(
+                clippy::iter_over_hash_type,
+                reason = "iteration order cannot reach the result: a BFS whose only output is `seen.len()` — the reachable set does not depend on visit order"
+            )]
             for &d in deps {
                 if seen.insert(d) {
                     queue.push_back(d);

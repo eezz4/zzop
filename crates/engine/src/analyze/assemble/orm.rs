@@ -49,6 +49,7 @@ mod tests {
 
     fn provide(key: &str, class: Option<&str>) -> IoProvide {
         IoProvide {
+            response: None,
             kind: "db-table".into(),
             key: key.into(),
             file: "x.entity.ts".into(),

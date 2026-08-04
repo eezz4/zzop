@@ -225,6 +225,7 @@ fn mutual_dynamic_import_pair_does_not_produce_a_circular_finding_in_envelope_mo
 fn io_facts_are_collected_and_surfaced_on_the_common_ir() {
     let mut a = projection("Ctrl.jsp", 20);
     a.io.provides.push(IoProvide {
+        response: None,
         body: None,
         kind: "http".to_string(),
         key: "GET /legacy/user.jsp".to_string(),

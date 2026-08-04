@@ -68,7 +68,7 @@ pub(crate) fn uncompilable_rule_warnings(packs: &[zzop_core::RulePackDef]) -> Ve
         .flat_map(zzop_core::pack_regex_issues)
         .map(|issue| {
             format!(
-                "{issue} — that rule is SKIPPED and can never fire; the pack's other rules are unaffected by it. Run `zzop validate-rule-pack <pack.json>` to catch this before a scan."
+                "{issue} — that rule is SKIPPED and can never fire; the pack's other rules are unaffected by it. Catch this before a scan with `zzop validate-rule-pack <pack.json>` (CLI binary) / the `validate_rule_pack` MCP tool."
             )
         })
         .collect()
@@ -149,10 +149,12 @@ fn adapter_on_ramp_note(unparsed: &BTreeMap<String, (usize, Vec<String>)>) -> St
          provide a Mode B adapter overlay via `overlays: [...]` in zzop.config.jsonc (embedders: \
          `adapterOverlays`) — a partial overlay covering just the missing channel/files is enough to \
          start (a tens-of-lines script; see the examples/ adapters in the repo (embedded: `zzop contract \
-         adapter-guide`), or `zzop contract example-envelope` for a complete sample). The contract ships \
-         inside the binary: `zzop contract envelope-guide` / MCP resource \
-         `zzop://contract/envelope-guide` (machine-checkable schema: `zzop contract envelope-schema`; \
-         check your overlay against it with `zzop validate-envelope <file>` / MCP tool \
+         adapter-guide` / MCP resource `zzop://contract/adapter-guide`), or `zzop contract \
+         example-envelope` / `zzop://contract/example-envelope` for a complete sample). The contract \
+         ships inside the binary: `zzop contract envelope-guide` / MCP resource \
+         `zzop://contract/envelope-guide` (machine-checkable schema: `zzop contract envelope-schema` \
+         / `zzop://contract/envelope-schema`; check your overlay against it with \
+         `zzop validate-envelope <file>` / MCP tool \
          `validate_envelope` before wiring it in); repo users, see docs/NORMALIZED_AST.md. (Mode A \
          full-envelope analysis: `zzop analyze-envelope <file>` / MCP tool `analyze_envelope`.)",
         unparsed.len(),

@@ -57,6 +57,7 @@ use std::path::Path;
 
 use zzop_core::RuleRegistry;
 
+pub use cache::surface::{engine_fingerprint, parser_fingerprints};
 pub use config::{EngineConfig, GitOptions, MountRule, PackSource};
 pub use coverage::CoverageCensus;
 pub use disclosure::{

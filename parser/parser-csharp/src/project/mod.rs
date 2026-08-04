@@ -145,11 +145,15 @@ mod walk_entrypoint {
         // partial are genuinely-distinct classes, dropped as ambiguous and counted.
         let mut skipped_ambiguous_class_name = 0u32;
         let mut classes: HashMap<String, ClassRow> = HashMap::new();
+        #[allow(
+            clippy::iter_over_hash_type,
+            reason = "iteration order cannot reach the result: `classes` is keyed by the same name and `skipped_ambiguous_class_name` is a sum; route emission below walks `controller_names`, which is sorted"
+        )]
         for (name, mut rows) in rows_by_name {
             if rows.len() == 1 {
                 classes.insert(name, rows.pop().unwrap());
             } else if rows.iter().all(|r| r.is_partial) {
-                classes.insert(name, merge_partial_rows(rows));
+                classes.insert(name, super::collect::merge_partial_rows(rows));
             } else {
                 skipped_ambiguous_class_name += rows.len() as u32;
             }
@@ -236,6 +240,7 @@ mod walk_entrypoint {
                 continue;
             }
             provides.push(IoProvide {
+                response: None,
                 body: None,
                 kind: "http".to_string(),
                 key,
@@ -243,44 +248,6 @@ mod walk_entrypoint {
                 line: method.line,
                 symbol: method.symbol.clone(),
             });
-        }
-    }
-
-    /// Merges 2+ same-name `partial class` halves into ONE `ClassRow` (module doc's "Partial classes").
-    /// Rows are sorted by declaring file first so the merge — first-non-empty prefix, first-wins constant on a
-    /// key collision — is DETERMINISTIC regardless of `HashMap` iteration order. `methods` are concatenated in
-    /// that same file order (each already carries its own `file` for emit); `is_controller` is the OR of the
-    /// halves (a controller attribute on any half makes the whole class a controller).
-    fn merge_partial_rows(mut rows: Vec<ClassRow>) -> ClassRow {
-        rows.sort_by(|a, b| a.file.cmp(&b.file));
-        let simple_name = rows[0].simple_name.clone();
-        let file = rows[0].file.clone();
-        let mut is_controller = false;
-        let mut prefix = ClassPrefix::Literal(String::new());
-        let mut prefix_fixed = false;
-        let mut constants: HashMap<String, String> = HashMap::new();
-        let mut methods: Vec<MethodRoute> = Vec::new();
-        for row in rows {
-            is_controller |= row.is_controller;
-            // First non-empty prefix among the halves wins — a partial controller declares its `[Route]` on at
-            // most one half in practice; a `Literal("")` (no `[Route]` on this half) does not fix the prefix.
-            if !prefix_fixed && !matches!(&row.prefix, ClassPrefix::Literal(p) if p.is_empty()) {
-                prefix = row.prefix;
-                prefix_fixed = true;
-            }
-            for (name, value) in row.constants {
-                constants.entry(name).or_insert(value); // first-wins on a key collision
-            }
-            methods.extend(row.methods);
-        }
-        ClassRow {
-            file,
-            simple_name,
-            is_controller,
-            is_partial: true,
-            prefix,
-            constants,
-            methods,
         }
     }
 }

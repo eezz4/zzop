@@ -16,3 +16,9 @@ regex = { workspace = true }
 # tests/no_panic_proptest.rs — the arbitrary-input panic property every parser frontend carries.
 [dev-dependencies]
 proptest = { workspace = true }
+
+# Inherit the workspace lint policy (root Cargo.toml [workspace.lints.clippy]) — every member does,
+# with no exceptions. Where a single target legitimately violates one, the exemption is a crate-level
+# #![allow] at that target's entry point, never a hole in this table.
+[lints]
+workspace = true

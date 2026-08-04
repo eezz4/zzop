@@ -59,10 +59,22 @@ fn schema_required_set(def_or_variant: &Value) -> HashSet<String> {
         .unwrap_or_default()
 }
 
+/// JSON Schema keywords that can EXCLUDE `null` from a property's value space. A property
+/// declaration carrying none of them constrains nothing, so it admits `null` like any other
+/// instance — see [`schema_property_is_nullable`]'s third clause.
+const VALUE_CONSTRAINING_KEYWORDS: &[&str] = &[
+    "type", "const", "enum", "$ref", "oneOf", "anyOf", "allOf", "not",
+];
+
 /// Whether one schema property declaration marks itself nullable, under this schema's own
-/// conventions (see module doc): a `type` array containing `"null"` (primitives, inline enums), or a
+/// conventions (see module doc): a `type` array containing `"null"` (primitives, inline enums), a
 /// `"oneOf"` alternative of `{"type": "null"}` (the `$ref`-to-object-type case, since draft-07 ignores
-/// keywords sibling to a bare `$ref`).
+/// keywords sibling to a bare `$ref`), or — the OPEN-VALUE case — a declaration that constrains the
+/// value space not at all. Today only `attribute.value` (Rust `serde_json::Value`, deliberately open
+/// JSON) is of that third kind; `null` is a legal instance of an unconstrained schema, so calling it
+/// non-nullable would be the schema disagreeing with itself, not with Rust. Note `$.properties.format`
+/// carries `const` and no `type` — hence `const` in [`VALUE_CONSTRAINING_KEYWORDS`], without which
+/// that property would be misread as open.
 fn schema_property_is_nullable(prop_schema: &Value) -> bool {
     let type_is_nullable = prop_schema
         .get("type")
@@ -75,7 +87,10 @@ fn schema_property_is_nullable(prop_schema: &Value) -> bool {
             arr.iter()
                 .any(|alt| alt.get("type").and_then(Value::as_str) == Some("null"))
         });
-    type_is_nullable || one_of_is_nullable
+    let unconstrained = VALUE_CONSTRAINING_KEYWORDS
+        .iter()
+        .all(|kw| prop_schema.get(*kw).is_none());
+    type_is_nullable || one_of_is_nullable || unconstrained
 }
 
 /// The subset of `schema_props` that [`schema_property_is_nullable`] considers nullable.

@@ -73,7 +73,8 @@ pub struct MultiAnalyzeOutput {
     /// `(root, config.source_id, output)` for each input tree, in the same order as `trees`.
     pub trees: Vec<(PathBuf, String, AnalyzeOutput)>,
     pub cross_layer: zzop_core::CrossLayerResult,
-    /// The 23 `cross-layer/*` native rules run over `cross_layer` — see `compute_cross_layer_findings`'s
+    /// The `cross-layer/*` native rules run over `cross_layer` (how many there are is owned by
+    /// `zzop_rules_cross_layer::register_native_analyses`) — see `compute_cross_layer_findings`'s
     /// doc for the gating/derivation/sort contract. Always populated: even a single-tree `analyze_trees`
     /// call runs these (most find nothing, since e.g. `db-table-name-in-multiple-sources`/`duplicate-route` need 2+
     /// distinct source trees to ever fire).

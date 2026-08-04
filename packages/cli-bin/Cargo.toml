@@ -29,3 +29,9 @@ zzop-config = { path = "../../crates/config" }
 # (`zzop_core::parse_dsl_pack` over `zzop_config::BUNDLED_PACK_SOURCES`), to assert every shipped rule
 # id is explainable through the real spawned binary — never a hand-copied id list that could drift.
 zzop-core = { path = "../../crates/core" }
+
+# Inherit the workspace lint policy (root Cargo.toml [workspace.lints.clippy]) — every member does,
+# with no exceptions. Where a single target legitimately violates one, the exemption is a crate-level
+# #![allow] at that target's entry point, never a hole in this table.
+[lints]
+workspace = true

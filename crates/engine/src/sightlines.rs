@@ -82,6 +82,10 @@ mod tests {
                 "RETRY_WITNESS_EXTENSIONS",
                 zzop_rules_cross_layer::RETRY_WITNESS_EXTENSIONS,
             ),
+            (
+                "RESPONSE_WITNESS_EXTENSIONS",
+                zzop_rules_cross_layer::RESPONSE_WITNESS_EXTENSIONS,
+            ),
         ] {
             for ext in list {
                 assert!(

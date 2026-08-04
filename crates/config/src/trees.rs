@@ -37,8 +37,9 @@ use crate::paths;
 /// not (only) in the hosts — without it a future host passing both would get a silently-narrowed join
 /// (config wins, paths ignored), exactly the per-host-drift class this crate exists to close.
 ///
-/// `operation` names the CALLER in both error messages, for the same reason `zero_config_trees` takes
-/// it (see the module doc's misattribution incident).
+/// Three refusals, one per way a call can name no usable source: BOTH sources, NEITHER source, and a
+/// config that resolves to one tree. `operation` names the CALLER in every one of them, for the same
+/// reason `zero_config_trees` takes it (see the module doc's misattribution incident).
 pub fn load_trees_request(
     operation: &str,
     paths: &[String],
@@ -69,6 +70,21 @@ pub fn load_trees_request(
             }
             Ok(loaded)
         }
+        // NEITHER source given — the sibling's explicit neither-branch, which this lane lacked until
+        // 2026-08-02. Without it the call fell through to `zero_config_trees`, whose sentence is about
+        // paths mode alone ("needs at least 2 paths") and therefore never mentioned that a config file
+        // is an equally valid source here: a caller who had one was told to go find a second directory.
+        // The host-local copy this shared layer replaced (`packages/mcp/src/tools.rs`'s `cross_repo`
+        // arm, deleted 2026-08-01) was the more complete of the two, and that is what this closes.
+        //
+        // It names TWO sources where the sibling names three, and the difference is the contract, not a
+        // wording slip: `resolve_trees_request` accepts ONE tree root because its callers' questions are
+        // meaningful over one tree, and this lane's are not — a join needs two sides. Copying the
+        // sibling's sentence verbatim would offer a source this function refuses one branch later.
+        None if paths.is_empty() => Err(format!(
+            "{operation} needs a source: pass 2+ tree roots, or a config file (a zzop.config.jsonc) \
+             whose `trees` define the join — one tree root is not a join"
+        )),
         None => zero_config_trees(operation, paths),
     }
 }

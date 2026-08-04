@@ -56,14 +56,15 @@ impl<'a> From<&'a zzop_engine::PackLoaded> for PackLoadedView<'a> {
     }
 }
 
-/// JSON view over `zzop_engine::RuleOverridesApplied` — D13③'s positive "this disable/remap actually
-/// took effect" confirmation (`AnalyzeOutputView::rule_overrides_applied`'s own doc has the full
-/// rationale). Borrowed strings, same zero-copy-view convention as every other field.
+/// JSON view over `zzop_engine::RuleOverridesApplied` — D13③'s positive "this disable/remap/allowlist
+/// actually took effect" confirmation (`AnalyzeOutputView::rule_overrides_applied`'s own doc has the
+/// full rationale). Borrowed strings, same zero-copy-view convention as every other field.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct RuleOverridesAppliedView<'a> {
     disabled: &'a [String],
     severity_remapped: &'a [String],
+    only: &'a [String],
 }
 
 impl<'a> From<&'a zzop_engine::RuleOverridesApplied> for RuleOverridesAppliedView<'a> {
@@ -71,6 +72,7 @@ impl<'a> From<&'a zzop_engine::RuleOverridesApplied> for RuleOverridesAppliedVie
         RuleOverridesAppliedView {
             disabled: &r.disabled,
             severity_remapped: &r.severity_remapped,
+            only: &r.only,
         }
     }
 }
@@ -98,11 +100,11 @@ impl<'a> From<&'a GitWindow> for GitWindowView<'a> {
 /// JSON view over `zzop_engine::CoverageCensus` — the vocab-free structural coverage census (see that
 /// type). Every field is a plain scalar copy (`join_contribution_zero` is the active-blindness FACT: this
 /// tree extracted no JOINABLE io — zero provides AND zero keyed consumes — while analyzing `files > 0`, so
-/// it is invisible to the cross-layer join). camelCase like every other output-facing type at this
-/// boundary.
+/// it is invisible to the cross-layer join) except the borrowed `declared_imports_by_ext` map. camelCase
+/// like every other output-facing type at this boundary.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(super) struct CoverageCensusView {
+pub(super) struct CoverageCensusView<'a> {
     files: usize,
     /// The parser-claimed subset of `files` — see `zzop_engine::CoverageCensus::parser_dispatched`. `files`
     /// counts every file walked (docs/data/assets included) and was being misread as the repo's code size.
@@ -111,6 +113,12 @@ pub(super) struct CoverageCensusView {
     /// RENAMED from `import_edges`/`importEdges` on 2026-07-31 — the name now states the membership
     /// rule (resolved in-tree edges only). See `zzop_engine::CoverageCensus::resolved_import_edges`.
     resolved_import_edges: usize,
+    /// F4: the declared-side denominator for `resolved_import_edges`, per extension — counted BEFORE
+    /// resolution, so package imports and unresolvable specifiers are still in it. ALWAYS serialized
+    /// (no skip-if-empty): an extension key's ABSENCE means "never measured" (channel-less parser, or a
+    /// Mode A envelope run, which measures nothing here), never 0 — see
+    /// `zzop_engine::CoverageCensus::declared_imports_by_ext` for the full contract.
+    declared_imports_by_ext: &'a std::collections::BTreeMap<String, usize>,
     io_provides: usize,
     io_consumes_keyed: usize,
     io_consumes_unresolved: usize,
@@ -118,13 +126,14 @@ pub(super) struct CoverageCensusView {
     join_contribution_zero: bool,
 }
 
-impl From<&zzop_engine::CoverageCensus> for CoverageCensusView {
-    fn from(c: &zzop_engine::CoverageCensus) -> Self {
+impl<'a> From<&'a zzop_engine::CoverageCensus> for CoverageCensusView<'a> {
+    fn from(c: &'a zzop_engine::CoverageCensus) -> Self {
         CoverageCensusView {
             files: c.files,
             parser_dispatched: c.parser_dispatched,
             symbols: c.symbols,
             resolved_import_edges: c.resolved_import_edges,
+            declared_imports_by_ext: &c.declared_imports_by_ext,
             io_provides: c.io_provides,
             io_consumes_keyed: c.io_consumes_keyed,
             io_consumes_unresolved: c.io_consumes_unresolved,

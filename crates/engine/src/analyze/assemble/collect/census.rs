@@ -20,10 +20,19 @@ use super::super::helpers::{
 pub(super) fn drain_python_candidates(
     candidates: Vec<(String, Option<String>, String)>,
     ts_paths: &HashSet<String>,
+    python_package_roots: &[&str],
     package_import_files: &mut BTreeMap<String, BTreeSet<String>>,
 ) {
     for (specifier, original, from_file) in candidates {
-        if resolve_python_import(&specifier, original.as_deref(), &from_file, ts_paths).is_none() {
+        if resolve_python_import(
+            &specifier,
+            original.as_deref(),
+            &from_file,
+            ts_paths,
+            python_package_roots,
+        )
+        .is_none()
+        {
             package_import_files
                 .entry(specifier)
                 .or_default()

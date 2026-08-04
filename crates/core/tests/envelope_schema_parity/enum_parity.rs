@@ -67,6 +67,10 @@ where
         .filter_map(|v| v.as_str().map(str::to_string))
         .collect();
 
+    #[allow(
+        clippy::iter_over_hash_type,
+        reason = "iteration order cannot reach any result: the loop only asserts, once per value"
+    )]
     for v in &schema_values {
         assert!(
             serde_json::from_value::<T>(Value::String(v.clone())).is_ok(),

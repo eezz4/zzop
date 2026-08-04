@@ -36,6 +36,10 @@ pub fn compute_main_sequence(
     cfg: &ScoresConfig,
 ) -> MainSequenceScore {
     let mut acc: BTreeMap<String, Acc> = BTreeMap::new();
+    #[allow(
+        clippy::iter_over_hash_type,
+        reason = "iteration order cannot reach the result: `acc` is a BTreeMap whose per-module fields are a set plus counters"
+    )]
     for f in dep.keys() {
         let Some(m) = module_of(cfg, f) else { continue };
         let s = acc.entry(m).or_insert_with(Acc::new);
@@ -44,6 +48,10 @@ pub fn compute_main_sequence(
             s.abstract_count += 1;
         }
     }
+    #[allow(
+        clippy::iter_over_hash_type,
+        reason = "iteration order cannot reach the result: the only writes are counter increments into the BTreeMap `acc`"
+    )]
     for (from, imports) in dep {
         let fm = module_of(cfg, from);
         for to in imports {

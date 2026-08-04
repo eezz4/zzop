@@ -3,7 +3,7 @@
 //! `FileProjection`, and everything reachable from them: `SourceSymbol`/`WriteSite`,
 //! `ImportBinding`/`ReExport`, `IoFacts`/`IoProvide`/`IoConsume`/`ProvideBodyShape`/
 //! `ProvideBodyField`/`ConsumeBodyShape`, `ClassShapeFragment`, `ProcedureRouterFragment`/
-//! `ProcedureRouterEntry`, `RouterMountFragment`/`RouterMountEntry`).
+//! `ProcedureRouterEntry`, `RouterMountFragment`/`RouterMountEntry`, `Attribute`/`EntityRef`).
 //!
 //! ## Method
 //! Build ONE fully-populated `NormalizedEnvelope` sample — every `Option` is `Some`, every
@@ -43,6 +43,17 @@
 //!     nullability only in prose before this test existed (`ioProvide.body`, `ioConsume.body`) and have
 //!     been promoted to the `oneOf` form so the machine-readable declaration matches reality; see this
 //!     file's test-batch report for the fix.
+//!   - WIRE ENUM VARIANT SETS (`wire_variants.rs`): the externally-tagged enums —
+//!     `RouterMountEntry`, `ProcedureRouterEntry`, `EntityRef` — are bound to their schema wrapper
+//!     definitions (`routerMountEntry`, `procedureRouterEntry`, `entityRef`) variant-for-variant, by
+//!     the COMPILER rather than by anyone remembering. Each has a mirror unit enum whose `ALL` array
+//!     is generated from the same token list as the enum, plus three exhaustive matches with no `_`
+//!     arm: real variant -> mirror (so a new upstream variant is a compile error), mirror -> wire
+//!     tag, mirror -> sample instance. `ALL` is then the ONE variant list — `samples.rs` derives
+//!     every fragment's `entries` and the per-file `attributes` channel from it, and
+//!     `required_nullable.rs` loops over it — so a new variant is automatically walked here and
+//!     probed there, and the check FAILS until the schema declares its tag. Read that file's module
+//!     doc for the full chain and the `MountRef` miss that motivated it.
 //!   - ENUM VALUE SETS: `sourceSymbol.kind` (`SourceSymbolKind`) and `writeSite.kind`
 //!     (`Option<NonIdempotentKind>`) are the only schema `enum` properties backed by a real Rust enum
 //!     type (swept: `procedureRouterEntry.Leaf.verb` also has a schema `enum`, but
@@ -67,6 +78,7 @@ mod key_parity;
 mod probes;
 mod required_nullable;
 mod samples;
+mod wire_variants;
 
 use std::collections::HashSet;
 use std::fs;
@@ -217,6 +229,7 @@ fn schema_definitions_cover_exactly_the_expected_type_set() {
         "fileProjection",
         "sourceSymbol",
         "writeSite",
+        "rawCall",
         "importBinding",
         "reExport",
         "ioFacts",
@@ -224,6 +237,7 @@ fn schema_definitions_cover_exactly_the_expected_type_set() {
         "ioConsume",
         "provideBodyField",
         "provideBodyShape",
+        "provideResponseShape",
         "consumeBodyShape",
         "classShapeFragment",
         "procedureRouterFragment",

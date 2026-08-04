@@ -8,7 +8,9 @@
 //! - `lang` — ruff AST -> Common-IR LANGUAGE projection: `SourceSymbol` extraction (`symbols`),
 //!   `ImportMap` extraction (`imports`), identifier-reference collection (`used_names`, dead-export
 //!   analysis substrate — mirrors `zzop_parser_typescript::parse_local_identifier_refs`'s purpose), and
-//!   `RawCall` call-site attribution (`calls`, the substrate for the engine's whole-repo `SymbolGraph`).
+//!   `RawCall` call-site attribution (`calls`, the substrate for the engine's whole-repo `SymbolGraph`),
+//!   plus the `CallSite` API-family projection (`call_sites`, `Matcher::CallScan`'s substrate — a
+//!   different fact from `calls`, see that module's doc for the boundary).
 //! - `adapters` — framework-vocabulary producers emitting cross-layer IO facts: FastAPI route PROVIDES
 //!   as router-mount fragments (`adapters::fastapi`) and `requests`/`httpx` literal egress CONSUMES
 //!   (`adapters::http_clients`), plus the two AUTH-GUARD evidence producers (`adapters::fastapi::guard`,
@@ -40,9 +42,12 @@ pub use adapters::http_clients::extract_python_http_consumes;
 pub use adapters::sqlalchemy::{
     extract_sqlalchemy_db_table_consumes, extract_sqlalchemy_db_table_provides,
 };
+pub use lang::call_sites::extract_call_sites;
 pub use lang::calls::parse_calls;
 pub use lang::imports::parse_imports;
+pub use lang::loop_spans::extract_loop_spans;
 pub use lang::resolve::python_import_candidates;
+pub use lang::string_literals::extract_string_literals;
 pub use lang::symbols::parse_symbols;
 pub use lang::used_names::parse_local_identifier_refs;
 
@@ -134,6 +139,9 @@ use zzop_core::recognizer::{channel, FrameworkRecognizer};
 /// Frameworks this parser recognizes — see [`zzop_core::recognizer`] for what a declaration does and
 /// does not claim. Verified against each adapter's RETURN TYPE, not a token scan: `RouterMountFragment`
 /// composes into the provide side, `IoConsume` is the consume side, and the db-table adapters emit both.
+/// The `evidence.auth-guarded` rows are the two guard producers the crate doc names
+/// (`adapters::fastapi::guard`, `adapters::django_routes::guard`): they return no io — their output is
+/// the decorator-guard side channel that exempts routes from `mutating-route-no-auth`.
 pub const FRAMEWORK_RECOGNIZERS: &[FrameworkRecognizer] = &[
     FrameworkRecognizer {
         framework: "django",
@@ -146,9 +154,19 @@ pub const FRAMEWORK_RECOGNIZERS: &[FrameworkRecognizer] = &[
         emits: &[channel::PROVIDES],
     },
     FrameworkRecognizer {
+        framework: "django",
+        extensions: &["py"],
+        emits: &[channel::AUTH_EVIDENCE],
+    },
+    FrameworkRecognizer {
         framework: "fastapi",
         extensions: &["py"],
         emits: &[channel::PROVIDES],
+    },
+    FrameworkRecognizer {
+        framework: "fastapi",
+        extensions: &["py"],
+        emits: &[channel::AUTH_EVIDENCE],
     },
     FrameworkRecognizer {
         framework: "sqlalchemy",
@@ -157,6 +175,17 @@ pub const FRAMEWORK_RECOGNIZERS: &[FrameworkRecognizer] = &[
     },
     FrameworkRecognizer {
         framework: "httpx",
+        extensions: &["py"],
+        emits: &[channel::CONSUMES],
+    },
+    // `requests` sits behind the SAME gate as `httpx` — `adapters::http_clients` is import-gated on
+    // either name and treats `requests.get(...)`/`requests.Session()` exactly like their httpx twins —
+    // yet only httpx had a row until 2026-08-01. Two clients, one module, so the module-keyed drift
+    // guard saw the module as declared and the disclosure told a `requests` user that this build has no
+    // consume-side recognizer for their stack. Same class as parser-typescript's `ky`/`$fetch`: the
+    // client VOCABULARY inside a declared module is not guarded, so widening it needs a row here.
+    FrameworkRecognizer {
+        framework: "requests",
         extensions: &["py"],
         emits: &[channel::CONSUMES],
     },

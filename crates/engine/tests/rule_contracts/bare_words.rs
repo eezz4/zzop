@@ -74,6 +74,23 @@ fn regex_bearing_texts(rule: &RuleDef) -> Vec<(&'static str, &str)> {
             .as_deref()
             .map(|p| vec![("key_pattern", p)])
             .unwrap_or_default(),
+        // `callee_pattern` shapes what a call-scan rule CLAIMS (it decides which projected callee counts
+        // as a hit), so it belongs in this subject set for the same reason `key_pattern` does. It is
+        // matched against a projected callee string rather than a source line, which makes a bare
+        // dangerous word here narrower than the same word in a `line_pattern` — narrower, not exempt.
+        Matcher::CallScan(m) => m
+            .callee_pattern
+            .as_deref()
+            .map(|p| vec![("callee_pattern", p)])
+            .unwrap_or_default(),
+        // `name_pattern` decides which projected binding NAMES count as a hit — same claim-shaping role
+        // as `SymbolScan::name_pattern` above, same subject-set membership. `name_exclude_pattern` is a
+        // veto (the `exclude_pattern` class this doc's header exempts).
+        Matcher::LiteralScan(m) => m
+            .name_pattern
+            .as_deref()
+            .map(|p| vec![("name_pattern", p)])
+            .unwrap_or_default(),
     }
 }
 

@@ -54,7 +54,7 @@ fn walk_class(rel: &str, node: Node, src: &str, rows_by_name: &mut HashMap<Strin
             Some("ApiController") | Some("Controller")
         )
     }) || simple_name.ends_with("Controller");
-    // `partial` modifier -> this row may be one half of a class split across files (`super::merge_partial_rows`).
+    // `partial` modifier -> this row may be one half of a class split across files (`merge_partial_rows` below).
     let is_partial = has_modifier(&modifiers_of(node), "partial", src);
     let prefix = class_prefix_state(&attrs, src, &simple_name);
 
@@ -192,4 +192,46 @@ fn declarator_value<'a>(declarator: Node<'a>, name_node: Node) -> Option<Node<'a
 fn is_string_type(ty: &str) -> bool {
     let last = ty.rsplit('.').next().unwrap_or(ty).trim();
     last == "string" || last == "String"
+}
+
+/// Merges 2+ same-name `partial class` halves into ONE `ClassRow` (module doc's "Partial classes").
+/// Rows are sorted by declaring file first so the merge — first-non-empty prefix, first-wins constant on a
+/// key collision — is DETERMINISTIC regardless of `HashMap` iteration order. `methods` are concatenated in
+/// that same file order (each already carries its own `file` for emit); `is_controller` is the OR of the
+/// halves (a controller attribute on any half makes the whole class a controller).
+pub(super) fn merge_partial_rows(mut rows: Vec<ClassRow>) -> ClassRow {
+    rows.sort_by(|a, b| a.file.cmp(&b.file));
+    let simple_name = rows[0].simple_name.clone();
+    let file = rows[0].file.clone();
+    let mut is_controller = false;
+    let mut prefix = ClassPrefix::Literal(String::new());
+    let mut prefix_fixed = false;
+    let mut constants: HashMap<String, String> = HashMap::new();
+    let mut methods: Vec<MethodRoute> = Vec::new();
+    for row in rows {
+        is_controller |= row.is_controller;
+        // First non-empty prefix among the halves wins — a partial controller declares its `[Route]` on at
+        // most one half in practice; a `Literal("")` (no `[Route]` on this half) does not fix the prefix.
+        if !prefix_fixed && !matches!(&row.prefix, ClassPrefix::Literal(p) if p.is_empty()) {
+            prefix = row.prefix;
+            prefix_fixed = true;
+        }
+        #[allow(
+            clippy::iter_over_hash_type,
+            reason = "iteration order cannot reach the result: one row's `constants` has unique keys, so first-wins into `constants` never resolves a collision from this loop; cross-row precedence comes from the `rows` Vec"
+        )]
+        for (name, value) in row.constants {
+            constants.entry(name).or_insert(value); // first-wins on a key collision
+        }
+        methods.extend(row.methods);
+    }
+    ClassRow {
+        file,
+        simple_name,
+        is_controller,
+        is_partial: true,
+        prefix,
+        constants,
+        methods,
+    }
 }

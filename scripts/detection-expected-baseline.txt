@@ -19,26 +19,35 @@
 # high or a missing row is an unrecorded one, and both are red. So this file cannot silently drift out
 # of agreement with the ground truth the way a hand-kept list can.
 #
+# The ROW SET is seeded from the corpus registry (the zzop.config.jsonc beside the ground truth), not
+# from the ground truth's own keys: a tree with zero labels still has its `<sourceId> 0 0 0` row, and
+# for those trees the row's EXISTENCE is the whole floor — removing the tree from the registry goes
+# red by name here instead of silently, which no count-only derivation could see.
+#
 # Maintained by: node scripts/measure/benchmark.mjs --expected cases/EXPECTED.jsonc --update-baseline
 # That mode GROWS ONLY. Lowering a number, or removing a row, is a hand edit — on purpose, so that
 # giving up a detection is an act with an author and a reason in the diff, never a side effect of
 # regenerating the answer key against a degraded engine.
-api 76 0 0
+api 111 0 0
+bearticles 0 0 0
+beinvoices 0 0 0
 callgraph 5 0 0
 cata 4 0 0
 catb 4 0 0
-decoy 0 36 0
+decoy 0 44 0
+depedge 0 0 0
 feaxios 2 0 0
 fecat 1 0 0
 fegensdk 2 0 0
 graph 7 0 0
 island 4 0 0
-java 16 0 0
+java 19 0 0
+rust 30 1 0
 sdk 1 0 0
 trpc 1 0 0
 unresolved 2 0 0
 web 14 0 0
 worker 1 0 0
-xbe 6 0 0
+xbe 7 0 0
 xbe2 4 0 0
 xfe 14 0 0

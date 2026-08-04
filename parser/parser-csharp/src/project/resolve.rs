@@ -34,6 +34,10 @@ pub(super) fn build_bare_index(
     classes: &HashMap<String, ClassRow>,
 ) -> HashMap<String, Option<String>> {
     let mut counts: HashMap<String, (usize, String)> = HashMap::new();
+    #[allow(
+        clippy::iter_over_hash_type,
+        reason = "iteration order cannot reach the result: `counts` keeps a value only when exactly one class declared the name, so the last-writer-wins assignment is unobservable — 2+ writers map to `None`"
+    )]
     for row in classes.values() {
         for (name, value) in &row.constants {
             let entry = counts.entry(name.clone()).or_insert((0, String::new()));

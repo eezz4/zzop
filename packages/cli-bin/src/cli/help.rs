@@ -57,7 +57,7 @@ fn elaborations() -> Vec<(&'static str, String)> {
         ),
         (
             "coverage",
-            "coverage <path>... | coverage --config <path> — the AGGREGATE-VISIBILITY view: \"how much of this tree does zzop actually see?\" Per tree, an extension-by-dispatch table (structural / lexical-only / degraded, plus inDepGraph — files of the extension with at least one RESOLVED outgoing import edge, the per-extension import-resolution sparsity baseline; each field's meaning shipped in the reply as dispatchMeaning), blindSpots — the CAPABILITY axis: per-rule evidence blind spots derived from the compiled-in sightline declarations crossed with the tree's structural extensions, with blindSpotBasis saying what was crossed — the tree's own engine warnings forwarded verbatim (the framework-silence self-reports ride there), the coverage census, and joinVisibility as a sentence. DELIBERATELY NO SINGLE SCORE: axes zzop never measured on your tree (recall) ride in an unmeasured FIELD instead of being folded into a number that would get quoted without them".to_string(),
+            "coverage <path>... | coverage --config <path> — the AGGREGATE-VISIBILITY view: \"how much of this tree does zzop actually see?\" Per tree, an extension-by-dispatch table (structural / lexical-only / degraded, plus inDepGraph — files of the extension with at least one RESOLVED outgoing import edge — and declaredImports, the pre-resolution declared-specifier denominator (null = never measured, e.g. a prisma/sql row), so declared-but-unresolved import blindness reads off one row; each field's meaning shipped in the reply as dispatchMeaning), blindSpots — the CAPABILITY axis: per-rule evidence blind spots derived from the compiled-in sightline declarations crossed with the tree's structural extensions, with blindSpotBasis saying what was crossed — the tree's own engine warnings forwarded verbatim (the framework-silence self-reports ride there), the coverage census, and joinVisibility as a sentence. DELIBERATELY NO SINGLE SCORE: axes zzop never measured on your tree (recall) ride in an unmeasured FIELD instead of being folded into a number that would get quoted without them".to_string(),
         ),
         (
             "graph",
@@ -85,14 +85,15 @@ fn elaborations() -> Vec<(&'static str, String)> {
         ),
         (
             "version",
-            "version [--verbose] — print this binary's version (equals the MCP serverInfo.version); --verbose adds every parser's fingerprint, the cache-key ingredient that identifies which parser build produced an analysis".to_string(),
+            "version [--verbose] — print this binary's version (equals the MCP serverInfo.version); --verbose adds every parser's fingerprint, which names the parser FRONTEND that read the files (an ID, not a per-build hash)".to_string(),
         ),
     ]
 }
 
 /// The three findings-view knobs, appended to the elaboration of every subcommand that takes them.
 /// One string, referenced from the table rather than repeated into it, so the three lanes cannot drift.
-const FILTER_KNOBS: &str = "  Findings-view knobs (the argv spelling of the same arguments the MCP tool twin takes): --severity <critical|warning|info> (minimum severity in the LIST; counts always cover everything), --rule <id>, --limit <n> (list cap; 0 = counts only).";
+const FILTER_KNOBS: &str = "  Findings-view knobs (the argv spelling of the same arguments the MCP tool twin takes): --severity <critical|warning|info> (minimum severity in the LIST; counts always cover everything), --rule <id>, --limit <n> (list cap; 0 = counts only).
+  Run knob: --profile-rules adds a `ruleTimings` report (per-rule wall-clock, cost-descending) to the reply. CLI-only — it has no MCP tool twin, because a timing report is a question about a local run rather than an answer about the code, and no zzop.config.jsonc key, because a config declares what is true about the PROJECT while this asks about ONE INVOCATION. On analyze-envelope the report times the envelope lane's own rule classes (symbol-scan/io-scan DSL rules plus the whole-graph analyses that run in Mode A). Cache hits contribute no timing, so profile against a cold cache; the report says so itself and carries the cache counts that prove it.";
 
 /// Which subcommands take [`FILTER_KNOBS`] — exactly the analysis lanes whose MCP twin tool declares
 /// `severity`/`rule`/`limit` in its input schema (`analyze_repo`, `analyze_envelope`, `cross_repo`).

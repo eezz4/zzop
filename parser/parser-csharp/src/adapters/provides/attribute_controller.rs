@@ -129,6 +129,7 @@ fn walk_class(rel: &str, node: Node, src: &str, out: &mut Vec<IoProvide>) {
         };
         let full_path = format!("{prefix}/{path}");
         out.push(IoProvide {
+            response: None,
             kind: "http".to_string(),
             key: http_interface_key(&verb, &full_path),
             file: rel.to_string(),

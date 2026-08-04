@@ -9,8 +9,9 @@
 //!
 //! Uses the same hand-rolled `TempDir` pattern as `crates/engine/tests/analyze_git.rs`/
 //! `analyze_diagnostics.rs`; the git-fixture helpers below mirror `analyze_git.rs`'s own
-//! `git_fixture_repo`/`git_available`/`run_git` (no shared test-support module exists in this workspace —
-//! see those files' own doc comments for why each test file keeps its own copy).
+//! `git_fixture_repo`/`git_available`/`run_git` — see those files' own doc comments for why each test
+//! file keeps its own copy of the FIXTURE builders. (`zzop-test-support` is the workspace's shared
+//! test crate, but it deliberately holds only `skip_notice!`; the fixtures are not in it.)
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -18,6 +19,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use zzop_engine::{analyze_tree, EngineConfig, GitOptions};
+use zzop_test_support::skip_notice;
 
 struct TempDir(PathBuf);
 
@@ -206,9 +208,7 @@ fn config_with_git() -> EngineConfig {
 #[test]
 fn layer_co_churn_reports_the_api_domains_cross_layer_pair_when_git_is_active() {
     if !git_available() {
-        eprintln!(
-            "skipping layer_co_churn_reports_the_api_domains_cross_layer_pair_when_git_is_active: git not on PATH"
-        );
+        skip_notice!("git not on PATH");
         return;
     }
     let dir = git_layer_fixture_repo();
@@ -236,7 +236,7 @@ fn layer_co_churn_reports_the_api_domains_cross_layer_pair_when_git_is_active() 
 #[test]
 fn layer_co_churn_is_deterministic_across_two_runs() {
     if !git_available() {
-        eprintln!("skipping layer_co_churn_is_deterministic_across_two_runs: git not on PATH");
+        skip_notice!("git not on PATH");
         return;
     }
     let dir = git_layer_fixture_repo();

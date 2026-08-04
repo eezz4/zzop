@@ -3,13 +3,39 @@
 //! A) — the two share one post-facade shaper (`shape_analyze_output`) so the same cap/disclosure/
 //! config-warning contract holds for both entry points.
 
-use crate::output::FindingFilters;
+use crate::output::{FindingFilters, RunKnobs};
 
 mod shape;
 #[cfg(test)]
 mod tests;
 
 use shape::shape_analyze_output;
+
+/// Turns rule-timing instrumentation on in an already-mapped request `Value`, for either request shape
+/// the config loader produces: a single `AnalyzeRequest` object (`Method::Analyze`) or the
+/// `{trees: [...]}` envelope (`Method::AnalyzeTrees`), where EVERY tree must be instrumented or the
+/// per-tree reports would silently disagree about what they measured.
+///
+/// Written onto the mapped request rather than carried as a config key on purpose — see
+/// `zzop_facade::AnalyzeRequest::profile_rules` for why this axis is a per-run switch and has no
+/// `zzop.config.jsonc` spelling. A no-op when `profile_rules` is false, so an unprofiled run's request
+/// is byte-identical to what the mapper produced.
+pub(crate) fn apply_run_knobs(request: &mut serde_json::Value, knobs: RunKnobs) {
+    if !knobs.profile_rules {
+        return;
+    }
+    match request
+        .get_mut("trees")
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        Some(trees) => {
+            for tree in trees {
+                tree["profileRules"] = serde_json::Value::Bool(true);
+            }
+        }
+        None => request["profileRules"] = serde_json::Value::Bool(true),
+    }
+}
 
 /// Analyze ONE tree, from EITHER source mode — exactly one of:
 /// - `path` — a tree root, with `<path>/zzop.config.jsonc` auto-discovered when present
@@ -28,8 +54,25 @@ pub fn analyze_summary(
     config_path: Option<&str>,
     filters: &FindingFilters,
 ) -> Result<String, String> {
+    analyze_summary_with(path, config_path, filters, RunKnobs::default())
+}
+
+/// [`analyze_summary`] plus the per-invocation [`RunKnobs`] — today, rule timing.
+///
+/// A separate entry point rather than a fourth argument on the original because the knob is CLI-only:
+/// `--profile-rules` has no MCP tool argument (a timing report is a question about a local run, not an
+/// answer an agent asked for), so every other host keeps calling the 3-argument form and cannot
+/// accidentally be handed a profiler it never asked to enable. If an MCP argument is ever added, the
+/// two collapse into one — the wrapper exists to avoid churning hosts for a knob they do not offer,
+/// not to fork the lane.
+pub fn analyze_summary_with(
+    path: Option<&str>,
+    config_path: Option<&str>,
+    filters: &FindingFilters,
+    knobs: RunKnobs,
+) -> Result<String, String> {
     // Absolutized at the host boundary (see `paths`): `zzop-config` requires an absolute root.
-    let (root, loaded) = match (path, config_path) {
+    let (root, mut loaded) = match (path, config_path) {
         (Some(_), Some(_)) => {
             return Err(
                 "pass either a tree root or a config file, not both — pass exactly one source"
@@ -56,6 +99,10 @@ pub fn analyze_summary(
             (resolved, loaded)
         }
     };
+    // Instrumentation is set on the MAPPED request, after the config loader has produced it and before
+    // either method sends it — the one place both `Analyze` and `AnalyzeTrees` pass through, so neither
+    // branch can be wired and the other forgotten.
+    apply_run_knobs(&mut loaded.request, knobs);
     // `disclosure` is the facade's run-global blindness-class registry (which failure classes zzop
     // does/does NOT detect) — the meta-honesty channel an AI consumer needs alongside the active
     // `warnings`; it rides at the top level of every facade output. Carried here, then FOLDED to its
@@ -95,7 +142,7 @@ pub fn analyze_summary(
     };
     // Config-loader warnings, collected first; the facade-level `configWarnings` entries riding the
     // tree output (engine-side config diagnostics, e.g. unknown-rule-id overrides) are merged onto
-    // these later, in `shape_analyze_output` (see `crate::config_warnings::facade_config_warnings`).
+    // these later, in `shape_analyze_output` (see `crate::warnings::facade_config_warnings`).
     let config_warnings: Vec<serde_json::Value> = loaded
         .warnings
         .into_iter()
@@ -136,6 +183,21 @@ pub fn analyze_envelope_summary(
     envelope_json: &str,
     filters: &FindingFilters,
 ) -> Result<String, String> {
+    analyze_envelope_summary_with(envelope_json, filters, RunKnobs::default())
+}
+
+/// [`analyze_envelope_summary`] plus the per-invocation [`RunKnobs`] — the envelope-lane twin of
+/// [`analyze_summary_with`], and CLI-only for the same reason (no MCP tool argument turns profiling
+/// on). This twin did NOT exist until 2026-08-03, deliberately: `zzop_engine::analyze_envelope` used
+/// to construct `rule_timings: None` unconditionally (its pack evaluation ran outside the timing
+/// accumulator), so the CLI refused `--profile-rules` on this lane by name rather than accept a knob
+/// nothing reads. Mode A's pack evaluation now feeds the same accumulator the native path does
+/// (`crates/engine/src/envelope/file_pass.rs`/`ingest.rs`), so the knob is real here too.
+pub fn analyze_envelope_summary_with(
+    envelope_json: &str,
+    filters: &FindingFilters,
+    knobs: RunKnobs,
+) -> Result<String, String> {
     if envelope_json.trim().is_empty() {
         // Spelling-free: `envelopeJson` is the MCP argument name, but the CLI twin passes a FILE whose
         // text landed here — naming the wire argument told half the callers about a knob they do not have.
@@ -150,8 +212,18 @@ pub fn analyze_envelope_summary(
     // `analyze_envelope_json` itself documents at the facade layer (bundled packs injected as inline
     // seeds, no disabledRules/severityOverrides/suppressions/mounts) — the MCP surface takes
     // `envelopeJson` only, so this is the minimal valid `EnvelopeAnalyzeRequest` construction, not a
-    // shortcut around it.
-    let out = zzop_facade::analyze_envelope_json(envelope_json, "{}")?;
+    // shortcut around it. `profileRules` is the one per-invocation addition, written only when asked
+    // for — an unprofiled request stays byte-identical to the pre-knob `"{}"`. Declaring no
+    // `vocabulary` here is likewise deliberate: the facade assigns the product default
+    // (`VocabularyConfig::built_in()`) to an undeclared envelope request, so both hosts run the same
+    // built-in convention vocabulary — declaring one is a facade-request capability neither host
+    // exposes as a knob today (`EnvelopeAnalyzeRequest::vocabulary`).
+    let config = if knobs.profile_rules {
+        r#"{"profileRules":true}"#
+    } else {
+        "{}"
+    };
+    let out = zzop_facade::analyze_envelope_json(envelope_json, config)?;
     let output_view: serde_json::Value = serde_json::from_str(&out).map_err(|e| e.to_string())?;
     let disclosure = output_view["disclosure"].clone();
     let summary = shape_analyze_output(

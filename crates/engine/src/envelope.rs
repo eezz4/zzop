@@ -13,10 +13,13 @@
 //!   instead of "did not run". `SymbolScan`/`IoScan` only read `symbols`/`io`, which a `FileProjection`
 //!   does supply, so `envelope_rule_pack` filters every pack down to just those two matcher kinds.
 //!   Per-file lexical rules belong on the external parser's own side of the boundary.
-//! - **No filesystem root -> no `unimported-export`/call-graph-BFS rules, no git-history analyses.** Those
-//!   need a second disk read or a repository root, which an envelope has neither of; the affected
-//!   `AnalyzeOutput` fields stay at their "git inactive" empty value, and a configured `git` option
-//!   produces one `warnings` entry rather than a panic.
+//! - **No filesystem root -> no `unimported-export`, no git-history analyses.** Those need a second
+//!   disk read or a repository root, which an envelope has neither of; the affected `AnalyzeOutput`
+//!   fields stay at their "git inactive" empty value, and a configured `git` option produces one
+//!   `warnings` entry rather than a panic. The call-graph-BFS rules used to be on this list for the
+//!   same reason (the native pass is a disk re-parse) — they now run from the envelope's OWN
+//!   `FileProjection::calls` channel instead ([`callgraph`]), and an envelope without that channel
+//!   keeps them silent WITH a disclosure rather than silently.
 //! - **Dep-graph resolution treats import specifiers as repo-relative.** Edge resolution is a plain
 //!   exact match against the envelope's own path set, not the TS parser's relative/extension-guessing
 //!   resolver — an arbitrary external parser's `imports` map has no reason to follow TS conventions. An
@@ -27,8 +30,10 @@
 //!   re-resolution run in envelope mode too, via the same composer functions the native path uses —
 //!   only the resolver differs, since an envelope carries no tsconfig or workspace manifests to alias
 //!   against.
-//! - **No caching, no rule-timing profiling.** Both are ignored — envelope mode has no per-file disk
-//!   content to hash and no per-rule timing loop wired for this smaller rule surface.
+//! - **No caching.** `cache_dir` is ignored — envelope mode has no per-file disk content to hash.
+//!   Rule-timing profiling (`EngineConfig::profile_rules`) DOES run here: the per-file DSL pass, the
+//!   whole-tree io-scan pass, and the whole-graph analyses all feed the same accumulator the native
+//!   path uses, so `rule_timings` populates in Mode A too.
 //!
 //! ## Module layout
 //!
@@ -37,18 +42,26 @@
 //!
 //! - [`ingest`] — Mode A: `analyze_envelope`, the whole-tree envelope entry point (orchestrator).
 //! - [`file_pass`] — Mode A's per-file accumulation loop, extracted verbatim from `analyze_envelope`.
+//! - [`callgraph`] — Mode A's call-graph pass over the envelope's `calls` channel (+ its absence/
+//!   residual disclosures).
+//! - [`native_pass`] — Mode A's whole-graph native analyses (`circular`/`unreachable`/
+//!   `dead-candidates`), extracted verbatim from `ingest`.
 //! - [`overlay`] — Mode B: `apply_adapter_overlays` + the shared fact-census predicate.
 //! - [`merge`] — Mode B's two per-projection merge branches (existing artifact vs synthetic).
 //! - [`reserved`] — reserved engine-internal io-sentinel predicates + drop/warning helpers, shared by
 //!   both modes so they can't drift.
 //! - [`resolve`] — the envelope-mode fragment-specifier resolver + the SymbolScan/IoScan pack filter.
+//! - [`shapes`] — Mode A's `body`/`response` dtoRef resolution (the native assemble passes, reused).
 
+mod callgraph;
 mod file_pass;
 mod ingest;
 mod merge;
+mod native_pass;
 mod overlay;
 mod reserved;
 mod resolve;
+mod shapes;
 mod topology_freeze;
 
 #[cfg(test)]

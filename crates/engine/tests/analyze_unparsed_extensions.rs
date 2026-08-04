@@ -97,6 +97,7 @@ fn fixture_tree() -> TempDir {
 /// uses `projection_with_io` instead so it keeps testing real coverage, not the zero-fact case.
 fn projection(path: &str) -> FileProjection {
     FileProjection {
+        calls: Vec::new(),
         class_shape_fragments: Vec::new(),
         path: path.to_string(),
         loc: 1,
@@ -115,6 +116,7 @@ fn projection(path: &str) -> FileProjection {
         attributes: Vec::new(),
         loop_spans: Vec::new(),
         function_spans: Vec::new(),
+        test_spans: Vec::new(),
     }
 }
 
@@ -124,6 +126,7 @@ fn projection(path: &str) -> FileProjection {
 fn projection_with_io(path: &str) -> FileProjection {
     let mut p = projection(path);
     p.io.provides.push(IoProvide {
+        response: None,
         body: None,
         kind: "http".to_string(),
         key: format!("GET /{path}"),

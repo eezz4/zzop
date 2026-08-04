@@ -19,6 +19,7 @@ fn pack(matcher: LineScan) -> RulePackDef {
             id: "r".to_string(),
             severity: Severity::Info,
             message: "m".to_string(),
+            scan_test_regions: false,
             matcher: Matcher::LineScan(matcher),
         }],
     }

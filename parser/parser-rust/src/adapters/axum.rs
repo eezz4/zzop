@@ -31,26 +31,69 @@
 //! - Any other chained method (`.layer(...)`, `.with_state(...)`, ...) is silently skipped — no
 //!   middleware/`layer` auth-attribute recognition here (M3 scope, out of bounds).
 //! - One `RouterMountFragment` per name with >=1 surviving entry, in first-appearance order.
+//!
+//! ## Test surface is excluded (2026-08-02 — the last adapter in this crate to gate it)
+//! A test fixture's `Router::new().route("/admin/reset", post(h))` is not a DEPLOYED route, and until
+//! this batch it entered the cross-layer join as one. The same three gates `adapters::raw_sql` and
+//! `adapters::http_clients` document apply here, through the same predicate: `zzop_core::is_test_file`
+//! on the path, the file's own `#![cfg(test)]` inner attributes, and a subtree skip on every test-gated
+//! item.
+//!
+//! The third gate asks about ONE node axis where the siblings ask about three (`Item`, `ImplItem`,
+//! `TraitItem`), because the other two are unreachable from here. Both siblings are `syn::visit::Visit`
+//! walks that descend the whole file, while this one reads `syn::File::items` and scans only
+//! `Item::Fn` — nothing inside an `impl`, a `trait`, or even a nested `mod` is ever looked at (the v1
+//! scope above). Measured 2026-08-02 before any gate existed: `#[cfg(test)] mod tests`, `#[test] fn` in
+//! an `impl`, and a `#[cfg(test)]` default trait method each already yielded zero fragments, while a
+//! file-level `#![cfg(test)]`, a top-level `#[cfg(test)] fn`/`#[test] fn`/`#[cfg(all(test, not(miri)))]
+//! fn`, and a `tests/` PATH each leaked a deployed route. `OUT_OF_REACH_ROUTERS` in this module's tests
+//! pins that measurement, so the missing axes stay a proven non-gap rather than an asserted one. The
+//! gate is nonetheless applied to EVERY top-level item rather than to `Item::Fn` alone, so it stays
+//! co-extensive with the loop should the walk ever widen.
+//!
+//! What is NOT gated is [`crate::lang::imports::parse_imports`] and the `imports_axum` check built on
+//! it, for the reason `adapters::http_clients` keeps its `BindingCollector` file-wide: a file whose only
+//! `use axum::...` is itself `#[cfg(test)]`-gated can still ship a fully-qualified
+//! `axum::Router::new().route(...)`, and narrowing the import scan would delete that REAL route instead
+//! of suppressing a fixture — the losing direction. Measured: with the import scan left flat, that file
+//! still yields its shipped route.
+//!
+//! Two residuals, both shared with `lang::test_spans` rather than introduced here. A `#[cfg(test)]`
+//! attribute on a LOCAL STATEMENT (`fn ship() { #[cfg(test)] let app = Router::new()…; }`) is invisible
+//! to both — `test_spans` walks items, not statements, so it records no span there either; the two axes
+//! agree, and making this adapter stricter alone would emit a suppression no rule pack could subtract.
+//! And the file-global fragment-name map means a chain rooted at a bare ident is accepted whenever ANY
+//! earlier item registered that name, so gating an item could in principle strand a later statement that
+//! was leaning on it — unreachable in compilable Rust, where such a chain root must resolve to a local
+//! of the SAME function, hence the same item, hence gated or kept as one.
 
 use std::collections::HashMap;
-use syn::{Expr, ExprAssign, ExprMethodCall, ItemFn, Local, Stmt};
+use syn::{Expr, ExprAssign, ItemFn, Local, Stmt};
 use zzop_core::{ImportMap, RouterMountEntry, RouterMountFragment};
+
+use crate::lang::test_spans::{is_test_gated, item_is_test_gated};
 
 mod entries;
 mod util;
-use entries::push_verb;
-use util::{
-    is_router_new_call, is_same_ident, simple_expr_ident, simple_pat_ident, string_literal,
-};
+use entries::builder_entries;
+use util::{collect_chain, is_router_new_call, is_same_ident, simple_expr_ident, simple_pat_ident};
 
 pub(crate) const VERB_METHODS: &[&str] = &["get", "post", "put", "delete", "patch"];
 
-/// Extract this file's axum router-mount fragments — see module doc. Empty on parse failure, and
-/// whenever the file does not import `axum` (never panics).
-pub fn extract_axum_router_fragments(_rel: &str, text: &str) -> Vec<RouterMountFragment> {
+/// Extract this file's axum router-mount fragments — see module doc. Empty on parse failure, for a test
+/// file or a test-gated one, and whenever the file does not import `axum` (never panics).
+pub fn extract_axum_router_fragments(rel: &str, text: &str) -> Vec<RouterMountFragment> {
+    // Test surface — see the module doc's "Test surface is excluded". Path first (no parse needed).
+    if zzop_core::is_test_file(rel) {
+        return Vec::new();
+    }
     let Some(file) = crate::parse_file(text) else {
         return Vec::new();
     };
+    if is_test_gated(&file.attrs) {
+        return Vec::new();
+    }
+    // Deliberately NOT narrowed to non-test items — see the module doc's paragraph on `imports_axum`.
     let imports = crate::lang::imports::parse_imports(text);
     if !imports_axum(&imports) {
         return Vec::new();
@@ -59,6 +102,9 @@ pub fn extract_axum_router_fragments(_rel: &str, text: &str) -> Vec<RouterMountF
     let mut order: Vec<String> = Vec::new();
     let mut entries: HashMap<String, Vec<RouterMountEntry>> = HashMap::new();
     for item in &file.items {
+        if item_is_test_gated(item) {
+            continue; // a fixture's routes are not deployed PROVIDES
+        }
         if let syn::Item::Fn(f) = item {
             scan_fn(f, &imports, &mut order, &mut entries);
         }
@@ -161,105 +207,6 @@ fn append(
         order.push(name.clone());
     }
     entries.entry(name).or_default().extend(new_entries);
-}
-
-/// Decomposes a method-call chain into its root expression and the ordered list of chained calls —
-/// `Router::new().route(a).nest(b)` -> `(Router::new(), [.route(a), .nest(b)])`.
-fn collect_chain(expr: &Expr) -> (&Expr, Vec<&ExprMethodCall>) {
-    match expr {
-        Expr::MethodCall(mc) => {
-            let (root, mut chain) = collect_chain(&mc.receiver);
-            chain.push(mc);
-            (root, chain)
-        }
-        other => (other, Vec::new()),
-    }
-}
-
-fn builder_entries(chain: &[&ExprMethodCall], imports: &ImportMap) -> Vec<RouterMountEntry> {
-    let mut out = Vec::new();
-    for mc in chain {
-        match mc.method.to_string().as_str() {
-            "route" => out.extend(route_entries(mc)),
-            "nest" => out.extend(nest_entry(mc, imports)),
-            "merge" => out.extend(merge_entry(mc, imports)),
-            _ => {}
-        }
-    }
-    out
-}
-
-fn route_entries(mc: &ExprMethodCall) -> Vec<RouterMountEntry> {
-    let Some(path) = mc.args.first().and_then(string_literal) else {
-        return Vec::new();
-    };
-    let Some(verb_expr) = mc.args.get(1) else {
-        return Vec::new();
-    };
-    let (root, chain) = collect_chain(verb_expr);
-    let Some((verb, handler, line)) = verb_call(root) else {
-        return Vec::new(); // root isn't a recognized verb call — never guess the whole `.route()`
-    };
-    let mut out = Vec::new();
-    push_verb(&mut out, verb, &path, handler, line);
-    for link in chain {
-        let name = link.method.to_string();
-        if VERB_METHODS.contains(&name.as_str()) || name == "any" {
-            let handler = link.args.first().and_then(simple_expr_ident);
-            push_verb(
-                &mut out,
-                name.to_ascii_uppercase(),
-                &path,
-                handler,
-                crate::line_of(&link.method),
-            );
-        }
-    }
-    out
-}
-
-fn verb_call(root: &Expr) -> Option<(String, Option<String>, u32)> {
-    let Expr::Call(call) = root else { return None };
-    let Expr::Path(p) = &*call.func else {
-        return None;
-    };
-    let seg = p.path.segments.last()?;
-    let verb = seg.ident.to_string();
-    // `any(handler)` is axum's every-method catch-all — recognized here as the sentinel "ANY", expanded
-    // to one entry per HTTP verb by `push_verb` below. `on(MethodFilter, handler)` (verb-from-argument)
-    // stays out of v1 scope.
-    if !VERB_METHODS.contains(&verb.as_str()) && verb != "any" {
-        return None;
-    }
-    let handler = call.args.first().and_then(simple_expr_ident);
-    Some((
-        verb.to_ascii_uppercase(),
-        handler,
-        crate::line_of(&seg.ident),
-    ))
-}
-
-fn nest_entry(mc: &ExprMethodCall, imports: &ImportMap) -> Option<RouterMountEntry> {
-    let prefix = string_literal(mc.args.first()?)?;
-    let ident = simple_expr_ident(mc.args.get(1)?)?;
-    let specifier = imports.get(&ident).map(|b| b.specifier.clone());
-    Some(RouterMountEntry::Mount {
-        prefix,
-        ident,
-        specifier,
-        attr_keys: Vec::new(),
-    })
-}
-
-fn merge_entry(mc: &ExprMethodCall, imports: &ImportMap) -> Option<RouterMountEntry> {
-    let ident = simple_expr_ident(mc.args.first()?)?;
-    let specifier = imports.get(&ident).map(|b| b.specifier.clone());
-    Some(RouterMountEntry::Mount {
-        prefix: String::new(),
-        ident,
-        specifier,
-        attr_keys: Vec::new(),
-    })
 }
 
 #[cfg(test)]

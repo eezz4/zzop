@@ -133,6 +133,8 @@ fn fragment_channels_round_trip_when_present() {
             attributes: Vec::new(),
             loop_spans: vec![],
             function_spans: vec![],
+            test_spans: Vec::new(),
+            calls: Vec::new(),
         }],
     };
     let json = serde_json::to_string(&envelope).unwrap();
@@ -231,6 +233,8 @@ fn rejects_duplicate_paths() {
                 attributes: Vec::new(),
                 loop_spans: vec![],
                 function_spans: vec![],
+                test_spans: Vec::new(),
+                calls: Vec::new(),
             },
             FileProjection {
                 class_shape_fragments: Vec::new(),
@@ -251,6 +255,8 @@ fn rejects_duplicate_paths() {
                 attributes: Vec::new(),
                 loop_spans: vec![],
                 function_spans: vec![],
+                test_spans: Vec::new(),
+                calls: Vec::new(),
             },
         ],
     };
@@ -308,6 +314,21 @@ fn jsp_contract_example_validates() {
     assert_eq!(file.io.provides[0].key, "GET /legacy/user.jsp");
     assert_eq!(file.io.consumes.len(), 1);
     assert_eq!(file.io.consumes[0].key.as_deref(), Some("table:users"));
+    // The calls channel: one same-file edge, attributed to the emitting file (the attribution rule
+    // `validate_envelope` enforces — this example must demonstrate the conforming shape).
+    assert_eq!(file.calls.len(), 1);
+    assert_eq!(file.calls[0].from_symbol, "webapp/legacy/user.jsp#getUser");
+    assert_eq!(file.calls[0].callee_name, "renderProfile");
+    // The declared-response channel, in the fields-direct supply mode (an external producer has no
+    // class map to defer to, so it fills `fields` and leaves `dtoRef` unset) — the example must
+    // demonstrate the shape the schema documents for adapters, not only the calls channel.
+    let response = file.io.provides[0]
+        .response
+        .as_ref()
+        .expect("the example demonstrates a declared response");
+    assert!(response.dto_ref.is_none());
+    assert_eq!(response.fields.len(), 2);
+    assert!(response.complete);
 }
 
 #[test]
@@ -434,5 +455,158 @@ mod overrides {
     fn an_envelope_declaring_no_overrides_stays_valid_below_the_floor() {
         let json = envelope_json("0.20.0", BINDS_UTIL, "[]");
         assert!(validate_envelope(&json).is_ok());
+    }
+}
+
+/// The `calls` channel (introduced in `MIN_VERSION_FOR_CALLS`) — an external submission of call-graph
+/// edges, so it carries its own validation the native `RawCall` producers never need. Raw JSON, same
+/// rationale as the `overrides` module above.
+mod calls {
+    use super::*;
+
+    fn envelope_json(version: &str, calls: &str) -> String {
+        format!(
+            r#"{{
+              "format": "{NORMALIZED_AST_FORMAT}",
+              "version": "{version}",
+              "parser": "t/1",
+              "source": "s",
+              "files": [{{
+                "path": "src/app.rb",
+                "loc": 9,
+                "calls": {calls}
+              }}]
+            }}"#
+        )
+    }
+
+    #[test]
+    fn a_well_attributed_call_is_valid_at_the_floor_and_round_trips() {
+        let json = envelope_json(
+            MIN_VERSION_FOR_CALLS,
+            r#"[{ "from_symbol": "src/app.rb#create_user", "callee_name": "require_auth", "line": 12 }]"#,
+        );
+        let envelope = validate_envelope(&json).unwrap_or_else(|e| panic!("{e:?}"));
+        let call = &envelope.files[0].calls[0];
+        assert_eq!(call.from_symbol, "src/app.rb#create_user");
+        assert_eq!(call.callee_name, "require_auth");
+        assert_eq!(call.line, 12);
+        assert_eq!(call.receiver_type, None);
+        assert!(!call.is_heritage);
+        // Optional refinements deserialize too (typed receiver / heritage — `RawCall`'s own fields).
+        let json2 = envelope_json(
+            MIN_VERSION_FOR_CALLS,
+            r#"[{ "from_symbol": "src/app.rb#create_user", "callee_name": "save", "line": 13, "receiver_type": "UserRepo", "is_heritage": false }]"#,
+        );
+        let envelope2 = validate_envelope(&json2).expect("refined call should validate");
+        assert_eq!(
+            envelope2.files[0].calls[0].receiver_type.as_deref(),
+            Some("UserRepo")
+        );
+    }
+
+    /// The channel is OPTIONAL — absent deserializes to empty, and the projection stays fully valid.
+    #[test]
+    fn an_envelope_without_calls_deserializes_to_an_empty_channel() {
+        let envelope = validate_envelope(&valid_envelope_json()).expect("should validate");
+        assert!(envelope.files[0].calls.is_empty());
+    }
+
+    /// The version floor — same mechanism as `overrides`: a mislabelled envelope (old declared
+    /// version, populated `calls`) would be silently dropped by an engine predating the field,
+    /// leaving every call-graph rule quiet while the producer believes its graph applied.
+    #[test]
+    fn calls_declared_below_the_floor_are_rejected_rather_than_silently_ignored() {
+        let json = envelope_json(
+            "0.20.0",
+            r#"[{ "from_symbol": "src/app.rb#create_user", "callee_name": "require_auth", "line": 12 }]"#,
+        );
+        let errors = validate_envelope(&json).unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("`calls` requires version >=")),
+            "{errors:?}"
+        );
+    }
+
+    /// Attribution — `from_symbol` must be `<this file's path>#<symbol>`. The whole-graph resolver
+    /// buckets calls by that prefix, so a foreign-file prefix would resolve this call against another
+    /// file's imports. All three malformed shapes are rejected: a foreign prefix, a missing `#`, and
+    /// a bare `"<path>#"` with no symbol name.
+    #[test]
+    fn a_call_attributed_to_another_file_or_malformed_is_rejected() {
+        for bad in [
+            r#"[{ "from_symbol": "src/other.rb#helper", "callee_name": "x", "line": 1 }]"#,
+            r#"[{ "from_symbol": "src/app.rb", "callee_name": "x", "line": 1 }]"#,
+            r#"[{ "from_symbol": "src/app.rb#", "callee_name": "x", "line": 1 }]"#,
+        ] {
+            let json = envelope_json(MIN_VERSION_FOR_CALLS, bad);
+            let errors = validate_envelope(&json).unwrap_err();
+            assert!(
+                errors
+                    .iter()
+                    .any(|e| e.contains("must be '<this file's path>#<symbol>'")),
+                "{bad}: {errors:?}"
+            );
+        }
+    }
+
+    /// A `#` inside the PATH of a calls-carrying file passes the attribution check (`strip_prefix`)
+    /// but breaks the whole-graph resolver's bucketing (`build_symbol_graph` splits `from_symbol` at
+    /// its FIRST `#`), so such a file's calls would resolve under a truncated path it never declared.
+    /// The two machines cannot agree on that shape, so the boundary rejects it — and ONLY for files
+    /// that actually carry calls (a `#` path with no calls has no bucketing to disagree with).
+    #[test]
+    fn calls_on_a_path_containing_hash_are_rejected() {
+        let json = format!(
+            r#"{{
+              "format": "{NORMALIZED_AST_FORMAT}",
+              "version": "{MIN_VERSION_FOR_CALLS}",
+              "parser": "t/1",
+              "source": "s",
+              "files": [{{
+                "path": "src/a#b.rb",
+                "loc": 9,
+                "calls": [{{ "from_symbol": "src/a#b.rb#create_user", "callee_name": "save", "line": 3 }}]
+              }}]
+            }}"#
+        );
+        let errors = validate_envelope(&json).unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("'#'") && e.contains("calls")),
+            "a calls-carrying '#' path must be rejected naming the mismatch: {errors:?}"
+        );
+
+        // The same path WITHOUT calls stays accepted — the rejection is scoped to the one channel
+        // whose bucketing the '#' actually breaks, never a blanket path rule.
+        let no_calls = format!(
+            r#"{{
+              "format": "{NORMALIZED_AST_FORMAT}",
+              "version": "{MIN_VERSION_FOR_CALLS}",
+              "parser": "t/1",
+              "source": "s",
+              "files": [{{ "path": "src/a#b.rb", "loc": 9 }}]
+            }}"#
+        );
+        assert!(
+            validate_envelope(&no_calls).is_ok(),
+            "a '#' path with no calls must stay accepted"
+        );
+    }
+
+    #[test]
+    fn an_empty_callee_name_is_rejected() {
+        let json = envelope_json(
+            MIN_VERSION_FOR_CALLS,
+            r#"[{ "from_symbol": "src/app.rb#create_user", "callee_name": "", "line": 1 }]"#,
+        );
+        let errors = validate_envelope(&json).unwrap_err();
+        assert!(
+            errors.iter().any(|e| e.contains("empty callee_name")),
+            "{errors:?}"
+        );
     }
 }

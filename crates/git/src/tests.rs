@@ -5,6 +5,7 @@
 //! exclusion, multi-author aggregation, tag classification (incl. REVERT-before-FIX), and the
 //! recent-window boundary; the tag-classifier cases specifically live in `tags.rs`.
 use super::*;
+use zzop_test_support::skip_notice;
 
 const SEP: char = '\u{1f}';
 
@@ -256,7 +257,7 @@ fn collect_end_to_end_against_a_real_temp_git_repo() {
 
     let git_available = Command::new("git").arg("--version").output().is_ok();
     if !git_available {
-        eprintln!("skipping collect_end_to_end_against_a_real_temp_git_repo: git not on PATH");
+        skip_notice!("git not on PATH");
         return;
     }
 
@@ -337,9 +338,7 @@ fn collect_end_to_end_round_trips_a_non_ascii_korean_filename_unescaped() {
 
     let git_available = Command::new("git").arg("--version").output().is_ok();
     if !git_available {
-        eprintln!(
-            "skipping collect_end_to_end_round_trips_a_non_ascii_korean_filename_unescaped: git not on PATH"
-        );
+        skip_notice!("git not on PATH");
         return;
     }
 

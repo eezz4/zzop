@@ -16,6 +16,9 @@
 //! - `project` — the whole-corpus Spring provides pass (the retired lexical extractor's project-pass
 //!   equivalent): cross-file class-level `@RequestMapping` constant resolution and CE-split
 //!   `extends`-chain gating.
+//! - `http_clients` — Spring `RestTemplate`/`WebClient` literal HTTP egress CONSUMES, the consume-side
+//!   counterpart of `provides` (closed the "half a join" gap disclosed on [`FRAMEWORK_RECOGNIZERS`]).
+//! - `jpa` — JPA `@Entity`/`@Table` `db-table` PROVIDES, the Java member of the ORM db-table family.
 //!
 //! ## Tree-sitter discipline (mirrors `zzop_parser_go`'s crate-root doc verbatim — see that crate for
 //! the fuller rationale; summarized here)
@@ -29,6 +32,8 @@
 //!   the compiled `tree_sitter_java::LANGUAGE`.
 //! - **No tree-sitter types in the public API.**
 
+pub mod http_clients;
+pub mod jpa;
 pub mod lang;
 pub mod project;
 pub mod provides;
@@ -40,30 +45,55 @@ use zzop_core::recognizer::{channel, FrameworkRecognizer};
 
 /// Frameworks this parser recognizes — see [`zzop_core::recognizer`].
 ///
-/// ⚠ NOTE THE ASYMMETRY, which is the whole reason `emits` is on this type: there is no
-/// [`channel::CONSUMES`] row here. Feign / RestTemplate / WebClient / HttpClient have no recognizer in
-/// this crate (measured 2026-08-01: zero occurrences in `src/`), so a Java service that CALLS another
-/// service contributes nothing to the consume side of the cross-layer join. By recognizer COUNT this
-/// parser looks comparable to `parser-rust`; by CHANNEL it is half a join. Closing it is an open item
-/// tracked as open work, and until then this declaration is what says so out loud.
+/// The consume side was EMPTY until 2026-08-02 (the declaration here said so out loud: a Java service
+/// that CALLS another service contributed nothing to the cross-layer join). `http_clients` now fills it
+/// for `RestTemplate`/`WebClient`, and `jpa` adds the db channel. Still absent, still disclosed: Feign
+/// (`@FeignClient` declarative interfaces) and `java.net.http.HttpClient` (URL not visible at the
+/// `send` call site) — see `http_clients`'s module doc for the reasons each is roadmap rather than
+/// recognized.
 pub const FRAMEWORK_RECOGNIZERS: &[FrameworkRecognizer] = &[
     FrameworkRecognizer {
         framework: "spring",
         extensions: &["java"],
         emits: &[channel::PROVIDES],
     },
+    // Spring Security emits NO io: `security` (method-security annotations) and `spring_security`
+    // (global posture) both feed the decorator-guard side channel that EXEMPTS routes from
+    // `mutating-route-no-auth`. This row declared `io.provides` until 2026-08-02 — a false claim the
+    // channel contract caught and pinned; `evidence.auth-guarded` is the channel that let it state
+    // the truth (`emits` must be non-empty, and none of the io three was it).
     FrameworkRecognizer {
         framework: "spring security",
         extensions: &["java"],
-        emits: &[channel::PROVIDES],
+        emits: &[channel::AUTH_EVIDENCE],
+    },
+    FrameworkRecognizer {
+        framework: "resttemplate",
+        extensions: &["java"],
+        emits: &[channel::CONSUMES],
+    },
+    FrameworkRecognizer {
+        framework: "webclient",
+        extensions: &["java"],
+        emits: &[channel::CONSUMES],
+    },
+    FrameworkRecognizer {
+        framework: "jpa",
+        extensions: &["java"],
+        emits: &[channel::DB],
     },
 ];
 
 #[cfg(test)]
 mod node_kinds;
 
+pub use http_clients::extract_java_http_consumes;
+pub use jpa::extract_jpa_db_table_provides;
+pub use lang::call_sites::extract_call_sites;
 pub use lang::calls::parse_calls;
 pub use lang::imports::parse_imports;
+pub use lang::loop_spans::extract_loop_spans;
+pub use lang::string_literals::extract_string_literals;
 pub use lang::symbols::parse_symbols;
 pub use lang::used_names::parse_local_identifier_refs;
 pub use project::{extract_http_provides_project, ProjectProvidesReport};

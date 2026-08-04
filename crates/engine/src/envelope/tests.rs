@@ -35,6 +35,8 @@ fn projection(path: &str, loc: u32) -> FileProjection {
         attributes: Vec::new(),
         loop_spans: Vec::new(),
         function_spans: Vec::new(),
+        test_spans: Vec::new(),
+        calls: Vec::new(),
     }
 }
 

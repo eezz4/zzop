@@ -130,6 +130,77 @@ fn real_credential_with_interpolated_host_after_the_at_sign_is_still_flagged() {
     );
 }
 
+// --- the Rust `format!` placeholder lane (the `.rs` false-positive class) ---
+//
+// The arc that added `.rs` to this rule's `file_pattern` left the userinfo placeholder veto JS-only
+// (`${...}` / `{{...}}` / `<...>` / `process.env`), so Rust's `{}` / `{name}` format placeholders sailed
+// through and a `format!("postgresql://{user}:{password}@{host}...")` fired at CRITICAL with a message
+// ordering the reader to ROTATE a credential that is not in the source at all. The veto vocabulary is
+// what was language-blind, so that is what was widened — still anchored between `://` and `@`, so a
+// placeholder in the HOST slot keeps laundering nothing.
+
+#[test]
+fn rust_format_named_placeholder_connection_string_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "src/db.rs",
+        "pub fn url(user: &str, password: &str, host: &str) -> String {\n    format!(\"postgresql://{user}:{password}@{host}:5432/app\")\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "conn-string-credentials").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn rust_format_positional_placeholder_connection_string_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "src/db.rs",
+        "pub fn url(u: &str, p: &str, h: &str) -> String {\n    format!(\"postgresql://{}:{}@{}:5432/app\", u, p, h)\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "conn-string-credentials").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+/// The under-detection boundary the widened veto must NOT cross: a real password spelled literally in
+/// Rust source is still a leaked credential, and this is the line the rule exists for. Dropping `.rs`
+/// from the `file_pattern` would have silenced it.
+#[test]
+fn a_literal_credential_in_rust_source_is_still_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "src/db.rs",
+        "pub const DB_URL: &str = \"postgresql://svc:hunter2@db.prod:5432/app\";\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "conn-string-credentials");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 1);
+}
+
+/// Second half of that boundary, and the reason the new arm was added to the userinfo-anchored
+/// alternative rather than to the line at large: a Rust placeholder in the HOST slot does not launder a
+/// literal password sitting in the userinfo slot — exactly the standing the `${...}` sibling already had.
+#[test]
+fn a_rust_format_with_a_literal_password_and_an_interpolated_host_is_still_flagged() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "src/db.rs",
+        "pub fn url(host: &str) -> String {\n    format!(\"postgresql://svc:hunter2@{host}:5432/app\")\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "conn-string-credentials");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 2);
+}
+
 #[test]
 fn loopback_host_credential_is_not_flagged() {
     // immich dogfood (round 7): `postgres://postgres:postgres@localhost:5432/immich` in a dev

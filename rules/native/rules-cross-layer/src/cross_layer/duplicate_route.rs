@@ -143,6 +143,7 @@ mod tests {
         TaggedProvide {
             source: source.to_string(),
             provide: IoProvide {
+                response: None,
                 body: None,
                 kind: "http".to_string(),
                 key: key.to_string(),
@@ -172,7 +173,7 @@ mod tests {
             assert_eq!(f.severity, Severity::Warning);
             assert!(f.message.contains("svc-a"), "{}", f.message);
             assert!(f.message.contains("svc-b"), "{}", f.message);
-            assert!(f.message.contains("disabled_rules"), "{}", f.message);
+            assert!(f.message.contains("disabledRules"), "{}", f.message);
         }
         assert_eq!(out[0].data.as_ref().unwrap()["provideSource"], "svc-a");
         assert_eq!(out[1].data.as_ref().unwrap()["provideSource"], "svc-b");
@@ -266,6 +267,7 @@ mod tests {
                 TaggedProvide {
                     source: "svc-a".to_string(),
                     provide: IoProvide {
+                        response: None,
                         body: None,
                         kind: "db-table".to_string(),
                         key: "table:users".to_string(),
@@ -277,6 +279,7 @@ mod tests {
                 TaggedProvide {
                     source: "svc-b".to_string(),
                     provide: IoProvide {
+                        response: None,
                         body: None,
                         kind: "db-table".to_string(),
                         key: "table:users".to_string(),

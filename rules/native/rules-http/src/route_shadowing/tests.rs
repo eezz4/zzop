@@ -5,6 +5,7 @@ use super::*;
 
 fn provide(key: &str, file: &str, line: u32) -> zzop_core::IoProvide {
     zzop_core::IoProvide {
+        response: None,
         body: None,
         kind: "http".to_string(),
         key: key.to_string(),
@@ -50,7 +51,7 @@ fn message_is_byte_identical_to_the_pre_sweep_text() {
          handler that branches on the concrete value). Precision limit: \"first registered pattern \
          wins\" is framework-dependent — a router that picks the most-specific match regardless of \
          registration order is unaffected by this shape; disable via config `rules: { \
-         \"route-shadowing\": \"off\" }` (embedders: `disabled_rules`) if that's your framework or the \
+         \"route-shadowing\": \"off\" }` (embedders: `disabledRules`) if that's your framework or the \
          ordering is intentional (this rule has no inline suppression marker)."
     );
 }
@@ -157,6 +158,7 @@ fn earliest_of_multiple_qualifying_param_routes_is_reported() {
 fn non_http_provides_are_ignored() {
     let provides = vec![
         zzop_core::IoProvide {
+            response: None,
             body: None,
             kind: "queue".to_string(),
             key: "GET /items/{}".to_string(),
@@ -165,6 +167,7 @@ fn non_http_provides_are_ignored() {
             symbol: None,
         },
         zzop_core::IoProvide {
+            response: None,
             body: None,
             kind: "queue".to_string(),
             key: "GET /items/active".to_string(),

@@ -29,6 +29,10 @@ pub fn extract_http_provides_project(files: &[(String, String)]) -> ProjectProvi
     // corpus) is ambiguous.
     let mut skipped_ambiguous_class_name = 0u32;
     let mut classes: HashMap<String, ClassRow> = HashMap::new();
+    #[allow(
+        clippy::iter_over_hash_type,
+        reason = "iteration order cannot reach the result: `classes` is keyed by the same name and `skipped_ambiguous_class_name` is a sum; emission below walks `root_names`, which is sorted"
+    )]
     for (name, mut rows) in rows_by_name {
         if rows.len() == 1 {
             classes.insert(name, rows.pop().unwrap());
@@ -174,6 +178,7 @@ fn emit_class_routes(
             continue;
         }
         provides.push(IoProvide {
+            response: None,
             body: None,
             kind: "http".to_string(),
             key,

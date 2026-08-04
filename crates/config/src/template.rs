@@ -46,7 +46,16 @@ pub const CONFIG_TEMPLATE_JSONC: &str = r#"// zzop configuration. JSONC: comment
   // per workspace package of a monorepo.
   "roots": ["."],
 
-  // Rule packs. `packs.disabled` drops a bundled pack whole, before any rule inside it is evaluated.
+  // Rule packs — the DOMAIN-level on/off switch, and the one to reach for first: a pack is a whole
+  // subject area, so turning one off is one line where the per-rule map below would be dozens.
+  // The bundled pack ids are:
+  //     browser  db  egress  go  http  perf  react  redis  reliability  security  sql  typescript
+  // `packs.disabled` drops a pack whole, before any rule inside it is evaluated ("everything except").
+  // `packs.only` is its opt-IN twin: name the packs you want and every OTHER bundled pack stays off,
+  // so a repo that only cares about one subject writes one line instead of eleven. The two compose —
+  // `only` selects, `disabled` still subtracts. Both are about PACKS: the native analyses
+  // (dead-candidates, unimported-export, scores, and friends) are not packs and keep running; switch
+  // those off by id in `rules` below.
   // `packs.extraDirs` names directories holding rule packs you wrote, and REPLACES the default
   // authored-pack location outright — the two are never merged, so a run's packs have one origin.
   "packs": {
@@ -108,6 +117,11 @@ pub const CONFIG_TEMPLATE_JSONC: &str = r#"// zzop configuration. JSONC: comment
     // Where Java sources live. A Spring security config only governs routes under its own copy of this
     // segment, so one module's posture never clears a sibling module's routes.
     "javaSourceRoot": "src/main/java/",
+    // Where Python absolute imports resolve from, beyond the tree root and src/ (always tried). An
+    // entry is an extra root directory ("backend") or a package-name mapping ("tml=" maps import name
+    // tml to the tree root — the editable-install symlink idiom). A wrong entry cannot invent an edge;
+    // it is one more candidate that matches no real file. Empty because only you know your layout.
+    "pythonPackageRoots": [],
     // Directories never analyzed at all, and (separately) never walked when "trees": "auto" looks for
     // workspace packages. Build output and tool state are named by you, not by any tool.
     "skipDirs": ["node_modules", "dist", "build", ".next", ".git", "target", ".yarn", ".zzop", "zzop-reports", ".zzop-cache"],
@@ -172,6 +186,16 @@ pub const CONFIG_TEMPLATE_JSONC: &str = r#"// zzop configuration. JSONC: comment
     // Cross-repo joins: which query parameters carry secrets, how you spell an API version segment, and
     // which routes are fetched from outside every analyzed tree (so "no consumer here" proves nothing).
     "secretParamNames": ["token","access_token","accesstoken","apikey","api_key","api-key","api_token","apitoken","key","secret","client_secret","password","auth","signature","jwt"],
+
+    // Declared response-DTO field names that count as sensitive (cross-layer/sensitive-response-field),
+    // in three matching axes: substrings of the normalized name, whole-name exacts, and suffixes.
+    // NORMALIZATION CONTRACT — different from secretParamNames above, where "api_key"/"api-key" are
+    // distinct legitimate entries: a field name is lowercased and stripped of "_"/"-" BEFORE these three
+    // lists are consulted, so every entry here must be lowercase with no separators ("apikey", never
+    // "api_key" — a separator-carrying entry can never match anything).
+    "sensitiveResponseFieldSubstrings": ["password","passwd","secret","apikey","privatekey","credential","passphrase","salt"],
+    "sensitiveResponseFieldExactNames": ["token","jwt","hash","pwd","ssn","otp"],
+    "sensitiveResponseFieldSuffixes": ["token"],
     "apiVersionSegmentPattern": "(?i)^v[0-9]+(?:\\.[0-9]+)*$",
     "externallyFetchedPaths": ["/","/health","/healthz","/healthcheck","/livez","/readyz","/robots.txt","/sitemap.xml","/sitemap_index.xml","/rss.xml","/feed.xml","/atom.xml","/favicon.ico"],
 

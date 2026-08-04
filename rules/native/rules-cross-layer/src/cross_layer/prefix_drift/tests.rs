@@ -68,7 +68,7 @@ fn fires_at_threshold_not_below() {
     // Regression pin for the disable-hint convention (also satisfies the engine's file-level
     // `native_rule_files_that_build_findings_mention_disabled_rules` contract for this split-out
     // test file, whose `Finding` fixtures would otherwise trip the grep).
-    assert!(f.message.contains("disabled_rules"));
+    assert!(f.message.contains("disabledRules"));
     assert_eq!(out.subsumed.len(), 3);
 
     // Below threshold (only 2 records): must not fire.

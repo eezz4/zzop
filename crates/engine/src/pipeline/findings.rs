@@ -18,6 +18,10 @@ use crate::dispatch::Language;
 pub(super) struct SpanFacts<'a> {
     pub loop_spans: &'a [(u32, u32)],
     pub function_spans: &'a [(u32, u32)],
+    /// Test-only regions — the SUBTRACTIVE member of this group: the other two let a rule say more,
+    /// this one stops every rule from speaking about a line the parser proved is compiled out of the
+    /// shipping build. See `zzop_core::dsl::SourceFile::test_spans`.
+    pub test_spans: &'a [(u32, u32)],
 }
 
 /// Runs every applicable DSL pack against this one file's slice. `packs` is already
@@ -42,6 +46,11 @@ pub(super) struct SpanFacts<'a> {
 /// `findings` to `AnalysisCache::put_findings` — the hint text is therefore part of the cached findings
 /// entry's `message` field, not appended fresh on every cache hit. See `cache.rs`'s `CACHE_SCHEMA_VERSION`
 /// doc for the schema bump this required.
+// 8 parameters. The grouping question was asked and answered by `SpanFacts`' own criterion: a struct is
+// worth it when the arguments are SAME-TYPED and adjacent, because those are the ones a call site can
+// silently transpose. `&[CallSite]` shares its type with nothing here, so wrapping it would buy no safety
+// and cost a second indirection between the projection and the matcher that reads it.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn eval_packs(
     packs: &[&RulePackDef],
     rel: &str,
@@ -49,6 +58,13 @@ pub(super) fn eval_packs(
     symbols: &[SourceSymbol],
     io: Option<IoFacts>,
     spans: SpanFacts<'_>,
+    // `Matcher::CallScan`'s substrate. NOT folded into `SpanFacts`: that group exists because three
+    // same-typed `&[(u32, u32)]` arguments could be silently transposed, and a `&[CallSite]` cannot be
+    // confused with any of them by the type checker.
+    call_sites: &[zzop_core::CallSite],
+    // `Matcher::LiteralScan`'s substrate — same "shares its type with nothing here" reasoning as
+    // `call_sites` for staying a positional parameter rather than joining `SpanFacts`.
+    string_literals: &[zzop_core::BoundStringLiteral],
     profile: bool,
 ) -> (Vec<zzop_core::Finding>, Vec<RuleTiming>, bool) {
     if zzop_core::dsl::is_minified_or_generated(text) {
@@ -57,6 +73,9 @@ pub(super) fn eval_packs(
     let file = SourceFile {
         loop_spans: spans.loop_spans.to_vec(),
         function_spans: spans.function_spans.to_vec(),
+        test_spans: spans.test_spans.to_vec(),
+        call_sites: call_sites.to_vec(),
+        string_literals: string_literals.to_vec(),
         rel: rel.to_string(),
         text: text.to_string(),
         symbols: symbols.to_vec(),
@@ -129,7 +148,7 @@ pub(super) fn schema_findings(
 }
 
 /// The usage counterpart of `schema_findings`: wires the usage cross-check (unreferenced-model-name / unreferenced-field-name /
-/// schema-churn) via `zzop_rules_schema::cross_check_schema`/`apply_churn_rule`. Unlike `schema_findings`
+/// model-churn) via `zzop_rules_schema::cross_check_schema`/`apply_churn_rule`. Unlike `schema_findings`
 /// this is a whole-tree pass — usage evidence (identifier presence) spans every source file, so it runs
 /// from `analyze::assemble`'s global stage and is recomputed each run, never entering the per-file
 /// findings cache. `analyze_schema_with_usage` is deliberately not used here since it re-runs the

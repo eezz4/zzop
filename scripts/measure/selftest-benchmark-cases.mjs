@@ -106,6 +106,11 @@ const GOOD_EXPECTED =
 // also write the floor it is checked against.
 const GOOD_BASELINE = "# selftest coverage floor\n# <sourceId> <expectations> <benign> <gap>\nalpha 2 1 1\n";
 
+// The corpus registry the scorer requires beside the ground truth: the floor's subject set is seeded
+// from its trees[] and benign controls are resolved through its root mapping. One tree, matching the
+// snapshot and the floor.
+const GOOD_REGISTRY = '{\n  // selftest tree registry — SELFTEST FIXTURE, not the corpus.\n  "trees": [{ "root": "trees/alpha", "sourceId": "alpha" }]\n}\n';
+
 // ---- sandbox construction -------------------------------------------------------------------------
 function sandbox(out) {
   const dirs = {
@@ -120,6 +125,7 @@ function sandbox(out) {
     script: path.join(dirs.measure, "benchmark.mjs"),
     baseline: path.join(dirs.root, "detection-expected-baseline.txt"),
     expected: path.join(dirs.root, "EXPECTED.jsonc"),
+    registry: path.join(dirs.root, "zzop.config.jsonc"),
     run: dirs.run,
     meta: path.join(dirs.run, "meta.json"),
     cross: path.join(dirs.run, "cross.json"),
@@ -129,6 +135,15 @@ function sandbox(out) {
   fs.copyFileSync(REAL_BENCHMARK, p.script);
   fs.writeFileSync(p.baseline, GOOD_BASELINE);
   fs.writeFileSync(p.expected, GOOD_EXPECTED);
+  // The tree registry beside the ground truth (2026-08-03): the scorer derives the floor's subject
+  // set from it and resolves benign controls through it, so the sandbox reproduces that neighbour the
+  // same way it reproduces the floor's. The benign control is a REAL file on disk because the scorer
+  // now asserts exactly that before scoring — a sandbox whose control is a ghost would make every
+  // mode below abort for the ghost instead of for its own damage.
+  fs.writeFileSync(p.registry, GOOD_REGISTRY);
+  const quiet = path.join(dirs.root, "trees", "alpha", "src", "quiet.ts");
+  fs.mkdirSync(path.dirname(quiet), { recursive: true });
+  fs.writeFileSync(quiet, "// selftest benign control — a real file, so only a damage mode can make it a ghost.\n");
   fs.writeFileSync(p.meta, JSON.stringify(GOOD_META, null, 2));
   fs.writeFileSync(p.cross, JSON.stringify(GOOD_CROSS, null, 2));
   fs.writeFileSync(p.tree, JSON.stringify(GOOD_TREE, null, 2));
@@ -222,6 +237,22 @@ const CASES = {
     fs.writeFileSync(p.expected, '{\n  "benign": ["alpha/src/quiet.ts"],\n  "untracked": []\n}\n');
     return score(p);
   },
+  /**
+   * A `benign` control naming a file that is not on disk. A ghost control asserts "no false positive
+   * here" about NOTHING — the walker can never fire in a file it never sees — while still living in
+   * the benign count and the precision claim. The ghost rides ALONGSIDE the real control so the abort
+   * provably names the ghost and not the fixture.
+   */
+  "benign-ghost": (p) => {
+    fs.writeFileSync(
+      p.expected,
+      '{\n  "alpha/src/a.ts:3": ["selftest/rule-a"],\n  "alpha/src/b.ts:7": ["cross-layer/selftest"],\n' +
+        '  "benign": ["alpha/src/quiet.ts", "alpha/src/ghost.ts"],\n' +
+        GAP_ENTRY +
+        '  "untracked": []\n}\n'
+    );
+    return score(p);
+  },
   /** The legacy tree-relative key format, in which locations in different trees collapse onto one key. */
   "legacy-keys": (p) => {
     fs.writeFileSync(
@@ -229,8 +260,38 @@ const CASES = {
       '{\n  "src/a.ts:3": ["selftest/rule-a"],\n  "src/b.ts:7": ["cross-layer/selftest"],\n  "benign": [],\n  "untracked": []\n}\n'
     );
     // Floor re-derived for the legacy shape, so the ratchet cannot fire first and stand in for the
-    // format check: under legacy keys `countsOf` reads the leading path segment as the sourceId.
-    fs.writeFileSync(p.baseline, "# selftest coverage floor\nsrc 2 0 0\n");
+    // format check: under legacy keys `countsOf` reads the leading path segment as the sourceId —
+    // and the registry still seeds `alpha`, whose zero row must be here too or the ratchet aborts on
+    // an unrecorded NEW row instead of the format.
+    fs.writeFileSync(p.baseline, "# selftest coverage floor\nalpha 0 0 0\nsrc 2 0 0\n");
+    return score(p);
+  },
+
+  // --- the tree registry -----------------------------------------------------------------------------
+  /** No registry beside the ground truth — the floor's subject set has nothing to come from. */
+  "registry-missing": (p) => {
+    fs.rmSync(p.registry);
+    return score(p);
+  },
+  /** The registry exists but does not parse — guessing it would seed the wrong floor. */
+  "registry-corrupt": (p) => {
+    fs.writeFileSync(p.registry, '{\n  "trees": [ { "root": "trees/alpha",\n');
+    return score(p);
+  },
+  /** Parses, but its trees[] is unusable. A dropped entry is a tree off the floor, so it is refused. */
+  "registry-no-trees": (p) => {
+    fs.writeFileSync(p.registry, '{\n  "trees": []\n}\n');
+    return score(p);
+  },
+  /**
+   * The state AFTER a zero-label tree is removed from the registry: its floor row is orphaned. This is
+   * the one removal the counts alone can never see — 0 -> 0 shrinks nothing — and the whole reason the
+   * subject set is seeded from the registry rather than from the ground truth's own keys. The floor
+   * gains `beta 0 0 0` (a tree the registry never had), which is byte-for-byte the orphan a removal
+   * leaves behind.
+   */
+  "registry-tree-removed": (p) => {
+    fs.appendFileSync(p.baseline, "beta 0 0 0\n");
     return score(p);
   },
 

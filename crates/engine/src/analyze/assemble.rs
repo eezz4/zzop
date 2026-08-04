@@ -14,13 +14,14 @@ use crate::analyze::diagnostics::{
 use crate::{pipeline::FileArtifact, AnalyzeOutput, CoverageCensus, EngineConfig};
 
 mod collect;
+mod declared;
 mod dep_graph;
-// `pub(in crate::analyze)`: `native_rules::callgraph`'s python/rust arms share these predicates and resolvers — the one agreement point outside this mod, reached as `assemble::helpers::*`.
+// `pub(in crate::analyze)`: `native_rules::callgraph`'s python/rust arms share these predicates and resolvers, reached as `assemble::helpers::*`. (`rules` below is the other cross-mod export.)
 pub(in crate::analyze) mod helpers;
 mod metrics;
 mod orm;
 mod provides;
-mod rules;
+pub(in crate::analyze) mod rules; // pub for `analyze/mod.rs`'s re-surface of the profiled io-scan evaluator (Mode A reuse — see `rules`'s re-export comment)
 mod sfc;
 mod warnings;
 
@@ -251,7 +252,13 @@ pub(crate) fn assemble(
         },
     };
 
-    let coverage = CoverageCensus::compute(file_count, parser_dispatched, &ir, degraded.len());
+    let mut coverage = CoverageCensus::compute(file_count, parser_dispatched, &ir, degraded.len());
+    // F4 declared-import denominator — set here, not in `compute` (see `declared`'s module doc).
+    coverage.declared_imports_by_ext = declared::by_ext(
+        &ts_import_pairs,
+        &ts_re_export_pairs,
+        &ts_dynamic_import_pairs,
+    );
 
     // Gated like `scores`/`health`/`critical`/`seams`: `Some` only when git collection actually ran, so no
     // consumer sees a window echoed for numbers that stayed empty.

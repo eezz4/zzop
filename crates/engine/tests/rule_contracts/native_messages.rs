@@ -20,8 +20,10 @@ fn native_rs_files() -> Vec<PathBuf> {
 /// single field this test can statically evaluate the way it can `RuleDef::message`. Instead this is a
 /// pragmatic grep: read every native rule source file, and if the file contains a literal `rule_id: "`
 /// token (i.e. it constructs at least one `Finding` for a hardcoded rule id), assert the SAME file also
-/// EITHER contains the literal substring `disabled_rules` somewhere, OR calls the shared
-/// `zzop_core::finding::disable_hint(` builder.
+/// EITHER contains the literal substring `disabled_rules` or `disabledRules` somewhere (the hint's
+/// spelling flipped to the camelCase wire form on 2026-08-02; the snake_case leg stays accepted because
+/// it is also the Rust-side `RuleConfig` field name a doc comment may legitimately spell), OR calls the
+/// shared `zzop_core::finding::disable_hint(` builder.
 ///
 /// The two-leg OR is not incidental: a 2026-07-10 audit found the disable-hint fragment
 /// (`` `rules: { "<id>": "off" }` (embedders: `disabled_rules`) ``) hand-written at ~34 native message call
@@ -37,6 +39,13 @@ fn native_rs_files() -> Vec<PathBuf> {
 /// The `disabled_rules` leg stays (not just `disable_hint(`) because a file's own `#[cfg(test)]` module
 /// legitimately still asserts `message.contains("disabled_rules")` as a regression pin, and a hand-authored
 /// file that never adopts the helper but still spells out the convention correctly should not be forced to.
+/// The disclosed cost of accepting BOTH spellings: a live message regressing to the retired snake_case
+/// spelling would pass this contract unseen, so the actual seal on the wire spelling is the shared builder's
+/// own unit tests in `crates/core/src/finding.rs` (which pin the camelCase rendering and forbid the
+/// snake_case one) plus `dsl_messages.rs`'s Contract 17 on the DSL side — and the exposure is currently one
+/// file, `rules/native/rules-http/src/mutating_route_no_auth.rs`, the only finding-building native source
+/// that satisfies this check without calling `disable_hint(` (via a doc-comment mention of the camelCase
+/// form).
 ///
 /// **What this proves**: a file that builds at least one `Finding` via a literal `rule_id: "..."`
 /// assignment also EITHER names `disabled_rules` OR calls `disable_hint(` somewhere in its own source — in
@@ -69,6 +78,7 @@ fn native_rule_files_that_build_findings_mention_disabled_rules() {
         };
         if text.contains("rule_id: \"")
             && !text.contains("disabled_rules")
+            && !text.contains("disabledRules")
             && !text.contains("disable_hint(")
         {
             offenders.push(path.display().to_string());
@@ -77,7 +87,7 @@ fn native_rule_files_that_build_findings_mention_disabled_rules() {
     assert!(
         offenders.is_empty(),
         "native rule source files construct a Finding (literal `rule_id: \"...\"`) but never mention \
-         `disabled_rules` and never call `disable_hint(` anywhere in the same file — the finding's message \
+         `disabledRules`/`disabled_rules` and never call `disable_hint(` anywhere in the same file — the finding's message \
          likely omits the \"how to exclude\" hint every other native rule includes (see this test's own doc \
          comment for exactly what this check can/cannot prove): {offenders:#?}"
     );

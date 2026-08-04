@@ -43,9 +43,14 @@
 //! methods, same coarse-signal tradeoff `exported`'s doc above already accepts elsewhere.
 //!
 //! ## `body_start`/`body_end`
-//! Only `Function`-kind symbols (top-level fns and `impl`-block methods) get a body line range, computed
-//! from their block's first/last statement — mirroring the FUNCTION side of
-//! `zzop_parser_python_3::lang::symbols`'s convention. Unlike Python (whose `class` body is a statement
+//! Only `Function`-kind symbols (top-level fns and `impl`-block methods) get a body line range: the
+//! first statement's START line through the last statement's END line — mirroring the FUNCTION side of
+//! `zzop_parser_python_3::lang::symbols`'s convention exactly (`s.start()`/`s.end()` there). Until
+//! 2026-08-02 `body_end` used the last statement's START line, which silently TRUNCATED the
+//! `MethodScan` scan region whenever the last statement was multi-line — discovered the day
+//! `lang::loop_spans` landed, because the commonest such statement is precisely a loop: a `for` sitting
+//! as a fn's final statement left its own body lines outside the fn's scannable span, so a
+//! `trigger_in_loop` probe inside it could never fire. Unlike Python (whose `class` body is a statement
 //! list, so `zzop_parser_python_3` computes a body range for classes too), a Rust struct/enum/union/trait
 //! has a FIELD or ASSOCIATED-ITEM list, not a statement body — there is no statement-shaped range to
 //! report, so every non-`Function` symbol here always carries `body_start: None, body_end: None`.
@@ -140,10 +145,17 @@ fn emit_item(rel: &str, item: &Item, out: &mut Vec<SourceSymbol>) {
     }
 }
 
+/// 1-based END line of a spanned node — `body_end`'s side of the module-doc convention (the crate
+/// root's shared `line_of` is the START side; kept local because these two body computations are the
+/// only END-line consumers in this crate).
+fn end_line_of<T: syn::spanned::Spanned>(node: &T) -> u32 {
+    node.span().end().line as u32
+}
+
 fn function_symbol(rel: &str, name: String, f: &ItemFn, exported: bool) -> SourceSymbol {
     let line = line_of(&f.sig.fn_token);
     let body_start = f.block.stmts.first().map(line_of);
-    let body_end = f.block.stmts.last().map(line_of);
+    let body_end = f.block.stmts.last().map(end_line_of);
     SourceSymbol {
         id: format!("{rel}#{name}"),
         file: rel.to_string(),
@@ -212,7 +224,7 @@ fn emit_impl(rel: &str, imp: &syn::ItemImpl, out: &mut Vec<SourceSymbol>) {
                 let name = format!("{type_name}.{}", f.sig.ident);
                 let line = line_of(&f.sig.fn_token);
                 let body_start = f.block.stmts.first().map(line_of);
-                let body_end = f.block.stmts.last().map(line_of);
+                let body_end = f.block.stmts.last().map(end_line_of);
                 out.push(SourceSymbol {
                     id: format!("{rel}#{name}"),
                     file: rel.to_string(),

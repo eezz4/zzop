@@ -12,6 +12,7 @@ use crate::io::{IoConsume, IoFacts, IoProvide, SourceIo};
 
 fn provide(kind: &str, key: &str, file: &str, line: u32, symbol: Option<&str>) -> IoProvide {
     IoProvide {
+        response: None,
         body: None,
         kind: kind.into(),
         key: key.into(),

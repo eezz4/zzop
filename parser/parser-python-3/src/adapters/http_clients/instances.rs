@@ -115,6 +115,10 @@ pub(super) fn instance_bindings(
     for stmt in body {
         history.visit_stmt(stmt);
     }
+    #[allow(
+        clippy::iter_over_hash_type,
+        reason = "iteration order cannot reach the result: each bucket is sorted independently; the loop mutates values and never reads the key order"
+    )]
     for entries in history.out.values_mut() {
         entries.sort_by_key(|&(line, _)| line);
     }

@@ -13,7 +13,12 @@
 //!   absolute imports always resolve from a top-level package, never relative to the importing file).
 //!   The `src/` root is the src-layout that setuptools, poetry and hatch all document as the recommended
 //!   project shape; see the comment at the branch for why an extra candidate is free and cannot invent
-//!   an edge. Relative specifiers get the tree root only — they are already anchored to `from_file`.
+//!   an edge. On top of those two ecosystem-fact roots, `package_roots` carries the run's DECLARED
+//!   `vocabulary.pythonPackageRoots` entries (see [`declared_base`] for the two entry forms) — a project
+//!   whose packages resolve from neither the tree root nor `src/` (an interposed `backend/`, or an
+//!   editable-install package name symlinked to the tree root) states so instead of losing every
+//!   absolute import edge. Relative specifiers get the tree root only — they are already anchored to
+//!   `from_file`, so neither `src/` nor a declared root can apply.
 //! - **`original`** (the imported name in `from X import name` — `Some("c")` for `from a.b import c`,
 //!   `None`/`Some("*")` for a star import or a plain `import a.b.c`): when present and DISTINCT from the
 //!   resolved base path's own last segment, submodule-first candidates (`<base>/<original>.py`,
@@ -26,17 +31,20 @@
 //!   real import shape produces.
 //!
 //! Every candidate list is deduped (first occurrence kept) and returned in a deterministic, pinned
-//! order — see this module's tests for the exact lists.
+//! order — built-in roots first, declared roots after, in declared order — see this module's tests for
+//! the exact lists.
 
 /// Ordered file-path candidates (tree-relative, POSIX slashes) for a Python import specifier — see
 /// module doc for the full semantics. `original` is the imported name from `from X import name`
 /// (`Some("c")` in `from a.b import c`); pass `None` for a plain `import a.b.c` or a star import
 /// (`original: "*"` on the `ImportBinding` — the caller is expected to translate `"*"` to `None` before
-/// calling, since `"*"` never names a real submodule).
+/// calling, since `"*"` never names a real submodule). `package_roots` is the run's declared
+/// `vocabulary.pythonPackageRoots` (empty when undeclared — the two built-in roots always apply).
 pub fn python_import_candidates(
     specifier: &str,
     original: Option<&str>,
     from_file: &str,
+    package_roots: &[&str],
 ) -> Vec<String> {
     let base = if specifier.starts_with('.') {
         normalize_join(dirname(from_file), specifier)
@@ -56,29 +64,91 @@ pub fn python_import_candidates(
     // and is NOT what this needs: candidates here are filtered by the engine against the set of paths
     // that actually exist (`resolve_python_import`'s `all_paths.contains`), so an extra spelling costs
     // one failed set lookup and can never invent an edge. A candidate is a question, not a claim.
+    // The DECLARED roots below extend the same safety argument to layouts no heuristic can know
+    // (U56, 2026-08-02): a wrong declaration is one more candidate that fails the membership check.
     // Relative specifiers are excluded because they are already anchored to the importing file.
-    let roots: &[&str] = if specifier.starts_with('.') {
-        &[""]
-    } else {
-        &["", "src/"]
-    };
-
-    let mut candidates: Vec<String> = Vec::new();
-    for root in roots {
-        let base = format!("{root}{base}");
-        if let Some(orig) = original {
-            if !orig.is_empty() && orig != "*" && last_segment(&base) != orig {
-                candidates.push(format!("{base}/{orig}.py"));
-                candidates.push(format!("{base}/{orig}/__init__.py"));
+    let mut bases: Vec<String> = vec![base.clone()];
+    if !specifier.starts_with('.') {
+        bases.push(format!("src/{base}"));
+        for entry in package_roots {
+            if let Some(declared) = declared_base(entry, specifier) {
+                bases.push(declared);
             }
         }
-        candidates.push(format!("{base}.py"));
-        candidates.push(format!("{base}/__init__.py"));
+    }
+
+    let mut candidates: Vec<String> = Vec::new();
+    for base in &bases {
+        if let Some(orig) = original {
+            if !orig.is_empty() && orig != "*" && last_segment(base) != orig {
+                let sub = join(base, orig);
+                candidates.push(format!("{sub}.py"));
+                candidates.push(format!("{sub}/__init__.py"));
+            }
+        }
+        if base.is_empty() {
+            // A declared package that IS the tree root (`"tml="` with `import tml`): the only file that
+            // can mark it is the root `__init__.py` — there is no `<nothing>.py` spelling to try.
+            candidates.push("__init__.py".to_string());
+        } else {
+            candidates.push(format!("{base}.py"));
+            candidates.push(format!("{base}/__init__.py"));
+        }
     }
 
     let mut seen = std::collections::HashSet::new();
     candidates.retain(|c| seen.insert(c.clone()));
     candidates
+}
+
+/// The extra candidate base one declared `pythonPackageRoots` entry contributes for `specifier`, or
+/// `None` when the entry does not apply. Two entry forms, one per layout family the declaration exists
+/// for (U56):
+///
+/// - **`"<dir>"`** (no `=`) — an additional package ROOT: every absolute specifier is also tried under
+///   `<dir>/` (`"backend"` makes `app.api.main` try `backend/app/api/main.py`), exactly the shape the
+///   built-in `""`/`"src/"` roots already have.
+/// - **`"<package>=<dir>"`** — a package-NAME mapping, the editable-install idiom where the import name
+///   points at a tree directory that does not carry the name (`ln -s $(pwd) site-packages/tml`):
+///   `"tml="` (or `"tml=."`) maps `tml.x.y` to `x/y.py` at the tree root, `"tml=lib"` to `lib/x/y.py`.
+///   Applies only to specifiers equal to the package name or dotted under it.
+///
+/// `<dir>` is tree-relative, POSIX slashes; a leading `./` and a trailing `/` are normalized away and
+/// `"."` means the tree root. No validation beyond that, deliberately: a malformed entry produces
+/// candidates the engine's membership check never finds, which is the same "a candidate is a question,
+/// not a claim" safety every other candidate here rides.
+fn declared_base(entry: &str, specifier: &str) -> Option<String> {
+    let (package, dir) = match entry.split_once('=') {
+        Some((package, dir)) => (package.trim(), dir.trim()),
+        None => ("", entry.trim()),
+    };
+    let rest = if package.is_empty() {
+        specifier
+    } else if specifier == package {
+        ""
+    } else {
+        specifier.strip_prefix(package)?.strip_prefix('.')?
+    };
+    let dir = dir.trim_start_matches("./").trim_end_matches('/');
+    let dir = if dir == "." { "" } else { dir };
+    let path = rest.replace('.', "/");
+    Some(if dir.is_empty() {
+        path
+    } else {
+        join(dir, &path)
+    })
+}
+
+/// POSIX join that tolerates an empty side — `join("", "x") == "x"`, `join("a", "") == "a"` — so the
+/// empty-base case a declared root can produce never grows a leading/trailing `/`.
+fn join(base: &str, name: &str) -> String {
+    if base.is_empty() {
+        name.to_string()
+    } else if name.is_empty() {
+        base.to_string()
+    } else {
+        format!("{base}/{name}")
+    }
 }
 
 /// POSIX dirname: text before the last '/', or "" when there is no '/' (root-level file) — deliberately
@@ -125,146 +195,5 @@ fn normalize_join(dir: &str, specifier: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn relative_sibling_module_import_from_root_level_file() {
-        // `from .helpers import x` in a root-level `main.py`.
-        assert_eq!(
-            python_import_candidates("./helpers", Some("x"), "main.py"),
-            vec![
-                "helpers/x.py".to_string(),
-                "helpers/x/__init__.py".to_string(),
-                "helpers.py".to_string(),
-                "helpers/__init__.py".to_string(),
-            ]
-        );
-    }
-
-    #[test]
-    fn relative_sibling_module_import_from_nested_file() {
-        // `from .routers import items` in `app/main.py`.
-        assert_eq!(
-            python_import_candidates("./routers", Some("items"), "app/main.py"),
-            vec![
-                "app/routers/items.py".to_string(),
-                "app/routers/items/__init__.py".to_string(),
-                "app/routers.py".to_string(),
-                "app/routers/__init__.py".to_string(),
-            ]
-        );
-    }
-
-    #[test]
-    fn relative_parent_walk_normalizes_dot_dot_segments() {
-        // `from ..shared import utils` in `app/sub/routes.py`.
-        assert_eq!(
-            python_import_candidates("../shared", Some("utils"), "app/sub/routes.py"),
-            vec![
-                "app/shared/utils.py".to_string(),
-                "app/shared/utils/__init__.py".to_string(),
-                "app/shared.py".to_string(),
-                "app/shared/__init__.py".to_string(),
-            ]
-        );
-    }
-
-    #[test]
-    fn bare_dot_import_does_not_double_append_the_already_folded_name() {
-        // `from . import x` in `app/main.py` -> parse_imports emits specifier "./x", original "x"
-        // already folded in; re-appending `original` would spuriously try "app/x/x.py".
-        assert_eq!(
-            python_import_candidates("./x", Some("x"), "app/main.py"),
-            vec!["app/x.py".to_string(), "app/x/__init__.py".to_string()],
-        );
-    }
-
-    #[test]
-    fn no_original_yields_only_plain_module_candidates() {
-        // A plain `import a.b.c` binding has `original: "*"` on the ImportMap side; the engine caller
-        // translates that to `None` before calling this function.
-        assert_eq!(
-            python_import_candidates("a.b.c", None, "x.py"),
-            vec![
-                "a/b/c.py".to_string(),
-                "a/b/c/__init__.py".to_string(),
-                "src/a/b/c.py".to_string(),
-                "src/a/b/c/__init__.py".to_string(),
-            ],
-        );
-    }
-
-    #[test]
-    fn star_original_is_treated_the_same_as_none() {
-        assert_eq!(
-            python_import_candidates("./sib", Some("*"), "a.py"),
-            vec!["sib.py".to_string(), "sib/__init__.py".to_string()],
-        );
-    }
-
-    #[test]
-    fn absolute_dotted_module_resolves_from_tree_root_regardless_of_from_file() {
-        // `from a.b import c` — resolution ignores `from_file`'s own directory entirely.
-        assert_eq!(
-            python_import_candidates("a.b", Some("c"), "deep/nested/dir/file.py"),
-            vec![
-                "a/b/c.py".to_string(),
-                "a/b/c/__init__.py".to_string(),
-                "a/b.py".to_string(),
-                "a/b/__init__.py".to_string(),
-                "src/a/b/c.py".to_string(),
-                "src/a/b/c/__init__.py".to_string(),
-                "src/a/b.py".to_string(),
-                "src/a/b/__init__.py".to_string(),
-            ]
-        );
-    }
-
-    #[test]
-    fn src_layout_root_is_offered_for_absolute_specifiers_only() {
-        // The regression this branch exists for: a standard src-layout tree (`src/mypkg/...`, the shape
-        // setuptools/poetry/hatch document) resolved ZERO absolute imports before 2026-07-30, because the
-        // candidate list assumed the package name was a directory at the tree root. Relative imports
-        // worked throughout, which is what disguised a LAYOUT gap as a Python one.
-        let abs = python_import_candidates("mypkg.sub.helper", None, "src/mypkg/main.py");
-        assert!(abs.contains(&"src/mypkg/sub/helper.py".to_string()));
-        assert!(abs.contains(&"mypkg/sub/helper.py".to_string()));
-
-        // Relative specifiers are already anchored to the importing file, so a `src/`-prefixed candidate
-        // would name a path no import shape can mean. None is offered.
-        let rel = python_import_candidates("./sib", None, "src/mypkg/main.py");
-        assert!(rel.iter().all(|c| !c.starts_with("src/src/")));
-        assert_eq!(
-            rel,
-            vec![
-                "src/mypkg/sib.py".to_string(),
-                "src/mypkg/sib/__init__.py".to_string(),
-            ]
-        );
-    }
-    #[test]
-    fn bare_single_segment_external_package_still_expands_but_wont_match_in_tree() {
-        // `import fastapi` — external package name, expanded the same way; the engine's membership
-        // check against its known-paths set is what actually filters this out as unresolvable.
-        assert_eq!(
-            python_import_candidates("fastapi", None, "app.py"),
-            vec![
-                "fastapi.py".to_string(),
-                "fastapi/__init__.py".to_string(),
-                "src/fastapi.py".to_string(),
-                "src/fastapi/__init__.py".to_string(),
-            ],
-        );
-    }
-
-    #[test]
-    fn candidates_are_deduped() {
-        // A pathological case where the submodule-first candidate happens to coincide with the plain
-        // module candidate is impossible by construction (guarded by the `last_segment` check), but the
-        // dedup pass is still exercised generically via the bare-dot test above.
-        let out = python_import_candidates("./x", Some("x"), "main.py");
-        let mut seen = std::collections::HashSet::new();
-        assert!(out.iter().all(|c| seen.insert(c.clone())), "{out:?}");
-    }
-}
+#[path = "resolve_tests.rs"]
+mod tests;

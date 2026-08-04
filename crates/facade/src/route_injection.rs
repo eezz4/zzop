@@ -45,6 +45,7 @@ pub(crate) fn routes_overlay(
             // Provides keep the raw path: a route TEMPLATE's `?` can be a wildcard, never a query string
             // (`zzop_core::io::key`'s contract), so provides use `http_interface_key` verbatim.
             RouteRole::Provide => provides.push(zzop_core::IoProvide {
+                response: None,
                 body: None,
                 kind: "http".to_string(),
                 key: zzop_core::http_interface_key(method, path),
@@ -74,6 +75,7 @@ pub(crate) fn routes_overlay(
 
     let io = zzop_core::IoFacts { provides, consumes };
     let file = zzop_core::FileProjection {
+        calls: Vec::new(),
         path: INJECTED_ROUTES_FILE.to_string(),
         loc: routes.len() as u32,
         symbols: Vec::new(),
@@ -89,6 +91,7 @@ pub(crate) fn routes_overlay(
         attributes: Vec::new(),
         loop_spans: Vec::new(),
         function_spans: Vec::new(),
+        test_spans: Vec::new(),
         degraded: false,
         is_entry: false,
         overrides: Default::default(),

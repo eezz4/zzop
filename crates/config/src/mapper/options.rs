@@ -11,8 +11,10 @@ use std::path::Path;
 use crate::ConfigError;
 
 use super::paths::{path_to_string, resolve_path};
-use super::severity::{apply_severity, exclude_entry, suppression_entry};
+use super::severity::exclude_entry;
 use super::validation::is_json_falsy;
+
+mod rules_map;
 
 /// `JSON.stringify(value)` equivalent for a severity error's offending value — matches byte-for-byte
 /// for every JSON primitive (strings, numbers, booleans, null), which covers every value a config
@@ -120,6 +122,33 @@ pub(super) fn build_shared_options(
                 ));
             }
         }
+
+        // `packs.only` -> `packsOnly`: the opt-IN half of the pack axis. Shape-checked here beside its
+        // twin and forwarded verbatim; the SELECTION is the engine's (`zzop_core::is_pack_enabled`),
+        // because only the engine knows which packs actually loaded — a mapper that expanded an
+        // allowlist into "disable everything else" would have to enumerate the bundled pack ids here,
+        // which is the shadow table this crate keeps finding stale.
+        if let Some(only) = packs.get("only") {
+            if !only.is_array() {
+                return Err(ConfigError(
+                    "packs.only must be an array of pack ids.".to_string(),
+                ));
+            }
+            let mut ids: Vec<Value> = Vec::new();
+            for entry in only.as_array().into_iter().flatten() {
+                if !entry.is_string() {
+                    return Err(ConfigError(
+                        "packs.only entries must be pack id strings.".to_string(),
+                    ));
+                }
+                if !ids.contains(entry) {
+                    ids.push(entry.clone());
+                }
+            }
+            if !ids.is_empty() {
+                shared.insert("packsOnly".to_string(), Value::Array(ids));
+            }
+        }
     }
 
     // --- Default discovery for USER-AUTHORED rule packs: `zzop/rules/` under the mapping base (the
@@ -155,70 +184,10 @@ pub(super) fn build_shared_options(
         }
     }
 
-    // --- rules.<id> -> severityOverrides / suppressions / disabledRules. `config.rules || {}` in JS:
-    // an absent OR falsy `rules` defaults to empty (no error); a present, truthy, non-object `rules`
-    // (e.g. an array) is a shape error. ---
-    let rules_obj = match config.get("rules") {
-        None => None,
-        Some(v) if is_json_falsy(v) => None,
-        Some(Value::Object(m)) => Some(m),
-        Some(_) => {
-            return Err(ConfigError(
-                "rules must be an object mapping rule ids to a severity or a rule object."
-                    .to_string(),
-            ))
-        }
-    };
-
-    let mut severity_overrides = Map::new();
-    let mut suppressions: Vec<Value> = Vec::new();
-
-    if let Some(rules) = rules_obj {
-        for (rule_id, entry) in rules {
-            match entry {
-                Value::String(_) => {
-                    apply_severity(entry, rule_id, &mut disabled, &mut severity_overrides)?;
-                }
-                Value::Object(entry_obj) => {
-                    if let Some(sev_val) = entry_obj.get("severity") {
-                        apply_severity(sev_val, rule_id, &mut disabled, &mut severity_overrides)?;
-                    }
-                    if let Some(exclude_val) = entry_obj.get("exclude") {
-                        let arr = exclude_val.as_array().ok_or_else(|| {
-                            ConfigError(format!(
-                                "rules.{rule_id}.exclude must be an array of path substrings or globs."
-                            ))
-                        })?;
-                        for path_val in arr {
-                            let path_str = path_val.as_str().ok_or_else(|| {
-                                ConfigError(format!("rules.{rule_id}.exclude entries must be strings."))
-                            })?;
-                            suppressions.push(suppression_entry(rule_id, path_str));
-                        }
-                    }
-                }
-                _ => {
-                    return Err(ConfigError(format!(
-                        "rules.{rule_id} must be a severity string (e.g. \"warn\"/\"off\") or an object \
-                         ({{ \"severity\": ..., \"exclude\": [...] }})."
-                    )))
-                }
-            }
-        }
-    }
-
-    if !disabled.is_empty() {
-        shared.insert("disabledRules".to_string(), Value::Array(disabled));
-    }
-    if !severity_overrides.is_empty() {
-        shared.insert(
-            "severityOverrides".to_string(),
-            Value::Object(severity_overrides),
-        );
-    }
-    if !suppressions.is_empty() {
-        shared.insert("suppressions".to_string(), Value::Array(suppressions));
-    }
+    // --- rules.<id> -> severityOverrides / suppressions / disabledRules. Owned by
+    // [`rules_map`]: `packs.*` is the whole-pack axis, `rules.*` the per-id one, and the `disabled`
+    // list seeded above is where the two meet. ---
+    rules_map::fold_rules_map(config, &mut shared, disabled)?;
 
     // --- top-level exclude -> globalExcludes (rule-agnostic finding-level filter). ---
     if let Some(exclude_val) = config.get("exclude") {

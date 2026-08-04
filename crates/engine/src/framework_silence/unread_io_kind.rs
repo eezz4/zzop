@@ -86,6 +86,7 @@ mod tests {
 
     fn provide(kind: &str, file: &str) -> IoProvide {
         IoProvide {
+            response: None,
             kind: kind.to_string(),
             key: "k".to_string(),
             file: file.to_string(),

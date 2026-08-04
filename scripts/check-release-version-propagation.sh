@@ -17,19 +17,24 @@
 # ## Subject A — committed `"version": "<semver>"` strings in tracked JSON
 # Discovered, never listed. A hand list of "files carrying the version" is the same second-copy-of-a-fact
 # this repo keeps paying for; a new manifest would join the release surface without joining the list, and
-# the guard would vouch for it by never looking. Two exclusions, both principled:
+# the guard would vouch for it by never looking. Every exclusion below is a claim that the field is not
+# the release version at all — never that checking it would be inconvenient (the count is not stated:
+# it said "Two" over four bullets until 2026-08-01, the same stale-count class §5.5 records):
 #   * `0.0.0` — the publish-time PLACEHOLDER. `.github/workflows/prebuild.yml` rewrites every
 #     `packages/cli/**/package.json` and `packages/mcpb/manifest.json` version at build time, so their
 #     committed value is deliberately not a version and must not be made to track one.
 #   * `examples/` — sample packages a user copies into their own tree (`adapter-kit` is at 0.1.0). Their
 #     version is their own artifact's, unrelated to zzop's release.
-#   * `docs/contracts/example-envelope.json` — the Normalized-AST ENVELOPE contract version, whose
-#     documented rule (`zzop_core::NORMALIZED_AST_CONTRACT_VERSION`, 2026-07-31 user ruling) is that it
-#     moves only when the envelope SHAPE moves, explicitly NOT every release: "bumping it every release
-#     would be the defect this replaces — a number that appears to describe the shape while actually
-#     describing the calendar." This guard bumped it to 0.28.0 anyway (caught in that release's pre-tag
-#     audit), which would have had adapter authors copying an example that every 0.27.x engine rejects
-#     for an unchanged shape. Semver-shaped is not the same fact as release-tracking.
+#   * Normalized-AST ENVELOPES, recognised by their own bytes (subject A0 below) — their `"version"`
+#     is a DIFFERENT FACT on a different schedule. `zzop_core::NORMALIZED_AST_CONTRACT_VERSION`'s rule
+#     (2026-07-31 user ruling) is that it moves only when the envelope SHAPE moves, explicitly NOT
+#     every release: "bumping it every release would be the defect this replaces — a number that
+#     appears to describe the shape while actually describing the calendar." This guard bumped
+#     `docs/contracts/example-envelope.json` to 0.28.0 anyway (caught in that release's pre-tag audit),
+#     which would have had adapter authors copying an example that every 0.27.x engine rejects for an
+#     unchanged shape. Semver-shaped is not the same fact as release-tracking. Envelopes are not left
+#     unguarded — they move to the CONTRACT-version axis, bound by
+#     `crates/engine/tests/rule_contracts/envelope_contract_version.rs`.
 #   * npm lockfiles (`package-lock.json`, any depth) — every `"version"` in one is a THIRD PARTY's
 #     version (playwright's, its transitive deps'), pinned on purpose and never meant to track this
 #     repo's release. First hit: scripts/site-render-check/ (2026-07-30). The *manifests* beside them
@@ -39,14 +44,28 @@
 # Integer `"version": 1` fields (the adapter envelope's schema version) are not semver strings and never
 # match the extraction — a different fact with a different lifecycle, correctly invisible here.
 #
+# ## Subject A0 — which files are envelopes, answered by CONTENT
+# An envelope is any tracked JSON whose bytes declare `"format": "zzop-normalized-ast"`, which is the
+# envelope contract's own self-identification (`zzop_core::NormalizedEnvelope::format`, and what
+# `validate_envelope` reads to decide the same question at runtime). Deliberately NOT a path list: this
+# guard already carried one (`docs/contracts/example-envelope.json`, by name) while `cases/`'s two
+# envelopes sat in subject A being forced to declare the RELEASE version — two envelopes under two rules,
+# green only because the two numbers happened to be equal. The moment the contract legitimately lags the
+# release, which is its normal state, a path list would have made those files declare a contract version
+# that does not exist. A content test classifies correctly wherever the file sits, and adding an envelope
+# anywhere in the tree needs no edit here (working-agreements §5.5 — the hand-maintained subject set is
+# the recurring cost).
+#
 # ## Subject B — `releases/download/v<semver>/` asset URLs in tracked files
 # `server.json`'s five `packages[].identifier` URLs carry the version a SECOND time, in the path. Bumping
 # the `version` fields and leaving the URLs behind points the MCP registry at the previous release's
 # assets — schema-valid, hash-checkable, and wrong. `.github/` is out of scope: prebuild.yml builds these
 # URLs from `$VERSION` at runtime and its only literal `v0.25.0` is prose in a comment about a past release.
 #
-# Both subjects fail closed on an EMPTY set: an extraction that stops matching would otherwise report a
-# clean tree while reading nothing, which is this repo's own twice-paid false-green class.
+# Every subject fails closed on an EMPTY set, A0 included: an extraction that stops matching would
+# otherwise report a clean tree while reading nothing, which is this repo's own twice-paid false-green
+# class. A0's floor guards the opposite direction from A's and B's — if the envelope classifier stopped
+# matching, the envelopes would silently rejoin subject A and be dragged onto the release calendar again.
 #
 # No deps beyond git + sed + grep + awk.
 set -euo pipefail
@@ -75,14 +94,35 @@ VERSION="$(awk '
 
 violations=0
 
+# --- Subject A0: classify the envelopes by content ------------------------------------------------
+# Their `"version"` belongs to the CONTRACT axis, not this one — see the header. Nothing about the path
+# is consulted; the file says what it is.
+envelope_files="$(git ls-files -z -- '*.json' \
+  | xargs -0 -r grep -l '"format"[[:space:]]*:[[:space:]]*"zzop-normalized-ast"' -- 2>/dev/null \
+  || true)"
+
+env_count="$(printf '%s\n' "$envelope_files" | grep -c . || true)"
+[ "$env_count" -gt 0 ] || abort \
+  "classified 0 Normalized-AST envelopes -- the '\"format\": \"zzop-normalized-ast\"' self-identification
+  was reshaped or every envelope left the tree. With no envelope set, every envelope in this repo falls
+  back into subject A and gets forced onto the RELEASE version, which is the exact defect this
+  classification removes. Fix the extraction rather than trusting a green run."
+
 # --- Subject A ------------------------------------------------------------------------------------
 # `git ls-files` output, filtered rather than pathspec-excluded, so the exclusion reads next to its
 # reason. `grep -H` forces the filename prefix even when xargs hands grep a single path.
+#
+# The envelope hold-out is the `awk` stage: the classified paths are read as a lookup table and the
+# `<path>` field of each `<path>:<lineno>:<text>` line is compared to it as a WHOLE STRING. Not a regex
+# — a path spliced into one would need every ERE metacharacter escaped, and a guard that silently
+# mis-escapes one path stops holding that envelope out while still printing a clean count. `NR==FNR`
+# is safe here only because the A0 floor above already refused an empty list.
 json_lines="$(git ls-files -z -- '*.json' \
   | xargs -0 -r grep -Hn '"version"[[:space:]]*:[[:space:]]*"[0-9][0-9.]*[0-9A-Za-z.+-]*"' -- 2>/dev/null \
   | grep -v '^examples/' \
-  | grep -v '^docs/contracts/example-envelope\.json:' \
   | grep -v 'package-lock\.json:' \
+  | awk -F: 'NR == FNR { if (NF) envelope[$0] = 1; next } !($1 in envelope)' \
+      <(printf '%s\n' "$envelope_files") - \
   || true)"
 
 a_count="$(printf '%s\n' "$json_lines" | grep -c . || true)"
@@ -140,8 +180,10 @@ if [ "$violations" -ne 0 ]; then
   echo "  never moves. That is why this runs on every commit." >&2
   echo >&2
   echo "  The publish-time placeholder \"$PLACEHOLDER\" is exempt (prebuild.yml rewrites those at build" >&2
-  echo "  time); so is anything under examples/, whose versions are the sample packages' own." >&2
+  echo "  time); so is anything under examples/, whose versions are the sample packages' own; so is every" >&2
+  echo "  Normalized-AST envelope, whose \"version\" is the envelope SHAPE contract and is bound instead by" >&2
+  echo "  crates/engine/tests/rule_contracts/envelope_contract_version.rs." >&2
   exit 1
 fi
 
-echo "$SELF: clean (workspace $VERSION; $a_count committed JSON version string(s), $b_count asset URL line(s) checked)."
+echo "$SELF: clean (workspace $VERSION; $a_count committed JSON version string(s), $b_count asset URL line(s) checked; $env_count envelope(s) held out to the contract axis)."

@@ -147,24 +147,38 @@ fn facade_pinned_key_sets() -> (BTreeSet<String>, BTreeSet<String>) {
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
 
-    // `find` returns the FIRST occurrence, and `..._with_rule_overrides_...` does not have
-    // `..._is_pinned_exactly` as a prefix of the base name, so the two markers cannot alias.
-    let single_markers = [
-        "fn analyze_json_top_level_key_set_is_pinned_exactly",
-        "fn analyze_json_top_level_key_set_with_rule_overrides_is_pinned_exactly",
-    ];
+    // DERIVED, not listed (2026-08-04). This was a hand list of two marker strings, and a hand list has
+    // the wrong failure direction here: a REMOVED pin panicked loudly, but a NEWLY ADDED pin was
+    // silently ignored, so the union it feeds — and therefore the set of fields this contract demands a
+    // registry row for — could quietly shrink relative to what the facade actually pins. That is the
+    // §5.5 shape: the guard's claimed subject set drifting below its real one, with green as the
+    // symptom. Found while adding `scoreMeanings`, whose own pin would have been the third.
+    //
+    // The name shape IS the contract: a single-tree key-set pin is `analyze_json_top_level_key_set…
+    // _is_pinned_exactly`. The multi-tree one is excluded by its distinct `analyze_trees_` prefix.
+    let single_marker_re =
+        regex::Regex::new(r"fn analyze_json_top_level_key_set[a-z0-9_]*_is_pinned_exactly")
+            .expect("static regex");
+    let single_markers: Vec<String> = single_marker_re
+        .find_iter(&text)
+        .map(|m| m.as_str().to_string())
+        .collect();
+    assert!(
+        single_markers.len() >= 2,
+        "extraction floor: found {} single-tree key-set pin(s) in {} — at least the base pin and the \
+         rule-overrides pin must exist. A count below that means the name shape changed and this union \
+         is now reading less than the facade pins, which is exactly the silent shrink this derivation \
+         replaced a hand list to prevent",
+        single_markers.len(),
+        path.display()
+    );
     let multi_marker = "fn analyze_trees_json_top_level_key_set_is_pinned_exactly";
 
     let mut single_keys = BTreeSet::new();
-    for marker in single_markers {
-        let start = text.find(marker).unwrap_or_else(|| {
-            panic!(
-                "{marker} not found in {} — has it been renamed? Every pinned single-tree key-set \
-                 literal must stay findable here; dropping one silently shrinks what this contract \
-                 demands a registry row for",
-                path.display()
-            )
-        });
+    for marker in &single_markers {
+        let start = text
+            .find(marker.as_str())
+            .expect("marker came from a match over this same text");
         single_keys.extend(extract_pinned_keys(&text, start, marker));
     }
     let multi_start = text.find(multi_marker).unwrap_or_else(|| {

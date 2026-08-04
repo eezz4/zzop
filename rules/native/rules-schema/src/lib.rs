@@ -8,7 +8,7 @@
 //!   missing-timestamps, redundant-index, float-money, stale-updated-at, temporal-as-string, fk-no-index,
 //!   nullable-fk, implicit-fk).
 //! - [`usage`]: usage-evidence collectors (per-file field-usage tokens) and the rules built on them
-//!   (unreferenced-model-name, unreferenced-field-name, schema-churn). The first two were spelled
+//!   (unreferenced-model-name, unreferenced-field-name, model-churn). The first two were spelled
 //!   `dead-model`/`dead-field` until they became registered ids; the matcher only ever asked whether the
 //!   NAME occurs as an identifier token in this tree's `.ts`/`.tsx` files, which is not the same claim as
 //!   "dead" — the ids now say what is measured (old ids recorded in `VERSIONING.md`).
@@ -65,7 +65,7 @@ pub const SCHEMA_STRUCTURAL_ISSUE_LABELS: [&str; 9] = [
 pub const SCHEMA_USAGE_ISSUE_LABELS: [&str; 3] = [
     "unreferenced-model-name",
     "unreferenced-field-name",
-    "schema-churn",
+    "model-churn",
 ];
 
 /// The registered rule id a `SchemaIssue` label reports under — `schema/god-model`, ... The engine builds a

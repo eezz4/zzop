@@ -130,6 +130,10 @@ pub(in crate::analyze) fn run_callgraph_rules(
 
     let mut raw_calls = Vec::new();
     let mut file_texts: HashMap<String, String> = HashMap::new();
+    #[allow(
+        clippy::iter_over_hash_type,
+        reason = "iteration order cannot reach the result: `file_texts` is a map, and `raw_calls` is re-bucketed per file into a BTreeMap by `build_symbol_graph` (and into a keyed map of sets by `cache_lane::run`) before any finding is minted"
+    )]
     for rel in ts_paths {
         if !crate::dead_exports::is_ts_source_ext(rel) {
             continue; // non-TS overlay participant (e.g. .svelte) — re-parsing as TS would inject noise
@@ -189,11 +193,12 @@ pub(in crate::analyze) fn run_callgraph_rules(
     }
     // Combined resolver, dispatched by the CALLING file's own extension — module doc "Java call
     // resolution".
+    let py_roots = &vocab.python_package_roots;
     let resolve_file_fn = |specifier: &str, from_file: &str| {
         if from_file.ends_with(".java") {
             Some(specifier.to_string())
         } else if crate::analyze::assemble::helpers::is_python_source_ext(from_file) {
-            python_guard::resolve_python_call_target(specifier, from_file, ts_paths)
+            python_guard::resolve_python_call_target(specifier, from_file, ts_paths, py_roots)
         } else if crate::analyze::assemble::helpers::is_rust_source_ext(from_file) {
             rust_guard::resolve_rust_call_target(specifier, from_file, ts_paths, rust_workspace)
         } else {

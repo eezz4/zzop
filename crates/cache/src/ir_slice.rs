@@ -20,8 +20,10 @@
 //!    assembled from `imports`). Serialized and joined *across* trees by the cross-layer linker.
 //! 2. **DSL-facing per-file facts** — `symbols` (body spans = method-scan spans), `io` (`IoScan`),
 //!    `loop_spans` (`MethodScan::trigger_in_loop`), `function_spans`
-//!    (`MethodScan::after_in_same_function`). Reach `zzop_core::dsl::RuleContext` and are read
-//!    directly by DSL matchers. This set is a *deliberate contract*, not "whatever got threaded":
+//!    (`MethodScan::after_in_same_function`), `test_spans` (the subtractive test-region gate every
+//!    matcher passes), `call_sites` (`Matcher::CallScan`), `string_literals`
+//!    (`Matcher::LiteralScan`). Reach `zzop_core::dsl::RuleContext` and are
+//!    read directly by DSL matchers. This set is a *deliberate contract*, not "whatever got threaded":
 //!    adding to it requires a real consuming rule (no speculative generality — an unused fact waits).
 //! 3. **Assemble-time composition fragments** — `procedure_router_fragments`,
 //!    `router_mount_fragments`, `wrapper_def_fragments`, `wrapper_call_fragments`,
@@ -38,16 +40,21 @@
 //! not a failure), deterministic serialization, and — because this is the *cached* slice — a
 //! `CACHE_SCHEMA_VERSION` bump (or `#[serde(default)]` back-compat) on every add, so a warm run never
 //! serves a slice that silently lost the field. Language coverage is per-fact and uneven (e.g.
-//! `loop_spans` is TypeScript + Go, `function_spans` is TypeScript only, `write_sites` and `io`'s
-//! `IoConsume::retry_configured` tag are
+//! `loop_spans` covers every structural statement-loop language — TS/Go/Python/Java/C#/Rust, since
+//! 2026-08-02 — while `function_spans` is TypeScript only, `test_spans` Rust only, `write_sites` and
+//! `io`'s `IoConsume::retry_configured` tag are
 //! TypeScript-only, while `symbols` / `io` (structure) span every parser); that unevenness is a
-//! deliberate, documented state, not an oversight.
+//! deliberate, documented state, not an oversight. WHICH languages produce `call_sites` is deliberately
+//! not restated here at all: that set grows one dispatch arm at a time
+//! (`crates/engine/src/pipeline/fresh/call_sites.rs`), and a language list copied into this doc would
+//! go stale on the very next arm. The per-environment SSOT is
+//! `crates/engine/tests/rule_contracts/capability_matrix.rs`'s declared table.
 
 use serde::{Deserialize, Serialize};
 use zzop_core::{
-    ClassShapeFragment, ControllerPrefixRouteFragment, ImportMap, IoFacts, ProcedureRouterFragment,
-    QueryCallSite, ReExport, RouterMountFragment, SourceSymbol, WrapperCallFragment,
-    WrapperDefFragment,
+    BoundStringLiteral, CallSite, ClassShapeFragment, ControllerPrefixRouteFragment, ImportMap,
+    IoFacts, ProcedureRouterFragment, QueryCallSite, ReExport, RouterMountFragment, SourceSymbol,
+    WrapperCallFragment, WrapperDefFragment,
 };
 
 /// One file's Common-IR slice, as produced by parse + per-file projection.
@@ -169,4 +176,43 @@ pub struct FileIrSlice {
     /// from being served (see that constant's doc).
     #[serde(default)]
     pub function_spans: Vec<(u32, u32)>,
+    /// This file's TEST-ONLY line spans (`zzop_parser_rust::extract_test_spans`) — mirrors
+    /// `FileArtifact::test_spans` / `zzop_core::dsl::SourceFile::test_spans`. Category 2, and the only
+    /// SUBTRACTIVE member of it: every other fact there lets a rule say MORE, this one stops every rule
+    /// from speaking about a line the parser proved is compiled out of the shipping build. Must
+    /// round-trip through the cache, and the consequence of dropping it is the LOUD direction rather than
+    /// the quiet one — a warm run that lost it would resurrect every finding inside every `#[cfg(test)]
+    /// mod tests` in the tree, which is 100% of what this repo's own `.rs` findings were before the fact
+    /// existed. `#[serde(default)]` keeps a pre-existing entry deserializable; the `CACHE_SCHEMA_VERSION`
+    /// bump is what actually prevents one from being served (see that constant's doc).
+    #[serde(default)]
+    pub test_spans: Vec<(u32, u32)>,
+    /// This file's projected CALL SITES (`zzop_core::call_sites::CallSite`) — mirrors
+    /// `FileArtifact::call_sites` / `zzop_core::dsl::SourceFile::call_sites`. **Category 2**, alongside
+    /// `loop_spans`/`function_spans`/`test_spans`: it reaches `RuleContext` and is read directly by
+    /// `Matcher::CallScan`, never by the cross-layer linker or an assemble-time composer.
+    ///
+    /// Must round-trip through the cache, and the degrade direction says how loudly: `CallScan`'s
+    /// absent-fact behavior is SILENCE (the `loop_spans` family, not `function_spans`' no-op), so a warm
+    /// run that dropped this field would report those rules as finding nothing — indistinguishable, in
+    /// the output, from a clean tree. `#[serde(default)]` keeps a pre-existing entry deserializable; what
+    /// actually prevents one from being SERVED is the derived `CACHE_SCHEMA_VERSION`, which hashes this
+    /// crate's own sources (`crates/engine/build.rs`) and therefore moved the moment this field was
+    /// added — no hand-held bump to forget.
+    #[serde(default)]
+    pub call_sites: Vec<CallSite>,
+    /// This file's projected BOUND STRING LITERALS (`zzop_core::BoundStringLiteral`) — mirrors
+    /// `FileArtifact::string_literals` / `zzop_core::dsl::SourceFile::string_literals`. **Category 2**,
+    /// alongside `call_sites`, whose degrade direction (SILENCE) and round-trip reasoning apply
+    /// verbatim: a warm run that dropped this field would report every `LiteralScan` rule as finding
+    /// nothing, indistinguishable from a clean tree.
+    ///
+    /// What this field is allowed to contain is part of the channel's contract: name + line + value
+    /// HASH + entropy, NEVER the literal's value — this is the cached, plain-text-JSON-on-disk slice
+    /// the no-plaintext design in `zzop_core::string_literals`'s module doc exists to protect.
+    /// `#[serde(default)]` keeps a pre-existing entry deserializable; what actually prevents one from
+    /// being SERVED is the derived `CACHE_SCHEMA_VERSION` (hashes this crate's own sources), which
+    /// moved the moment this field was added.
+    #[serde(default)]
+    pub string_literals: Vec<BoundStringLiteral>,
 }

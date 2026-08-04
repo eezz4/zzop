@@ -18,6 +18,12 @@
 //! - `tools`     — MCP tool definitions (`tools/definitions.rs`) + dispatch (`analyze_repo`,
 //!   `cross_repo`, ...): extract arguments, call `zzop_summary`, wrap the result into the MCP reply
 //!   shape.
+//! - `staleness` — the "this build is old" self-report: one constant baked by `build.rs` (the source
+//!   `HEAD`'s commit date) plus the system clock, no network. It is the only update-notification
+//!   channel the manually installed Claude Desktop (`.mcpb`) lane has, and it rides `initialize`'s
+//!   `instructions` field plus the serve-time stderr banner. Silent on a current build. Its sibling
+//!   `stamp_floor` is the pure SOURCE_DATE_EPOCH plausibility check `build.rs` shares via `#[path]`
+//!   — compiled here only so the lib's test harness can pin a build-time decision.
 //! - `resources` — MCP resources: the embedded authoring contracts (`zzop://contract/<name>`, served
 //!   from the shared `zzop_summary::contracts` table), so a custom-parser or rule author needs neither
 //!   the zzop source repo nor Node.
@@ -31,4 +37,9 @@
 
 pub mod resources;
 pub mod server;
+pub mod staleness;
+// Compiled into the lib ONLY so its tests run in a harness (a build script has none); the lib itself
+// never calls it — build.rs is the runtime consumer, via `#[path]`. Hence the dead_code allow.
+#[allow(dead_code)]
+mod stamp_floor;
 pub mod tools;

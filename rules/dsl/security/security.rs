@@ -107,6 +107,7 @@ mod jwt_sign_secret;
 mod mass_assignment;
 mod private_key_committed;
 mod request_targets;
+mod rust_rules;
 mod scan_scope;
 mod secrets;
 mod secrets_vetoes;

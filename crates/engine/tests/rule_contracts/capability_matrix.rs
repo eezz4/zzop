@@ -7,7 +7,8 @@
 //! drifted from the code: an audit found "loop spans are TS-only" stated somewhere while
 //! `parser/parser-go/src/lang/loop_spans.rs` and `go/goroutine-in-loop`'s `trigger_in_loop` matcher had
 //! moved reality out from under that sentence. This module replaces the sentence with a table read
-//! straight from `crates/engine/src/pipeline/fresh.rs`'s own per-language match arms (ground truth) and a
+//! straight from the engine's own per-language match arms (ground truth — `pipeline/fresh.rs` for
+//! `symbols`/`io`, `pipeline/fresh/spans.rs` for the three span facts) and a
 //! canary fixture per parser environment that empirically confirms the table against the REAL engine path
 //! (`zzop_engine::analyze_tree`), the same path every other end-to-end rule test in this repo uses.
 //!
@@ -38,9 +39,9 @@
 //!     are TS-only" prose let slip through undetected.
 //!
 //! ## The declaration table (ground truth: `crates/engine/src/pipeline/fresh.rs`'s per-language match
-//! arms for `symbols`/`io`/`loop_spans`, NOT prose)
+//! arms for `symbols`/`io` and `fresh::spans`'s for `loop_spans`, NOT prose)
 //!
-//! Five channels, chosen at the granularity `crates/core/src/normalized.rs`'s `FileProjection` actually
+//! Six channels, chosen at the granularity `crates/core/src/normalized.rs`'s `FileProjection` actually
 //! models (`symbols: Vec<SourceSymbol>`, `loop_spans: Vec<(u32,u32)>`, `io: IoFacts { provides, consumes }`)
 //! plus one further split `SourceSymbol::body_start`/`body_end` earns on its own (a symbol can exist with
 //! no body span — Prisma's models are the concrete case, see below):
@@ -65,17 +66,77 @@
 //! dispatch-`None` file, just with empty `symbols`/`io`/`loop_spans` — see that function's own doc). This
 //! is verified empirically below too, not just asserted.
 //!
-//! | environment        | symbols | method_spans | loop_spans | io_provides | io_consumes |
-//! |---------------------|---------|---------------|------------|-------------|-------------|
-//! | typescript          | yes     | yes           | yes        | yes         | yes         |
-//! | python-3            | yes     | yes           | no         | yes         | yes         |
-//! | java-21             | yes     | yes           | no         | yes         | no          |
-//! | rust                | yes     | yes           | no         | yes         | yes         |
-//! | go                  | yes     | yes           | yes        | yes         | yes         |
-//! | prisma              | yes     | no            | no         | yes         | no          |
-//! | sql                 | no      | no            | no         | yes         | no          |
-//! | csharp              | yes     | yes           | no         | yes         | yes         |
-//! | lexical-fallback    | no      | no            | no         | no          | no          |
+//! - `call_sites` — `Matcher::CallScan`'s substrate: whether this environment's `FileArtifact::call_sites`
+//!   (`crates/engine/src/pipeline/fresh/call_sites.rs`) can be non-empty at all.
+//! - `string_literals` — `Matcher::LiteralScan`'s substrate: whether this environment's
+//!   `FileArtifact::string_literals` (`crates/engine/src/pipeline/fresh/string_literals.rs`) can be
+//!   non-empty at all. Landed all six structural languages at once (the A17 wave, 2026-08-03), so
+//!   unlike `call_sites` it never had a partial-coverage phase; prisma/sql/lexical-fallback are `no`
+//!   because PSL/DDL declare no named string BINDING (a `provider = "…"` config pair and a column
+//!   DEFAULT are not declarations that bind a name to a literal in the sense the channel carries, and
+//!   no parser arm projects them).
+//!
+//! | environment        | symbols | method_spans | loop_spans | io_provides | io_consumes | call_sites | string_literals |
+//! |---------------------|---------|---------------|------------|-------------|-------------|------------|-----------------|
+//! | typescript          | yes     | yes           | yes        | yes         | yes         | yes        | yes             |
+//! | python-3            | yes     | yes           | yes        | yes         | yes         | yes        | yes             |
+//! | java-21             | yes     | yes           | yes        | yes         | yes         | yes        | yes             |
+//! | rust                | yes     | yes           | yes        | yes         | yes         | yes        | yes             |
+//! | go                  | yes     | yes           | yes        | yes         | yes         | yes        | yes             |
+//! | prisma              | yes     | no            | no         | yes         | no          | no         | no              |
+//! | sql                 | no      | no            | no         | yes         | no          | no         | no              |
+//! | csharp              | yes     | yes           | yes        | yes         | yes         | yes        | yes             |
+//! | lexical-fallback    | no      | no            | no         | no          | no          | no         | no              |
+//!
+//! `call_sites` flipped `no` -> `yes` for typescript/python-3 on 2026-08-03 in the wave (W1) that landed
+//! the first two producers together with the three rules that read them — `reliability/console-in-be`
+//! and `reliability/console-in-loop` over `console-write`, `reliability/env-outside-config` over
+//! `env-read` — and for java-21/rust/go/csharp later the same day in W2 (six producer arms dispatched
+//! by `pipeline/fresh/call_sites.rs`; rust emits the `env-read` family only, per its producer doc).
+//! W2 (same date) flipped go/java-21/csharp (both families) and rust (`env-read` ONLY — the `println!`
+//! judgment in `zzop_parser_rust::lang::call_sites`'s module doc: fact-layer console writes whose
+//! consuming rules never admit `.rs`, so producing them would be a speculative fact) in the wave that
+//! widened those same three rules' `file_pattern`s. NOTE the column is channel-existence, not
+//! family-existence: rust's `yes` says "call sites can exist", and which FAMILIES a language produces is
+//! each producer module doc's contract. The remaining three rows stay `no` because no producer arm
+//! exists for them — for prisma/sql that is a statement about the language (no console write or env read
+//! to write down). Keeping the cells honest is what makes the sweep below refuse a `file_pattern` that
+//! reaches them.
+//!
+//! **W3 (`process-exec`) added no cell and no canary construct, and that is the column's contract
+//! rather than an omission.** The column asks whether an environment projects the CHANNEL, never which
+//! FAMILIES it projects — `call-scan-probe` deliberately names no `kind` for exactly this reason, so a
+//! new family cannot move any cell and a probe construct for it would measure nothing new. Which
+//! families each language emits is its producer module doc's contract, bound to the rules by
+//! `zzop_core::RULE_READ_CALL_KINDS` (`call_kind_readers.rs`) rather than by this table. What W3 DID
+//! add here is on the rule side: `required_channels` now reports `call_sites` for a `MethodScan` with
+//! `require_call_kind` and for a `LineScan` with `line_call_kind`, so those structurally-gated rules
+//! are swept for forever-silence exactly like a `CallScan` — a `LineScan` was previously exempt by
+//! construction and no longer is whenever it carries that gate.
+//!
+//! **The column is measured now, and `call-scan-probe` is what measures it.** Until 2026-08-03 this
+//! column was declared but never compared against a real run — a debt this doc named, because
+//! `every_declared_environment_has_a_canary_that_measures_it` checks that every ENVIRONMENT is measured,
+//! not that every CHANNEL is, and an all-`no` column could only under-claim so the debt stayed bounded.
+//! The moment two cells say `yes` the column starts making a POSITIVE claim, so the probe landed in the
+//! same change: every canary fixture whose language can express a console write or an environment read now
+//! contains one (see `canary_files()`), and `call-scan-probe` — a `CallScan` with no `kind` and no
+//! `callee_pattern`, so it asks only "does this environment project call sites AT ALL" — must fire on
+//! exactly the `yes` rows. The negative rows are therefore proven against fixtures that genuinely contain
+//! the construct, the same discipline `ZZOP_LOOP_MARKER` follows by sitting inside a real loop.
+//!
+//! `loop_spans` went `no` -> `yes` for python-3/java-21/rust/csharp on 2026-08-02 (each parser's
+//! `lang/loop_spans` module + `pipeline/fresh/spans.rs`'s per-language arms): statement loops are a
+//! span in all six structural languages; eager-vs-lazy callback arms are per-language calls whose
+//! boundary `zzop_core::dsl::SourceFile::loop_spans`'s field doc owns (Python comprehensions in,
+//! genexp/Rust adapters/Java Streams/C# LINQ out). Prisma/SQL stay `no` — no loop syntax exists to
+//! span, a statement about the language rather than a missing capability.
+//!
+//! `java-21`'s `io_consumes` flipped `no` -> `yes` on 2026-08-02: `pipeline::io_projection`'s Java arm
+//! now projects `zzop_parser_java_21::extract_java_http_consumes` (Spring `RestTemplate`/`WebClient`
+//! literal egress, `!degraded`-gated like every other language's consume arm) — the half of the
+//! cross-layer join Java lacked while already filling the provide side. The java canary fixture's
+//! `getForObject` call is what keeps the flipped cell measured.
 //!
 //! `prisma`'s `io_provides` flipped `no` -> `yes` when the orphan this table originally DOCUMENTED was
 //! wired up. The orphan was: `zzop_parser_prisma::build_common_ir` computed a `db-table` `IoProvide` per
@@ -94,7 +155,7 @@
 //! ## `function_spans` is deliberately NOT a sixth column (2026-07-25)
 //!
 //! `MethodScan::after_in_same_function`'s substrate (`FileProjection::function_spans`,
-//! `pipeline::fresh`'s fourth per-language match arm) is **TypeScript only** — every other environment,
+//! `pipeline::fresh::spans`) is **TypeScript only** — every other environment,
 //! Go included, is a blank. That asymmetry is published in `docs/NORMALIZED_AST.md`, `docs/rules/
 //! dsl-reference.md`, and `crates/cache/src/ir_slice.rs`'s module doc, but it is NOT pinned here, and the
 //! reason is a property of the channel rather than laziness: this one's absent-fact degrade is a
@@ -106,6 +167,25 @@
 //! (Prisma, SQL) cannot express at all. The inverted, fixture-heavy probe was judged to cost more
 //! confusion than the drift it would catch. **If a second language ever learns `function_spans`, revisit
 //! this**: at two producers the column earns its fixtures.
+//!
+//! ## `test_spans` is not a column either, and for a STRONGER reason (2026-08-02)
+//!
+//! `zzop_core::dsl::SourceFile::test_spans` (`pipeline::fresh::spans`, **Rust
+//! only**) is SUBTRACTIVE: no rule REQUIRES it, so its absence can never make a rule forever-silent —
+//! which is the only defect class this file's strong negative claim is about. A missing `test_spans`
+//! over-reports; every other channel here under-reports. The column would therefore pin a fact that
+//! cannot produce the failure this contract exists to catch.
+//!
+//! It is also unprobeable per environment in the way the columns above are: the fixture that would prove
+//! the channel ABSENT has to contain a test region, and outside Rust there is no such syntax to write —
+//! `.py`/`.ts`/`.go` name their tests in the PATH, which is the rule packs' `${test-paths-stories}`
+//! exclusion's business, not a parser channel's. A blank row would read as a gap when it is a statement
+//! that the other axis already covers that language.
+//!
+//! Where the drift IS pinned, two-sided, on the one environment that has the channel:
+//! `crates/engine/tests/analyze_rust_test_spans.rs` — same violation inside and outside a `#[cfg(test)]`
+//! region, one finding, on the shipped line. **If a second language ever learns `test_spans`, revisit
+//! this**: at two producers the asymmetry stops being self-evident from the one arm in `fresh.rs`.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -126,6 +206,8 @@ struct Capabilities {
     loop_spans: bool,
     io_provides: bool,
     io_consumes: bool,
+    call_sites: bool,
+    string_literals: bool,
 }
 
 /// The declaration table transcribed from this module's own doc — see there for the ground-truth
@@ -133,6 +215,9 @@ struct Capabilities {
 /// last as the synthetic 9th row).
 const ENVIRONMENTS: &[(&str, Capabilities)] = &[
     (
+        // `call_sites` flipped `no` -> `yes` on 2026-08-03 with W1's producer
+        // (`zzop_parser_typescript::extract_call_sites` — `console-write` + `env-read`). The canary
+        // fixture's `console.log` and `process.env` reads are what keep this row measured.
         "typescript",
         Capabilities {
             symbols: true,
@@ -140,39 +225,59 @@ const ENVIRONMENTS: &[(&str, Capabilities)] = &[
             loop_spans: true,
             io_provides: true,
             io_consumes: true,
+            call_sites: true,
+            string_literals: true,
         },
     ),
     (
+        // `call_sites` flipped in the same wave, via `zzop_parser_python_3::extract_call_sites` — the
+        // canary fixture's `print(...)` and `os.getenv(...)` keep it measured.
         "python-3",
         Capabilities {
             symbols: true,
             method_spans: true,
-            loop_spans: false,
+            loop_spans: true,
             io_provides: true,
             io_consumes: true,
+            call_sites: true,
+            string_literals: true,
         },
     ),
     (
+        // `io_consumes` flipped `no` -> `yes` on 2026-08-02: `pipeline::io_projection`'s Java arm now
+        // projects `zzop_parser_java_21::extract_java_http_consumes` (RestTemplate/WebClient literal
+        // egress) — the canary fixture's `getForObject` call is what keeps this row measured.
+        // `call_sites` flipped in W2 (2026-08-03) via `zzop_parser_java_21::extract_call_sites` — the
+        // canary fixture's `System.out.println` and `System.getenv` keep it measured.
         "java-21",
         Capabilities {
             symbols: true,
             method_spans: true,
-            loop_spans: false,
+            loop_spans: true,
             io_provides: true,
-            io_consumes: false,
+            io_consumes: true,
+            call_sites: true,
+            string_literals: true,
         },
     ),
     (
+        // `call_sites` flipped in W2 (2026-08-03) via `zzop_parser_rust::extract_call_sites`, whose one
+        // family is `env-read` — the canary fixture's `std::env::var` keeps it measured (its `println!`
+        // deliberately projects nothing; the producer module doc owns that judgment).
         "rust",
         Capabilities {
             symbols: true,
             method_spans: true,
-            loop_spans: false,
+            loop_spans: true,
             io_provides: true,
             io_consumes: true,
+            call_sites: true,
+            string_literals: true,
         },
     ),
     (
+        // `call_sites` flipped in W2 (2026-08-03) via `zzop_parser_go::extract_call_sites` — the canary
+        // fixture's `fmt.Println` and `os.Getenv` keep it measured.
         "go",
         Capabilities {
             symbols: true,
@@ -180,6 +285,8 @@ const ENVIRONMENTS: &[(&str, Capabilities)] = &[
             loop_spans: true,
             io_provides: true,
             io_consumes: true,
+            call_sites: true,
+            string_literals: true,
         },
     ),
     (
@@ -190,6 +297,8 @@ const ENVIRONMENTS: &[(&str, Capabilities)] = &[
             loop_spans: false,
             io_provides: true,
             io_consumes: false,
+            call_sites: false,
+            string_literals: false,
         },
     ),
     (
@@ -200,16 +309,23 @@ const ENVIRONMENTS: &[(&str, Capabilities)] = &[
             loop_spans: false,
             io_provides: true,
             io_consumes: false,
+            call_sites: false,
+            string_literals: false,
         },
     ),
     (
+        // `call_sites` flipped in W2 (2026-08-03) via `zzop_parser_csharp::extract_call_sites` — the
+        // canary fixture's `System.Console.WriteLine` and `System.Environment.GetEnvironmentVariable`
+        // keep it measured.
         "csharp",
         Capabilities {
             symbols: true,
             method_spans: true,
-            loop_spans: false,
+            loop_spans: true,
             io_provides: true,
             io_consumes: true,
+            call_sites: true,
+            string_literals: true,
         },
     ),
     (
@@ -220,6 +336,8 @@ const ENVIRONMENTS: &[(&str, Capabilities)] = &[
             loop_spans: false,
             io_provides: false,
             io_consumes: false,
+            call_sites: false,
+            string_literals: false,
         },
     ),
 ];
@@ -330,6 +448,23 @@ impl Drop for TempDir {
 /// even for environments this table declares `loop_spans: false`, so the negative is proven bidirectionally
 /// against a source that genuinely has a loop, not merely against a fixture that omits one). A symbol
 /// literally named `ZzopCanaryTarget` gives every symbol-projecting environment something to declare.
+///
+/// Every fixture ALSO carries a `zzopCanaryCallSites` function holding that language's own console write
+/// and environment read (`console.log`/`process.env`, `print`/`os.getenv`, `System.out.println`/
+/// `System.getenv`, `println!`/`std::env::var`, `fmt.Println`/`os.Getenv`, `Console.WriteLine`/
+/// `Environment.GetEnvironmentVariable`, Kotlin's `println`/`System.getenv`) — the `call_sites` column's
+/// probe, on exactly the discipline `ZZOP_LOOP_MARKER` follows: a row declared `call_sites: false` is
+/// proven false against a fixture that genuinely contains the construct, never against one that omits it,
+/// so a producer arm added without flipping its cell turns this file red instead of passing quietly.
+/// Prisma and SQL are the two exceptions and they are statements rather than gaps: PSL and DDL have no
+/// console write and no environment read to write down, the same reason their `ZZOP_LOOP_MARKER` is a
+/// bare comment.
+///
+/// Every fixture whose language can express one ALSO carries a named string binding
+/// (`zzopCanaryBoundLiteral` in that language's casing) — the `string_literals` column's probe, same
+/// discipline: a `string_literals: false` row is proven against a fixture that genuinely contains the
+/// construct (the Kotlin fixture's `val`), and Prisma/SQL are again the two languages with nothing to
+/// write down (no declaration binds a name to a string literal — see the module doc's column note).
 fn canary_files() -> Vec<(&'static str, &'static str, &'static str)> {
     vec![
         (
@@ -351,6 +486,13 @@ function zzopEgress() {
   fetch("https://api.example.com/zzop-canary");
 }
 
+function zzopCanaryCallSites() {
+  console.log("zzop-canary");
+  return process.env.ZZOP_CANARY;
+}
+
+const zzopCanaryBoundLiteral = "zzop-canary-value";
+
 apiRoutes.get("/zzop-canary-ts", zzopCanaryHandler);
 
 function zzopCanaryHandler() {}
@@ -361,6 +503,7 @@ function zzopCanaryHandler() {}
             "canary.py",
             r#"# ZZOP_LINE_MARKER
 from fastapi import FastAPI
+import os
 import requests
 
 app = FastAPI()
@@ -384,6 +527,14 @@ def zzop_loop_body():
 
 def zzop_egress():
     requests.get("https://api.example.com/zzop-canary")
+
+
+def zzop_canary_call_sites():
+    print("zzop-canary")
+    return os.getenv("ZZOP_CANARY")
+
+
+zzop_canary_bound_literal = "zzop-canary-value"
 "#,
         ),
         (
@@ -392,6 +543,7 @@ def zzop_egress():
             r#"// ZZOP_LINE_MARKER
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.client.RestTemplate;
 
 @RestController
 class ZzopCanaryController {
@@ -409,6 +561,17 @@ class ZzopCanaryTarget {
   }
 
   void zzopLoopBody() {}
+
+  void zzopEgress() {
+    new RestTemplate().getForObject("https://api.example.com/zzop-canary", String.class);
+  }
+
+  String zzopCanaryCallSites() {
+    System.out.println("zzop-canary");
+    return System.getenv("ZZOP_CANARY");
+  }
+
+  String zzopCanaryBoundLiteral = "zzop-canary-value";
 }
 "#,
         ),
@@ -439,6 +602,13 @@ fn zzop_loop_body() {}
 fn zzop_egress() {
     reqwest::get("https://api.example.com/zzop-canary");
 }
+
+fn zzop_canary_call_sites() -> Result<String, std::env::VarError> {
+    println!("zzop-canary");
+    std::env::var("ZZOP_CANARY")
+}
+
+const ZZOP_CANARY_BOUND_LITERAL: &str = "zzop-canary-value";
 "#,
         ),
         (
@@ -449,7 +619,9 @@ fn zzop_egress() {
 // ZZOP_LINE_MARKER
 
 import (
+	"fmt"
 	"net/http"
+	"os"
 
 	"github.com/gin-gonic/gin"
 )
@@ -480,6 +652,13 @@ func zzopLoopBody() {}
 func zzopEgress() {
 	http.Get("/zzop-canary")
 }
+
+func zzopCanaryCallSites() string {
+	fmt.Println("zzop-canary")
+	return os.Getenv("ZZOP_CANARY")
+}
+
+const zzopCanaryBoundLiteral = "zzop-canary-value"
 "#,
         ),
         (
@@ -528,6 +707,13 @@ public class ZzopCanaryTarget {
         var client = new HttpClient();
         var r = client.GetAsync("https://api.example.com/zzop-canary");
     }
+
+    public string ZzopCanaryCallSites() {
+        System.Console.WriteLine("zzop-canary");
+        return System.Environment.GetEnvironmentVariable("ZZOP_CANARY");
+    }
+
+    public string ZzopCanaryBoundLiteral = "zzop-canary-value";
 }
 "#,
         ),
@@ -539,7 +725,19 @@ public class ZzopCanaryTarget {
 // ZZOP_LOOP_MARKER
 // .kt is not dispatched by any parser this engine ships today (crates/engine/src/dispatch.rs's
 // dispatch_by_extension has no "kt" arm) -- this file exercises the lexical-fallback path on purpose.
+// The console write and env read below are REAL Kotlin ones, so `call_sites: false` on this row is
+// proven against a file that genuinely contains both rather than against one that omits them.
 fun main() {}
+
+fun zzopCanaryCallSites(): String? {
+    println("zzop-canary")
+    return System.getenv("ZZOP_CANARY")
+}
+
+// A REAL Kotlin named string binding, same discipline as the console write above: the
+// `string_literals: false` cell on this row is proven against a file that genuinely contains the
+// construct, never against one that omits it.
+val zzopCanaryBoundLiteral = "zzop-canary-value"
 "#,
         ),
     ]
@@ -736,6 +934,24 @@ const CANARY_PROBE_PACK_JSON: &str = r#"{
         "trigger": "hit",
         "trigger_in_loop": true
       }
+    },
+    {
+      "id": "call-scan-probe",
+      "severity": "info",
+      "message": "capability-matrix MINIMAL-EXISTENCE probe (NOT a real finding): fires on ANY projected call site -- no `kind` and no `callee_pattern`, deliberately, so it asks the one question this column is about (does this environment project the call_sites channel at all) rather than any question about a particular family. A miss does NOT mean the fixture contains no console write and no environment read -- every fixture whose language can express one contains both -- it means this engine does not project call sites for that environment. See this file's module doc for the full claim boundary.",
+      "matcher": {
+        "type": "call-scan",
+        "file_pattern": ".*"
+      }
+    },
+    {
+      "id": "literal-scan-probe",
+      "severity": "info",
+      "message": "capability-matrix MINIMAL-EXISTENCE probe (NOT a real finding): fires on ANY projected bound string literal -- no `name_pattern` and no `entropy_min`, deliberately, so it asks the one question this column is about (does this environment project the string_literals channel at all). A miss does NOT mean the fixture contains no named string binding -- every fixture whose language can express one contains `zzopCanaryBoundLiteral` (or its casing-convention twin) -- it means this engine does not project bound string literals for that environment. See this file's module doc for the full claim boundary.",
+      "matcher": {
+        "type": "literal-scan",
+        "file_pattern": ".*"
+      }
     }
   ]
 }
@@ -811,6 +1027,90 @@ fn canary_loop_spans_channel_matches_the_declared_table_via_a_trigger_in_loop_pr
     );
 }
 
+/// Canary #5 (MINIMAL EXISTENCE): `string_literals` per environment — `call-scan-probe`'s twin, one
+/// channel over: a `LiteralScan` with no `name_pattern` and no `entropy_min` asks only "does this
+/// environment project bound string literals AT ALL". Landed WITH the column and the producers (the
+/// A17 wave), so unlike `call_sites` the column never had a declared-but-unmeasured phase.
+#[test]
+fn canary_string_literals_channel_matches_the_declared_table_via_a_literal_scan_probe_rule() {
+    let dir = TempDir::new("zzop-capability-matrix-stringliterals");
+    write_canary_files(&dir);
+    let out = canary_engine_output(&dir, vec![canary_probe_pack()]);
+
+    let literal_scan_hits: std::collections::BTreeSet<&str> = out
+        .findings
+        .iter()
+        .filter(|f| f.rule_id == "capability-matrix-canary/literal-scan-probe")
+        .map(|f| f.file.as_str())
+        .collect();
+
+    let mut mismatches = Vec::new();
+    for (env, file, _) in canary_files() {
+        let caps = capabilities_for(env);
+        let fired = literal_scan_hits.contains(file);
+        if fired != caps.string_literals {
+            mismatches.push(format!(
+                "{env} ({file}): declared string_literals={}, literal-scan probe actually \
+                 fired={fired} (MINIMAL-EXISTENCE mismatch, not a firing claim — see module doc). A \
+                 declared-absent row that fired means a producer arm landed without flipping its \
+                 cell; a declared-present row that missed means the projection lost its wiring.",
+                caps.string_literals
+            ));
+        }
+    }
+    assert!(
+        mismatches.is_empty(),
+        "capability_matrix: ENVIRONMENTS table's string_literals column disagrees with the real \
+         engine projection: {mismatches:#?}"
+    );
+}
+
+/// Canary #4 (MINIMAL EXISTENCE): `call_sites` per environment. Like `loop_spans`, the channel is never
+/// serialized into `AnalyzeOutput` (only `Matcher::CallScan` consumes it), so it is proven through a real
+/// rule loaded via `load_dsl_packs` rather than by inspecting output — but unlike `loop_spans`' probe, this
+/// one gates on NOTHING beyond the file pattern, because the column asks whether the channel exists, not
+/// whether a family within it does. Which families a shipped rule actually reads is a different contract
+/// with a different owner (`zzop_core::RULE_READ_CALL_KINDS`, bound by `call_kind_readers.rs`).
+///
+/// This is the probe whose absence this file's module doc carried as a named debt until 2026-08-03: with
+/// the column all-`no` it could only under-claim, and the first `yes` turned it into a positive claim
+/// nothing had measured.
+#[test]
+fn canary_call_sites_channel_matches_the_declared_table_via_a_call_scan_probe_rule() {
+    let dir = TempDir::new("zzop-capability-matrix-callsites");
+    write_canary_files(&dir);
+    let out = canary_engine_output(&dir, vec![canary_probe_pack()]);
+
+    let call_scan_hits: std::collections::BTreeSet<&str> = out
+        .findings
+        .iter()
+        .filter(|f| f.rule_id == "capability-matrix-canary/call-scan-probe")
+        .map(|f| f.file.as_str())
+        .collect();
+
+    let mut mismatches = Vec::new();
+    for (env, file, _) in canary_files() {
+        let caps = capabilities_for(env);
+        let fired = call_scan_hits.contains(file);
+        if fired != caps.call_sites {
+            mismatches.push(format!(
+                "{env} ({file}): declared call_sites={}, call-scan probe actually fired={fired} \
+                 (MINIMAL-EXISTENCE mismatch, not a firing claim — see module doc). A declared-absent \
+                 row that FIRED means a producer arm landed in `pipeline/fresh/call_sites.rs` without \
+                 flipping this table; a declared-present row that did NOT means the arm went away, or \
+                 the fixture's console write / environment read stopped being one this producer \
+                 recognizes.",
+                caps.call_sites
+            ));
+        }
+    }
+    assert!(
+        mismatches.is_empty(),
+        "capability_matrix: ENVIRONMENTS table's call_sites column disagrees with the real engine \
+         projection: {mismatches:#?}"
+    );
+}
+
 // -------------------------------------------------------------------------------------------------------
 // Rule-side sweep — every shipped rule's matcher vs. the declaration table above.
 // -------------------------------------------------------------------------------------------------------
@@ -883,11 +1183,26 @@ const ALLOWLIST: &[(&str, &str)] = &[
 /// `source_lines` channel, so it can never be an offender regardless of `file_pattern`).
 fn required_channels(matcher: &Matcher) -> Option<(&str, Option<&str>, Vec<&'static str>)> {
     match matcher {
-        Matcher::LineScan(_) => None,
+        // A plain LineScan needs only the universal `source_lines` channel — but `line_call_kind`
+        // (W3) gates every matched line on a projected call site, so a gated rule is FOREVER-SILENT
+        // on an environment without the channel, exactly like a CallScan.
+        Matcher::LineScan(m) => match &m.line_call_kind {
+            None => None,
+            Some(_) => Some((
+                m.file_pattern.as_str(),
+                m.file_exclude_pattern.as_deref(),
+                vec!["call_sites"],
+            )),
+        },
         Matcher::MethodScan(m) => {
             let mut required = vec!["method_spans"];
             if m.trigger_in_loop {
                 required.push("loop_spans");
+            }
+            // `require_call_kind` (W3) gates the span on a projected call site — silent without the
+            // channel, so it is a required channel exactly like `trigger_in_loop`'s `loop_spans`.
+            if m.require_call_kind.is_some() {
+                required.push("call_sites");
             }
             Some((
                 m.file_pattern.as_str(),
@@ -909,6 +1224,24 @@ fn required_channels(matcher: &Matcher) -> Option<(&str, Option<&str>, Vec<&'sta
                 required,
             ))
         }
+        Matcher::CallScan(m) => {
+            // `in_loop` adds `loop_spans` the same way `MethodScan::trigger_in_loop` does — the gate reads
+            // the identical field and is silent without it.
+            let mut required = vec!["call_sites"];
+            if m.in_loop {
+                required.push("loop_spans");
+            }
+            Some((
+                m.file_pattern.as_str(),
+                m.file_exclude_pattern.as_deref(),
+                required,
+            ))
+        }
+        Matcher::LiteralScan(m) => Some((
+            m.file_pattern.as_str(),
+            m.file_exclude_pattern.as_deref(),
+            vec!["string_literals"],
+        )),
     }
 }
 
@@ -919,6 +1252,8 @@ fn channel_satisfied(caps: Capabilities, channel: &str) -> bool {
         "loop_spans" => caps.loop_spans,
         "io_provides" => caps.io_provides,
         "io_consumes" => caps.io_consumes,
+        "call_sites" => caps.call_sites,
+        "string_literals" => caps.string_literals,
         "io_provides_or_io_consumes" => caps.io_provides || caps.io_consumes,
         other => panic!("capability_matrix: unknown required-channel key {other:?}"),
     }
@@ -982,5 +1317,453 @@ fn every_shipped_rule_matcher_only_admits_environments_whose_required_channel_th
         offenders.is_empty(),
         "capability_matrix rule-side sweep found forever-silent matcher/environment combinations: \
          {offenders:#?}"
+    );
+}
+
+// -------------------------------------------------------------------------------------------------------
+// io FIELD-level capability table — `response` / `body` / `retry_configured`, the three OPTIONAL fields
+// that ride an `IoProvide`/`IoConsume` entry. Until 2026-08-03 their language coverage lived only as
+// prose (rule messages, module docs) — the exact absent-by-silence mechanism that let `loop_spans` sit
+// TS+Go-only unnoticed. Same convention as the channel table above: a declaration table transcribed
+// from the producers' own code, and a canary that measures every row bidirectionally against the real
+// `analyze_tree` path. These are NOT matcher substrates (no DSL matcher reads them — their consumers
+// are the native cross-layer rules), so they deliberately do not join `Capabilities`/
+// `required_channels`; a separate table also keeps this section additive beside the channel columns.
+//
+// | environment      | io_provide_response | io_provide_body | io_consume_retry_configured |
+// |------------------|---------------------|-----------------|-----------------------------|
+// | typescript       | yes                 | yes             | yes                         |
+// | every other row  | no                  | no              | no                          |
+//
+// Ground truth per column (grep-censused 2026-08-03, not guessed):
+// - `io_provide_response` — ONE producer: parser-typescript's Nest controller-decorator return-type
+//   capture (`adapters/controller_decorators/method_facts.rs`, `response-shape-v1`, the ⓖ wave).
+// - `io_provide_body` — ONE producer: the same Nest capture's `@Body()` DTO arm (`method_body_shape`
+//   in the same file; `analyze/compose/controller_prefix.rs` only carries it through).
+// - `io_consume_retry_configured` — ONE producer: parser-typescript's egress collector
+//   (`adapters/egress/collector.rs`, `egress-retry-v1`).
+//
+// **A `yes` cell is CHANNEL-EXISTENCE, not a framework gate** (the second dimension the extension-keyed
+// sightline cannot express): inside TypeScript extensions, only the NEST controller-decorator shape
+// emits `response`/`body` — an Express/Hono/Next file-convention route in the same `.ts` tree emits
+// neither — and only the axios/fetch EGRESS COLLECTOR sets `retry_configured` — the hono-client, tRPC
+// and fetch-wrapper consume paths leave it unset. So `yes` means "this environment CAN carry the
+// field", never "every route/call in this environment does". The `no` rows are proven against fixtures
+// that genuinely CONTAIN the construct where the language can express it (a FastAPI `-> Out` return
+// annotation + Pydantic body param + tenacity-retried write; a Spring `@RequestBody` + DTO return +
+// `@Retryable` write; an axum `Json<Out>` handler; a C# typed action with `[FromBody]`) — the
+// `ZZOP_LOOP_MARKER` discipline. Go handlers write to a `ResponseWriter`/context rather than declaring
+// a response type in any signature position, and Prisma/SQL provides are `db-table` declarations with
+// no HTTP contract to annotate — for those rows the absent construct is a statement about the language,
+// like their loop rows.
+// -------------------------------------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy)]
+struct IoFieldCapabilities {
+    io_provide_response: bool,
+    io_provide_body: bool,
+    io_consume_retry_configured: bool,
+}
+
+/// The io-field declaration table — see the section comment above for the per-column ground-truth
+/// citations. Rows deliberately mirror `ENVIRONMENTS` one-to-one (pinned below), so a 10th environment
+/// cannot land with its io-field coverage undeclared.
+const IO_FIELD_ENVIRONMENTS: &[(&str, IoFieldCapabilities)] = &[
+    (
+        "typescript",
+        IoFieldCapabilities {
+            io_provide_response: true,
+            io_provide_body: true,
+            io_consume_retry_configured: true,
+        },
+    ),
+    (
+        "python-3",
+        IoFieldCapabilities {
+            io_provide_response: false,
+            io_provide_body: false,
+            io_consume_retry_configured: false,
+        },
+    ),
+    (
+        "java-21",
+        IoFieldCapabilities {
+            io_provide_response: false,
+            io_provide_body: false,
+            io_consume_retry_configured: false,
+        },
+    ),
+    (
+        "rust",
+        IoFieldCapabilities {
+            io_provide_response: false,
+            io_provide_body: false,
+            io_consume_retry_configured: false,
+        },
+    ),
+    (
+        "go",
+        IoFieldCapabilities {
+            io_provide_response: false,
+            io_provide_body: false,
+            io_consume_retry_configured: false,
+        },
+    ),
+    (
+        "prisma",
+        IoFieldCapabilities {
+            io_provide_response: false,
+            io_provide_body: false,
+            io_consume_retry_configured: false,
+        },
+    ),
+    (
+        "sql",
+        IoFieldCapabilities {
+            io_provide_response: false,
+            io_provide_body: false,
+            io_consume_retry_configured: false,
+        },
+    ),
+    (
+        "csharp",
+        IoFieldCapabilities {
+            io_provide_response: false,
+            io_provide_body: false,
+            io_consume_retry_configured: false,
+        },
+    ),
+    (
+        "lexical-fallback",
+        IoFieldCapabilities {
+            io_provide_response: false,
+            io_provide_body: false,
+            io_consume_retry_configured: false,
+        },
+    ),
+];
+
+fn io_field_capabilities_for(env: &str) -> IoFieldCapabilities {
+    IO_FIELD_ENVIRONMENTS
+        .iter()
+        .find(|(e, _)| *e == env)
+        .unwrap_or_else(|| {
+            panic!(
+                "capability_matrix: no IO_FIELD_ENVIRONMENTS row for {env:?} — add one (with a \
+                 producer-cited justification) before referencing it"
+            )
+        })
+        .1
+}
+
+/// `(environment key, fixture files)` — this section's OWN fixtures, separate from `canary_files()`
+/// on purpose (those feed set-equality pins and channel probes; splicing extra constructs into them
+/// would entangle two contracts). Every fixture that CAN express a construct contains it genuinely —
+/// see the section comment for which rows are construct-absence statements instead.
+fn io_field_canary_files() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
+    vec![
+        (
+            "typescript",
+            vec![
+                (
+                    "zzopIoFields.controller.ts",
+                    r#"declare function Controller(prefix: string): ClassDecorator;
+declare function Get(path?: string): MethodDecorator;
+declare function Post(path?: string): MethodDecorator;
+declare function Body(): ParameterDecorator;
+
+class ZzopCanaryOutDto {
+  id: string;
+}
+
+class ZzopCanaryCreateDto {
+  name: string;
+}
+
+@Controller('zzop-canary-io-fields')
+export class ZzopCanaryIoFieldsController {
+  @Get('out')
+  read(): Promise<ZzopCanaryOutDto> {
+    return Promise.resolve(new ZzopCanaryOutDto());
+  }
+
+  @Post('in')
+  create(@Body() dto: ZzopCanaryCreateDto): Promise<ZzopCanaryOutDto> {
+    return Promise.resolve(new ZzopCanaryOutDto());
+  }
+}
+"#,
+                ),
+                (
+                    "zzopIoFieldsRetry.ts",
+                    r#"import axios from 'axios';
+import axiosRetry from 'axios-retry';
+
+axiosRetry(axios, { retries: 3 });
+
+export function zzopRetriedWrite() {
+  return axios.post('/zzop-canary-retried-write', { name: 'x' });
+}
+"#,
+                ),
+            ],
+        ),
+        (
+            "python-3",
+            vec![(
+                "zzop_io_fields.py",
+                r#"from fastapi import FastAPI
+from pydantic import BaseModel
+import requests
+from tenacity import retry
+
+app = FastAPI()
+
+
+class ZzopCanaryOut(BaseModel):
+    id: str
+
+
+class ZzopCanaryIn(BaseModel):
+    name: str
+
+
+@app.get("/zzop-canary-io-fields")
+def zzop_read() -> ZzopCanaryOut:
+    return ZzopCanaryOut(id="1")
+
+
+@app.post("/zzop-canary-io-fields")
+def zzop_create(payload: ZzopCanaryIn) -> ZzopCanaryOut:
+    return ZzopCanaryOut(id="1")
+
+
+@retry
+def zzop_retried_write():
+    requests.post("https://api.example.com/zzop-canary", json={"name": "x"})
+"#,
+            )],
+        ),
+        (
+            "java-21",
+            vec![(
+                "ZzopIoFields.java",
+                r#"import org.springframework.retry.annotation.Retryable;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.client.RestTemplate;
+
+@RestController
+class ZzopCanaryIoFieldsController {
+  @GetMapping("/zzop-canary-io-fields")
+  ZzopCanaryOutDto read() { return new ZzopCanaryOutDto(); }
+
+  @PostMapping("/zzop-canary-io-fields")
+  ZzopCanaryOutDto create(@RequestBody ZzopCanaryInDto dto) { return new ZzopCanaryOutDto(); }
+
+  @Retryable
+  void zzopRetriedWrite() {
+    new RestTemplate().postForObject("https://api.example.com/zzop-canary", null, String.class);
+  }
+}
+
+class ZzopCanaryOutDto { public String id; }
+
+class ZzopCanaryInDto { public String name; }
+"#,
+            )],
+        ),
+        (
+            "rust",
+            vec![(
+                "zzop_io_fields.rs",
+                r#"use axum::routing::{get, post};
+use axum::{Json, Router};
+
+struct ZzopCanaryOut { id: String }
+struct ZzopCanaryIn { name: String }
+
+fn main() {
+    let app = Router::new()
+        .route("/zzop-canary-io-fields", get(zzop_read))
+        .route("/zzop-canary-io-fields", post(zzop_create));
+}
+
+async fn zzop_read() -> Json<ZzopCanaryOut> {
+    Json(ZzopCanaryOut { id: "1".to_string() })
+}
+
+async fn zzop_create(Json(payload): Json<ZzopCanaryIn>) -> Json<ZzopCanaryOut> {
+    Json(ZzopCanaryOut { id: payload.name })
+}
+"#,
+            )],
+        ),
+        (
+            "go",
+            vec![(
+                "zzop_io_fields.go",
+                r#"package main
+
+import (
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+)
+
+// Go handlers write to the context/ResponseWriter — there is no signature position that declares a
+// response DTO, so the `no` cells on this row are construct-absence statements (section comment).
+func main() {
+	r := gin.Default()
+	r.GET("/zzop-canary-io-fields", zzopIoFieldsHandler)
+}
+
+func zzopIoFieldsHandler(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"id": "1"})
+}
+"#,
+            )],
+        ),
+        (
+            "prisma",
+            vec![(
+                "zzop_io_fields.prisma",
+                r#"// A `db-table` provide has no HTTP contract to annotate — construct-absence row.
+model ZzopCanaryIoFields {
+  id String @id
+}
+"#,
+            )],
+        ),
+        (
+            "sql",
+            vec![(
+                "zzop_io_fields.sql",
+                r#"-- A `db-table` provide has no HTTP contract to annotate — construct-absence row.
+CREATE TABLE zzop_canary_io_fields (id INT);
+"#,
+            )],
+        ),
+        (
+            "csharp",
+            vec![(
+                "ZzopIoFields.cs",
+                r#"public class ZzopCanaryIoFieldsController {
+    [HttpGet]
+    public ZzopCanaryOutDto Read() { return new ZzopCanaryOutDto(); }
+
+    [HttpPost]
+    public ZzopCanaryOutDto Create([FromBody] ZzopCanaryInDto dto) { return new ZzopCanaryOutDto(); }
+}
+
+public class ZzopCanaryOutDto { public string Id; }
+
+public class ZzopCanaryInDto { public string Name; }
+"#,
+            )],
+        ),
+        (
+            "lexical-fallback",
+            vec![(
+                "zzopIoFields.kt",
+                r#"// .kt is never dispatched (lexical fallback) — a genuinely TYPED Kotlin handler shape, so this
+// row's `no` cells are proven against a file containing the construct, not one omitting it.
+data class ZzopCanaryOut(val id: String)
+
+fun zzopRead(): ZzopCanaryOut = ZzopCanaryOut("1")
+"#,
+            )],
+        ),
+    ]
+}
+
+/// The io-field table's row set must mirror `ENVIRONMENTS` exactly, and every row must have its own
+/// fixture — the same "a row nobody measures is worse than absent" lesson
+/// `every_declared_environment_has_a_canary_that_measures_it` documents.
+#[test]
+fn io_field_environments_mirror_the_channel_table_and_each_row_has_a_fixture() {
+    let channel_rows: BTreeSet<&str> = ENVIRONMENTS.iter().map(|(e, _)| *e).collect();
+    let field_rows: BTreeSet<&str> = IO_FIELD_ENVIRONMENTS.iter().map(|(e, _)| *e).collect();
+    assert_eq!(
+        channel_rows, field_rows,
+        "capability_matrix: IO_FIELD_ENVIRONMENTS must have exactly one row per ENVIRONMENTS row — \
+         a new environment cannot land with its io-field coverage undeclared"
+    );
+    let fixture_rows: BTreeSet<&str> = io_field_canary_files()
+        .into_iter()
+        .map(|(e, _)| e)
+        .collect();
+    assert_eq!(
+        field_rows, fixture_rows,
+        "capability_matrix: every IO_FIELD_ENVIRONMENTS row needs an io_field_canary_files() entry \
+         (and vice versa) — an unmeasured declaration row is a claim nobody has compared to the engine"
+    );
+}
+
+/// Canary #6 (MINIMAL EXISTENCE, bidirectional): the three io FIELDS per environment, read off the
+/// ASSEMBLED whole-tree io exactly like canary #2 — `response`/`body` after assemble-time DTO
+/// resolution (the state the native rules actually read), `retry_configured` as the collector left it.
+/// A declared-`no` row whose fixture measures `Some` means a producer landed without flipping its
+/// cell; a declared-`yes` row measuring `None` means the capture (or its assemble resolution) lost
+/// its wiring.
+#[test]
+fn canary_io_fields_match_the_declared_table() {
+    let dir = TempDir::new("zzop-capability-matrix-iofields");
+    for (_, files) in io_field_canary_files() {
+        for (name, content) in files {
+            dir.write(name, content);
+        }
+    }
+    let out = canary_engine_output(&dir, Vec::new());
+    let io = out.ir.ir.io.as_ref();
+
+    let mut mismatches = Vec::new();
+    for (env, files) in io_field_canary_files() {
+        let caps = io_field_capabilities_for(env);
+        let in_env = |file: &str| files.iter().any(|(name, _)| *name == file);
+        let has_response = io.is_some_and(|io| {
+            io.provides
+                .iter()
+                .any(|p| in_env(&p.file) && p.response.is_some())
+        });
+        let has_body = io.is_some_and(|io| {
+            io.provides
+                .iter()
+                .any(|p| in_env(&p.file) && p.body.is_some())
+        });
+        let has_retry = io.is_some_and(|io| {
+            io.consumes
+                .iter()
+                .any(|c| in_env(&c.file) && c.retry_configured == Some(true))
+        });
+        for (column, declared, measured) in [
+            (
+                "io_provide_response",
+                caps.io_provide_response,
+                has_response,
+            ),
+            ("io_provide_body", caps.io_provide_body, has_body),
+            (
+                "io_consume_retry_configured",
+                caps.io_consume_retry_configured,
+                has_retry,
+            ),
+        ] {
+            if declared != measured {
+                mismatches.push(format!(
+                    "{env}: declared {column}={declared}, engine actually projected {measured} \
+                     (MINIMAL-EXISTENCE mismatch — and remember the section comment: a `yes` is \
+                     channel-existence, gated inside the environment by the ONE producing framework \
+                     shape, never an all-frameworks claim)"
+                ));
+            }
+        }
+    }
+    assert!(
+        mismatches.is_empty(),
+        "capability_matrix: IO_FIELD_ENVIRONMENTS disagrees with the real assembled engine \
+         projection: {mismatches:#?}"
     );
 }

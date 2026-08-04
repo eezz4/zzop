@@ -14,6 +14,13 @@
 //! `pack_loader::pack_regex_issues` reports the same class of defect ahead of a run, for a pack a user
 //! chose to validate; this channel reports what an ACTUAL evaluation actually skipped, including packs
 //! nothing forced through that validator (inline `packDefs`, a `packsDir` pack, a bundled pack).
+//!
+//! Every message here points at the validator in BOTH host dialects — `` `zzop validate-rule-pack
+//! <pack.json>` `` and the `validate_rule_pack` MCP tool — the same pairing
+//! `zzop_engine::analyze::diagnostics::capability`'s load-scope twin uses. This sink is a PUBLIC
+//! embedder channel (`dsl::eval_pack_into`), so the crate cannot know which host will render the line;
+//! naming one spelling hands the other audience a command it cannot type. Contract 16
+//! (`crates/engine/tests/rule_contracts/host_vocabulary.rs`) scans this file for exactly that.
 
 use super::def::LabeledPattern;
 
@@ -47,7 +54,8 @@ impl<'a> RuleDiag<'a> {
             Err(err) => {
                 let message = format!(
                     "rule \"{}\": `{field}` is not a valid regex — the rule was SKIPPED and can never fire; \
-                     run `zzop validate-rule-pack` on this pack to catch this before a scan. regex error: {err}",
+                     catch this before a scan with `zzop validate-rule-pack <pack.json>` (CLI binary) / \
+                     the `validate_rule_pack` MCP tool. regex error: {err}",
                     self.rule_id
                 );
                 self.push(message);
@@ -104,8 +112,8 @@ impl<'a> RuleDiag<'a> {
     /// lowercase clause completing "rule \"x\": <why> — the rule was SKIPPED ...".
     pub(super) fn malformed(&mut self, why: &str) {
         let message = format!(
-            "rule \"{}\": {why} — the rule was SKIPPED and can never fire; \
-             run `zzop validate-rule-pack` on this pack to catch this before a scan.",
+            "rule \"{}\": {why} — the rule was SKIPPED and can never fire; catch this before a scan \
+             with `zzop validate-rule-pack <pack.json>` (CLI binary) / the `validate_rule_pack` MCP tool.",
             self.rule_id
         );
         self.push(message);

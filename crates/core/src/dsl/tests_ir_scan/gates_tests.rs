@@ -210,6 +210,7 @@ fn suppress_marker_recognizes_the_python_hash_comment_leader() {
     // io-scan anchor lines span every provide-producing language — `# zzop-protected-path-no-auth-evidence-ok` on a FastAPI route
     // line must suppress exactly like `// zzop-protected-path-no-auth-evidence-ok` on an Express one (`compile_marker_line_comment`).
     let provides = vec![IoProvide {
+        response: None,
         kind: "http".into(),
         key: "GET /legacy".into(),
         file: "app.py".into(),
@@ -277,6 +278,7 @@ fn a_python_hash_near_miss_is_disclosed_and_ordinary_anchor_prose_is_not() {
         r#"{"id":"legacy","severity":"info","message":"m","matcher":{"type":"io-scan","file_pattern":"\\.py$","direction":"provides"}}"#,
     );
     let provides = vec![IoProvide {
+        response: None,
         kind: "http".into(),
         key: "GET /legacy".into(),
         file: "app.py".into(),

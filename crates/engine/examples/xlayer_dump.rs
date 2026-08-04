@@ -2,6 +2,11 @@
 //! unprovided consume / unconsumed provide is a real contract gap or an extraction artifact.
 //! Usage: `cargo run --release -p zzop-engine --example xlayer_dump -- <root> [<root> ...]`
 
+// This target PRINTS BY DESIGN, so the workspace `print_stdout` lint is exempted here rather than
+// the lint being weakened for everyone. See root Cargo.toml [workspace.lints.clippy]: it measured
+// zero in every library `src/`, and Cargo's lint table cannot be scoped to a single target.
+#![allow(clippy::print_stdout)]
+
 use std::path::PathBuf;
 
 use zzop_engine::{analyze_trees, EngineConfig};

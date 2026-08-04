@@ -131,7 +131,9 @@ schema's `$comment`, and the shipped contract falsifies it. `version` is a zzop 
 ADDITIVE included, if an engine that silently drops the new field would produce a different analysis
 than one that honours it. `overrides` is exactly that case: purely additive, and it carries a version
 floor of `0.27.0` for the reason spelled out in [NORMALIZED_AST.md](../NORMALIZED_AST.md)'s "The
-`overrides` version floor". An additive field an older engine can safely ignore — a hint, an extra
+`overrides` version floor". `calls` is the second: an engine that drops it silently loses the whole
+call-graph rule family for that envelope (a recall loss with no trace), so it carries a floor of
+`0.29.0`. An additive field an older engine can safely ignore — a hint, an extra
 provenance tag — does not move it, and is what `additionalProperties: true` is for. See the schema's
 own `$comment` for the same statement in machine-readable form.
 

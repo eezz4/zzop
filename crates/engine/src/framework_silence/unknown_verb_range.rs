@@ -91,6 +91,7 @@ mod tests {
 
     fn provide(file: &str, key: &str) -> IoProvide {
         IoProvide {
+            response: None,
             kind: "http".to_string(),
             key: key.to_string(),
             file: file.to_string(),

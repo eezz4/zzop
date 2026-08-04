@@ -12,6 +12,22 @@
 //! it is `zzop contract example-envelope` and `zzop contract envelope-guide` telling one adapter author
 //! two different things.
 //!
+//! ## The other axis, and why every committed ENVELOPE lives on this one
+//! `scripts/check-release-version-propagation.sh` owns the RELEASE axis: every committed `"version"` on
+//! the release surface equals `Cargo.toml`'s `[workspace.package] version`. An envelope's `"version"` is
+//! not on that surface — it names the SHAPE the bytes conform to. The two numbers are equal today only
+//! by coincidence, and the moment the contract legitimately lags the release (its normal state), the
+//! release guard would force every committed envelope to declare a contract version that does not exist.
+//! The guard therefore classifies envelopes by their own bytes (`"format": "zzop-normalized-ast"`) and
+//! holds them out; [`every_committed_envelope_declares_a_contract_version_this_build_accepts`] is where
+//! they land instead, so neither axis has an unguarded hole.
+//!
+//! What that test can bind is NOT equality with the constant. An envelope declaring an older contract
+//! version is the contract WORKING — `examples/adapters/*` deliberately still emit `0.27.0` to prove a
+//! producer survives releases it predates — so demanding equality would be the calendar defect one level
+//! out. What holds for every envelope regardless is that its declared version is a real contract version
+//! this build accepts: parseable, at or below the current contract, and passing `validate_envelope`.
+//!
 //! ## The failure this exists to prevent, which already happened
 //! During the v0.28.0 bump, `scripts/check-release-version-propagation.sh` (semver-shaped, and unable to
 //! know this field is not release-tracking) rewrote `example-envelope.json` to `0.28.0`, and the constant
@@ -79,19 +95,184 @@ fn every_shipped_copy_of_the_envelope_contract_version_agrees_with_the_constant(
     }
 }
 
-/// The version must not silently become the workspace version. They are equal only by coincidence when
-/// a release happens to change the shape; a test that asserted equality would re-introduce exactly the
-/// calendar-tracking defect the constant's ruling rejects. So this asserts the opposite direction: the
-/// propagation guard must still be excluding the example envelope.
+/// A per-feature floor (`MIN_VERSION_FOR_*`) pins to the release that introduced ITS feature, and a
+/// later contract bump must not drag it along — a floor that tracks the contract version answers "what
+/// is current" to a reader who asked "since when". No test can see that a floor was wrongly moved, so
+/// this asserts the two things that hold either way: a floor is a parseable version at or below the
+/// current contract version (above it would name a release no conforming producer may declare), and the
+/// guide states its value, since a floor no author can read rejects envelopes for an invisible reason.
 #[test]
-fn the_release_propagation_guard_still_excludes_the_example_envelope() {
+fn every_per_feature_floor_is_stated_in_the_guide_and_at_or_below_the_contract_version() {
+    let contract = zzop_core::parse_contract_version(zzop_core::NORMALIZED_AST_CONTRACT_VERSION)
+        .expect("NORMALIZED_AST_CONTRACT_VERSION must be MAJOR.MINOR.PATCH");
+    let guide = read("docs/NORMALIZED_AST.md");
+    for (name, floor) in [
+        (
+            "MIN_VERSION_FOR_OVERRIDES",
+            zzop_core::MIN_VERSION_FOR_OVERRIDES,
+        ),
+        (
+            "MIN_VERSION_FOR_ROUTER_MOUNT_REF",
+            zzop_core::MIN_VERSION_FOR_ROUTER_MOUNT_REF,
+        ),
+    ] {
+        let parsed = zzop_core::parse_contract_version(floor)
+            .unwrap_or_else(|| panic!("{name} ({floor}) must be MAJOR.MINOR.PATCH"));
+        assert!(
+            parsed <= contract,
+            "{name} is {floor}, above the current contract version {}. A floor names the release that \
+             introduced its feature, so it can never exceed the release whose shape is current — one of \
+             the two moved wrongly.",
+            zzop_core::NORMALIZED_AST_CONTRACT_VERSION
+        );
+        assert!(
+            guide.contains(floor),
+            "docs/NORMALIZED_AST.md never mentions {floor}, the value of {name}. An adapter author is \
+             told which version to declare by that document alone; a floor it does not state rejects \
+             envelopes for a reason their author cannot read."
+        );
+    }
+}
+
+/// Every tracked file whose own bytes say it is a Normalized-AST envelope, as `(repo-relative path,
+/// declared version)`. Classified by CONTENT — top-level `"format": "zzop-normalized-ast"` — never by
+/// path or extension, so an envelope added anywhere in the tree joins this subject set without an edit
+/// here. A path list is the second copy of a fact this repo keeps paying for, and this exact subject had
+/// one: the guard named `docs/contracts/example-envelope.json` by hand while `cases/`'s two envelopes
+/// sat on the release axis, two envelopes under two rules with nothing saying which was right.
+///
+/// The subject is derived from `git ls-files` for the same reason `markers.rs` derives its pages there:
+/// a hardcoded root can stop resolving and a green result then means nothing was read.
+fn committed_envelopes() -> Vec<(String, String)> {
+    let root = repo();
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&root)
+        .args(["ls-files", "-z"])
+        .output()
+        .unwrap_or_else(|e| {
+            panic!(
+                "could not run `git ls-files` in {} ({e}) — this contract DERIVES its envelopes from \
+                 git, so without it there is no subject set and a green result would mean nothing was \
+                 read",
+                root.display()
+            )
+        });
+    assert!(
+        out.status.success(),
+        "`git ls-files` failed in {}: {}",
+        root.display(),
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let mut found = Vec::new();
+    for rel in String::from_utf8_lossy(&out.stdout)
+        .split('\0')
+        .filter(|s| !s.is_empty())
+    {
+        let Ok(text) = std::fs::read_to_string(root.join(rel)) else {
+            continue; // binary or deleted-in-worktree; neither can be an envelope
+        };
+        // Cheap prefilter, then the real test: it must PARSE as JSON and carry the format string as a
+        // top-level field. Without the parse, this crate's own test fixtures — which embed envelope
+        // text inside Rust string literals — would be classified as envelopes.
+        if !text.contains(zzop_core::NORMALIZED_AST_FORMAT) {
+            continue;
+        }
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+            continue;
+        };
+        if value.get("format").and_then(|v| v.as_str()) != Some(zzop_core::NORMALIZED_AST_FORMAT) {
+            continue;
+        }
+        let declared = value
+            .get("version")
+            .and_then(|v| v.as_str())
+            .unwrap_or_else(|| {
+                panic!("{rel} is a Normalized-AST envelope but declares no string `version`")
+            });
+        found.push((rel.to_string(), declared.to_string()));
+    }
+    found
+}
+
+/// The whole committed envelope population, on the contract axis rather than the release one.
+///
+/// Equality with the constant is deliberately NOT the assertion — see the module doc. What is asserted
+/// is that each declared version is a contract version that exists and that this build accepts, which is
+/// exactly the property the release guard would have destroyed by dragging these files onto the calendar.
+#[test]
+fn every_committed_envelope_declares_a_contract_version_this_build_accepts() {
+    let contract = zzop_core::parse_contract_version(zzop_core::NORMALIZED_AST_CONTRACT_VERSION)
+        .expect("NORMALIZED_AST_CONTRACT_VERSION must be MAJOR.MINOR.PATCH");
+    let envelopes = committed_envelopes();
+
+    // Non-empty floor, mirroring the one the release guard keeps on its own extraction: a classifier
+    // that stopped matching would report a clean tree having read nothing, and the envelopes would
+    // silently fall back onto the release axis with no test left holding them.
+    assert!(
+        !envelopes.is_empty(),
+        "classified ZERO committed Normalized-AST envelopes. The `\"format\": \
+         \"{}\"` self-identification was reshaped, or `git ls-files` returned nothing — either way \
+         this contract read no bytes and its green means nothing.",
+        zzop_core::NORMALIZED_AST_FORMAT
+    );
+    assert!(
+        envelopes
+            .iter()
+            .any(|(rel, _)| rel == "docs/contracts/example-envelope.json"),
+        "the envelope an adapter author copies (docs/contracts/example-envelope.json) is not in the \
+         classified set {envelopes:?} — the content classification is no longer finding the file this \
+         contract is most about."
+    );
+
+    for (rel, declared) in &envelopes {
+        let parsed = zzop_core::parse_contract_version(declared).unwrap_or_else(|| {
+            panic!(
+                "{rel} declares version {declared}, which is not MAJOR.MINOR.PATCH. Every envelope \
+                 version names a RELEASE whose shape it conforms to, and a string no consumer can \
+                 order against is rejected by every engine that reads it."
+            )
+        });
+        assert!(
+            parsed <= contract,
+            "{rel} declares envelope version {declared}, ABOVE the current contract version {}. That \
+             names a shape no build in this repo produces or accepts (\"reject newer, never guess\"). \
+             Declaring an OLDER version is fine and is the contract working; declaring a newer one \
+             means either the shape moved without the constant, or this file was dragged onto the \
+             RELEASE version by something that mistook the two axes for one — see this file's \
+             module doc.",
+            zzop_core::NORMALIZED_AST_CONTRACT_VERSION
+        );
+        if let Err(issues) = zzop_core::validate_envelope(&read(rel)) {
+            panic!(
+                "{rel} is a committed envelope this build REJECTS: {issues:?}. A shipped envelope that \
+                 does not validate is one an adapter author may copy — including the per-feature floors \
+                 (`MIN_VERSION_FOR_*`), which a declared version moved by the wrong axis violates."
+            );
+        }
+    }
+}
+
+/// The release axis must keep classifying envelopes by CONTENT, not by a path list. This is the seam
+/// between the two guards, and it is the seam that was wrong: the shell guard named one envelope by path
+/// and silently held the others to the release version.
+#[test]
+fn the_release_propagation_guard_classifies_envelopes_by_content() {
     let guard = read("scripts/check-release-version-propagation.sh");
     assert!(
-        guard.contains("docs/contracts/example-envelope"),
-        "scripts/check-release-version-propagation.sh no longer names \
-         docs/contracts/example-envelope.json. That guard rewrites every semver-shaped `\"version\"` in \
-         tracked JSON to the workspace version, and this one file must be exempt — it carries the \
-         envelope SHAPE version, whose contract is that it does not track releases. Without the \
-         exclusion the next release silently breaks every 0.x adapter again."
+        guard.contains(zzop_core::NORMALIZED_AST_FORMAT),
+        "scripts/check-release-version-propagation.sh no longer mentions \"{}\", so it is no longer \
+         classifying envelopes by their own bytes. That guard forces every semver-shaped `\"version\"` \
+         in tracked JSON to the workspace version, and an envelope's version is the SHAPE contract, \
+         which does not track releases. Without the content test the next release silently breaks \
+         every 0.x adapter again.",
+        zzop_core::NORMALIZED_AST_FORMAT
+    );
+    assert!(
+        !guard.contains("^docs/contracts/example-envelope"),
+        "scripts/check-release-version-propagation.sh has an anchored PATH exclusion for the example \
+         envelope again. Content classification already covers it; two mechanisms for one exemption is \
+         how the other envelopes ended up on the wrong axis in the first place."
     );
 }

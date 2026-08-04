@@ -16,16 +16,21 @@ zzop-engine = { path = "../engine" }
 # crate; the dependency edge stays acyclic (`zzop-config` depends only on `serde_json` + `zzop-cache`
 # and must never depend on this crate's request types — see `src/lib.rs`'s corollary).
 zzop-config = { path = "../config" }
-# Path deps purely for `version_string()`'s diagnostic form (`PARSER_FINGERPRINT` constants) — NOT for
-# `version()`, the bare form in the same module, which reads no parser at all. Not part of the analyze
-# pipeline either (that lives entirely inside `zzop-engine`).
-zzop-parser-typescript = { path = "../../parser/parser-typescript" }
-zzop-parser-prisma = { path = "../../parser/parser-prisma" }
-zzop-parser-python-3 = { path = "../../parser/parser-python-3" }
-zzop-parser-java-21 = { path = "../../parser/parser-java-21" }
-zzop-parser-rust = { path = "../../parser/parser-rust" }
-zzop-parser-go = { path = "../../parser/parser-go" }
-zzop-parser-sql = { path = "../../parser/parser-sql" }
-zzop-parser-csharp = { path = "../../parser/parser-csharp" }
+# No parser path deps: `version_string()`'s diagnostic form reads the derived fingerprints through
+# `zzop_engine::parser_fingerprints()` (id + source hash in one value, same owner as the cache key)
+# instead of each parser's `PARSER_FINGERPRINT` constant — the eight direct parser deps this crate
+# carried for that one function were retired with the 2026-08-03 derived-stamp reform.
 serde = { workspace = true }
 serde_json = { workspace = true }
+
+[dev-dependencies]
+# `skip_notice!` — the one stderr writer `src/analyze_tests.rs` is allowed. That module is a
+# `#[cfg(test)] mod` inside this LIBRARY, so covering it with a crate-level `#![allow]` would open
+# the hole in the very lib the lint policy protects; a dev-dependency keeps it out of the build.
+zzop-test-support = { path = "../test-support" }
+
+# Inherit the workspace lint policy (root Cargo.toml [workspace.lints.clippy]) — every member does,
+# with no exceptions. Where a single target legitimately violates one, the exemption is a crate-level
+# #![allow] at that target's entry point, never a hole in this table.
+[lints]
+workspace = true

@@ -292,6 +292,53 @@ fn rule_overrides_applied_lists_only_ids_that_actually_matched() {
 }
 
 #[test]
+fn rule_overrides_applied_confirms_an_honored_pack_allowlist() {
+    // The v0.29.0 release-audit finding, pinned from both sides: `packs.only` suppresses strictly more
+    // than `packs.disabled`, so a run that sets it and gets back no acknowledgement is a run whose
+    // missing findings have no wire evidence at all. `packsLoaded` cannot stand in — it is a path-match
+    // census and is byte-identical under either knob.
+    let dir = fixture_tree();
+    let mut cfg = config(DEFAULT_SIZE_CAP);
+    let a_loaded_pack = cfg
+        .packs
+        .first()
+        .map(|p| p.id.clone())
+        .expect("the fixture config loads at least one DSL pack");
+    cfg.rule_config.only_packs.push(a_loaded_pack.clone());
+    cfg.rule_config
+        .only_packs
+        .push("no-such-pack-typo".to_string());
+    let out = analyze_tree(dir.path(), &cfg);
+    let applied = out
+        .rule_overrides_applied
+        .expect("expected Some — only_packs alone must be enough to open the field");
+    assert_eq!(applied.only, vec![a_loaded_pack]);
+    assert!(applied.disabled.is_empty());
+    assert!(applied.severity_remapped.is_empty());
+}
+
+#[test]
+fn a_pack_allowlist_naming_no_loaded_pack_reports_an_empty_only_rather_than_nothing() {
+    // The dangerous typo: `is_pack_enabled` then admits NO pack and every DSL finding disappears at
+    // once, and there is no unknown-id diagnostic for this knob today. `Some` with an EMPTY `only` is
+    // the whole signal — collapsing it to `None` would make it indistinguishable from "never set".
+    let dir = fixture_tree();
+    let mut cfg = config(DEFAULT_SIZE_CAP);
+    cfg.rule_config
+        .only_packs
+        .push("no-such-pack-typo".to_string());
+    let out = analyze_tree(dir.path(), &cfg);
+    let applied = out
+        .rule_overrides_applied
+        .expect("an all-typo allowlist WAS a request — it must still be confirmed");
+    assert!(
+        applied.only.is_empty(),
+        "a typo names no loaded pack, so nothing was applied: {:?}",
+        applied.only
+    );
+}
+
+#[test]
 fn rule_overrides_applied_is_none_when_nothing_was_requested() {
     let dir = fixture_tree();
     let out = analyze_tree(dir.path(), &config(DEFAULT_SIZE_CAP));

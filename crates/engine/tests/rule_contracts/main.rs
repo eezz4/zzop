@@ -25,7 +25,7 @@
 //!    `disable_hint_literal_args_are_known_ids_matching_the_files_own_findings`) — a
 //!    pragmatic grep-based proxy (native findings are built in code, not read from declarative data — see
 //!    each test's own doc for exactly what this can and cannot prove). The first accepts either a literal
-//!    `disabled_rules` mention OR a call to the shared `zzop_core::finding::disable_hint` builder every
+//!    `disabled_rules`/`disabledRules` mention OR a call to the shared `zzop_core::finding::disable_hint` builder every
 //!    native message's disable-hint fragment now goes through (see that test's doc for why the OR is load-
 //!    bearing, not incidental); the second proves each literal `disable_hint("<id>")` argument is a real id
 //!    matching what the same file actually emits (a wrong-id hint = a silent config no-op for the user).
@@ -114,9 +114,26 @@
 //!     disable sentence to EVERY DSL finding (`pipeline::findings`'s `append_disable_hints`), so an
 //!     author who writes one too ships it TWICE. It shipped once (`perf/sqlalchemy-eager-relationship`),
 //!     and the hand-written copy was the worse of the two — it named only the embedder field, never the
-//!     config-file spelling. Contract 2 above still ACCEPTS `disabled_rules` as a "how to exclude" leg;
-//!     this one removes that option for DSL specifically, so the single thing a pack author writes is
-//!     their own derived `zzop-<id>-ok` marker.
+//!     config-file spelling. Contract 2 above still ACCEPTS `disabled_rules`/`disabledRules` as a "how
+//!     to exclude" leg; this one removes that option for DSL specifically (both spellings), so the
+//!     single thing a pack author writes is their own derived `zzop-<id>-ok` marker.
+//! 18. **Recognizer CHANNEL binding** (`recognizer_channels.rs`) — the axis `recognizer_drift` names as
+//!     unbound. Every `FrameworkRecognizer::emits` set must equal the channels its backing modules'
+//!     own code constructs, derived from (side, `kind:`) at each io struct literal plus a type hop
+//!     through the engine's `compose_*(zzop_core::…Fragment) -> Io…` signatures for the seven
+//!     recognizers that return fragments instead of io. `hono` shipped declaring one side of a join it
+//!     filled both sides of, and a human found it. Rows no evidence reaches are pinned by name with a
+//!     reason each — see that file's own doc for what the pin does and does not mean.
+//! 19. **Call-KIND binding** (`call_kind_readers.rs`) — `zzop_core::RULE_READ_CALL_KINDS` must equal the
+//!     set of kinds shipped `call-scan` rules name in `CallScan::kind`. Same doctrine as
+//!     `io_kind_readers.rs` (contract-less until now because the constant was honestly empty), and the
+//!     same two silent drift directions: a kind read but unlisted makes an unread-kind disclosure cry
+//!     wolf, a kind listed but unread makes it stay quiet about facts nothing consumes. It derives its
+//!     subject set from the LOADED PACKS rather than by grepping source, because a call kind is named
+//!     declaratively in JSON where an io kind is compared in Rust — a transliteration of io's grep would
+//!     have found zero literals and gone vacuously green. Second leg: every kind a rule names must be a
+//!     spelling some `zzop_core::CALL_KIND_*` constant fixes, which is what catches a typo the set
+//!     equality alone would happily bless on both sides at once.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -125,6 +142,7 @@ use zzop_core::{load_dsl_packs, RulePackDef, RuleRegistry};
 use zzop_engine::register_all_native;
 
 mod bare_words;
+mod call_kind_readers;
 mod capability_matrix;
 mod catalog_sync;
 mod config_surface;
@@ -134,10 +152,13 @@ mod host_vocabulary;
 mod id_hygiene;
 mod io_kind_readers;
 mod kernel_vocabulary;
+mod literal_scan_threshold;
 mod markers;
 mod native_messages;
 mod pack_loading;
+mod path_anchor_pin;
 mod policy_pins;
+mod recognizer_channels;
 mod recognizer_drift;
 mod reference_unit_tests;
 mod reference_validation;

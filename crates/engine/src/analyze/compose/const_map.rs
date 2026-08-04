@@ -20,6 +20,10 @@ pub(crate) fn merge_const_map_fragments(
     sorted.sort_by(|a, b| a.0.cmp(&b.0));
     let mut merged: BTreeMap<String, String> = BTreeMap::new();
     for (_, fragment) in sorted {
+        #[allow(
+            clippy::iter_over_hash_type,
+            reason = "iteration order cannot reach the result: one fragment's keys are unique, so the first-writer-wins fold into the `merged` BTreeMap is commutative; cross-fragment precedence comes from the `rel` sort above"
+        )]
         for (key, value) in fragment {
             merged.entry(key.clone()).or_insert_with(|| value.clone());
         }

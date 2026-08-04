@@ -23,6 +23,11 @@ pub(crate) const PINNED_NODE_KINDS: &[&str] = &[
     "record_declaration",
     "delegate_declaration",
     "global_statement",
+    // Loop spans (`lang::loop_spans`)
+    "for_statement",
+    "foreach_statement",
+    "while_statement",
+    "do_statement",
     // Symbols (`lang::symbols`)
     "declaration_list",
     "enum_member_declaration_list",
@@ -53,6 +58,9 @@ pub(crate) const PINNED_NODE_KINDS: &[&str] = &[
     "interpolated_string_expression",
     "string_content",
     "interpolation",
+    // EF Core db-table provides (`adapters::ef_core`): `DbSet<T>` property-type reading.
+    "type_argument_list",
+    "nullable_type",
     // Calls/expressions (`adapters::provides`, `adapters::http_clients`, `lang::used_names`)
     "invocation_expression",
     "member_access_expression",

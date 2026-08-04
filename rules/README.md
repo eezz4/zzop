@@ -11,11 +11,13 @@ whether the rule is common or environment-specific).
 - **Distribution**: bundled in the engine's prebuilds (5 platforms). Changing one requires rebuilding.
 - **Examples**: `rules-graph` (circular, unreachable, dead-candidates, unimported-export), `rules-http`
   (single-tree HTTP/route rules: duplicate-route, route-shadowing, mutating-route-no-auth,
-  unprovided-consume, plus the 2 call-graph-BFS scanners unsafe-read-endpoint and non-idempotent-write),
-  `rules-cross-layer` (the 25 multi-tree `cross-layer/*` rules joining HTTP/DB/tRPC IO facts across
+  unprovided-consume, plus the call-graph-BFS scanners unsafe-read-endpoint and non-idempotent-write),
+  `rules-cross-layer` (the multi-tree `cross-layer/*` rules joining HTTP/DB/tRPC IO facts across
   trees), and `rules-schema`
-  (the 9 Prisma structural rules + the 3 usage-aware checks, each a registered `schema/*` id of its own
-  behind the `schema-structural`/`schema-usage` family gates). Seams, criticality,
+  (the Prisma structural rules + the usage-aware checks, each a registered `schema/*` id of its own
+  behind the `schema-structural`/`schema-usage` family gates). Per-crate counts are not written here —
+  [`docs/rules/catalog.md`](../docs/rules/catalog.md)'s totals are machine-checked against the loaded
+  rule set, and a second hand-kept copy would drift from them. Seams, criticality,
   scores, health, and recommendations are **not** rules — they're scores computed in `crates/metrics`,
   registered via that crate's own `register_native_analyses` (see "Adding a rule" below), and only ride the
   same `RuleConfig` disable/suppress/severity-override id space as native rules do. Layer-violations/feature-envy are a roadmap item
@@ -45,8 +47,8 @@ whether the rule is common or environment-specific).
   compiled in, not shipped as data.
 - **Extensibility**: same DSL schema for first-party and third-party — a user can drop in a JSON rule.
 - **Why DSL over WASM?** Redistribution is needed regardless, so the DSL gives the same build-free / platform-independent benefits while wasmtime, the ABI, the boundary cost, and the ~3x slowdown all disappear. (Biome GritQL / ast-grep / Semgrep model.)
-- **Status**: 12 packs shipped (`rules/dsl/<pack>/<pack>.json`), most with rules implemented, a handful
-  still `"rules": []` stubs. Java security-concern rules live in `security` (concern-named, not
+- **Status**: every shipped pack lives at `rules/dsl/<pack>/<pack>.json` and every one of them carries
+  rules — there are no `"rules": []` stubs left. Java security-concern rules live in `security` (concern-named, not
   language-named), including `cmd-injection` (a `method-scan` co-occurrence of `exec`/`ProcessBuilder`
   with string concatenation — no Java CST needed after all). Full pack/rule list:
   [`docs/rules/catalog.md`](../docs/rules/catalog.md).

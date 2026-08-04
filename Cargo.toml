@@ -16,6 +16,12 @@ members = [
   "crates/config",
   "crates/summary",
 
+  # Test-only, and a dev-dependency of four of the crates above and of nothing else — it links into no
+  # shipped binary. It is a crate rather than a module because the thing it owns is an exemption from
+  # `clippy::print_stderr` (see the lint table below), and an exemption parked in a shipped library is
+  # a hole in the library the policy protects.
+  "crates/test-support",
+
   # Product layer: packages/ holds everything that SHIPS, one dir per product. `packages/cli` is a
   # zero-logic npm shim (pure JS, spawns the native `zzop` binary — not a Cargo member); the two below
   # are the native binaries themselves, each its own Cargo package building exactly one [[bin]] over
@@ -59,7 +65,7 @@ members = [
 # the `0.0.0` placeholder), and a stamp cannot fail the way a verification can. `version_string()`
 # / the binaries report `CARGO_PKG_VERSION` directly (no `ZZOP_RELEASE_VERSION` env). Cache-bust tokens are
 # stamped with this version at their scope's last change — see the cache decision.
-version = "0.28.0"
+version = "0.29.0"
 edition = "2021"
 license = "MIT"
 
@@ -78,3 +84,89 @@ rayon = "1"
 # and spawns a subprocess per case — the no-panic properties here run in-process, so that machinery is
 # dead weight in every parser test binary.
 proptest = { version = "1", default-features = false, features = ["std", "bit-set"] }
+
+# ---------------------------------------------------------------------------------------------------
+# Lint policy (2026-08-01). Before this, zzop had NO lint configuration at all — no [workspace.lints],
+# no clippy.toml, no crate-level #![warn] — so `cargo clippy -- -D warnings` was exercising default
+# lints only, and the `restriction`/`pedantic` groups had never been examined.
+#
+# LEVEL IS `warn`, NEVER `deny`. CI (.github/workflows/ci.yml) and scripts/ci-local.sh both run
+# `cargo clippy --workspace --all-targets -- -D warnings`, so `-D warnings` stays the single knob that
+# decides whether a warning is fatal. Denying here would create a second, competing policy.
+#
+# ADMISSION RULE for this table: a lint is listed only if it (a) measured ZERO over the scope it
+# applies to — nothing anywhere is allow-listed per-violation to make a lint green — and (b) names a
+# defect class this repo actually has. (b) is what stops the table from growing into noise; "it is
+# free" is not a reason on its own — roughly thirty restriction lints measured zero here and were still
+# left off because no defect class could be named for them.
+#
+# The measured counts behind every rejection are recorded in the project's internal decision notes and
+# are deliberately NOT copied here: a count is a dated snapshot, and a snapshot duplicated into two
+# files is a snapshot that will disagree with itself. Re-measure instead of trusting any number:
+#   cargo clippy --workspace --all-targets --message-format json -- -W clippy::<name>
+# De-duplicate by file:line before judging — clippy reports a violation once per target a file compiles
+# into, so anything in both a lib and its lib-test counts twice.
+[workspace.lints.clippy]
+# --- Measured zero across every member and every target ---
+dbg_macro = "warn"             # debug residue on a shipping surface
+todo = "warn"                  # `todo!()` in a release build is a panic with no message
+unimplemented = "warn"         # same, and it reads as deliberate rather than forgotten
+panic_in_result_fn = "warn"    # several modules document a "returns Err, never panics" contract
+create_dir = "warn"            # cache/export dirs are nested; `create_dir` fails on a missing parent
+match_wild_err_arm = "warn"    # `Err(_) => panic!(..)` drops the cause; diagnostic text is a product surface
+
+# NOT here: anything from the `clippy::cargo` group (`wildcard_dependencies` was the one we wanted — a
+# `*` requirement would make the THIRD-PARTY-NOTICES inventory unreproducible). That group is INERT in
+# this workspace and would have been decoration: with `-W clippy::cargo` forced on AND a live
+# `serde_json = "*"` planted in crates/cache/Cargo.toml, clippy emitted zero cargo-group diagnostics —
+# not even `cargo_common_metadata`, which these `publish = false` crates all violate. The root manifest
+# here is a VIRTUAL manifest (`[workspace]` with no `[package]`), so clippy's cargo pass has no root
+# package to attach to. Re-test if the workspace ever gains a root `[package]`.
+
+# --- Measured zero in every library `src/`; nonzero ONLY in targets whose job IS to print or exit ---
+# Cargo's lint table is per-PACKAGE, not per-target, so the exemption cannot live here. It is a
+# crate-level `#![allow]` at exactly ten entry points, each of which prints or exits BY DESIGN:
+# packages/cli-bin/src/main.rs (the CLI), packages/mcp/src/bin/zzop-mcp.rs (writes the stdio protocol —
+# that package's LIB stays covered), and the eight crates/engine/examples/ roots (demo binaries whose
+# output is the point). Every other member measured zero, including all eight parser frontends and the
+# four native rule packs. Build scripts need no exemption — clippy does not apply these lints there
+# (the 6 `println!` across crates/engine/build.rs + crates/config/build.rs produced no hits).
+print_stdout = "warn" # stdout carries a machine-readable contract: pretty JSON on every lane, and NDJSON on
+                      # `zzop graph --format cosmograph-*`. One stray println! in a library corrupts it silently.
+exit = "warn"         # `process::exit` in a library skips destructors and unflushed stdout, truncating that
+                      # same contract mid-document.
+# `print_stderr` (added 2026-08-02) is the same shape with a narrower exemption set: NINE of those ten
+# roots, not ten — `crates/engine/examples/xlayer_dump.rs` writes only stdout, so it gets no allow it
+# does not need. Two library sites remain and neither is a crate-level hole:
+#   * packages/mcp/src/server.rs::log_protocol_error — that lib IS the stdio transport, so its stdout is
+#     the JSON-RPC wire and stderr is the only diagnostic channel left. ONE function, `#[allow]`ed with
+#     its reason; the four protocol-error branches call it instead of printing themselves.
+#   * crates/test-support/src/lib.rs::emit_skip_notice — a test crate that ships nowhere. It backs
+#     `skip_notice!`, which folded the 33 "skipping <test>: git not on PATH" lines that used to sit in
+#     six test files. Those could not be covered by an entry-point allow at all: an integration test is
+#     its OWN crate root, and two of the six files are `#[cfg(test)] mod`s inside a shipped lib.
+# That fold is what unblocked this lint. Before it, turning `print_stderr` on meant allow-listing 37
+# unfixable sites, which is precisely what the admission rule above forbids; the lint was therefore left
+# OFF until the 37 became 0. Re-measuring now yields zero outside the nine roots and those two functions.
+print_stderr = "warn" # stderr is a product surface too: it carries every CLI usage/error line a user reads,
+                      # and in `zzop-mcp` it is the ONLY channel that is not the protocol.
+
+# --- Measured 35 (33 in library `src/`), audited to zero LEAKS, then admitted (2026-08-01) ---
+# The one lint here that is NOT "measured zero": every one of those 35 sites was read, and each was
+# either converted to an ordered collection (4 sites) or left in place under a site-local
+# `#[allow(clippy::iter_over_hash_type, reason = "...")]` naming the concrete thing that destroys the
+# order — a downstream sort, a BTreeMap/BTreeSet, a commutative counter/set fold, or a key that is
+# unique by construction. Zero sites were found where the order reached an output field.
+#
+# This is a DELIBERATE exception to the admission rule above, and it is narrow: no table-level hole and
+# no crate-level allow exists for it. The reason to take the exception is that this lint guards the
+# repo's single hardest contract (byte-identical output for identical input, core-invariants), the
+# per-site reasons ARE the audit's finding pinned where the next reader will meet it, and any NEW hash
+# iteration anywhere now fails the build until its author writes the same proof.
+#
+# NOT converted wholesale to BTreeMap: `DepGraph = HashMap<String, Vec<String>>` is a public alias used
+# as a build-time accumulator across core/engine/metrics, and `crates/core/src/serde_util.rs` already
+# decided (with its rationale in that module's doc) to sort at the serialize boundary rather than pay
+# BTreeMap insert cost on every write. Eight of these sites iterate that alias; reversing that decision
+# is a separate call, not a lint's to make.
+iter_over_hash_type = "warn"

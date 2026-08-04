@@ -244,7 +244,7 @@ fn ruleset_only_change_still_reflects_schema_structural_toggle_on_a_warm_cache()
 }
 
 // --- schema-usage wiring (`zzop_core` implements the schema usage cross-checks —
-// unreferenced-model-name/unreferenced-field-name/schema-churn — but the engine has to wire them in explicitly:
+// unreferenced-model-name/unreferenced-field-name/model-churn — but the engine has to wire them in explicitly:
 // `pipeline::schema_usage_findings` runs `cross_check_schema`/`apply_churn_rule` as a whole-tree
 // global pass whenever code access exists, gated behind the pre-registered native id
 // `"schema-usage"`. These tests prove that wiring end-to-end.) ---

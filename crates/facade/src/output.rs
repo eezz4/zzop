@@ -76,6 +76,19 @@ pub(crate) struct AnalyzeOutputView<'a> {
     /// under it.
     nodes: &'a [FileNode],
     scores: &'a Option<Scores>,
+    /// What each `scores` key MEANS, one sentence apiece — the same self-describing-reply device
+    /// `verdictMeaning` uses, for the same reason and after the same measurement. Four of the seventeen
+    /// score keys are bare acronyms (`sdp`, `sfc`, `lod`, `fsd`) whose expansion existed only in Rust
+    /// doc-comments: a 2026-08-04 name survey found `docs/` and `site/` carried zero occurrences of
+    /// "Stable Dependencies Principle", and the MCP tool descriptions name no score field at all. A
+    /// consumer holding `scores.sdp = 41.2` had no vocabulary on any surface.
+    ///
+    /// Present exactly when `scores` is — a legend for numbers that did not run explains nothing, and
+    /// this repo reads a present field as "the capability ran". The definitions have ONE owner
+    /// (`zzop_metrics::SCORE_MEANINGS`), whose completeness is pinned against serde's own key set, so a
+    /// new score cannot ship a bare key here.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    score_meanings: Option<std::collections::BTreeMap<&'a str, &'a str>>,
     health: &'a Option<HealthIndex>,
     recommendations: &'a [Recommendation],
     /// Files ranked by `blastRadius` (transitive dependents). Same treatment as `nodes` above: the term
@@ -100,11 +113,13 @@ pub(crate) struct AnalyzeOutputView<'a> {
     cache: Option<CacheStatsView>,
     rule_timings: &'a Option<Vec<zzop_core::dsl::RuleTiming>>,
     /// Structural coverage census — always present (post-aggregate, never git-gated).
-    coverage: CoverageCensusView,
+    coverage: CoverageCensusView<'a>,
     /// D13③: `ruleOverridesApplied` — omitted entirely (never an empty `{}`) when the caller's
-    /// `disabled_rules`/`severity_overrides` were both empty (nothing requested). This is the "quieter"
-    /// of the two documented conventions (`zzop_engine::RuleOverridesApplied`'s own doc) — a caller who
-    /// never touched either knob sees no new field, rather than an always-present empty object.
+    /// `disabled_rules`/`severity_overrides`/`only_packs` were ALL empty (nothing requested). This is the
+    /// "quieter" of the two documented conventions (`zzop_engine::RuleOverridesApplied`'s own doc) — a
+    /// caller who never touched any of the three sees no new field, rather than an always-present empty
+    /// object. (`only_packs` became the third gate in v0.29.0, when a release audit found the pack
+    /// allowlist suppressing findings with no positive acknowledgement anywhere on the wire.)
     #[serde(skip_serializing_if = "Option::is_none")]
     rule_overrides_applied: Option<RuleOverridesAppliedView<'a>>,
     /// `gitWindow` — the operative `recentDays`/`since` git-window knobs. ALWAYS serialized (no
@@ -125,6 +140,12 @@ impl<'a> AnalyzeOutputView<'a> {
             file_count: output.file_count,
             nodes: &output.nodes,
             scores: &output.scores,
+            score_meanings: output.scores.as_ref().map(|_| {
+                zzop_metrics::SCORE_MEANINGS
+                    .iter()
+                    .map(|(k, m)| (*k, *m))
+                    .collect()
+            }),
             health: &output.health,
             recommendations: &output.recommendations,
             critical: &output.critical,

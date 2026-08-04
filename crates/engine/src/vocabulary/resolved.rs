@@ -48,6 +48,7 @@ pub(crate) struct ResolvedVocabulary<'a> {
     pub(crate) auth_family_path_pattern: Option<&'a str>,
     pub(crate) api_segment_pattern: Option<&'a str>,
     pub(crate) java_source_root: Option<&'a str>,
+    pub(crate) python_package_roots: Vec<&'a str>,
     pub(crate) prisma_client_getter: Option<&'a str>,
     pub(crate) retry_wrappers: Vec<&'a str>,
     pub(crate) middleware_guard_callees: Vec<&'a str>,
@@ -68,6 +69,9 @@ pub(crate) struct ResolvedVocabulary<'a> {
     pub(crate) cache_lane_anchor_pattern: Option<&'a str>,
     pub(crate) file_read_callees: Vec<&'a str>,
     pub(crate) secret_param_names: Vec<&'a str>,
+    pub(crate) sensitive_response_field_substrings: Vec<&'a str>,
+    pub(crate) sensitive_response_field_exact_names: Vec<&'a str>,
+    pub(crate) sensitive_response_field_suffixes: Vec<&'a str>,
     pub(crate) api_version_segment_pattern: Option<&'a str>,
     pub(crate) externally_fetched_paths: Vec<&'a str>,
     pub(crate) schema_usage_skip_fields: Vec<&'a str>,
@@ -109,6 +113,15 @@ impl ResolvedVocabulary<'_> {
             optional_extractor_prefixes: &self.rust_optional_extractor_prefixes,
         }
     }
+
+    /// `cross-layer/sensitive-response-field`'s three declared lists, in the shape the rule takes.
+    pub(crate) fn sensitive_response(&self) -> zzop_rules_cross_layer::SensitiveResponseVocab<'_> {
+        zzop_rules_cross_layer::SensitiveResponseVocab {
+            substrings: &self.sensitive_response_field_substrings,
+            exact_names: &self.sensitive_response_field_exact_names,
+            suffixes: &self.sensitive_response_field_suffixes,
+        }
+    }
 }
 
 impl VocabularyConfig {
@@ -127,6 +140,7 @@ impl VocabularyConfig {
             auth_family_path_pattern: declared(&self.auth_family_path_pattern),
             api_segment_pattern: declared(&self.api_segment_pattern),
             java_source_root: declared(&self.java_source_root),
+            python_package_roots: declared_list(&self.python_package_roots),
             prisma_client_getter: declared(&self.prisma_client_getter),
             retry_wrappers: declared_list(&self.retry_wrappers),
             middleware_guard_callees: declared_list(&self.middleware_guard_callees),
@@ -153,6 +167,15 @@ impl VocabularyConfig {
             cache_lane_anchor_pattern: declared(&self.cache_lane_anchor_pattern),
             file_read_callees: declared_list(&self.file_read_callees),
             secret_param_names: declared_list(&self.secret_param_names),
+            sensitive_response_field_substrings: declared_list(
+                &self.sensitive_response_field_substrings,
+            ),
+            sensitive_response_field_exact_names: declared_list(
+                &self.sensitive_response_field_exact_names,
+            ),
+            sensitive_response_field_suffixes: declared_list(
+                &self.sensitive_response_field_suffixes,
+            ),
             api_version_segment_pattern: declared(&self.api_version_segment_pattern),
             externally_fetched_paths: declared_list(&self.externally_fetched_paths),
             schema_usage_skip_fields: declared_list(&self.schema_usage_skip_fields),

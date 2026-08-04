@@ -7,7 +7,9 @@
 //! `FindingFilters` through its wire-neutral constructor, calls the one `zzop_summary` function its MCP
 //! twin tool calls, and prints. Same exit contract as every sibling — 2 = argument shape, 1 = runtime.
 
-use super::args::{extract_finding_filters, parse_trees_args, reject_flag_like_args};
+use super::args::{
+    extract_finding_filters, extract_run_knobs, parse_trees_args, reject_flag_like_args,
+};
 use super::{print_or_exit, read_or_exit};
 
 /// `analyze <path> | analyze --config <file>` plus the findings knobs. The `--config` mode is the reason
@@ -18,7 +20,8 @@ use super::{print_or_exit, read_or_exit};
 /// that would be SILENTLY narrowed here (a trailing path after `--config` would be dropped).
 pub fn run_analyze(args: &[String]) -> ! {
     const USAGE: &str = "usage: zzop analyze <path> | analyze --config <zzop.config.jsonc> [--severity <critical|warning|info>] [--rule <id>] [--limit <n>]";
-    let (rest, filters) = extract_finding_filters(args, USAGE);
+    let (rest, knobs) = extract_run_knobs(args);
+    let (rest, filters) = extract_finding_filters(&rest, USAGE);
     let (path, config_path) = match rest.get(2).map(String::as_str) {
         Some("--config") => {
             let Some(cp) = rest.get(3) else {
@@ -48,15 +51,23 @@ pub fn run_analyze(args: &[String]) -> ! {
             std::process::exit(2);
         }
     };
-    print_or_exit(zzop_summary::analyze_summary(path, config_path, &filters));
+    print_or_exit(zzop_summary::analyze_summary_with(
+        path,
+        config_path,
+        &filters,
+        knobs,
+    ));
 }
 
 /// `analyze-envelope <envelope.json>` plus the findings knobs — Mode A: the file's content REPLACES
 /// native parsing entirely for this run (contrast `analyze`, which walks a real tree). Same handler as
 /// the `analyze_envelope` MCP tool, so this CLI form and a tool call give the identical answer.
+/// `--profile-rules` works on this lane too (it used to be an exit-2 refusal by name, back when the
+/// envelope path ran outside the engine's timing accumulator and the flag would have produced nothing).
 pub fn run_analyze_envelope(args: &[String]) -> ! {
-    const USAGE: &str = "usage: zzop analyze-envelope <envelope.json> [--severity <critical|warning|info>] [--rule <id>] [--limit <n>]";
-    let (rest, filters) = extract_finding_filters(args, USAGE);
+    const USAGE: &str = "usage: zzop analyze-envelope <envelope.json> [--severity <critical|warning|info>] [--rule <id>] [--limit <n>] [--profile-rules]";
+    let (rest, knobs) = extract_run_knobs(args);
+    let (rest, filters) = extract_finding_filters(&rest, USAGE);
     let Some(path) = rest.get(2) else {
         eprintln!("{USAGE}");
         std::process::exit(2);
@@ -67,9 +78,10 @@ pub fn run_analyze_envelope(args: &[String]) -> ! {
     }
     reject_flag_like_args([path.as_str()], USAGE);
     let envelope_json = read_or_exit(path);
-    print_or_exit(zzop_summary::analyze_envelope_summary(
+    print_or_exit(zzop_summary::analyze_envelope_summary_with(
         &envelope_json,
         &filters,
+        knobs,
     ));
 }
 
@@ -79,9 +91,15 @@ pub fn run_analyze_envelope(args: &[String]) -> ! {
 /// tool's two modes, and inherits every silent-narrowing guard from the shared [`parse_trees_args`].
 pub fn run_cross(args: &[String]) -> ! {
     const USAGE: &str = "usage: zzop cross <path> <path>... (2+ paths) | cross --config <zzop.config.jsonc> [--severity <critical|warning|info>] [--rule <id>] [--limit <n>]";
-    let (rest, filters) = extract_finding_filters(args, USAGE);
+    let (rest, knobs) = extract_run_knobs(args);
+    let (rest, filters) = extract_finding_filters(&rest, USAGE);
     let (paths, config_path) = parse_trees_args(&rest, "cross", 2);
-    print_or_exit(zzop_summary::cross_summary(&paths, config_path, &filters));
+    print_or_exit(zzop_summary::cross_summary_with(
+        &paths,
+        config_path,
+        &filters,
+        knobs,
+    ));
 }
 
 /// `endpoint <pattern> <path>... | endpoint <pattern> --config <path>`: one path = single-tree mode (the

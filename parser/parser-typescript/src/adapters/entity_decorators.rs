@@ -51,6 +51,7 @@ impl Visit for EntityCollector<'_> {
     fn visit_class_decl(&mut self, n: &ClassDecl) {
         if let Some((table, decorator)) = entity_table_name(&n.class.decorators) {
             self.out.push(IoProvide {
+                response: None,
                 kind: "db-table".to_string(),
                 key: format!("table:{}", zzop_core::db_table_channel_casing(&table)),
                 file: self.file.to_string(),

@@ -34,6 +34,10 @@ pub fn compute_type_safety(
     let mut total_loc: u64 = 0;
     let mut violations: Vec<TypeSafetyViolation> = Vec::new();
 
+    #[allow(
+        clippy::iter_over_hash_type,
+        reason = "iteration order cannot reach the result: the totals are sums, and `violations` is sorted by (density desc, path asc) — `path` is this map's key, so that comparator is a total order"
+    )]
     for (path, c) in counts {
         if !is_scored(path) {
             continue;

@@ -11,16 +11,16 @@ declare const adminReports: unknown;
 declare const auditEvents: unknown;
 
 export function bad() {
-  apiRoutes.get('/admin/users', listUsers); // cache: server-render (isolates this from get-route-no-cache-marker)
+  apiRoutes.get('/admin/users', listUsers);
 }
 
 // NEGATIVE CONTROL 1 — cleared by an EXACT IoKey attribute on `GET /admin/reports`.
 export function good() {
-  apiRoutes.get('/admin/reports', adminReports); // cache: server-render
+  apiRoutes.get('/admin/reports', adminReports);
 }
 
 // NEGATIVE CONTROL 2 — cleared by a PathScope attribute on prefix `/admin/audit`. Segment-boundary match,
 // so it covers this route and NOT the `/admin/users` bad route above.
 export function goodPathScope() {
-  apiRoutes.get('/admin/audit/events', auditEvents); // cache: server-render
+  apiRoutes.get('/admin/audit/events', auditEvents);
 }

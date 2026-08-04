@@ -20,6 +20,12 @@ impl LineScanPrefilter {
         let mut patterns: Vec<String> = Vec::new();
         let mut pattern_rule: Vec<usize> = Vec::new();
         for (rule_idx, rule) in pack.rules.iter().enumerate() {
+            // Line-scan only, and `Matcher::CallScan` is the arm most likely to look like an oversight:
+            // its `callee_pattern` is a regex too, but it matches a PROJECTED callee string rather than a
+            // line of text, so feeding it to this set would test it against the wrong subject and reject
+            // files that genuinely match (see `eval`'s `CallScan` arm for the worked example). A rule kind
+            // that contributes no pattern here is simply always a candidate, which is the only safe
+            // default for an optimization that must stay observationally invisible.
             let Matcher::LineScan(m) = &rule.matcher else {
                 continue;
             };

@@ -3,10 +3,12 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{io::IoFacts, ir::SourceSymbol};
+use crate::{
+    call_sites::CallSite, io::IoFacts, ir::SourceSymbol, string_literals::BoundStringLiteral,
+};
 
 /// Rule interpreter input — the source files a rule pack evaluates against, each already carrying its own
-/// projected structural facts (`symbols`/`io`/`loop_spans`/`function_spans`).
+/// projected structural facts (`symbols`/`io`/`loop_spans`/`function_spans`/`call_sites`).
 ///
 /// Deliberately per-file: the tree-wide `CommonIr` is NOT reachable from here. A rule that needs the
 /// assembled IR is answered out of process by the `zzop facts` CLI lane, which emits the whole
@@ -38,14 +40,43 @@ pub struct SourceFile {
     /// Per-file IO facts (`Matcher::IoScan`'s substrate), projected alongside `symbols`. `None` when the
     /// parser has no IO adapter / falls back lexically — io-scan rules silently skip such files.
     pub io: Option<IoFacts>,
-    /// Per-file loop-body line spans (1-based, inclusive), projected alongside `symbols`: each
-    /// `for`/`for-of`/`for-in`/`while`/`do-while` statement's full span (header line included — a call in
-    /// the loop CONDITION runs once per iteration too), plus the span of the callback ARGUMENT of an
-    /// array-iteration call (`.map`/`.forEach`/`.filter`/`.reduce`/...) — the callback only, not the whole
-    /// call expression, so a receiver like `(await fetch(u)).items.map(...)` does not put the one-shot
-    /// `fetch` "inside" the loop. Consumed by `MethodScan::trigger_in_loop`. Empty when the parser has no
-    /// support / falls back lexically — structural rules silently skip such files (graceful degrade,
-    /// same policy as `symbols`).
+    /// Per-file loop-body line spans (1-based, inclusive), projected alongside `symbols`. The contract
+    /// every language's extractor projects onto: **a call sitting textually inside one of these spans is
+    /// PROVEN to run once per iteration** — never "co-occurs with loop syntax somewhere nearby".
+    ///
+    /// Two span sources, split by that proof:
+    /// - **Statement loops — every projecting language**: each `for`(-of/-in/-each/`range`)/`while`/
+    ///   `do-while`/`loop` statement's full span (header line included — a call in the loop CONDITION
+    ///   runs once per iteration too). Python's `else:` block is excluded (runs at most once).
+    /// - **Callback/comprehension forms — only where EAGER evaluation is proven**: the callback ARGUMENT
+    ///   of a TS array-iteration call (`.map`/`.forEach`/`.filter`/`.reduce`/... — the callback only,
+    ///   not the whole call expression, so a receiver like `(await fetch(u)).items.map(...)` does not
+    ///   put the one-shot `fetch` "inside" the loop), and a Python list/set/dict COMPREHENSION (eager).
+    ///   **Lazy forms are deliberately SILENT — never a span**: a Python generator expression, a Rust
+    ///   `.iter().map(|x| …)` adapter closure, a Java Stream lambda, a C# LINQ lambda. Each runs ZERO
+    ///   times unless its pipeline is consumed, so the per-iteration proof cannot be honored; emitting a
+    ///   span there would make `trigger_in_loop` findings claim iteration that may never happen. A
+    ///   parser adding a new callback-shaped arm must first prove the host evaluates it eagerly — this
+    ///   sentence is the boundary's owner; each parser's `loop_spans` module doc restates its own side.
+    ///   Known EAGER forms not yet projected: Java `Collection.forEach`, C# `List<T>.ForEach`, Rust
+    ///   `Iterator::for_each` — unimplemented, not lazy; adding one follows this doc's eager-proof
+    ///   obligation. (Rust `.map` is a deliberate PERMANENT silence, not backlog: `Option::map`/
+    ///   `Result::map` spell identically to `Iterator::map` and run at most once, so no lexical
+    ///   receiver check can honor the per-iteration proof.)
+    ///
+    ///   **A SINGLE-LINE callback/comprehension span is never emitted, even when eager.** This channel
+    ///   is line-granular, and a `(n, n)` span cannot prove containment: a one-shot call sharing the
+    ///   callback's only line (`console.log(items.map((i) => i.id).join(','))`, `print("ids:",
+    ///   [r.id for r in rows])`) is indistinguishable from the callback's own body, so emitting the
+    ///   span sweeps provably-once code into "per iteration". Producers drop such spans — silence is
+    ///   the never-guess direction, at the published cost of INTENDED UNDER-REPORTING (a genuine
+    ///   one-line per-iteration call like `xs.forEach(x => log(x))` is lost). STATEMENT-loop one-line
+    ///   spans are kept: a `stmt; for (...) f()` line-share is a rare idiom, and that residual
+    ///   ambiguity is a published limit rather than a fixed one.
+    ///
+    /// Consumed by `MethodScan::trigger_in_loop`. Empty when the parser has no support / falls back
+    /// lexically — structural rules silently skip such files (graceful degrade, same policy as
+    /// `symbols`).
     pub loop_spans: Vec<(u32, u32)>,
     /// Per-file FUNCTION line spans (1-based, inclusive), projected alongside `symbols`: every
     /// function-like node (declaration/expression/arrow/method/constructor/accessor), with one merge —
@@ -62,9 +93,46 @@ pub struct SourceFile {
     /// such a file. Same graceful-degrade family as `symbols`/`io`/`loop_spans`, but note the direction
     /// differs from `loop_spans` (whose absence silences `trigger_in_loop` entirely).
     pub function_spans: Vec<(u32, u32)>,
+    /// Per-file TEST-ONLY line spans (1-based, inclusive): regions the parser PROVED are compiled out of
+    /// the shipping build — today `zzop_parser_rust::extract_test_spans`' `#[cfg(test)]` / `#[test]`-family
+    /// items, the one convention no path pattern can see because it lives INSIDE the shipping file.
+    ///
+    /// Unlike every other field here this one is SUBTRACTIVE, and it is applied to every DSL rule rather
+    /// than opted into by one: [`SourceFile::is_test_only_line`] gates finding emission in
+    /// `dsl::eval`, once, for every matcher type. See that gate's doc for why it is unconditional.
+    ///
+    /// Empty when the parser has no support / falls back lexically / fails to parse — the SAFE direction
+    /// for a subtractive fact: nothing is subtracted, so a degraded file keeps its full judgment rather
+    /// than going quiet. This is the same graceful-degrade family as `symbols`/`io`/`loop_spans`, with the
+    /// degrade direction chosen by what an empty value MEANS rather than by convention.
+    pub test_spans: Vec<(u32, u32)>,
+    /// Per-file CALL SITES in source order — `Matcher::CallScan`'s substrate: one fact per witnessed use
+    /// of an API family (console write, env read, ...), carrying the callee EXACTLY as written. See
+    /// [`crate::call_sites::CallSite`] for the never-guess and no-`level`-field contracts that shape it.
+    ///
+    /// Degrade direction is the `loop_spans` family — RECALL, not precision. Empty (no producer for this
+    /// language, degraded parse, oversized file, envelope mode) means every `CallScan` rule is SILENT
+    /// here, never that the file is clean. That is the opposite of `function_spans` (absent = the gate
+    /// no-ops, the rule keeps its coarser behavior) and of `test_spans` (absent = nothing subtracted), so
+    /// migrating a text-scan rule onto this channel is not a free win: it trades false positives for
+    /// blindness on exactly the files that were already hardest to parse.
+    pub call_sites: Vec<CallSite>,
+    /// Per-file BOUND STRING LITERALS in source order — `Matcher::LiteralScan`'s substrate: name +
+    /// value hash + value entropy, NEVER the value ([`crate::string_literals`] owns that contract).
+    /// Degrade direction is `call_sites`' exactly: empty means SILENT, never clean.
+    pub string_literals: Vec<BoundStringLiteral>,
 }
 
 impl SourceFile {
+    /// Whether `line` (1-based) sits inside any [`SourceFile::test_spans`] entry — "the parser proved
+    /// this line is not shipped code". Linear over the spans, which are per-ITEM (one `#[cfg(test)] mod
+    /// tests` is one entry, not one per function inside it), so this stays small on real files.
+    pub fn is_test_only_line(&self, line: u32) -> bool {
+        self.test_spans
+            .iter()
+            .any(|&(start, end)| start <= line && line <= end)
+    }
+
     /// START line of the INNERMOST [`SourceFile::function_spans`] entry containing `line`, or `None`
     /// when no span does (module top level — or a file with no projected spans at all, which is what
     /// makes the gate that consumes this a no-op under graceful degrade).

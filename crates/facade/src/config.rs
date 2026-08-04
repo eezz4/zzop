@@ -88,6 +88,7 @@ pub(crate) fn base_engine_config(
     pack_defs: &[RulePackDef],
     packs_dirs: &[&str],
     disabled_rules: &[String],
+    only_packs: &[String],
     severity_overrides: &BTreeMap<String, Severity>,
     suppressions: &[Suppression],
     global_excludes: &[GlobalExclude],
@@ -188,6 +189,7 @@ pub(crate) fn base_engine_config(
         pack_sources,
         rule_config: zzop_core::RuleConfig {
             disabled_rules: disabled_rules.to_vec(),
+            only_packs: only_packs.to_vec(),
             severity_overrides: severity_overrides.clone(),
             suppressions: suppressions.to_vec(),
             global_excludes: global_excludes.to_vec(),
@@ -212,6 +214,7 @@ pub(crate) fn build_engine_config(
         &req.pack_defs,
         &packs_dirs,
         &req.disabled_rules,
+        &req.packs_only,
         &req.severity_overrides,
         &req.suppressions,
         &req.global_excludes,
@@ -220,6 +223,11 @@ pub(crate) fn build_engine_config(
 
     config.size_cap = req.size_cap.unwrap_or(DEFAULT_SIZE_CAP);
     config.cache_dir = req.cache_dir.as_ref().map(PathBuf::from);
+    // Rule timing. A pure INSTRUMENTATION switch: it selects whether `AnalyzeOutput::rule_timings` is
+    // populated and changes nothing about which rules run or what they report, so it deliberately takes
+    // no part in the cache key — a profiled run and an unprofiled one over the same tree are the same
+    // analysis and must reuse each other's cache entries.
+    config.profile_rules = req.profile_rules;
     config.git = req.git.as_ref().map(|g| GitOptions {
         since: g.since.clone(),
         recent_days: g

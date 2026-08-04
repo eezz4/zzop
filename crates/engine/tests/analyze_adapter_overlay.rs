@@ -121,6 +121,7 @@ fn config() -> EngineConfig {
 fn projection(path: &str, loc: u32) -> FileProjection {
     FileProjection {
         class_shape_fragments: Vec::new(),
+        calls: Vec::new(),
         path: path.to_string(),
         loc,
         symbols: Vec::new(),
@@ -138,6 +139,7 @@ fn projection(path: &str, loc: u32) -> FileProjection {
         attributes: Vec::new(),
         loop_spans: Vec::new(),
         function_spans: Vec::new(),
+        test_spans: Vec::new(),
     }
 }
 
@@ -293,6 +295,7 @@ fn projection_for_an_unknown_rel_still_contributes_its_provide() {
 
     let mut proj = projection("external/legacy.jsp", 5);
     proj.io.provides.push(IoProvide {
+        response: None,
         body: None,
         kind: "http".to_string(),
         key: "GET /legacy/status".to_string(),
@@ -497,6 +500,7 @@ fn overlay_nest_global_prefix_provide_is_dropped_and_warned_not_reapplied_tree_w
 
     let mut proj = projection("external/legacy.jsp", 3);
     proj.io.provides.push(IoProvide {
+        response: None,
         body: None,
         kind: "nest-global-prefix".to_string(),
         key: "api".to_string(),
@@ -589,6 +593,7 @@ fn overlay_with_only_ordinary_io_kinds_merges_with_no_drop_warning() {
 
     let mut proj = projection("external/legacy.jsp", 4);
     proj.io.provides.push(IoProvide {
+        response: None,
         body: None,
         kind: "http".to_string(),
         key: "GET /legacy/ping".to_string(),
@@ -629,6 +634,7 @@ fn mismatched_overlay_source_warns_about_the_intra_source_join() {
     };
     let mut proj = projection("external/legacy.jsp", 3);
     proj.io.provides.push(IoProvide {
+        response: None,
         body: None,
         kind: "http".to_string(),
         key: "GET /legacy/ping".to_string(),
@@ -673,6 +679,7 @@ fn overlay_source_equal_to_the_tree_source_id_warns_nothing() {
     };
     let mut proj = projection("external/legacy.jsp", 3);
     proj.io.provides.push(IoProvide {
+        response: None,
         body: None,
         kind: "http".to_string(),
         key: "GET /legacy/ping".to_string(),
@@ -709,6 +716,7 @@ fn overlay_with_empty_source_warns_nothing() {
     };
     let mut proj = projection("external/legacy.jsp", 3);
     proj.io.provides.push(IoProvide {
+        response: None,
         body: None,
         kind: "http".to_string(),
         key: "GET /legacy/ping".to_string(),
@@ -838,6 +846,7 @@ fn overlay_warnings_are_byte_for_byte_identical_across_two_runs() {
 
     let mut mismatched = projection("external/mismatched.jsp", 1);
     mismatched.io.provides.push(IoProvide {
+        response: None,
         body: None,
         kind: "db-table".to_string(),
         key: "table:widgets".to_string(),
@@ -976,6 +985,7 @@ fn reserved_io_only_overlay_is_zero_fact_not_coverage() {
 
     let mut proj = projection("a.rb", 1);
     proj.io.provides.push(IoProvide {
+        response: None,
         body: None,
         kind: "nest-global-prefix".to_string(),
         key: "api".to_string(),
@@ -1000,5 +1010,38 @@ fn reserved_io_only_overlay_is_zero_fact_not_coverage() {
             .any(|w| w.contains("no native parser") && w.contains("a.rb")),
         "reserved-io-only coverage must not suppress the unparsed-extension disclosure: {:?}",
         out.warnings
+    );
+}
+
+/// Crates F5: the Mode B calls-ignored warning must name the Mode A surface by BOTH host spellings
+/// (`zzop analyze-envelope` / MCP `analyze_envelope`) — the sibling convention `capability.rs`'s
+/// on-ramp note pins — not the removed napi-era `analyzeEnvelope` spelling no shipped host exposes.
+#[test]
+fn overlay_calls_ignored_warning_names_both_host_spellings_for_mode_a() {
+    let dir = TempDir::new("zzop-adapter-overlay");
+    dir.write("src/app.ts", "export const x = 1;\n");
+
+    let mut proj = projection("a.rb", 3);
+    proj.calls.push(zzop_core::callgraph::RawCall {
+        from_symbol: "a.rb#handler".to_string(),
+        callee_name: "save".to_string(),
+        line: 2,
+        receiver_type: None,
+        is_heritage: false,
+    });
+    let mut cfg = config();
+    cfg.adapter_overlays = vec![overlay("rb-adapter/1", vec![proj])];
+
+    let out = analyze_tree(dir.path(), &cfg);
+    let w = out
+        .warnings
+        .iter()
+        .find(|w| w.contains("`calls` entr") && w.contains("ignored"))
+        .unwrap_or_else(|| panic!("Mode B must disclose ignored calls: {:?}", out.warnings));
+    assert!(w.contains("zzop analyze-envelope"), "{w}");
+    assert!(w.contains("`analyze_envelope`"), "{w}");
+    assert!(
+        !w.contains("analyzeEnvelope"),
+        "must not name the removed napi spelling: {w}"
     );
 }

@@ -15,8 +15,13 @@ use super::fragments::{fragment_ref_name, shared_fragments, FragmentError};
 use crate::Severity;
 
 mod matcher;
+mod pattern_fields;
 
-pub use matcher::{IoDirection, IoScan, LabeledPattern, LineScan, Matcher, MethodScan, SymbolScan};
+pub use matcher::{
+    CallScan, IoDirection, IoScan, LabeledPattern, LineScan, LiteralScan, Matcher, MethodScan,
+    SymbolScan,
+};
+pub(crate) use pattern_fields::for_each_pattern_field;
 
 /// A rule pack (DSL) — maps to one `rules/dsl/<id>.json`. Independently shipped and versioned.
 #[derive(Debug, Clone, Deserialize)]
@@ -84,52 +89,11 @@ fn resolve_field(
     Ok(())
 }
 
-/// Same as `resolve_field`, for an `Option<String>` field — a `None` field has nothing to resolve.
-fn resolve_opt(
-    value: &mut Option<String>,
-    merged: &BTreeMap<String, String>,
-    rule_id: &str,
-    field: &str,
-) -> Result<(), FragmentError> {
-    match value {
-        Some(v) => resolve_field(v, merged, rule_id, field),
-        None => Ok(()),
-    }
-}
-
-/// Same as `resolve_field`, applied to every element of a `Vec<String>` field (`require_file_all`/
-/// `require_file_absent`) — each element is independently eligible for a whole-value `${NAME}` ref.
-fn resolve_vec(
-    values: &mut [String],
-    merged: &BTreeMap<String, String>,
-    rule_id: &str,
-    field: &str,
-) -> Result<(), FragmentError> {
-    for v in values.iter_mut() {
-        resolve_field(v, merged, rule_id, field)?;
-    }
-    Ok(())
-}
-
-/// Same as `resolve_field`, applied to every `LabeledPattern::pattern` in a slice (`any`/`patterns`/
-/// `absent`) — the `label` alongside it is never pattern-bearing, so it is never a fragment-ref target.
-fn resolve_labeled(
-    patterns: &mut [LabeledPattern],
-    merged: &BTreeMap<String, String>,
-    rule_id: &str,
-    field: &str,
-) -> Result<(), FragmentError> {
-    for lp in patterns.iter_mut() {
-        resolve_field(&mut lp.pattern, merged, rule_id, field)?;
-    }
-    Ok(())
-}
-
 impl RulePackDef {
     /// Resolves every whole-value `${NAME}` fragment reference across every pattern-bearing field in this
-    /// pack (`file_pattern`, `file_exclude_pattern`, `require_file`, `require_file_all`,
-    /// `require_file_absent`, `line_pattern`, `any[].pattern`, `exclude_pattern`, `patterns[].pattern`,
-    /// `absent[].pattern`, `name_pattern`, `key_pattern`), then CLEARS `self.fragments` to empty — so a
+    /// pack — the field set is not restated here, it is walked by
+    /// [`pattern_fields::for_each_pattern_field`], whose exhaustive destructuring is what makes "every"
+    /// true (see that module's header) — then CLEARS `self.fragments` to empty — so a
     /// pack that never referenced a fragment at all, and a pack that resolved every `${NAME}` ref, end up
     /// `Debug`/hash-identical to each other (and to the equivalent pack authored with the patterns spelled
     /// out inline). This is what makes the migration in this pass projection-neutral: `{pack:?}` — the
@@ -170,63 +134,9 @@ impl RulePackDef {
 
         for rule in &mut self.rules {
             let rid = rule.id.clone();
-            match &mut rule.matcher {
-                Matcher::LineScan(m) => {
-                    resolve_field(&mut m.file_pattern, &merged, &rid, "file_pattern")?;
-                    resolve_opt(&mut m.require_file, &merged, &rid, "require_file")?;
-                    resolve_vec(&mut m.require_file_all, &merged, &rid, "require_file_all")?;
-                    resolve_vec(
-                        &mut m.require_file_absent,
-                        &merged,
-                        &rid,
-                        "require_file_absent",
-                    )?;
-                    resolve_opt(&mut m.line_pattern, &merged, &rid, "line_pattern")?;
-                    if let Some(any) = m.any.as_mut() {
-                        resolve_labeled(any, &merged, &rid, "any[].pattern")?;
-                    }
-                    resolve_opt(&mut m.exclude_pattern, &merged, &rid, "exclude_pattern")?;
-                    resolve_opt(
-                        &mut m.file_exclude_pattern,
-                        &merged,
-                        &rid,
-                        "file_exclude_pattern",
-                    )?;
-                }
-                Matcher::MethodScan(m) => {
-                    resolve_field(&mut m.file_pattern, &merged, &rid, "file_pattern")?;
-                    resolve_opt(&mut m.require_file, &merged, &rid, "require_file")?;
-                    resolve_vec(&mut m.require_file_all, &merged, &rid, "require_file_all")?;
-                    resolve_vec(
-                        &mut m.require_file_absent,
-                        &merged,
-                        &rid,
-                        "require_file_absent",
-                    )?;
-                    resolve_labeled(&mut m.patterns, &merged, &rid, "patterns[].pattern")?;
-                    resolve_labeled(&mut m.absent, &merged, &rid, "absent[].pattern")?;
-                    resolve_opt(
-                        &mut m.file_exclude_pattern,
-                        &merged,
-                        &rid,
-                        "file_exclude_pattern",
-                    )?;
-                }
-                Matcher::SymbolScan(m) => {
-                    resolve_field(&mut m.file_pattern, &merged, &rid, "file_pattern")?;
-                    resolve_opt(&mut m.name_pattern, &merged, &rid, "name_pattern")?;
-                }
-                Matcher::IoScan(m) => {
-                    resolve_field(&mut m.file_pattern, &merged, &rid, "file_pattern")?;
-                    resolve_opt(
-                        &mut m.file_exclude_pattern,
-                        &merged,
-                        &rid,
-                        "file_exclude_pattern",
-                    )?;
-                    resolve_opt(&mut m.key_pattern, &merged, &rid, "key_pattern")?;
-                }
-            }
+            for_each_pattern_field(rule, &mut |field, value| {
+                resolve_field(value, &merged, &rid, field)
+            })?;
         }
 
         self.fragments.clear();
@@ -241,6 +151,31 @@ pub struct RuleDef {
     /// Human-facing message (cause / fix hint).
     pub message: String,
     pub matcher: Matcher,
+    /// OPT OUT of the test-region gate: `true` means this rule keeps judging lines a parser proved are
+    /// compiled out of the shipping build (`SourceFile::test_spans` — see `crate::dsl::eval`'s
+    /// `TestRegions`). Default `false` = gated, which is what almost every rule wants.
+    ///
+    /// ## Why this is a RULE field and not a matcher field
+    /// The gate is applied in `eval_pack_impl` AFTER a rule's matcher has run, over the findings it
+    /// produced — it never consults the matcher's shape. Putting the opt-out on `LineScan` would leave
+    /// `MethodScan`/`SymbolScan`/`CallScan` silently unable to ask for it; putting it on every matcher
+    /// struct would be one fact written once per kind. It sits where the gate sits: on the rule.
+    ///
+    /// ## What justifies setting it
+    /// Exactly one axis: the finding is about a **credential at rest**, where the COMMIT is the leak and
+    /// the code's execution status is irrelevant to the verdict. A PEM header or a `user:pass@host` URL
+    /// inside `#[cfg(test)] mod tests` is still a key in git history, readable by every fork and clone,
+    /// and still has to be rotated. Every other rule class judges code that RUNS, and test-only code
+    /// does not run in production — for those the gate is right and this flag must stay `false`.
+    ///
+    /// The same axis is already visible in the packs as the ABSENCE of
+    /// `file_exclude_pattern: "${test-paths-stories}"` on those rules: they decline PATH-based test
+    /// exclusion for this reason, so declining SPAN-based exclusion is the same decision with the other
+    /// kind of evidence. A rule that sets this while still excluding test PATHS would be incoherent,
+    /// and `crates/facade/src/test_region_promise_tests.rs` refuses that combination — along with any
+    /// drift between this flag and the promise the catalog/message publishes to users.
+    #[serde(default)]
+    pub scan_test_regions: bool,
 }
 
 impl RuleDef {

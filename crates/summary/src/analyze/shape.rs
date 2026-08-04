@@ -45,8 +45,8 @@ pub(super) fn shape_analyze_output(
     // Config-loader warnings first, then the facade-level `configWarnings` entries riding the tree
     // output (engine-side config diagnostics, e.g. unknown-rule-id overrides) — merged into the one
     // config-honesty channel so the moved diagnostics are not silently dropped at this layer (see
-    // `crate::config_warnings::facade_config_warnings` for the absent-field degradation contract).
-    config_warnings.extend(crate::config_warnings::facade_config_warnings(output_view));
+    // `crate::warnings::facade_config_warnings` for the absent-field degradation contract).
+    config_warnings.extend(crate::warnings::facade_config_warnings(output_view));
     summary.insert("fileCount".to_string(), output_view["fileCount"].clone());
     summary.insert(
         "degraded".to_string(),
@@ -83,8 +83,8 @@ pub(super) fn shape_analyze_output(
     if let Some(truncated) = degraded_truncated {
         summary.insert("degradedTruncated".to_string(), truncated);
     }
-    // Rule-override confirmation ({disabled, severityRemapped} id lists) — forwarded whole, no cap
-    // needed (bounded by the caller's own disabledRules/severityOverrides config size), same as
+    // Rule-override confirmation ({disabled, severityRemapped, only} id lists) — forwarded whole, no cap
+    // needed (bounded by the caller's own disabledRules/severityOverrides/packsOnly config size), same as
     // packsLoaded. Unlike packsLoaded (always present), the engine OMITS this field when no overrides
     // were requested, so a bare `output_view["ruleOverridesApplied"]` index would turn that omission
     // into JSON `null` noise; `.get()` preserves the omission instead — a MISSING field (older engine
@@ -111,6 +111,16 @@ pub(super) fn shape_analyze_output(
     // forward" instead of a missing-key panic.
     if let Some(git_window) = output_view.get("gitWindow") {
         summary.insert("gitWindow".to_string(), git_window.clone());
+    }
+    // Rule timing — present ONLY when the run was instrumented (`zzop analyze --profile-rules`). The
+    // facade always serializes its own `ruleTimings` key (`null` when profiling was off), so this is
+    // gated on the VALUE being an array rather than on the key existing: an unprofiled reply must stay
+    // byte-identical to what it was before this surface existed, not grow a `null` field. The reply's
+    // key carries its own `meaning` string (see `output::timings`), which is why no sibling
+    // `ruleTimingsMeaning` key appears here — the disclosure rides INSIDE the object it describes,
+    // so a consumer that reads the numbers cannot fail to also have read what they omit.
+    if let Some(rule_timings) = output::shape_rule_timings(output_view) {
+        summary.insert("ruleTimings".to_string(), rule_timings);
     }
     serde_json::Value::Object(summary)
 }

@@ -2,7 +2,7 @@
 //! so the orchestrator and this pass each fit their own file. Everything the loop accumulates crosses
 //! back via [`FilePassState`]; behavior is identical to the pre-split inline loop.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use zzop_core::{
     eval_pack, pack_loader, DepGraph, Finding, IoConsume, IoProvide, RuleContext, RulePackDef,
@@ -40,6 +40,10 @@ pub(super) struct FilePassState {
     /// resolution substrate `analyze::late_resolve_cross_file_consumes` re-resolves unresolved
     /// `IoConsume`s against below.
     pub(super) const_fragment_pairs: Vec<(String, HashMap<String, String>)>,
+    /// Each file's declared class/interface shapes, path-paired — the `body`/`response` dtoRef
+    /// resolution substrate (`super::shapes`), collected exactly as `analyze::assemble::collect`
+    /// gathers the native artifacts' `class_shape_fragments`.
+    pub(super) class_shape_pairs: Vec<(String, Vec<zzop_core::ClassShapeFragment>)>,
     /// Same summary `analyze::assemble` builds natively — see `AnalyzeOutput::package_imports`.
     pub(super) package_import_files:
         std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
@@ -48,6 +52,11 @@ pub(super) struct FilePassState {
     /// `apply_adapter_overlays`'s own per-overlay aggregation. See the in-loop comment for why these
     /// are dropped at all.
     pub(super) reserved_dropped: usize,
+    /// `EngineConfig::profile_rules` accumulator — the envelope-mode counterpart of
+    /// `analyze::assemble`'s per-artifact `rule_timings` reduce: per-rule `(nanos, findings)` summed
+    /// across every file, same `"{pack}/{rule}"` keys `record_native_timing`'s callers use, finalized
+    /// by `sort_rule_timings` in the orchestrator. Stays empty when profiling is off.
+    pub(super) rule_time: HashMap<String, (u128, usize)>,
 }
 
 /// The per-file pass of `analyze_envelope`: per-file fact collection, hand-built dep-graph edges, and the
@@ -59,6 +68,7 @@ pub(super) fn run_file_pass(
     files: &[&zzop_core::FileProjection],
     all_paths: &HashSet<&str>,
     enabled_packs: &[RulePackDef],
+    profile: bool,
 ) -> FilePassState {
     let mut state = FilePassState {
         loc_by_path: HashMap::new(),
@@ -72,8 +82,10 @@ pub(super) fn run_file_pass(
         trpc_fragment_pairs: Vec::new(),
         router_mount_pairs: Vec::new(),
         const_fragment_pairs: Vec::new(),
+        class_shape_pairs: Vec::new(),
         package_import_files: std::collections::BTreeMap::new(),
         reserved_dropped: 0usize,
+        rule_time: HashMap::new(),
     };
 
     for file in files {
@@ -134,6 +146,11 @@ pub(super) fn run_file_pass(
                 .const_fragment_pairs
                 .push((file.path.clone(), file.const_map_fragment.clone()));
         }
+        if !file.class_shape_fragments.is_empty() {
+            state
+                .class_shape_pairs
+                .push((file.path.clone(), file.class_shape_fragments.clone()));
+        }
 
         // Every file gets a `dep` entry (even an empty edge list) so `dep_stats_from_dep` downstream
         // counts it as a graph node, letting an isolated (import-free) file still get a `FileNode`.
@@ -143,7 +160,9 @@ pub(super) fn run_file_pass(
         // (type-only, or a dynamic import) — mirrors
         // `zzop_parser_typescript::lang::resolve::build_dep_impl`'s own aggregation, folded in here since
         // envelope mode builds `dep` by hand rather than calling that shared helper.
-        let mut target_noncycle: HashMap<String, bool> = HashMap::new();
+        // BTreeMap, not HashMap: this map is drained into `state.noncycle_edges` below, and an
+        // ordered walk removes the question of whether that drain order matters at all.
+        let mut target_noncycle: BTreeMap<String, bool> = BTreeMap::new();
         for binding in file.imports.values() {
             // Non-relative specifier naming no projected file = a package import — summarized for
             // `cross-layer/untraced-client-import-no-visible-consume`.
@@ -217,6 +236,31 @@ pub(super) fn run_file_pass(
             // Same plumbing rationale as `loop_spans` directly above (carry the real fact, never a
             // hardcoded placeholder), and likewise inert in envelope mode today.
             function_spans: file.function_spans.clone(),
+            // Unlike the two above this one is NOT inert here: the test-region gate (`zzop_core::dsl::
+            // eval`'s `TestRegions`) runs over whatever this per-file pass produces, which in envelope
+            // mode is symbol-scan, so a producer that declares `test_spans` gets its fixtures excluded in
+            // Mode B too. Mode B and Mode A must not disagree about what counts as shipped code.
+            //
+            // Two edges this pass does NOT cover, both stated at the wire field
+            // (`docs/adapters/envelope.schema.json`, `docs/NORMALIZED_AST.md`) so a producer is not left
+            // inferring them: a rule declaring `scan_test_regions` keeps judging these spans on purpose
+            // (credential-at-rest rules — the commit is the leak), and `Matcher::IoScan` is evaluated
+            // whole-tree by `ingest`'s own `eval_pack_io_scan` call, over assembled facts this
+            // `SourceFile` is not part of. The producer withholds test-region io facts instead; gating
+            // them here would clean the findings and leave the same route in the join.
+            test_spans: file.test_spans.clone(),
+            // Always empty in Mode A/B: `FileProjection` has no call-SITE channel on the wire today.
+            // Its `calls` channel is NOT that — those are call-graph EDGES (a different fact category,
+            // consumed by `super::callgraph`'s BFS pass, never by `Matcher::CallScan`) — and opening a
+            // per-file call-SITE channel on the external contract is its own additive, version-gated
+            // change. Consequence, stated so it cannot be discovered by surprise: a `CallScan` rule is
+            // silent on every envelope-projected file, the same recall-side degrade a language with no
+            // native producer gets.
+            call_sites: Vec::new(),
+            // Always empty in Mode A/B — the boundary here is PRIVACY (unsalted 64-bit hashes of
+            // candidate SECRETS must not ride an external submission), not only additive-change
+            // discipline: see docs/NORMALIZED_AST.md "Channels deliberately NOT on this wire".
+            string_literals: Vec::new(),
             rel: file.path.clone(),
             text: String::new(),
             symbols: file.symbols.clone(),
@@ -226,11 +270,26 @@ pub(super) fn run_file_pass(
         let ctx = RuleContext { files: ctx_files };
         for pack in enabled_packs {
             if pack_loader::applies_to(pack, &file.path) {
+                // Same profiled/unprofiled branch `pipeline::findings::eval_packs` uses: an unprofiled
+                // run keeps the exact whole-pack call it always made (no `Instant::now()` cost), a
+                // profiled one goes through `eval_pack_profiled` and folds each `RuleTiming` into the
+                // SAME per-rule accumulator shape `analyze::assemble`'s reduce step sums — findings are
+                // byte-identical either way (profiling never changes what runs).
+                let mut found = if profile {
+                    let (found, timings) = zzop_core::dsl::eval_pack_profiled(pack, &ctx);
+                    for t in timings {
+                        let entry = state.rule_time.entry(t.rule_id).or_insert((0, 0));
+                        entry.0 += t.nanos;
+                        entry.1 += t.findings;
+                    }
+                    found
+                } else {
+                    eval_pack(pack, &ctx)
+                };
                 // D13①: same config-disable-hint append `pipeline::findings::eval_packs` does for Mode
                 // A — via the SAME shared helper (never a second hand-written hint template). Mode B has
                 // no on-disk cache (see `envelope.rs`'s module doc), so this never touches
                 // `CACHE_SCHEMA_VERSION`'s contract the way the Mode A call site does.
-                let mut found = eval_pack(pack, &ctx);
                 crate::pipeline::findings::append_disable_hints(&mut found);
                 state.per_file_findings.extend(found);
             }

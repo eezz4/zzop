@@ -13,7 +13,12 @@
 #                                             failure trains people to ignore this script
 #
 # ## What counts as a "command"
-# The `cargo`/`node`/`bash scripts/...` invocations in `ci.yml`'s `run:` steps. Deliberately excluded:
+# The `cargo`/`node`/`npm ci`/`bash scripts/...` invocations in `ci.yml`'s `run:` steps. `node` covers
+# BOTH shapes ci.yml actually runs — `node scripts/<file>` and `node --test $files` — because until
+# 2026-08-03 the extractor knew only the first, and the three test-runner commands (two `node --test`
+# steps, one `npm ci`) sat in ci.yml with no local counterpart while this guard reported "mirrored
+# both ways". A needle list that is narrower than the claim is the same defect this guard exists to
+# catch, one level down. Deliberately excluded:
 #   * `bash scripts/check-*.sh` — the guards job. `pre-commit` runs those on every commit and
 #     `check-guards-wired.sh` already binds that list; mirroring them here would be a third owner.
 #   * `git`/`echo`/`set` plumbing inside multi-line steps — not the work, just the shell around it.
@@ -41,7 +46,7 @@ normalize() { sed -E 's/^[[:space:]]*-?[[:space:]]*run:[[:space:]]*//; s/[[:spac
 # line would compare a path rather than a step.
 extract() {
   grep -vE '^[[:space:]]*#' "$1" \
-    | grep -hoE '^[[:space:]]*-?[[:space:]]*(run: )?(\$CARGO|cargo|node scripts/[^ ]+|bash scripts/measure/[^ ]+)([^|>&#"]*)?' \
+    | grep -hoE '^[[:space:]]*-?[[:space:]]*(run: )?(\$CARGO|cargo|node scripts/[^ ]+|node --test|npm ci|bash scripts/measure/[^ ]+)([^|>&#"]*)?' \
     | sed -E 's/\$CARGO/cargo/' \
     | normalize \
     | grep -vE '^bash scripts/check-|site-graph-data' \

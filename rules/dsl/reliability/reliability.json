@@ -71,10 +71,10 @@
     {
       "id": "debug-true-committed",
       "severity": "warning",
-      "message": "Debug flag or disabled TLS verification (`debug: true`, `NODE_TLS_REJECT_UNAUTHORIZED=0`, `rejectUnauthorized: false`) committed to source — ships a dev backdoor or TLS bypass to production if deployed unchanged. Remove the flag or gate it behind an environment check (e.g. `NODE_ENV !== 'production'`). Suppress a vetted line with `// zzop-debug-true-committed-ok`.",
+      "message": "Debug flag or disabled TLS verification (`debug: true`, `NODE_TLS_REJECT_UNAUTHORIZED=0`, `rejectUnauthorized: false`) committed to source — ships a dev backdoor or TLS bypass to production if deployed unchanged. The two TLS shapes are Node-specific, but the `debug: true` shape is not, and this rule scans Rust as well: a struct literal (`Settings { debug: true }`) fires exactly as a JS object literal does. Remove the flag, or gate it behind an environment check in whichever language the line is written in — `process.env.NODE_ENV !== 'production'` in Node, `std::env::var` in Rust. Suppress a vetted line with `// zzop-debug-true-committed-ok`.",
       "matcher": {
         "type": "line-scan",
-        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs|rs)$",
         "file_exclude_pattern": "${test-paths-stories}",
         "skip_comment_lines": true,
         "any": [
@@ -139,6 +139,32 @@
       }
     },
     {
+      "id": "reqwest-no-timeout",
+      "severity": "warning",
+      "message": "A `reqwest` HTTP client is constructed inside this function (`Client::new()` / `Client::builder()` / `Client::default()` / `ClientBuilder::new()`, or the `reqwest::get(url)` convenience call — which builds a fresh, timeout-less default client on every invocation — in a file that names `reqwest` at all) and no `.timeout(` call appears in the same function body — reqwest's default client has no request timeout, so a peer that accepts the connection and then stalls holds this task, its connection and whatever it borrows for as long as the peer likes. Set one: `Client::builder().timeout(Duration::from_secs(5)).build()`, or `.timeout(..)` on the individual request builder; for `reqwest::get` there is no builder to put one on — construct a client instead. Scope, disclosed rather than assumed: the veto is FUNCTION-LOCAL, purely lexical, and matches the METHOD spellings `.timeout(` and `.read_timeout(` only — so a client built by a shared constructor elsewhere and merely used here is invisible to it, a timeout configured outside this function reads as absent, and a caller-side deadline such as `tokio::time::timeout(...)` does not clear it either (use the suppression marker for that case) — confirm before changing code. `read_timeout` DOES clear it: it bounds exactly the stalled-peer read this message describes. `connect_timeout` deliberately does NOT clear it: that caps the HANDSHAKE only, and the stalled-peer failure above begins after the handshake succeeds. The TypeScript sibling is `reliability/fetch-no-timeout`. Suppress a vetted case with `// zzop-reqwest-no-timeout-ok`.",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.rs$",
+        "file_exclude_pattern": "${test-paths-stories}",
+        "require_file": "\\breqwest\\b",
+        "skip_comment_lines": true,
+        "patterns": [
+          {
+            "pattern": "\\b(?:reqwest::)?Client(?:Builder)?::(?:new|builder|default)\\s*\\(|\\breqwest::get\\s*\\(",
+            "label": "client"
+          }
+        ],
+        "trigger": "client",
+        "absent": [
+          {
+            "pattern": "\\.(?:read_)?timeout\\s*\\(",
+            "label": "timeout"
+          }
+        ],
+        "snippet_max": 160
+      }
+    },
+    {
       "id": "process-exit-in-lib",
       "severity": "warning",
       "message": "`process.exit(...)` called inside a function — skips pending I/O flushes and cleanup handlers, killing the entire process, not just the current request. Throw (or reject) instead and let a top-level handler decide; legitimate only in a CLI entrypoint or a signal-handling module. Suppress a vetted case with `// zzop-process-exit-in-lib-ok`.",
@@ -171,13 +197,25 @@
     {
       "id": "console-in-be",
       "severity": "info",
-      "message": "`console.*` call in backend-path source (`api/`, `server/`, `backend/`, `be/`, `routes/`, `controllers/`, `services/`) — console writes are synchronous and unstructured. Use the project's structured logger instead so output is queryable, non-blocking, and carries request context. Suppress a vetted case with `// zzop-console-in-be-ok`.",
+      "message": "Console write in backend-path source (`api/`, `server/`, `backend/`, `be/`, `routes/`, `controllers/`, `services/`) — console writes are synchronous and unstructured. Use the project's structured logger instead so output is queryable, non-blocking, and carries request context. This rule reads the parser's projected call-site channel rather than a text regex, so a console call named inside a string literal or a comment is not a site at all, and the one rule covers five languages with each platform's own spellings: TypeScript/JavaScript's `console.*`, Python's `print`, Go's `fmt.Print`/`fmt.Println`/`fmt.Printf` (plus `fmt.Fprint`/`fmt.Fprintln`/`fmt.Fprintf` when the writer is spelled `os.Stdout` or `os.Stderr` at the site — an aliased writer is silent, spelling over data flow), Java's `System.out`/`System.err` `print`/`println`/`printf`/`format`, and C#'s `Console.Write`/`Console.WriteLine` including the `Console.Error`/`Console.Out` and `System.`-prefixed spellings. Scope stated so the blanks read as choices: on TypeScript only `log`, `error`, `warn` and `info` count — `console.debug` and `console.trace` ARE projected and deliberately left out, so that moving off the text regex neither gained nor lost a TypeScript finding. Rust is a permanent blank BY JUDGMENT, not by gap: `println!` is a console write in the fact layer but a CLI's normal output, so this rule never admits `.rs`. A structured logger (`winston`, `pino`, Python's `logging`, slf4j, `ILogger`) is never a console write and never fires here — and Go's stdlib `log.Print*` is on the LOGGER side of that line (it defaults to stderr but `log.SetOutput` retargets it; the boundary case the design excludes from v1). One more Python silence is FILE-scoped and worth knowing before trusting a quiet file: a file that rebinds the name `print` anywhere (`def print`, `print = ...`, `from rich import print`, even a parameter named `print`) projects no console-write sites at all — the projected fact claims the BUILT-IN, and a file that shadows the name has taken that claim away, so one unrelated rebinding silences every `print` in that file. A file this engine cannot parse, or one in a language with no call-site producer, yields no sites at all — silence from this rule is absence of evidence, never a clean bill. Suppress a vetted case with `// zzop-console-in-be-ok` (`# zzop-console-in-be-ok` in Python).",
       "matcher": {
-        "type": "line-scan",
-        "file_pattern": "(?i)(^|/)(api|server|backend|be|routes|controllers|services)/.*\\.(ts|js|mjs|cjs)$",
+        "type": "call-scan",
+        "file_pattern": "(?i)(^|/)(api|server|backend|be|routes|controllers|services)/.*\\.(ts|js|mjs|cjs|py|go|java|cs)$",
         "file_exclude_pattern": "${test-paths-stories}",
-        "skip_comment_lines": true,
-        "line_pattern": "console\\.(log|error|warn|info)\\s*\\("
+        "kind": "console-write",
+        "callee_pattern": "^(console\\.(log|error|warn|info)|print|System\\.(out|err)\\.(print|println|printf|format)|(System\\.)?Console(\\.(Error|Out))?\\.(Write|WriteLine)|fmt\\.(Print|Println|Printf|Fprint|Fprintln|Fprintf))$"
+      }
+    },
+    {
+      "id": "console-in-loop",
+      "severity": "warning",
+      "message": "Console write PROVED to run inside a loop — the call site's own line falls within one of the parser's projected loop spans (a `for`/`for-of`/`for-in`/`while`/`do-while` statement or an Array `forEach`/`map`/`filter`/`reduce` callback in TypeScript/JavaScript; a `for`/`while` statement or a comprehension in Python; every `for` form in Go; `for`/enhanced-`for`/`while`/`do` in Java; `for`/`foreach`/`while`/`do` in C# — each language's console-write spellings are `console-in-be`'s, and each language's lazy callback forms, Java Stream lambdas and C# LINQ included, are deliberately NOT loop spans, so a write inside one is missed rather than claimed), so it writes once per iteration instead of once. Rust is a permanent blank BY JUDGMENT, `console-in-be`'s own: `println!` is a CLI's normal output, so `.rs` is never admitted here either. Console writes are synchronous: to a pipe or a file each one blocks until the write lands, so a loop over a few thousand items turns a millisecond of work into seconds of I/O, and the volume it emits is unreadable to the person who has to grep it. Emit one aggregated line after the loop, or move the per-item detail behind a structured logger's debug level where a sink can drop it. This is a STRUCTURAL claim, not a co-occurrence heuristic — a console write merely sharing a function with a loop does not fire, only one the parser placed inside the loop's span. Both inputs degrade to SILENCE and never to a guess: a file with no projected call sites (unparseable, or a language with no producer) and a file with no projected loop spans each yield nothing, so this rule under-reports by construction. One silence is FILE-scoped and worth knowing before trusting a quiet Python file: a file that rebinds the name `print` anywhere (`def print`, `print = ...`, `from rich import print`, even a parameter named `print`) projects no console-write sites at all — the projected fact claims the BUILT-IN, and a file that shadows the name has taken that claim away. A single-line callback or comprehension also projects no loop span (line-granular containment cannot tell its body from the receiver line), so a one-liner`'`s per-iteration write is deliberately missed rather than a one-shot write falsely claimed. Unlike `reliability/console-in-be`, every console write method the parser recognizes counts here, `debug` and `trace` included — the harm is per-iteration volume and blocking, which the level does not change. Suppress a vetted case with `// zzop-console-in-loop-ok` (`# zzop-console-in-loop-ok` in Python).",
+      "matcher": {
+        "type": "call-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|jsx|mjs|cjs|py|go|java|cs)$",
+        "file_exclude_pattern": "${test-paths-stories}",
+        "kind": "console-write",
+        "in_loop": true
       }
     },
     {
@@ -196,15 +234,14 @@
     {
       "id": "env-outside-config",
       "severity": "info",
-      "message": "`process.env.X` is read outside the env-config module(s) declared for this project — scattering env parsing and validation across the codebase, so nothing can state what the app actually depends on or validate it at startup. WHICH paths are the config module is a fact about the project, not something the source says, so this rule does not guess it: it runs only when an `env-config-module` attribute is declared, and a file covered by a truthy one is exempt. An exact `{\"file\": {\"path\": ...}}` target overrides a covering `{\"pathScope\": {\"prefix\": ...}}`, so one file can be carved out of a directory declared wholesale. Declare it with `overlays: [\"./zzop-attributes.json\"]` in zzop.config.jsonc (embedders: `adapterOverlays`), whose envelope carries the attribute on a file entry — examples/adapters/auth-overlay-adapter is a complete working one. With nothing declared this rule does not run at all, and the run's warnings say so along with how many sites it left unjudged; it does not fall back to flagging every read. Two consequences worth stating rather than discovering: the exemption is whole-FILE, so every env read in a declared file is exempt including ones unrelated to config; and the declaration is taken on trust — nothing here verifies that a declared module validates, caches, or re-exports what it reads, only that you said it is the place. Test, spec, story and Storybook paths are excluded outright, independently of any declaration. Centralize env reads in a declared config module and import the validated value elsewhere. Suppress a vetted case with `// zzop-env-outside-config-ok`.",
+      "message": "A process environment variable is read outside the env-config module(s) declared for this project — scattering env parsing and validation across the codebase, so nothing can state what the app actually depends on or validate it at startup. WHICH paths are the config module is a fact about the project, not something the source says, so this rule does not guess it: it runs only when an `env-config-module` attribute is declared, and a file covered by a truthy one is exempt. An exact `{\"file\": {\"path\": ...}}` target overrides a covering `{\"pathScope\": {\"prefix\": ...}}`, so one file can be carved out of a directory declared wholesale. Declare it with `overlays: [\"./zzop-attributes.json\"]` in zzop.config.jsonc (embedders: `adapterOverlays`), whose envelope carries the attribute on a file entry — examples/adapters/auth-overlay-adapter is a complete working one. With nothing declared this rule does not run at all, and the run's warnings say so along with how many sites it left unjudged; it does not fall back to flagging every read. Two consequences worth stating rather than discovering: the exemption is whole-FILE, so every env read in a declared file is exempt including ones unrelated to config; and the declaration is taken on trust — nothing here verifies that a declared module validates, caches, or re-exports what it reads, only that you said it is the place. Test, spec, story and Storybook paths are excluded outright, independently of any declaration. WHAT COUNTS AS A READ is the parser's projected call-site channel, not a text regex, and that changed the reach in three directions worth naming rather than discovering. It covers six languages, each with its platform's own keyed-read spellings: TypeScript/JavaScript's `process.env`, Python's `os.getenv(...)`/`os.environ.get(...)`/`os.environ[...]`, Go's `os.Getenv`/`os.LookupEnv`, Java's `System.getenv`, C#'s `Environment.GetEnvironmentVariable` (with or without the `System.` prefix), and Rust's `std::env::var`/`std::env::var_os` (each spelling kept as written, so `env::var` after `use std::env` is its own callee). Deliberately NOT reads, per producer: whole-environment enumerations (`os.Environ()`, `GetEnvironmentVariables()`, `std::env::vars()`, bare `os.environ` as a mapping) and Rust's `env!()`/`option_env!()`, which resolve at COMPILE time and read no process environment. It is WIDER on TypeScript/JavaScript than the regex it replaced: that regex could only see `process.env.` followed by a bare identifier, so `process.env[\"NAME\"]` and `process.env[key]` were invisible to it and are now flagged; every read point is one finding, so two reads on one line are two findings where the old line scan reported one. And it is narrower in the honest direction: a read named only inside a string literal or a comment was never a read and is no longer counted as one, while a file this engine cannot parse — or one in a language with no call-site producer — yields no sites at all, so silence there is absence of evidence rather than a clean bill. The variable's NAME is deliberately not carried, because this rule fires on any read and no rule asks which one. Centralize env reads in a declared config module and import the validated value elsewhere. Suppress a vetted case with `// zzop-env-outside-config-ok` (`# zzop-env-outside-config-ok` in Python).",
       "matcher": {
-        "type": "line-scan",
-        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "type": "call-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs|py|go|java|cs|rs)$",
         "file_exclude_pattern": "${test-paths-stories}",
+        "kind": "env-read",
         "attr_absent": "env-config-module",
-        "require_attr_declared": "env-config-module",
-        "skip_comment_lines": true,
-        "line_pattern": "\\bprocess\\.env\\.[A-Za-z0-9_]+"
+        "require_attr_declared": "env-config-module"
       }
     },
     {

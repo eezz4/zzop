@@ -26,9 +26,14 @@ fn hammer(rel: &str, text: &str) {
     let _ = java::parse_imports(text);
     let _ = java::parse_calls(rel, text);
     let _ = java::parse_local_identifier_refs(text);
+    let _ = java::extract_loop_spans(rel, text);
+    let _ = java::extract_call_sites(rel, text);
+    let _ = java::extract_string_literals(rel, text);
     let _ = java::java_package_of(text);
     let _ = java::java_type_names(text);
     let _ = java::extract_http_provides(rel, text);
+    let _ = java::extract_java_http_consumes(rel, text);
+    let _ = java::extract_jpa_db_table_provides(rel, text);
     let _ = java::extract_spring_guarded_lines(rel, text);
     let _ = java::extract_spring_security_posture(rel, text);
 

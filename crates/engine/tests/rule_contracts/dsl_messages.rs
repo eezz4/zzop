@@ -5,11 +5,14 @@ use std::path::PathBuf;
 
 use crate::dsl_dir;
 
-/// The token a DSL author must never write. It is the embedder-facing half of the ONE disable-hint
-/// fragment `crates/engine/src/pipeline/findings.rs`'s `append_disable_hints` appends to EVERY finding
-/// `eval_packs` (and `envelope::file_pass`'s Mode B `eval_pack`) produces — unconditionally, before the
-/// finding reaches the cache, so the appended sentence is present in warm-cache reads too.
-const ENGINE_OWNED_TOKEN: &str = "disabled_rules";
+/// The tokens a DSL author must never write. `disabledRules` is the embedder-facing half of the ONE
+/// disable-hint fragment `crates/engine/src/pipeline/findings.rs`'s `append_disable_hints` appends to
+/// EVERY finding `eval_packs` (and `envelope::file_pass`'s Mode B `eval_pack`) produces —
+/// unconditionally, before the finding reaches the cache, so the appended sentence is present in
+/// warm-cache reads too. `disabled_rules` is the snake_case spelling that fragment emitted until
+/// 2026-08-02 (it is the Rust `RuleConfig` field name, but NOT a spelling the JSON wire accepts) — kept
+/// forbidden so the original hand-written-hint incident cannot recur under the old habit either.
+const ENGINE_OWNED_TOKENS: [&str; 2] = ["disabledRules", "disabled_rules"];
 
 /// Every `rules/dsl/<pack>/<pack>.json`, as raw files. Read from the same directory
 /// [`crate::load_all_packs`] loads, but deliberately NOT through the typed loader: this contract judges
@@ -73,7 +76,8 @@ fn collect_messages(
     }
 }
 
-/// Contract 17 — no shipped DSL pack's `message` field names `disabled_rules`.
+/// Contract 17 — no shipped DSL pack's `message` field names `disabledRules` (or the retired
+/// `disabled_rules` spelling).
 ///
 /// The engine appends the disable hint to every DSL finding itself
 /// (`pipeline::findings::append_disable_hints`), so a hand-written copy does not ADD the sentence — it
@@ -88,16 +92,18 @@ fn collect_messages(
 /// dialect does not have.
 ///
 /// **Relationship to contract 2** (`markers.rs`'s `every_dsl_rule_message_documents_how_to_exclude_it`),
-/// which accepts `disabled_rules` as one of two ways to satisfy the "how to exclude" leg: the two compose
-/// rather than conflict. Contract 2 says a DSL message must name its marker OR `disabled_rules`; this one
-/// removes the second option, leaving exactly one thing a DSL author writes — their own derived
-/// `zzop-<id>-ok` marker — while the engine owns the disable sentence. Contract 2's `disabled_rules` leg
+/// which accepts `disabled_rules`/`disabledRules` as one of two ways to satisfy the "how to exclude"
+/// leg: the two compose rather than conflict. Contract 2 says a DSL message must name its marker OR that
+/// token; this one removes the second option, leaving exactly one thing a DSL author writes — their own
+/// derived `zzop-<id>-ok` marker — while the engine owns the disable sentence. Contract 2's token leg
 /// is not deleted there because it is also the leg a future non-DSL caller of that helper could use; here
 /// it is simply unavailable.
 ///
-/// **Scope**: the `disabled_rules` spelling only. `disabledRules` (the config-file dialect) is not
-/// forbidden — nothing has ever hand-written it, and the token this contract exists to stop is the one the
-/// engine's own fragment emits verbatim.
+/// **Scope**: both spellings of the embedder field. `disabledRules` is what the engine's fragment emits
+/// verbatim since the 2026-08-02 wire-spelling fix (the request surfaces are camelCase and silently drop
+/// unknown keys, so the old snake_case hint was uncopyable); `disabled_rules` stays forbidden so a
+/// hand-written copy of the RETIRED hint — the exact shape of the original incident — cannot return
+/// either.
 #[test]
 fn no_dsl_pack_message_hand_writes_the_engine_appended_disable_hint() {
     let files = dsl_pack_files();
@@ -119,7 +125,7 @@ fn no_dsl_pack_message_hand_writes_the_engine_appended_disable_hint() {
         let mut found = Vec::new();
         collect_messages(&value, None, &mut found);
         for (rule_id, message) in found {
-            if message.contains(ENGINE_OWNED_TOKEN) {
+            if ENGINE_OWNED_TOKENS.iter().any(|tok| message.contains(tok)) {
                 offenders.push(format!("{}: rule `{rule_id}`", path.display()));
             }
             messages.push(message);
@@ -135,28 +141,29 @@ fn no_dsl_pack_message_hand_writes_the_engine_appended_disable_hint() {
 
     assert!(
         offenders.is_empty(),
-        "DSL rule messages that hand-write `{ENGINE_OWNED_TOKEN}`. The engine appends the disable hint to \
+        "DSL rule messages that hand-write the engine-owned disable-hint token ({ENGINE_OWNED_TOKENS:?}). The engine appends the disable hint to \
          every DSL finding already (`pipeline::findings::append_disable_hints`), so this text renders \
          TWICE in the finding a user reads — delete the hand-written sentence, keep only your rule's own \
          `zzop-<id>-ok` marker (docs/rules/authoring-guide.md): {offenders:#?}"
     );
 }
 
-/// A rule that can never reach its own goal must SAY where its ceiling is, in the finding itself.
+/// A rule that can never reach its own goal must SAY where its ceiling is, in the finding itself —
+/// and when the ceiling OPENS, the message must say exactly what opened and what did not.
 ///
-/// `hardcoded-secret` is the case with the most to lose: it matches on VALUE SHAPE, so a passphrase
-/// built from dictionary words is always silent and a random base64url token is silent whenever it
-/// draws no digits. Neither is fixable by tuning the rule — closing the first needs entropy (not
-/// computable in a line scan) and the second needs a string-literal-with-binding-name IR node the
-/// matcher does not have. That is why `2.backlog/waiting.md` keeps the row: the door does not open
-/// from inside this rule.
+/// `hardcoded-secret` matches on VALUE SHAPE, so a passphrase built from dictionary words and a
+/// no-digit base64url token are both silent in ITS arms — that part is unchanged and still pinned.
+/// What changed (A17, 2026-08-03): the string-literal-with-binding-name IR node the message used to
+/// name as the missing fix now EXISTS, and `security/high-entropy-secret` reads it. So this pin's job
+/// grew a second half: the line-scan message must point at the sibling that covers its measured
+/// blindness (or a reader still concludes the classes are uncovered), and the SIBLING's message must
+/// state its own residuals — the measured threshold, the sub-floor passphrases it misses, and the
+/// value-veto it structurally cannot have (the value is hashed at extraction) — so the pair can never
+/// be read as closure.
 ///
-/// The message already carries all of it, including measured false-negative rates. This pins it,
-/// because a message that long is exactly the kind an editor trims for brevity — and the sentences most
-/// likely to look trimmable are the ones admitting the ceiling, which are the reason a reader can trust
-/// the rest.
+/// Both messages are long, and the sentences most likely to look trimmable are exactly these.
 #[test]
-fn hardcoded_secret_states_the_ceiling_it_cannot_pass() {
+fn hardcoded_secret_and_its_entropy_sibling_state_their_ceilings() {
     let mut messages = Vec::new();
     for path in dsl_pack_files() {
         let text = fs::read_to_string(&path).expect("pack readable");
@@ -169,19 +176,46 @@ fn hardcoded_secret_states_the_ceiling_it_cannot_pass() {
         .expect("hardcoded-secret must still exist and carry a message");
 
     for token in [
-        // the two ceilings, each named as what it IS rather than as a vague limitation
+        // this rule's OWN ceiling, unchanged: shape, named as what it is
         "SHAPE test, not entropy",
-        "string-literal-with-binding-name",
-        // and the honesty that makes the ceiling actionable rather than decorative: what is silenced,
-        // and how often
+        // the silenced classes and their measured rates
         "ALWAYS silenced",
         "200k samples",
+        // the opened half: the node exists and the sibling reads it — with the both-rules residual
+        "string-literal-with-binding-name",
+        "security/high-entropy-secret",
+        "Still silent in BOTH rules",
     ] {
         assert!(
             message.contains(token),
-            "hardcoded-secret's message must keep stating its own ceiling, missing {token:?}.\n\
+            "hardcoded-secret's message must keep stating its ceiling AND where the opened half now \
+             lives, missing {token:?}.\n\
              Trimming these sentences leaves a rule that looks complete and is not — the exact \
              silence this repo's disclosure discipline exists to abolish."
+        );
+    }
+
+    let (_, sibling) = messages
+        .iter()
+        .find(|(id, _)| id == "high-entropy-secret")
+        .expect("high-entropy-secret must still exist and carry a message");
+
+    for token in [
+        // the judgment and its measured floor
+        "threshold 80",
+        // the no-plaintext contract, stated where a user reads it
+        "NEVER the value itself",
+        // the residuals that keep the pair honest: sub-floor passphrases, the impossible value-side
+        // veto, and the indistinguishable long-identifier class
+        "88.5% below 80",
+        "invisible by design",
+        "indistinguishable from a passphrase",
+    ] {
+        assert!(
+            sibling.contains(token),
+            "high-entropy-secret's message must keep stating its measured floor and residuals, \
+             missing {token:?} — without them the hardcoded-secret + high-entropy-secret pair reads \
+             as closure, which the measurements say it is not."
         );
     }
 }

@@ -234,6 +234,7 @@ pub(super) fn collect(
     census::drain_python_candidates(
         python_package_import_candidates,
         &ts_paths,
+        &config.vocabulary.resolve().python_package_roots,
         &mut package_import_files,
     );
     census::drain_rust_candidates(

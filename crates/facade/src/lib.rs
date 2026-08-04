@@ -65,6 +65,8 @@ mod query_e2e_tests;
 mod query_tests;
 #[cfg(test)]
 mod rule_pack_tests;
+#[cfg(test)]
+mod test_region_promise_tests;
 
 pub use analyze::{analyze_json, analyze_trees_json};
 pub use envelope::{analyze_envelope_json, validate_envelope_only_json};

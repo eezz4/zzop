@@ -27,11 +27,11 @@ const HTTP_CLIENT_SPECIFIERS: &[&str] = &[
     // `server_framework_import`'s own `SERVER_FRAMEWORK_SPECIFIERS` doc gives for its own Go entries; the
     // slash-subpath arm below already covers `"github.com/go-resty/resty/v2"` for free.
     "github.com/go-resty/resty",
-    // Spring's RestTemplate/WebClient (Java) — NOT extracted in v1 (this crate's Spring adapter is
-    // provide-side only, no http-egress/consume extractor exists for Java yet), so this entry is a pure
-    // disclosure vocab word, unlike most of this list's natively-recognized dual: a tree importing
-    // `org.springframework.web.client.*` and showing near-zero http consumes is ALWAYS blind here, never
-    // a false positive. Census-grain note: Java's F5 drain censuses at the first-TWO-dotted-segments grain
+    // Spring's RestTemplate (Java) — natively recognized since 2026-08-02
+    // (`zzop_parser_java_21::http_clients`, literal URLs only), so this entry now has the same
+    // recognized-dual role as most of this list: near-zero consumes DESPITE the import signals an
+    // idiom that extractor does not read (Feign, a wrapper, computed URLs), no longer guaranteed
+    // blindness. Census-grain note: Java's F5 drain censuses at the first-TWO-dotted-segments grain
     // (`org.springframework`, not `org.springframework.web.client`) — see this entry's own disjoint-pin
     // caveat below (`java_client_vocab_nested_under_server_vocab_is_deliberate_overlap_not_a_bug` in
     // `tests.rs`): a real Java import specifier censused at that coarser grain never reaches THIS vocab

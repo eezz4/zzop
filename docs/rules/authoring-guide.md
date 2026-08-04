@@ -1,6 +1,6 @@
 # Authoring a DSL rule pack
 
-How to write and ship a `rules/dsl/*.json` pack. Field-by-field semantics live in
+How to write and ship a `rules/dsl/<pack>/<pack>.json` pack. Field-by-field semantics live in
 [dsl-reference.md](dsl-reference.md); this doc covers placement, a worked example, performance, testing,
 and when to reach for a native rule instead.
 
@@ -76,7 +76,7 @@ reader sees how to silence a vetted case:
   and it behaves exactly like any shipped pack — there is no first-party/third-party distinction at the
   interpreter level.
 
-[dsl-reference.md](dsl-reference.md) is the field-by-field reference for all four matcher shapes; worked
+[dsl-reference.md](dsl-reference.md) is the field-by-field reference for every matcher shape; worked
 `method-scan`, `symbol-scan`, and `io-scan` examples live in `crates/core/src/dsl.rs`'s own test module (the
 `http-conventions` fixture pack there is a full `symbol-scan` + `io-scan` end-to-end demo, kept test-only
 rather than shipped — it exists to demonstrate the matcher shapes, not because it detects anything real).
@@ -88,7 +88,7 @@ Every DSL finding's `message` gets one more sentence appended by the engine at r
 builds:
 
 ```
-Disable via config `rules: { "<pack>/<rule>": "off" }` (embedders: `disabled_rules`)
+Disable via config `rules: { "<pack>/<rule>": "off" }` (embedders: `disabledRules`)
 ```
 
 and `crates/engine/src/pipeline/findings.rs`'s `append_disable_hints` appends this to every finding built
@@ -129,7 +129,7 @@ Pack correctness is tested as **engine end-to-end over fixture trees**, not by u
 interpreter against synthetic JSON alone (though `dsl.rs`'s own test module does plenty of that for the
 matcher machinery itself). A pack's own test suite:
 
-- Loads the real `rules/dsl/<pack>.json` (via `load_dsl_packs`, exactly as the engine would), not an
+- Loads the real `rules/dsl/<pack>/<pack>.json` (via `load_dsl_packs`, exactly as the engine would), not an
   inlined copy — so the shipped file is what's actually under test.
 - Runs it through `eval_pack`/`analyze_tree` against small hand-built source fixtures that reproduce the
   rule's documented reference cases.
@@ -145,16 +145,18 @@ the one weak rule.
 
 ## When a rule does NOT fit the DSL
 
-Some detections are structurally impossible to express with the four matchers above, no matter how
-clever the regex. Reach for a native rule (`rules/native/*`, statically linked into `core`) instead when
+Some detections are structurally impossible to express with the matchers above, no matter how
+clever the regex. Reach for a native rule (`rules/native/*`, statically linked into `zzop-engine` — never into
+`zzop-core`, which stays rule-agnostic; see `rules/README.md`) instead when
 the check needs:
 
 - **Absence beyond what `absent` expresses.** `method-scan`'s `absent` only vetoes on a *pattern
   appearing in the same span*; it cannot express "this identifier is declared but never read" or "this
   key is set but its TTL is never checked" — that needs real declaration→use correlation, not
-  co-occurrence. (`redisTtlMissing`'s Map-alias exclusion is exactly this shape — deferred to the native
-  backlog for this reason.)
-- **Cross-file joins.** All four matchers operate on one file's `SourceFile` slice (text + symbols + IO
+  co-occurrence. (A "cache key set without an expiry" check is exactly this shape: distinguishing a real
+  Redis client from a `Map` used as a cache needs the declaration, not a nearby token — which is why no
+  such rule ships as DSL.)
+- **Cross-file joins.** Every matcher operates on one file's `SourceFile` slice (text + symbols + IO
   facts) in isolation; nothing in the DSL contract can see a second file's content. A rule that needs to
   resolve a constant defined in another module, join against a shared `REDIS_KEYS`-style vocabulary
   module, or correlate a route registration in one file with its handler's body in another (`http`
@@ -189,16 +191,19 @@ What it checks:
   construction guarantees; what the test still enforces is that no two rules — in any pack — derive the same
   marker (i.e. rule ids are globally unique), since a shared marker would silently co-suppress both.
 - **Message triple** — every DSL rule's `message` names its own derived marker (or, for a disable-only
-  rule, the literal `disabled_rules`/`disabledRules` string) somewhere in the text — the "how to exclude"
+  rule, the literal `disabledRules` string — `disabledRules` is the wire spelling every embedder
+  request surface actually accepts; the contract also still recognizes the retired snake_case
+  `disabled_rules`) somewhere in the text — the "how to exclude"
   leg every finding must carry alongside its problem/fix explanation.
 - **Native message contract** — a pragmatic grep over `rules/native/*/src/**/*.rs`: any file that
-  constructs a `Finding` via a literal `rule_id: "..."` must also mention `disabled_rules` somewhere in the
+  constructs a `Finding` via a literal `rule_id: "..."` must also mention `disabledRules` (or the Rust
+  field spelling `disabled_rules`, or call `zzop_core::disable_hint`) somewhere in the
   same file (native findings are built in code, so there is no single declarative `message` field to
   inspect precisely the way the DSL check above can — see the test's own doc comment for exactly what this
   proxy can and cannot prove).
 - **Id hygiene** — DSL pack ids are unique across packs, rule ids are unique within a pack, and no DSL
   `"pack"` or `"pack/rule"` id collides with a native analysis id (all three id shapes share one
-  `disabled_rules`/`suppressions` string-match space — see `crates/core/src/registry.rs::is_enabled`).
+  `disabledRules`/`suppressions` string-match space — see `crates/core/src/registry.rs::is_enabled`).
 - **Catalog sync** — [catalog.md](catalog.md)'s totals sentence (`N DSL packs, N DSL rules, N native
   analysis ids`) matches what `load_dsl_packs`/`register_native_analyses` actually load, and every native
   analysis id / DSL pack id appears somewhere in the catalog's text. The sightline surface is pinned as a

@@ -47,6 +47,8 @@ fn hammer(rel: &str, text: &str) {
     let _ = ts::parse_exported_signature_names(rel, text);
     let _ = ts::extract_function_spans(rel, text);
     let _ = ts::extract_loop_spans(rel, text);
+    let _ = ts::extract_call_sites(rel, text);
+    let _ = ts::extract_string_literals(rel, text);
     let _ = ts::extract_sfc_script_imports(rel, text);
 
     // Adapters — the extractors that only fire once a framework marker has been recognized.

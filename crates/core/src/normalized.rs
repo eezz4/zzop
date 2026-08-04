@@ -15,84 +15,12 @@ mod hints;
 
 pub use hints::envelope_hints;
 
-/// The exact `format` string every conforming envelope must carry (`docs/NORMALIZED_AST.md`'s Envelope
-/// section).
-pub const NORMALIZED_AST_FORMAT: &str = "zzop-normalized-ast";
-
-/// The RELEASE in which the envelope shape last changed — the value a conforming producer declares as
-/// `NormalizedEnvelope::version`, and the only contract-version constant this crate has.
-///
-/// ## Why this is a release number and not a counter (2026-07-31, user ruling)
-/// It used to be an independent `u32` (v1, v2), so a reader had to hold two unrelated version systems
-/// at once and could not tell from an envelope which zzop it belonged with. It now uses the workspace's
-/// own semver, so "which zzop is this" and "which shape is this" are answered in the same units.
-///
-/// It is NOT simply the current release. It moves only when the SHAPE moves, which is what keeps a
-/// producer's output working across releases: an adapter that emitted `"0.27.0"` keeps emitting it, and
-/// keeps being accepted, through every later release that did not change the shape. Bumping it every
-/// release would be the defect this replaces — a number that appears to describe the shape while
-/// actually describing the calendar, leaving a reader unable to tell which bump mattered.
-///
-/// ⚠ That is exactly what happened during the v0.28.0 bump and it was caught in the pre-tag audit: this
-/// constant AND `docs/contracts/example-envelope.json` were moved to `0.28.0` for a release whose only
-/// envelope diff was a prose `description` rewrite, while the schema and `NORMALIZED_AST.md` still (and
-/// correctly) said `0.27.0`. An adapter author copying the shipped example would have emitted an
-/// envelope every 0.27.x engine rejects, for a shape identical to the one they already had. The example
-/// file is now excluded from `scripts/check-release-version-propagation.sh` for this reason — a
-/// release-propagation guard must not reach a constant whose contract is "do not track the release".
-///
-/// ## What acceptance means
-/// A consumer accepts an envelope whose declared version is `<=` its own package version, and rejects
-/// anything newer ("reject newer, never guess" — the same policy `pack_loader`'s DSL schema version
-/// keeps). An engine built before a shape existed refuses the whole envelope rather than silently
-/// ignoring the field it does not know, which is the silent-loss shape the displacement disclosure
-/// exists to abolish, reappearing one level up in the contract. `FileProjection` has no
-/// `deny_unknown_fields`, so without this comparison an unknown field would deserialize, be dropped,
-/// and leave the producer believing it applied.
-///
-/// That comparison protects an HONEST producer, and only an honest one — it cannot see a mislabelled
-/// envelope, which declares an old version while carrying a new field. Nothing about switching to a
-/// release number changed that, so the per-feature floors ([`MIN_VERSION_FOR_OVERRIDES`]) stay: they
-/// are the only thing that makes the mislabel fail loudly on the engine that DOES understand the field,
-/// which is the one run where the producer can still be told.
-///
-/// PRE-1.0 CONSEQUENCE, accepted deliberately: an envelope declaring this version does not run on an
-/// engine older than it, including engines that would have understood every field in it. `VERSIONING.md`
-/// already states that `0.x` makes no backward-compatibility promise; the only known producers are this
-/// repo's own `examples/adapters/`, which are migrated in the same commit.
-pub const NORMALIZED_AST_CONTRACT_VERSION: &str = "0.27.0";
-
-/// The release that introduced `overrides` — the floor an envelope must DECLARE to use it.
-///
-/// A per-feature floor is not made redundant by the `<=` acceptance comparison above, because the two
-/// catch opposite mistakes. Acceptance catches an envelope that is NEWER than the engine. This catches
-/// one that claims to be OLDER than the field it carries: declared `"0.20.0"` plus a populated
-/// `overrides` deserializes cleanly on an engine that predates the field, drops it, and produces a run
-/// where the adapter believes it displaced a native binding and the engine quietly did not. The engine
-/// that understands the field is the only one positioned to notice, so it rejects — the producer learns
-/// at authoring time instead of shipping bytes that mean different things to different engines.
-///
-/// A new gated field adds a constant here and moves [`NORMALIZED_AST_CONTRACT_VERSION`] to the same
-/// release. Fields that are safe to silently ignore need no floor and get none.
-pub const MIN_VERSION_FOR_OVERRIDES: &str = "0.27.0";
-
-/// This build's own version, as the acceptance ceiling — see [`NORMALIZED_AST_CONTRACT_VERSION`].
-/// Every crate inherits the workspace version (`version.workspace = true`), so this is the number
-/// `zzop version` prints.
-pub const SUPPORTED_NORMALIZED_AST_VERSION: &str = env!("CARGO_PKG_VERSION");
-
-/// `"0.27.0"` -> `(0, 27, 0)`, or `None` when the string is not three dot-separated integers.
-///
-/// Hand-rolled rather than a `semver` dependency: the envelope contract needs ordering over
-/// `MAJOR.MINOR.PATCH` and nothing else — no pre-release tags, no build metadata, no ranges — and a
-/// dependency whose extra semantics nobody uses is a surface that can disagree with this crate's own
-/// idea of what a version is. Tuple comparison gives the ordering directly.
-pub fn parse_contract_version(version: &str) -> Option<(u32, u32, u32)> {
-    let mut parts = version.split('.');
-    let mut next = || parts.next()?.parse::<u32>().ok();
-    let parsed = (next()?, next()?, next()?);
-    parts.next().is_none().then_some(parsed)
-}
+mod version;
+pub use version::{
+    parse_contract_version, MIN_VERSION_FOR_CALLS, MIN_VERSION_FOR_OVERRIDES,
+    MIN_VERSION_FOR_ROUTER_MOUNT_REF, NORMALIZED_AST_CONTRACT_VERSION, NORMALIZED_AST_FORMAT,
+    SUPPORTED_NORMALIZED_AST_VERSION,
+};
 
 /// One external-parser invocation's output for one source tree (`docs/NORMALIZED_AST.md`'s Envelope
 /// section). `format`/`version` are plain fields here (not enforced at the type level) so a
@@ -210,6 +138,38 @@ pub struct FileProjection {
     /// convention as `loop_spans` above.
     #[serde(default, alias = "functionSpans")]
     pub function_spans: Vec<(u32, u32)>,
+    /// Per-file TEST-ONLY line spans (1-based, inclusive) — external-parser counterpart of
+    /// `zzop_core::dsl::SourceFile::test_spans` (see that field's doc for the exact contract): regions
+    /// this producer PROVED are compiled out of the shipping build, the fact that lets a rule pack tell
+    /// Rust's in-file `#[cfg(test)] mod tests` apart from shipped code. OPTIONAL (`#[serde(default)]`;
+    /// absent = empty = nothing is subtracted, so an envelope that omits it keeps its full judgment
+    /// rather than going quiet — the SAFE direction for a SUBTRACTIVE fact, and the reason this field
+    /// needs no schema-version gate). Same snake_case-with-camelCase-input-alias convention as
+    /// `loop_spans`/`function_spans` above.
+    #[serde(default, alias = "testSpans")]
+    pub test_spans: Vec<(u32, u32)>,
+    /// Per-file CALL-GRAPH EDGES (`calls-v1`) — the external-parser counterpart of the `RawCall` sites
+    /// native parsers project (`crate::callgraph::RawCall`, same serde type verbatim): each entry
+    /// attributes one call site to its enclosing top-level symbol (`from_symbol`, which MUST be
+    /// `"<this file's path>#<symbol>"` — [`validate_envelope`] rejects any other file's prefix) and
+    /// names its target (`callee_name`, plus the optional typed-receiver/heritage refinements). This is
+    /// the channel that lets a producer with NO native call-graph parser turn on the call-graph-BFS
+    /// rule family (`mutating-route-no-auth`, `unsafe-read-endpoint`, `non-idempotent-write`) for its
+    /// language in envelope mode: the engine resolves these against this SAME projection's `imports` +
+    /// symbol set (cross-file specifiers under the exact/`./`-relative envelope contract above; an
+    /// unresolvable callee's edge is dropped, never guessed — identical to the native resolver's
+    /// contract). OPTIONAL (`#[serde(default)]`; absent = empty = those rules stay silent for this
+    /// envelope, the recall-direction degrade, which Mode A disclosures name rather than letting it
+    /// read as "no findings"). NOT a `Matcher::CallScan` fact — call-graph EDGES and per-file
+    /// call-SITES are different fact categories (see `dsl::SourceFile::call_sites`). Requires
+    /// `version >= `[`MIN_VERSION_FOR_CALLS`]: an older engine drops the field silently and its
+    /// call-graph rules stay quiet, so a mislabelled envelope must fail loudly on the engine that CAN
+    /// tell the producer. Mode B (adapter overlays) does not consume this channel today — the native
+    /// call graph re-parses dispatched sources itself — and discloses that per overlay rather than
+    /// silently ignoring it. Serialized snake_case (`calls`), no camelCase alias: the field is new, so
+    /// there is no frozen-v1 camelCase emitter to tolerate.
+    #[serde(default)]
+    pub calls: Vec<crate::callgraph::RawCall>,
     /// The parser could not fully process this file (size cap, syntax failure) — `loc` must still be
     /// present regardless.
     #[serde(default)]

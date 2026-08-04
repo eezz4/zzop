@@ -74,6 +74,7 @@ mod tests {
         TaggedProvide {
             source: source.to_string(),
             provide: IoProvide {
+                response: None,
                 body: None,
                 kind: kind.to_string(),
                 key: key.to_string(),
@@ -103,7 +104,7 @@ mod tests {
         assert!(out[0].message.contains("source `web`"));
         assert!(out[0].message.contains("createCaller"));
         assert!(out[0].message.contains("useUtils"));
-        assert!(out[0].message.contains("disabled_rules"));
+        assert!(out[0].message.contains("disabledRules"));
     }
 
     #[test]

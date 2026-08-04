@@ -116,11 +116,15 @@ pub struct GitWindow {
     pub since: Option<String>,
 }
 
-/// `AnalyzeOutput::rule_overrides_applied`'s payload. Both lists are sorted + deduped and bounded by the
+/// `AnalyzeOutput::rule_overrides_applied`'s payload. Every list is sorted + deduped and bounded by the
 /// size of the corresponding `RuleConfig` list the caller supplied (never larger than what was
-/// requested): only entries that matched a KNOWN id appear — the same known-id union `analyze::
-/// diagnostics::coverage_report::known_rule_ids` already computes for the unknown-id diagnostics, never a
-/// second definition of "known".
+/// requested): only entries that matched a KNOWN name appear.
+///
+/// "Known" is one definition per ID SPACE, never a second definition within one: `disabled`/
+/// `severity_remapped` reuse the union `analyze::diagnostics::coverage_report::known_rule_ids` already
+/// computes for the unknown-id diagnostics, while `only` reads the LOADED PACK IDS — a different space
+/// on purpose, because `registry::is_pack_enabled` compares an allowlist entry against `pack.id` alone,
+/// so a `"<pack>/<rule>"` or native id there gates nothing and must not be reported as applied.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RuleOverridesApplied {
     /// `RuleConfig::disabled_rules` entries that matched a known native-analysis id, DSL `"<pack>/<rule>"`
@@ -131,6 +135,23 @@ pub struct RuleOverridesApplied {
     /// `unknown_severity_override_ids`'s narrower known-id union (`registry::apply_severity_override`
     /// matches a finding's `rule_id` exactly, and a bare pack id can never equal one).
     pub severity_remapped: Vec<String>,
+    /// `RuleConfig::only_packs` entries that matched a loaded pack id — the pack ALLOWLIST that actually
+    /// took effect this run (config dialect `packs.only`, embedder field `packsOnly`).
+    ///
+    /// This lives beside `disabled` because it is the same question asked from the other side, and a
+    /// v0.29.0 release audit found the asymmetry the hard way: `packs.disabled` was positively confirmed
+    /// here while `packs.only` — which suppresses *strictly more* — was confirmed nowhere in any reply
+    /// field. A consumer could watch `sql/*` and `typescript/*` findings vanish with no wire evidence
+    /// that a knob had been set, and `packsLoaded` cannot supply it (that field is a path-match census by
+    /// its own doc, and it stays identical under BOTH knobs — it was never an enablement report).
+    ///
+    /// Only entries naming a pack in `config.packs` appear, mirroring `disabled`'s known-id filter: an
+    /// allowlist entry that names no loaded pack contributed nothing to this run's gate. Unlike
+    /// `disabled_rules`, an all-typo `only_packs` has no unknown-id diagnostic of its own today — and it
+    /// is the more dangerous typo, because `is_pack_enabled` then admits NO pack and every DSL finding
+    /// disappears at once. That makes this list the signal: `only` present but EMPTY means the caller set
+    /// an allowlist and none of it named a loaded pack.
+    pub only: Vec<String>,
 }
 
 /// `AnalyzeOutput::cache`'s payload — see that field's doc for what counts as a hit vs a miss.

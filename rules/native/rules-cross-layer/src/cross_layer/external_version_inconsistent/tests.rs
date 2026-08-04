@@ -43,7 +43,7 @@ fn versioned_and_versionless_paths_on_the_same_host_are_flagged_anchored_at_vers
     assert_eq!(out[0].file, "Accounts.ts");
     assert_eq!(out[0].line, 7);
     assert!(out[0].message.contains("api.vendor.com"));
-    assert!(out[0].message.contains("disabled_rules"));
+    assert!(out[0].message.contains("disabledRules"));
     assert!(out[0].message.contains("equally plausible readings"));
     assert!(out[0]
         .message

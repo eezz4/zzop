@@ -6,13 +6,11 @@
 use std::collections::HashSet;
 
 use zzop_core::{
-    circular_from_dep_excluding, is_enabled, merge_findings, registry, CommonIr, GitStats,
-    MinimalIr, NormalizedEnvelope, RulePackDef, DEFAULT_WEIGHTS,
+    circular_from_dep_excluding, merge_findings, registry, CommonIr, GitStats, MinimalIr,
+    NormalizedEnvelope, RulePackDef, DEFAULT_WEIGHTS,
 };
 
-use crate::analyze::{
-    circular_findings, dead_candidate_findings, dep_stats_from_dep, unreachable_findings,
-};
+use crate::analyze::dep_stats_from_dep;
 use crate::{AnalyzeOutput, EngineConfig};
 
 use super::file_pass::{run_file_pass, FilePassState};
@@ -38,7 +36,7 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
     let enabled_packs: Vec<RulePackDef> = config
         .packs
         .iter()
-        .filter(|p| registry::is_enabled(&config.rule_config, &p.id))
+        .filter(|p| registry::is_pack_enabled(&config.rule_config, &p.id))
         .map(|p| crate::pipeline::gate_pack_rules(p, &config.rule_config))
         .map(|p| envelope_rule_pack(&p))
         .filter(|p| !p.rules.is_empty())
@@ -58,9 +56,11 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
         trpc_fragment_pairs,
         router_mount_pairs,
         const_fragment_pairs,
+        class_shape_pairs,
         package_import_files,
         reserved_dropped,
-    } = run_file_pass(&files, &all_paths, &enabled_packs);
+        mut rule_time,
+    } = run_file_pass(&files, &all_paths, &enabled_packs, config.profile_rules);
 
     // Fragment composition + late const-map consume re-resolution must run before `io_provides`/
     // `io_consumes` are sorted and frozen into `MinimalIr::io` below.
@@ -74,11 +74,11 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
     // `compose_router_mount_provides` also composes producer-judged attributes riding the same
     // fragments (e.g. a recognized Express middleware guard) — kept, together with the envelope's own
     // per-file `attributes`, in `AnalyzeOutput::attributes` below. Mode A never runs
-    // `run_callgraph_rules`/`schema_usage_findings` (see the envelope module doc, "No filesystem root
-    // -> no ... call-graph-BFS rules") and never joins `analyze_trees`' cross-layer stage, so no rule
-    // reads this store TODAY — but the field is part of `AnalyzeOutput`'s plumbing contract now
-    // (the cross-layer idempotency veto reads it for filesystem trees), and silently dropping an
-    // envelope's injected attributes here would make this mode's output lie about them.
+    // `schema_usage_findings` and never joins `analyze_trees`' cross-layer stage, but this store DOES
+    // have a Mode A rule consumer now: the envelope call-graph pass below threads it into
+    // `mutating-route-no-auth` as `route_attr_store`, so an injected `auth-guarded` attribute clears
+    // a route here exactly as it does natively (it is also `AnalyzeOutput` plumbing — the cross-layer
+    // idempotency veto reads it for filesystem trees).
     let mut warnings: Vec<String> = Vec::new();
     let mut native_attrs: Vec<zzop_core::Attribute> = Vec::new();
     // Merged BEFORE `const_fragment_pairs` moves into `late_resolve_cross_file_consumes` below —
@@ -100,15 +100,21 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
     let attribute_store =
         zzop_core::AttributeStore::from_parts(native_attrs, std::slice::from_ref(envelope));
     crate::analyze::late_resolve_cross_file_consumes(const_fragment_pairs, &mut io_consumes);
+    // `body`/`response` dtoRef resolution — the native assemble seam, reused at the same position
+    // (after every provide-composition pass, before any whole-tree rule reads `io_provides`); also
+    // strips + discloses the no-return-type sentinel so it can never leak into `MinimalIr::io`.
+    super::shapes::resolve_shape_refs(&mut io_provides, &class_shape_pairs, &mut warnings);
 
     // Whole-tree `Matcher::IoScan` DSL pass — the envelope-mode counterpart of `analyze::assemble`'s own
     // (native-path) call, run here now that `io_provides`/`io_consumes`/`attribute_store` above all exist.
     // `anchor_line` is always `None`: an envelope carries no source text (see this module's doc, "No
     // source text" bullet), so `anchor_exclude_pattern`/suppress-marker recognition stay honestly inactive
     // — the same "no info available, never a guess" contract every `None` callback result gets in
-    // `eval_pack_io_scan`'s own doc. No decorator-guard minting here: Mode A never runs
-    // `run_callgraph_rules` (this module's doc, "No filesystem root" bullet), so there is no
-    // `decorator_guarded` evidence to mint from — `attribute_store` is used as-is. `enabled_packs` is
+    // `eval_pack_io_scan`'s own doc. No decorator-guard minting here: Mode A has no source text, so
+    // no decorator/annotation producer ever runs and there is no `decorator_guarded` evidence to mint
+    // from — `attribute_store` is used as-is. (The envelope call-graph pass below is edge-only for
+    // the same reason; injected `auth-guarded` attributes are the envelope-native guard channel.)
+    // `enabled_packs` is
     // already the same is_enabled/`gate_pack_rules`/`envelope_rule_pack`-gated pack list `run_file_pass`
     // evaluated per-file above; reused here unchanged for the whole-tree pass.
     let anchor_line = |_: &str, _: u32| None;
@@ -118,9 +124,23 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
         attrs: &attribute_store,
         anchor_line: &anchor_line,
     };
+    // Profiled branch = the SAME pack-splitting evaluator the native whole-tree pass uses
+    // (`assemble::rules::io_scan::eval_pack_timed`, re-exported): one `"{pack}/{rule}"` entry per
+    // `IoScan` rule into the one shared accumulator. Cloned because that evaluator drains its pack.
     let mut io_scan_findings = Vec::new();
-    for pack in &enabled_packs {
-        zzop_core::eval_pack_io_scan(pack, &io_scan_ctx, &mut io_scan_findings);
+    if config.profile_rules {
+        for pack in &mut enabled_packs.clone() {
+            crate::analyze::eval_io_scan_pack_timed(
+                pack,
+                &io_scan_ctx,
+                &mut rule_time,
+                &mut io_scan_findings,
+            );
+        }
+    } else {
+        for pack in &enabled_packs {
+            zzop_core::eval_pack_io_scan(pack, &io_scan_ctx, &mut io_scan_findings);
+        }
     }
     crate::pipeline::findings::append_disable_hints(&mut io_scan_findings);
 
@@ -181,51 +201,55 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
     // envelope mode too, and a caller who injected the pack inline never ran `validate-rule-pack` on it.
     warnings.extend(crate::analyze::uncompilable_rule_warnings(&config.packs));
 
-    let mut global_findings = Vec::new();
-    if is_enabled(&config.rule_config, "circular") {
-        global_findings.extend(circular_findings(&cycles));
-    }
-    if is_enabled(&config.rule_config, "unreachable") {
-        // No filesystem root here (see the envelope module doc), so there are no cargo manifests to
-        // scan for declared-target entries — the empty set is the honest Mode-A value, same rationale
-        // as `dead-candidates`' empty package.json entry set just below.
-        global_findings.extend(unreachable_findings(&nodes, &dep, &Default::default()));
-    }
-    if is_enabled(&config.rule_config, "dead-candidates") {
-        // No filesystem root (see the envelope module doc) -> no package.json-referenced entries; the
-        // envelope's own `is_entry`-marked projections ARE the entry set — the Mode A counterpart of the
-        // Mode B overlay union in `analyze::assemble` (same contract marker, same exemption). Before
-        // this, Mode A silently dropped `is_entry` and every convention-loaded entry file (a crate's
-        // `lib.rs`, a test harness file) read as dead — caught by a Mode A envelope example's
-        // self-analysis.
-        let extra_entries: HashSet<String> = envelope
-            .files
-            .iter()
-            .filter(|f| f.is_entry)
-            .map(|f| f.path.clone())
-            .collect();
-        // Deliberate divergence from the native `assemble::rules` path: it post-filters out generated
-        // (`@generated`/auto-generated-bannered) files via `generated_banner::file_has_generated_banner`,
-        // which re-reads each candidate's head off disk. Mode A has no filesystem `root` and a
-        // `FileProjection` (normalized.rs) carries no raw text, so that head-comment detector structurally
-        // cannot run here — an adapter that wants a generated file exempt marks it `is_entry` (above) or
-        // omits it from the envelope. Documented, not a bug: the exemption is a native-path-only refinement.
-        global_findings.extend(dead_candidate_findings(&nodes, &dep, &extra_entries));
-    }
-
-    let findings = merge_findings(
-        vec![per_file_findings, global_findings, io_scan_findings],
-        &config.rule_config,
+    // Whole-graph native analyses (`circular`/`unreachable`/`dead-candidates`) — extracted verbatim
+    // to `super::native_pass` (line cap); same gates, same timing ids, same order.
+    let profile = config.profile_rules;
+    let mut global_findings = super::native_pass::run_whole_graph_native(
+        envelope,
+        config,
+        &cycles,
+        &nodes,
+        &dep,
+        &mut rule_time,
     );
 
     degraded.sort();
     // Config-declared topology onto both channels, then the sort + freeze — one seam because the
-    // ordering constraint lives BETWEEN them. See `super::topology_freeze`.
+    // ordering constraint lives BETWEEN them. See `super::topology_freeze`. Runs BEFORE the
+    // call-graph pass below (which used to sit nowhere — findings were merged first) so that pass
+    // reads the same post-mount http keys the native `run_callgraph_rules` sees (native applies
+    // config mounts in `assemble`'s provides phase, before its rules phase).
     let io = super::topology_freeze::apply_topology_and_freeze(
         io_provides,
         io_consumes,
         config,
         &mut warnings,
+    );
+
+    // Mode A call-graph pass — the consumer of the envelope's `calls` channel (`FileProjection::
+    // calls`): builds the whole-tree `SymbolGraph` from the envelope's own edges and runs the
+    // call-graph-BFS rules the "No filesystem root" bullet used to rule out entirely. An envelope
+    // WITHOUT the channel keeps the old behavior (those rules silent), now disclosed rather than
+    // mute — see `super::callgraph`'s module doc for the pass, its disclosures, and its documented
+    // deviations from the native pass.
+    if let Some(io_facts) = io.as_ref() {
+        super::callgraph::run_envelope_callgraph(
+            &files,
+            &all_paths,
+            &all_symbols,
+            &io_facts.provides,
+            &attribute_store,
+            config,
+            profile,
+            &mut rule_time,
+            &mut global_findings,
+            &mut warnings,
+        );
+    }
+
+    let findings = merge_findings(
+        vec![per_file_findings, global_findings, io_scan_findings],
+        &config.rule_config,
     );
 
     let ir = CommonIr {
@@ -264,7 +288,7 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
         warnings,
         config_warnings,
         cache: None,
-        rule_timings: None,
+        rule_timings: profile.then(|| crate::analyze::sort_rule_timings(rule_time)),
         rule_overrides_applied: crate::analyze::rule_overrides_applied(config),
         // Envelope mode (Mode A) never runs git collection — no real tree to walk — so this stays
         // `None` exactly like `scores`/`health`/`critical`/`seams` above.

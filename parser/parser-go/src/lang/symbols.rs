@@ -254,6 +254,11 @@ fn emit_var_declaration(rel: &str, node: Node, src: &str, out: &mut Vec<SourceSy
 
 /// One symbol per comma-separated name in a `const_spec`/`var_spec`'s `name` field — module doc's
 /// "grouped declarations" section.
+///
+/// The `kind() == "identifier"` gate is load-bearing: tree-sitter-go 0.25 attaches the `name` FIELD
+/// to a `const_spec`'s COMMA tokens as well (`var_spec` does not), so without it `const A, B = …`
+/// emitted a third, ghost symbol spelled `","` (id `a.go#,`) into the graph/dead-export/count
+/// machinery — the same fielded-comma quirk `lang::string_literals`' name collection filters for.
 fn emit_spec_names(
     rel: &str,
     spec: Node,
@@ -264,7 +269,7 @@ fn emit_spec_names(
     let line = line_of(spec);
     let mut cursor = spec.walk();
     for name_node in spec.children_by_field_name("name", &mut cursor) {
-        if name_node.is_error() || name_node.is_missing() {
+        if name_node.is_error() || name_node.is_missing() || name_node.kind() != "identifier" {
             continue;
         }
         let name = node_text(name_node, src).to_string();

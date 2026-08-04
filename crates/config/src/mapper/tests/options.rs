@@ -9,6 +9,53 @@ use crate::mapper::warnings::parse_pack_defs;
 use crate::test_support::TempDir;
 use crate::Method;
 
+// --- packs.only (the opt-in half of the pack axis) -------------------------------------------
+
+#[test]
+fn packs_only_forwards_pack_ids_verbatim_and_dedupes() {
+    let mapped = config_to_request(
+        &json!({"roots": ["."], "packs": {"only": ["security", "sql", "security"]}}),
+        Path::new("/base"),
+    )
+    .unwrap();
+    let req = analyze_request(&mapped.request);
+    // Verbatim, NOT expanded into "disable everything else": the mapper cannot know which packs
+    // loaded (a caller's own `extraDirs` pack is not in any list this crate holds), so the selection
+    // is the engine's. Expanding here would be the stale shadow table this crate keeps finding.
+    assert_eq!(req["packsOnly"], json!(["security", "sql"]));
+    assert!(
+        req.get("disabledRules").is_none(),
+        "an allowlist must not be smuggled in as a disable list: {req:?}"
+    );
+}
+
+#[test]
+fn an_absent_or_empty_packs_only_emits_no_wire_key() {
+    // Empty means "no allowlist" downstream, and the wire says it by SAYING NOTHING — an emitted
+    // `"packsOnly": []` would be indistinguishable on the wire from a caller who meant it.
+    for cfg in [
+        json!({"roots": ["."], "packs": {"disabled": []}}),
+        json!({"roots": ["."], "packs": {"only": []}}),
+    ] {
+        let mapped = config_to_request(&cfg, Path::new("/base")).unwrap();
+        let req = analyze_request(&mapped.request);
+        assert!(
+            req.get("packsOnly").is_none(),
+            "unexpected packsOnly: {req:?}"
+        );
+    }
+}
+
+#[test]
+fn a_non_array_packs_only_is_a_named_shape_error() {
+    let err = config_to_request(
+        &json!({"roots": ["."], "packs": {"only": "security"}}),
+        Path::new("/base"),
+    )
+    .unwrap_err();
+    assert!(format!("{err:?}").contains("packs.only"), "{err:?}");
+}
+
 // --- packs.extraDirs resolution ------------------------------------------------------------
 
 #[test]

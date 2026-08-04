@@ -89,11 +89,18 @@ id is named. The current id set is always [`docs/rules/catalog.md`](docs/rules/c
 | `typescript` | `always-false-comparison` | `always-constant-comparison` |
 | `typescript` | `unhandled-promise-use-effect` | `use-effect-async-callback` |
 
-Six more renames land on the NATIVE analysis ids, which are not DSL rules and live in no pack. They are
+**One renamed rule was later REMOVED entirely (2026-08-02): `http/get-route-no-cache-marker`** (the
+`read-model-path` row above). Its `require_file` gate (`apiRoutes\.get\(`) was one repository's own
+router-variable vocabulary, so in every other codebase the rule was silent by construction — an
+eternally-silent rule is catalog noise, not detection. There is no replacement id to migrate to; a
+config naming either of its spellings now gets the same unknown-rule-id `configWarnings`/`warnings`
+line described at the top of this section.
+
+Seven more renames land on the NATIVE analysis ids, which are not DSL rules and live in no pack. They are
 listed separately because the marker rule above does not reach them: **no native analysis derives a
 suppress marker at all** (the two exceptions, `unsafe-read-endpoint`/`non-idempotent-write`, read a
 hand-authored `// idempotent-ok:` comment that is not derived from any id and is unaffected). For these
-six there is nothing to migrate in your source — only in `disabledRules` / `severityOverrides` /
+seven there is nothing to migrate in your source — only in `disabledRules` / `severityOverrides` /
 `suppressions`:
 
 | old id | new id |
@@ -104,12 +111,16 @@ six there is nothing to migrate in your source — only in `disabledRules` / `se
 | `cross-layer/sdk-import-no-visible-consume` | `cross-layer/untraced-client-import-no-visible-consume` |
 | `schema/dead-model` | `schema/unreferenced-model-name` |
 | `schema/dead-field` | `schema/unreferenced-field-name` |
+| `schema/schema-churn` | `schema/model-churn` |
 
 Each rename makes the id describe what the matcher literally checks, rather than the conclusion a
 reader might draw from it — `await-in-map` never looked for `await`, `sql-taint` performs no taint
 analysis, `dead-exports` reported a symbol as dead in the same breath as telling you it was referenced,
-and `shared-db-table`'s own message said "not that they physically share one database". Detection
-behavior is unchanged by the renames themselves.
+and `shared-db-table`'s own message said "not that they physically share one database". The 2026-08-02
+`schema/model-churn` rename is the same doctrine applied to naming convention: the `schema/` namespace
+already says which family the rule belongs to, and the count the rule reads is the injected
+`model-churn` attribute, so the id now carries the attribute's own name instead of repeating the pack
+name. Detection behavior is unchanged by the renames themselves.
 
 **Additive alongside them: the 12 `schema/*` ids became real ids.** `schema` findings have always spelled
 `ruleId` as `schema/<issue>` (`schema/god-model`, `schema/fk-no-index`, ...), but only the two family gates
@@ -221,6 +232,9 @@ reply's `serverInfo.version` reports. A release bumps that one number in a commi
 `main`; an auto-tag lane picks up the bump, creates the matching `vX.Y.Z` tag, and runs the full release
 from there — no separate manual `git tag`/`git push` step needed. CI's release job fails unless the tag,
 `Cargo.toml`, and `.claude-plugin/plugin.json`'s `"version"` all agree, so the binaries and the Claude
-Code plugin are always released in lockstep. (The old tag-stamped `ZZOP_RELEASE_VERSION` env and the
-`0.0.0` placeholder are gone.) The npm packages (`@zzop/cli` and its 5 platform sub-packages) are
+Code plugin are always released in lockstep. (The old tag-stamped `ZZOP_RELEASE_VERSION` env is gone;
+the `0.0.0` placeholder is gone *from the Rust workspace*. The npm and `.mcpb` manifests under
+`packages/` deliberately keep `"version": "0.0.0"` in-tree — they are rewritten at publish time from
+the release tag, and CONTRIBUTING's version-propagation guard exempts them for exactly that reason, so
+a committed real number there would be the stale copy.) The npm packages (`@zzop/cli` and its 5 platform sub-packages) are
 stamped with the same number at publish time from the release tag, verified by the same CI gate.

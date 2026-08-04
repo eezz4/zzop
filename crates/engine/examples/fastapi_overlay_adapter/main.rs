@@ -45,6 +45,12 @@
 //!
 //! Usage: `cargo run --release -p zzop-engine --example fastapi_overlay_adapter -- <root>`
 
+// This target PRINTS BY DESIGN — on BOTH streams — so the workspace `print_stdout`/`print_stderr`
+// lints are exempted here rather than being weakened for everyone. See root Cargo.toml
+// [workspace.lints.clippy]: both measured zero in every library `src/`, and Cargo's lint table
+// cannot be scoped to a single target.
+#![allow(clippy::print_stdout, clippy::print_stderr)]
+
 use std::path::PathBuf;
 
 use zzop_core::RouterMountEntry;

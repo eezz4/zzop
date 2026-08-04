@@ -113,7 +113,7 @@ mod tests {
         assert_eq!(f.file, "handler.ts");
         assert_eq!(f.line, 12);
         assert!(f.message.contains("/me/achievements"));
-        assert!(f.message.contains("disabled_rules"));
+        assert!(f.message.contains("disabledRules"));
         let data = f.data.as_ref().unwrap();
         assert_eq!(data["source"], "api");
         assert_eq!(data["servedPath"], "/me/achievements");

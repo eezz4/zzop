@@ -126,9 +126,10 @@ they gate how a change must be SHAPED rather than merely whether it compiles:
   must equal it in the SAME commit: `.claude-plugin/plugin.json`, `server.json`'s top-level `version`
   and each `packages[].version`, and the `releases/download/v<version>/` URL in each
   `packages[].identifier`. The subject set is derived from every semver string in tracked `*.json`
-  rather than hand-listed, with two exemptions — the `0.0.0` placeholder that the release workflow
-  rewrites at publish time (`packages/cli/**`, `packages/mcpb/manifest.json`), and `examples/`, whose
-  sample packages carry their own versions. This runs on every commit rather than only on release
+  rather than hand-listed, minus a few exemptions — chiefly the `0.0.0` placeholder that the release
+  workflow rewrites at publish time (`packages/cli/**`, `packages/mcpb/manifest.json`). The current
+  exemption list, and the reason beside each one, lives in `scripts/check-release-version-propagation.sh`'s
+  own header; it is not restated here, because a second copy of it is what goes stale. This runs on every commit rather than only on release
   commits, because a manifest that disagrees with the SSOT is wrong whatever the commit is about — and
   because the workflow jobs that ask the same question run *after* the push that creates the tag, which
   is too late for a tag that must never move.
@@ -151,8 +152,13 @@ clone (plain git, no husky or npm dependency):
 git config core.hooksPath .githooks
 ```
 
-The hook's `GUARDS` array mirrors the CI job's step order element-for-element, so a green pre-commit
-means the guard half of CI is already satisfied.
+The hook's `GUARDS` array mirrors the CI `guards` job's step order element-for-element (bound by
+`scripts/check-guards-wired.sh`), so a green pre-commit means that job is satisfied — but `guards` is
+one of CI's five jobs, not its guard *half*. The other four (`test`, `cli-shim-test`,
+`detection-benchmark`, `site-render-check`) had no local counterpart at all until `scripts/ci-local.sh`,
+which runs them in CI's order; that gap is how v0.28.0's tag went red on an immutable tag. Run
+`bash scripts/ci-local.sh` (or `--fast`, which skips the two jobs needing a release build — the two
+that caught v0.28.0) before pushing anything you care about.
 
 ## Re-measuring before you commit
 
@@ -215,14 +221,14 @@ switch, so it has not been made — which is a different sentence from "the CLI 
 
 Two honest limitations:
 
-- **CI does not run any of this**, and it is not wired to. Until 2026-07-26 the reason was that
-  there was nothing to point CI at — every corpus was gitignored or lived outside the tree. That is
-  no longer true: the labeled benchmark is committed at `cases/`, so a recall/precision
-  gate is now *possible*. It is still not wired, and the remaining objection is cost and scope
-  (a `--release` build plus a full two-axis snapshot per run), not availability — plus the one
-  ungittable fixture described in the next bullet, which any such gate has to synthesize or exclude
-  before it can ever go green. These stay
-  developer tools, deliberately kept out of `scripts/check-*.sh` (where every file *is* CI-wired).
+- **CI runs the recall/precision axis, and only that one.** Since the labeled benchmark was committed
+  at `cases/` (2026-07-26), a gate became possible and is now wired: ci.yml's `detection-benchmark`
+  job scores `cases/` against its adjudicated `EXPECTED.jsonc` on every run, kept a separate job so a
+  red score reads as "detection regressed" rather than "the test job failed". What CI still does **not**
+  run is everything else on this page — the drift check and the full two-axis snapshot — because those
+  need the ungittable corpus described in the next bullet, which any such gate would have to synthesize
+  or exclude before it could ever go green. Those stay developer tools, deliberately kept out of
+  `scripts/check-*.sh` (where every file *is* CI-wired).
 - **Bring your own corpus for the drift check.** Any repository, or set of repositories, with a
   `zzop.config.jsonc` declaring 2+ trees works — that axis needs real code, which this repo cannot
   ship. The recall/precision axis does not: score `cases/` (in-tree, labeled) against its

@@ -25,10 +25,13 @@ use std::io::{BufRead, Write};
 pub use zzop_summary::version;
 
 /// The DIAGNOSTIC version form this binary prints for `zzop-mcp version --verbose`: the same release
-/// version plus every parser's `PARSER_FINGERPRINT`. Re-exported from the same shared crate the bare
+/// version plus every parser's derived fingerprint (`<id>/<source hash>`) and the engine's own
+/// (`zzop-engine=<hash>`). Re-exported from the same shared crate the bare
 /// form comes from, reaching the same single owner (`zzop_facade::version_string`), and byte-identical
-/// to what `zzop version --verbose` prints — the parity half of that CLI knob, so "which parser build
-/// produced this analysis?" is answerable from either product rather than the CLI alone.
+/// to what `zzop version --verbose` prints — the parity half of that CLI knob, so "which parser
+/// build read these files?" is answerable from either product rather than the CLI alone. (Build, not
+/// just frontend, since 2026-08-03: each value carries the source hash that keys the per-file cache,
+/// so it moves whenever extraction code moves — see `zzop_facade::version_string`.)
 ///
 /// It is NOT on the MCP wire: `serverInfo` is a spec-shaped `{name, version}` object and every
 /// `resources/read` document this server serves is a static embedded contract, so a runtime fingerprint
@@ -104,7 +107,7 @@ pub fn handle_line(line: &str) -> Option<serde_json::Value> {
         Err(e) => {
             // -32700 Parse error, id null: the request id is unrecoverable from a line that does
             // not parse, and the spec reserves exactly this response shape for that case.
-            eprintln!("zzop-mcp: unparseable JSON-RPC line ({e})");
+            log_protocol_error(format_args!("unparseable JSON-RPC line ({e})"));
             return Some(serde_json::json!({
                 "jsonrpc": "2.0", "id": null,
                 "error": { "code": -32700, "message": format!("Parse error: {e}") }
@@ -136,7 +139,7 @@ pub fn handle_line(line: &str) -> Option<serde_json::Value> {
 /// (wrongly) matches positionally. Pinned by a table row so it stays a decision rather than an accident.
 fn handle_batch(elements: &[serde_json::Value]) -> Option<serde_json::Value> {
     if elements.is_empty() {
-        eprintln!("zzop-mcp: empty JSON-RPC batch array");
+        log_protocol_error(format_args!("empty JSON-RPC batch array"));
         return Some(invalid_request(
             "Invalid Request: an empty array is not a valid JSON-RPC batch",
         ));
@@ -147,6 +150,30 @@ fn handle_batch(elements: &[serde_json::Value]) -> Option<serde_json::Value> {
         return None;
     }
     Some(serde_json::Value::Array(replies))
+}
+
+/// The ONE stderr writer in this package's library, and the reason the four protocol-error branches
+/// above call a function instead of writing the line themselves. It also owns the `zzop-mcp: ` prefix,
+/// which was four separate string literals before.
+///
+/// Why this library prints at all, when `clippy::print_stderr` says a library must not: this module IS
+/// the stdio transport. Its stdout is the JSON-RPC wire — one reply object per line, read positionally
+/// — so a diagnostic there would corrupt the protocol, which is exactly what `print_stdout` (a warn in
+/// the workspace lint table, with no exemption here) prevents. Stderr is the conventional MCP
+/// diagnostic channel and the only channel left. The alternative, staying silent, is the
+/// silent-failure this module's header names as the class it exists to close: a malformed frame
+/// answered on the wire but invisible to the operator debugging why their client sent it.
+///
+/// Takes `fmt::Arguments` rather than `&str` so call sites keep `eprintln!`-style formatting without
+/// allocating a `String` per diagnostic.
+#[allow(
+    clippy::print_stderr,
+    reason = "See this function's doc: stdout carries the JSON-RPC wire, so stderr is the only \
+              diagnostic channel this transport has. Deliberately the only site in this library that \
+              is exempt — the exemption is one function wide, not one file and not one crate."
+)]
+fn log_protocol_error(detail: std::fmt::Arguments<'_>) {
+    eprintln!("zzop-mcp: {detail}");
 }
 
 /// The JSON-RPC `-32600` reply, always with `id: null`: a frame that is not a well-formed request
@@ -161,6 +188,11 @@ fn invalid_request(message: &str) -> serde_json::Value {
 /// Dispatches one already-parsed JSON-RPC message. Split from the transport (`serve`) and from
 /// parsing (`handle_line`) so the protocol is a pure function of the message — which is what makes the
 /// error lanes and the notification contract testable as a table rather than as spawned processes.
+///
+/// ONE branch is not pure and is named here rather than left for a reader to discover: `initialize`
+/// reads the wall clock through `crate::staleness::notice()`. The impurity is confined to that call,
+/// the value it produces is tested through `staleness::notice_at` (both inputs are arguments there), and
+/// the WIRING is pinned clock-independently by `tests::initialize_carries_the_staleness_notice_iff_there_is_one`.
 pub fn handle_message(msg: &serde_json::Value) -> Option<serde_json::Value> {
     if !msg.is_object() {
         // Two ways to land here: a top-level frame that is neither an object nor a batch array (a bare
@@ -168,7 +200,7 @@ pub fn handle_message(msg: &serde_json::Value) -> Option<serde_json::Value> {
         // JSON-RPC has no nested batches. Both are `-32600`; inside a batch this is that ELEMENT's
         // reply, not the batch's. Answering at all beats the pre-2026-07-27 behavior (falling into the
         // "no id" branch and silently never replying).
-        eprintln!("zzop-mcp: JSON-RPC frame is not a request object");
+        log_protocol_error(format_args!("JSON-RPC frame is not a request object"));
         return Some(invalid_request(
             "Invalid Request: expected a JSON-RPC request object",
         ));
@@ -182,7 +214,7 @@ pub fn handle_message(msg: &serde_json::Value) -> Option<serde_json::Value> {
     // the class it exists to close, and three prose sites (twice here, once in docs/modules/mcp.md)
     // already promised the `-32600` — the code, not the prose, was the thing that was wrong.
     let Some(method) = msg.get("method").and_then(|m| m.as_str()) else {
-        eprintln!("zzop-mcp: JSON-RPC object carries no string `method`");
+        log_protocol_error(format_args!("JSON-RPC object carries no string `method`"));
         return Some(invalid_request(
             "Invalid Request: a request object must carry a string \"method\"",
         ));
@@ -196,14 +228,22 @@ pub fn handle_message(msg: &serde_json::Value) -> Option<serde_json::Value> {
                 .get("params")
                 .and_then(|p| p.get("protocolVersion"))
                 .and_then(|v| v.as_str());
-            ok(
-                id,
-                serde_json::json!({
-                    "protocolVersion": negotiate_protocol_version(requested),
-                    "capabilities": { "tools": {}, "resources": {} },
-                    "serverInfo": { "name": "zzop", "version": version() }
-                }),
-            )
+            let mut result = serde_json::json!({
+                "protocolVersion": negotiate_protocol_version(requested),
+                "capabilities": { "tools": {}, "resources": {} },
+                "serverInfo": { "name": "zzop", "version": version() }
+            });
+            // The staleness self-report rides `instructions`, and ONLY when there is one to make (see
+            // `crate::staleness` for all four silences). `instructions` is an optional string on
+            // `InitializeResult` in every revision this server advertises, and its defined purpose —
+            // text the host may pass to the model, like a system prompt — is exactly the reach this
+            // needs: the `.mcpb` lane has no delivery-layer notifier, so the notice has to arrive
+            // somewhere a reader actually looks. `serverInfo` could not carry it (it is a spec-shaped
+            // `{name, version}` object), and stderr alone is a log file nobody opens unprompted.
+            if let Some(notice) = crate::staleness::notice() {
+                result["instructions"] = serde_json::Value::String(notice);
+            }
+            ok(id, result)
         }
         "tools/list" => ok(id, crate::tools::list()),
         "tools/call" => ok(id, crate::tools::call(msg.get("params"))),

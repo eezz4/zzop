@@ -21,6 +21,7 @@ fn sym(file: &str, name: &str, line: u32) -> SourceSymbol {
 
 fn provide(key: &str, file: &str, line: u32, handler: &str) -> zzop_core::IoProvide {
     zzop_core::IoProvide {
+        response: None,
         body: None,
         kind: "http".to_string(),
         key: key.to_string(),
@@ -307,6 +308,7 @@ fn ambiguous_handler_name_defined_in_two_files_is_skipped() {
 #[test]
 fn provide_with_no_symbol_captured_is_skipped() {
     let provides = vec![zzop_core::IoProvide {
+        response: None,
         body: None,
         kind: "http".to_string(),
         key: "POST /anon".to_string(),
@@ -639,6 +641,7 @@ fn decorator_guarded_exemption_is_precise_per_route_in_a_shared_controller() {
 #[test]
 fn non_http_provides_are_ignored() {
     let provides = vec![zzop_core::IoProvide {
+        response: None,
         body: None,
         kind: "queue".to_string(),
         key: "POST /topic".to_string(),

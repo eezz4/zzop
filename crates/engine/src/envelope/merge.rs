@@ -176,6 +176,10 @@ pub(super) fn merge_projection_onto_artifact(
     artifact
         .class_shape_fragments
         .extend(projection.class_shape_fragments.iter().cloned());
+    #[allow(
+        clippy::iter_over_hash_type,
+        reason = "iteration order cannot reach the result: one projection's `const_map_fragment` has unique keys, so the first-writer-wins `or_insert_with` never resolves a collision produced by this loop"
+    )]
     for (key, value) in &projection.const_map_fragment {
         artifact
             .const_map_fragment
@@ -268,5 +272,13 @@ pub(super) fn synthetic_artifact_from_projection(
         // runs over a synthetic overlay artifact today (`findings: Vec::new()` above).
         loop_spans: projection.loop_spans.clone(),
         function_spans: projection.function_spans.clone(),
+        test_spans: projection.test_spans.clone(),
+        // No wire counterpart to plumb: `FileProjection` carries no call-site channel — see the identical
+        // note at the Mode A `SourceFile` in `file_pass` for why that boundary is deliberate.
+        call_sites: Vec::new(),
+        // No wire counterpart either, and deliberately so for a second reason beyond `call_sites`':
+        // the channel carries hashes of candidate secrets, which must not ride an external
+        // submission — `file_pass`'s note at its `string_literals` owns the privacy argument.
+        string_literals: Vec::new(),
     }
 }

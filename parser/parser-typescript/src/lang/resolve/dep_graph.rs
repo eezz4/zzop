@@ -55,7 +55,9 @@ where
         // type-only import/re-export (erased at compile time) or a dynamic `import()` (async — never a
         // synchronous module-load cycle). Any one plain value edge flips it false. The target still
         // gains a real dep edge (fan-in) either way; only `circular_from_dep_excluding` consults this set.
-        let mut target_noncycle: HashMap<String, bool> = HashMap::new();
+        // BTreeMap, not HashMap: this map is drained into `noncycle_edges` below, and an ordered
+        // walk removes the question of whether that drain order matters at all.
+        let mut target_noncycle: BTreeMap<String, bool> = BTreeMap::new();
         for binding in imports.values() {
             if binding.deferred {
                 continue; // lazy require/import: no module-load edge

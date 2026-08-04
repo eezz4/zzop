@@ -66,6 +66,7 @@ pub fn extract_django_db_table_provides(rel: &str, text: &str) -> Vec<IoProvide>
         if let Stmt::ClassDef(cls) = stmt {
             if let Some(table) = model_table_name(cls, &models, app_label) {
                 out.push(IoProvide {
+                    response: None,
                     kind: "db-table".to_string(),
                     key: format!("table:{}", zzop_core::db_table_channel_casing(&table)),
                     file: rel.to_string(),

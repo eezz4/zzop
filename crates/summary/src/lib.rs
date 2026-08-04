@@ -30,12 +30,13 @@
 //!   engine's live blindness registry, which lives in Rust and has no file to embed.
 //! - `siblings` — sibling-directory scope disclosure for `cross_summary`.
 //! - `suggest`  — deterministic nearest-key fallback for `endpoint_summary`'s `not-found` suggestions.
-//! - `config_warnings` — facade-level `configWarnings` merge helper shared by `analyze_summary`/
-//!   `cross_summary`.
+//! - `warnings` — the two honesty-channel merge helpers every lane stamps on its reply: the engine's
+//!   own `warnings` and the facade-level `configWarnings`. Both read the multi-tree document PER TREE,
+//!   which is where three lanes independently got it wrong.
 //! - `analyze`  — `analyze_summary`: one-tree analysis (config auto-discovery + facade call + summary
 //!   assembly); `analyze_envelope_summary`: Mode A full-envelope analysis (no filesystem root — a
-//!   minimal `"{}"` config drives the same facade call), sharing the tree-mode path's post-facade
-//!   shaper.
+//!   minimal config drives the same facade call, `"{}"` plus `profileRules` when the `_with` twin's
+//!   run knob asks), sharing the tree-mode path's post-facade shaper.
 //! - `cross`    — `cross_summary`: multi-tree cross-layer join summary.
 //! - `facts`    — `facts_json`: the post-assembly FACT DUMP (`zzop facts`) — per-tree `CommonIr` plus
 //!   the whole cross-layer join, uncapped, for a user's own rule program to read. The emit half of the
@@ -58,8 +59,9 @@
 
 mod analyze;
 pub mod args;
-mod config_warnings;
 pub mod contracts;
+#[cfg(test)]
+mod contracts_tests;
 mod coverage;
 mod cross;
 #[cfg(test)]
@@ -72,10 +74,13 @@ mod manifest;
 pub mod output;
 mod siblings;
 mod suggest;
+mod warnings;
 
-pub use analyze::{analyze_envelope_summary, analyze_summary};
+pub use analyze::{
+    analyze_envelope_summary, analyze_envelope_summary_with, analyze_summary, analyze_summary_with,
+};
 pub use coverage::coverage_summary;
-pub use cross::cross_summary;
+pub use cross::{cross_summary, cross_summary_with};
 pub use endpoint::endpoint_summary;
 pub use facts::facts_json;
 pub use file::file_summary;
@@ -83,7 +88,7 @@ pub use graph::{
     graph_cosmograph, graph_mermaid, CosmographOutput, GraphDomain, GraphFormat, DEFAULT_GRAPH_TOP,
 };
 pub use manifest::{diff_manifests_json, manifest_json};
-pub use output::FindingFilters;
+pub use output::{FindingFilters, RunKnobs};
 // Verbatim `zzop-facade` entry points, re-exported (never wrapped) so a host product needs only this
 // crate: `explain`, `version` and `version_string` are pure reads over engine/rule data the facade owns,
 // and the two validators are structure-only checks with no shaping of this crate's own. Only what a host

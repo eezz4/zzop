@@ -46,8 +46,16 @@ fn analyze_output_view_rows() -> serde_json::Map<String, serde_json::Value> {
 ///
 /// A whitelist, deliberately: a new `carry-conditional` field fails closed (it lands in the denylist
 /// and this file goes red) until someone states which of the two lanes it took.
-const CONDITIONAL_UNDER_ITS_OWN_NAME: &[&str] =
-    &["degraded", "findings", "gitWindow", "ruleOverridesApplied"];
+const CONDITIONAL_UNDER_ITS_OWN_NAME: &[&str] = &[
+    "degraded",
+    "findings",
+    "gitWindow",
+    "ruleOverridesApplied",
+    // Added 2026-08-02 with the `--profile-rules` wiring: forwarded under its own name, but only when
+    // the run was instrumented. It reaches this list (rather than the denylist) because the shaper
+    // spells `ruleTimings` as the reply key — see `output::timings`.
+    "ruleTimings",
+];
 
 /// The reply keys the SHAPER invents — the ones that are not `AnalyzeOutputView` fields at all, so the
 /// registry has no row for them: the tree-mode `path`/`config` echo, the `degradedTruncated`
@@ -189,4 +197,110 @@ fn every_summary_reply_key_is_a_registry_field_or_a_declared_shaper_invention() 
          (docs/contracts/surface-parity.json) nor a declared shaper invention: {undeclared:?} — add \
          the registry row, or declare it in SHAPER_INVENTED_KEYS with a reason"
     );
+}
+
+/// `--profile-rules` END TO END — a real zzop.config.jsonc on disk, through the config mapper, the
+/// request wire field, the engine's `EngineConfig::profile_rules`, and back out as a report.
+///
+/// The capability (`EngineConfig::profile_rules`) shipped long before this test and its only caller was
+/// `crates/engine/examples/bench.rs`, so no user could ask for it. These tests pin the DOOR, not the room:
+/// the room (that the engine times rules correctly) is already covered by
+/// `crates/engine/src/analyze/assemble/rules/io_scan/tests.rs`.
+#[cfg(test)]
+mod profile_rules_wiring {
+    use super::no_filters;
+    use crate::output::RunKnobs;
+
+    /// A tree with one file of each of the two stacks whose rules dominate the report, written fresh so
+    /// the run is COLD — a warm run is exactly the case the report's own `meaning` warns about, and a
+    /// test that silently profiled a warm tree would assert against an empty list.
+    fn tree(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("zzop-profile-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(
+            dir.join("src/api.ts"),
+            "export const load = () => fetch('/api/users');
+",
+        )
+        .unwrap();
+        // `cacheDir: null` opts caching out entirely, so this stays a cold profile on every re-run of
+        // the suite rather than emptying out the second time it is executed on one machine.
+        std::fs::write(
+            dir.join("zzop.config.jsonc"),
+            "{ \"trees\": [{ \"root\": \".\" }], \"cacheDir\": null }
+",
+        )
+        .unwrap();
+        dir
+    }
+
+    fn analyze(dir: &std::path::Path, profile_rules: bool) -> serde_json::Value {
+        let config = dir.join("zzop.config.jsonc");
+        let out = super::super::analyze_summary_with(
+            None,
+            Some(config.to_str().unwrap()),
+            &no_filters(),
+            RunKnobs { profile_rules },
+        )
+        .expect("the tree must analyze");
+        serde_json::from_str(&out).expect("the summary must be valid JSON")
+    }
+
+    /// The BEFORE half, kept as an assertion rather than a memory: without the knob the reply carries no
+    /// timing key AT ALL — absent, not `null`. That is what makes an unprofiled reply byte-identical to
+    /// the one this surface did not exist for.
+    #[test]
+    fn an_unprofiled_run_carries_no_rule_timings_key() {
+        let v = analyze(&tree("off"), false);
+        assert!(
+            v.get("ruleTimings").is_none(),
+            "an unprofiled reply must not grow the key at all (not even as null): {v}"
+        );
+    }
+
+    /// The AFTER half: the knob is reachable, and what comes back names real rules with real durations.
+    #[test]
+    fn a_profiled_run_reports_named_rules_with_durations_and_its_own_disclosure() {
+        let v = analyze(&tree("on"), true);
+        let timings = v
+            .get("ruleTimings")
+            .unwrap_or_else(|| panic!("--profile-rules must produce a report: {v}"));
+        let rules = timings["rules"].as_array().expect("rules must be an array");
+        assert!(
+            rules.len() > 1,
+            "a cold run over a real tree must time more than one rule, got {}: {timings}",
+            rules.len()
+        );
+        // Every entry is a NAMED rule with a duration — the two things the report exists to carry.
+        for rule in rules {
+            assert!(
+                rule["ruleId"].as_str().is_some_and(|id| !id.is_empty()),
+                "every timing row must name its rule: {rule}"
+            );
+            assert!(
+                rule["nanos"].is_number(),
+                "every timing row must carry nanos: {rule}"
+            );
+        }
+        // Sorted by cost descending — the property that makes the report a RANKING rather than a dump.
+        let nanos: Vec<u64> = rules.iter().filter_map(|r| r["nanos"].as_u64()).collect();
+        assert!(
+            nanos.windows(2).all(|w| w[0] >= w[1]),
+            "the report must be sorted by nanos descending: {nanos:?}"
+        );
+        // The disclosure is not optional decoration: it is the only thing standing between this report
+        // and a reader who profiles warm and believes the short list.
+        let meaning = timings["meaning"]
+            .as_str()
+            .expect("the report must disclose its own limits");
+        assert!(
+            meaning.contains("cacheHitFiles") && meaning.contains("whole-graph"),
+            "the disclosure must name the cache field a reader has to check, and say what survives a              warm run: {meaning}"
+        );
+        assert!(
+            timings["cacheHitFiles"].is_number() && timings["fileCount"].is_number(),
+            "the disclosure's two numbers must actually ride the report: {timings}"
+        );
+    }
 }

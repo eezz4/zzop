@@ -15,14 +15,17 @@ import * as deadDynamicLoader from './lib/dead.dynamic-loader';
 import * as egressMixedContent from './lib/egress.http-url-literal.decoy';
 import * as reexports from './lib/reexports';
 import * as reliabilityBodyLimitMissing from './lib/reliability.body-limit-missing.decoy';
+import * as reliabilityConsoleInLoop from './lib/reliability.console-in-loop.decoy';
 import * as reliabilityIntervalNoClear from './lib/reliability.interval-no-clear.decoy';
 import * as securityApiKeyInUrl from './lib/security.api-key-in-url.decoy';
 import * as securityConnStringCredentials from './lib/security.conn-string-credentials.decoy';
 import * as securityCorsWildcard from './lib/security.cors-wildcard.decoy';
 import * as securityEvalDynamicCode from './lib/security.eval-dynamic-code.decoy';
 import * as securityHardcodedSecret from './lib/security.hardcoded-secret.decoy';
+import * as securityHighEntropySecret from './lib/security.high-entropy-secret.decoy';
 import * as securityJwtNoneAlgorithm from './lib/security.jwt-none-algorithm.decoy';
 import * as securityLocalstorageJwt from './lib/security.localstorage-jwt.decoy';
+import * as securityProcessExec from './lib/security.process-exec.decoy';
 import * as securityRawQueryInterpolation from './lib/security.raw-query-unsafe-api.decoy';
 import * as securityShellExecInterpolation from './lib/security.shell-exec-interpolation.decoy';
 import * as securityTimingUnsafeCompare from './lib/security.timing-unsafe-compare.decoy';
@@ -50,14 +53,17 @@ export const registry = {
   egressMixedContent,
   reexports,
   reliabilityBodyLimitMissing,
+  reliabilityConsoleInLoop,
   reliabilityIntervalNoClear,
   securityApiKeyInUrl,
   securityConnStringCredentials,
   securityCorsWildcard,
   securityEvalDynamicCode,
   securityHardcodedSecret,
+  securityHighEntropySecret,
   securityJwtNoneAlgorithm,
   securityLocalstorageJwt,
+  securityProcessExec,
   securityRawQueryInterpolation,
   securityShellExecInterpolation,
   securityTimingUnsafeCompare,

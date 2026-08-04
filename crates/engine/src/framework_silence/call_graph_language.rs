@@ -72,8 +72,10 @@ pub fn call_graph_language_gap_warning(io_provides: &[IoProvide]) -> Option<Stri
          handler-reachability BFS has no edges to walk there, which is why those routes are exempted \
          rather than reported clean. Languages this build DOES walk: {}. Three ways to close it for \
          yours: inject `auth-guarded` on the guarded route or router prefix through an adapter overlay \
-         (Mode B), supply call sites through the envelope call channel, or teach the parser for that \
-         language a `RawCall` extractor. Every other rule is unaffected — this gap is specific to the \
+         (Mode B), supply call sites through `files[].calls` in a Mode A analyze-envelope run \
+         (`zzop analyze-envelope` / MCP tool `analyze_envelope` — Mode A ONLY: a Mode B overlay's \
+         `calls` are not consumed on a native tree), or teach the parser for that language a \
+         `RawCall` extractor. Every other rule is unaffected — this gap is specific to the \
          call graph.",
         per_ext.join("; "),
         zzop_rules_http::mutating_route_no_auth::CALL_GRAPH_COVERED_EXTENSIONS.join("/"),
@@ -86,6 +88,7 @@ mod tests {
 
     fn provide(file: &str, key: &str) -> IoProvide {
         IoProvide {
+            response: None,
             kind: "http".to_string(),
             key: key.to_string(),
             file: file.to_string(),
@@ -123,6 +126,11 @@ mod tests {
         assert!(w.contains("internal/api/handler.go"), "{w}");
         assert!(w.contains("mutating-route-no-auth"), "{w}");
         assert!(w.contains("Mode B"), "{w}");
+        // The `calls` escape hatch must name the ONE lane that consumes it (Mode A analyze-envelope):
+        // this warning fires on a NATIVE tree, whose only envelope surface is Mode B overlays — and
+        // Mode B drops `calls` — so an unqualified "envelope call channel" pointed the reader at a
+        // channel their run would discard (crates F4).
+        assert!(w.contains("Mode A analyze-envelope"), "{w}");
         // The covered list is rendered from the constant, never a copy.
         assert!(w.contains("java/py/pyi"), "{w}");
         // A covered-language route never appears in the gap list.

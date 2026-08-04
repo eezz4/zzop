@@ -1,4 +1,4 @@
-// sql/nplus1 (file_pattern ^api/) — bad: await a store call per loop iteration. good: one batched query.
+// sql/nplus1, root-level `api/` — bad: await a store call per loop iteration. good: one batched query.
 type Order = { findMany: (a: unknown) => Promise<unknown[]> };
 declare const prisma: { order: Order };
 

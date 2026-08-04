@@ -15,6 +15,13 @@
 //! - A non-literal `.route()` path (`Router::new().route(path, get(handler))`, `path` a local variable)
 //!   never becomes an `http` provide at all — `zzop_parser_rust::adapters::axum`'s "non-literal path
 //!   skips the WHOLE `.route()` call" contract — so no cross-layer edge can form for it either.
+//! - **The `db-table` half**: a `migrations/*.sql` tree's `CREATE TABLE` provides joined by a Rust
+//!   service tree's raw-SQL consumes (`zzop_parser_rust::extract_rust_raw_sql_db_table_consumes`, wired
+//!   into `pipeline::io_projection`'s `Language::Rust` arm). This is the channel `.rs` had NO producer
+//!   for until 2026-08-02: the parser unit tests prove the facts exist, and only this file proves they
+//!   reach the join — the chain that has broken before. Its negative twin pins that an interpolated
+//!   table name produces no consume, so the same migration's provides stay unconsumed rather than
+//!   joining to a fabricated key.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -215,5 +222,157 @@ fn non_literal_route_path_produces_no_http_provide_or_cross_layer_edge() {
         http_provides.is_empty(),
         "expected zero http provides for the non-literal-path file, got: {:?}",
         http_provides
+    );
+}
+
+// --- The db-table half: a .sql migration tree x a Rust service tree's raw-SQL consumes ----------------
+
+/// A migration tree: `CREATE TABLE` provides only, no application code at all.
+fn migration_tree(prefix: &str) -> TempDir {
+    let dir = TempDir::new(prefix);
+    dir.write(
+        "db/migrations/V1__init.sql",
+        concat!(
+            "CREATE TABLE users (\n",
+            "  id BIGINT PRIMARY KEY,\n",
+            "  email VARCHAR(255) NOT NULL\n",
+            ");\n",
+            "\n",
+            "CREATE TABLE orders (\n",
+            "  id BIGINT PRIMARY KEY,\n",
+            "  user_id BIGINT NOT NULL\n",
+            ");\n",
+        ),
+    );
+    dir
+}
+
+#[test]
+fn rust_raw_sql_consumes_join_a_sql_migration_trees_db_table_provides() {
+    let db = migration_tree("zzop-engine-rust-db-migrations");
+    let svc = TempDir::new("zzop-engine-rust-db-svc");
+    // Both raw-SQL shapes in one file: the `sqlx::query!` MACRO (whose argument syn hands back as an
+    // opaque token stream — the shape a literal-only walk would have missed) and an ordinary call
+    // argument.
+    svc.write(
+        "src/db.rs",
+        concat!(
+            "pub async fn load_user(pool: &sqlx::PgPool, id: i64) {\n",
+            "    sqlx::query!(\"SELECT id, email FROM users WHERE id = $1\", id);\n",
+            "}\n",
+            "\n",
+            "pub async fn load_orders(client: &tokio_postgres::Client) {\n",
+            "    client.query(\"SELECT id FROM orders\", &[]).await.ok();\n",
+            "}\n",
+        ),
+    );
+
+    let trees = vec![
+        (db.path().to_path_buf(), config("db-migrations")),
+        (svc.path().to_path_buf(), config("svc-rust")),
+    ];
+    let out = analyze_trees(&trees);
+
+    let mut db_edges: Vec<_> = out
+        .cross_layer
+        .edges
+        .iter()
+        .filter(|e| e.kind == "db-table")
+        .collect();
+    db_edges.sort_by(|a, b| a.key.cmp(&b.key));
+    assert_eq!(
+        db_edges.len(),
+        2,
+        "expected one db-table edge per touched table, got: {:?}",
+        out.cross_layer.edges
+    );
+    assert_eq!(db_edges[0].key, "table:orders");
+    assert_eq!(db_edges[1].key, "table:users");
+    for e in &db_edges {
+        assert_eq!(e.from.source, "svc-rust", "the Rust file is the CONSUMER");
+        assert_eq!(e.from.file, "src/db.rs");
+        assert_eq!(e.to.source, "db-migrations");
+        assert_eq!(e.to.file, "db/migrations/V1__init.sql");
+        assert!(
+            e.cross_source,
+            "migrations and service are different sources"
+        );
+    }
+    // The consume side is keyed by the parser itself (the statement names the physical table), so
+    // nothing is left for the engine's ORM entity resolver to fill in.
+    assert!(
+        out.cross_layer.unresolved_consumes.is_empty(),
+        "raw-SQL consumes are keyed at extraction time: {:?}",
+        out.cross_layer.unresolved_consumes
+    );
+}
+
+#[test]
+fn an_interpolated_table_name_produces_no_consume_and_no_edge() {
+    let db = migration_tree("zzop-engine-rust-db-neg-migrations");
+    let svc = TempDir::new("zzop-engine-rust-db-neg-svc");
+    // Three things that must all stay silent: a fully interpolated table, a prefix+hole table (the
+    // shape that would key a non-existent `table:users_`), and English prose shaped like SQL.
+    svc.write(
+        "src/db.rs",
+        concat!(
+            "pub fn dynamic(table: &str) -> String {\n",
+            "    format!(\"SELECT * FROM {table}\")\n",
+            "}\n",
+            "\n",
+            "pub fn sharded(n: u8) -> String {\n",
+            "    format!(\"SELECT * FROM users_{n}\")\n",
+            "}\n",
+            "\n",
+            "pub const HELP: &str = \"Select a date from the list\";\n",
+        ),
+    );
+
+    let trees = vec![
+        (db.path().to_path_buf(), config("db-neg")),
+        (svc.path().to_path_buf(), config("svc-rust-neg")),
+    ];
+    let out = analyze_trees(&trees);
+
+    let db_edges: Vec<_> = out
+        .cross_layer
+        .edges
+        .iter()
+        .filter(|e| e.kind == "db-table")
+        .collect();
+    assert!(
+        db_edges.is_empty(),
+        "a non-literal table name must never join: {db_edges:?}"
+    );
+
+    // Direct confirmation on the service tree alone: zero db-table consumes at all, not merely zero
+    // edges — an edge count can be zero because the PROVIDE side was missing.
+    let solo = analyze_tree(svc.path(), &config("svc-rust-neg-solo"));
+    let db_consumes: Vec<_> = solo
+        .ir
+        .ir
+        .io
+        .as_ref()
+        .map(|io| {
+            io.consumes
+                .iter()
+                .filter(|c| c.kind == "db-table")
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    assert!(
+        db_consumes.is_empty(),
+        "expected zero db-table consumes for interpolated/prose strings, got: {db_consumes:?}"
+    );
+
+    // ... and the migration's provides are still there, unconsumed — which is what makes the zero above
+    // a real silence rather than a tree with nothing in it.
+    assert!(
+        out.cross_layer
+            .unconsumed_provides
+            .iter()
+            .any(|p| p.provide.key == "table:users"),
+        "the CREATE TABLE provides must survive as unconsumed: {:?}",
+        out.cross_layer.unconsumed_provides
     );
 }

@@ -40,9 +40,8 @@ pub(crate) use go_module::{
 };
 pub(crate) use java_index::{scan_java_index, JavaIndex};
 pub(crate) use package_json::package_json_entries;
-// Not currently named outside `pipeline` (callers use field access on `package_json_entries`'
-// return), but re-exported so the pre-split `crate::pipeline::PackageJsonScan` path keeps resolving.
-#[allow(unused_imports)]
+// Re-exported so the pre-split `crate::pipeline::PackageJsonScan` path keeps resolving; `assemble`'s
+// `dep_graph`/`provides`/`rules` all name it through here.
 pub(crate) use package_json::PackageJsonScan;
 pub(crate) use rust_workspace::{
     declared_rust_target_paths, scan_rust_workspace, RustWorkspaceMap,
@@ -156,6 +155,30 @@ pub(crate) struct FileArtifact {
     /// counterpart yet — the coverage asymmetry is published in `docs/NORMALIZED_AST.md` and
     /// `FileIrSlice`'s module doc, not hidden).
     pub function_spans: Vec<(u32, u32)>,
+    /// Per-file TEST-ONLY line spans (`zzop_parser_rust::extract_test_spans`) — feeds
+    /// `zzop_core::dsl::SourceFile::test_spans`, the SUBTRACTIVE gate every DSL matcher passes through
+    /// (`zzop_core::dsl::eval`'s `TestRegions`). Same AST-derived convention as the two span facts above,
+    /// but RUST only, and deliberately so: every other language names its tests in the PATH, where the
+    /// packs' `${test-paths-stories}` fragment already excludes them, while Rust's `#[cfg(test)] mod
+    /// tests` lives inside the shipping file where no path pattern can reach it.
+    pub test_spans: Vec<(u32, u32)>,
+    /// Per-file call sites (`zzop_core::call_sites::CallSite`) — feeds
+    /// `zzop_core::dsl::SourceFile::call_sites`, `Matcher::CallScan`'s substrate. Same AST-derived
+    /// convention as the three span facts above (real sites only from a well-formed, non-degraded parse
+    /// of a language that projects them). WHICH languages project them is deliberately not listed here:
+    /// producers land one dispatch arm at a time in `pipeline/fresh/call_sites.rs`, and the
+    /// per-environment SSOT is `capability_matrix`'s `call_sites` column
+    /// (`crates/engine/tests/rule_contracts/capability_matrix.rs`) — a language with no arm carries an
+    /// empty vec, graceful degrade like every other fact on this struct.
+    pub call_sites: Vec<zzop_core::CallSite>,
+    /// Per-file bound string literals (`zzop_core::BoundStringLiteral`) — feeds
+    /// `zzop_core::dsl::SourceFile::string_literals`, `Matcher::LiteralScan`'s substrate. Same
+    /// AST-derived convention and the same "which languages is the capability matrix's business"
+    /// stance as `call_sites` directly above; producers land one dispatch arm at a time in
+    /// `pipeline/fresh/string_literals.rs`. Carries hash + entropy per entry, NEVER the literal's
+    /// value — `zzop_core::string_literals`'s no-plaintext contract, load-bearing here because this
+    /// struct is what the cache serializes.
+    pub string_literals: Vec<zzop_core::BoundStringLiteral>,
 }
 
 /// Runs the fused per-file pass over every file under `root` (skipping `config.dispatch.skip_dirs`) and
@@ -178,7 +201,7 @@ pub(crate) fn run_file_pass(
     let gated_packs: Vec<RulePackDef> = config
         .packs
         .iter()
-        .filter(|p| registry::is_enabled(&config.rule_config, &p.id))
+        .filter(|p| registry::is_pack_enabled(&config.rule_config, &p.id))
         .map(|p| gate_pack_rules(p, &config.rule_config))
         .collect();
     let enabled_packs: Vec<&RulePackDef> = gated_packs.iter().collect();

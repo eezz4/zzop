@@ -17,7 +17,7 @@ use sightline::{field_usage_sightline_claim, query_call_site_sightline_claim};
 /// `disable_hint`'s own fragment minus its leading `"Disable "` word — every message in this file that
 /// embeds the disable hint mid-sentence (rather than as its own "Disable via config ..." sentence, the
 /// shape most other native rules use) splices this in after its own lead-in verb instead of hand-writing
-/// the `` `rules: {...}` (embedders: `disabled_rules`) `` fragment again, so this file still has exactly
+/// the `` `rules: {...}` (embedders: `disabledRules`) `` fragment again, so this file still has exactly
 /// one source of truth for that fragment even though none of its call sites use `disable_hint`'s output
 /// verbatim.
 fn disable_hint_tail(id: &str) -> String {
@@ -188,7 +188,7 @@ pub fn schema_issue_message(issue: &SchemaIssue) -> String {
             issue.model,
             field_usage_sightline()
         ),
-        "schema-churn" => format!(
+        "model-churn" => format!(
             "Model {} accumulated {} migration change(s) — the design may be unstable.",
             issue.model,
             param("count").unwrap_or_default()

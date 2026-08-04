@@ -13,6 +13,10 @@ pub(crate) fn dep_stats_from_dep(dep: &DepGraph) -> DepStats {
     let mut fan_in = std::collections::BTreeMap::new();
     let mut fan_out = std::collections::BTreeMap::new();
     let mut all_paths = std::collections::BTreeSet::new();
+    #[allow(
+        clippy::iter_over_hash_type,
+        reason = "iteration order cannot reach the result: all three `DepStats` fields are BTreeMap/BTreeSet filled by commutative inserts and counter increments"
+    )]
     for (src, targets) in dep {
         all_paths.insert(src.clone());
         fan_out.insert(src.clone(), targets.len() as u32);

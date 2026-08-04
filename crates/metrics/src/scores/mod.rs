@@ -12,6 +12,7 @@ pub mod god_file;
 pub mod hierarchy;
 pub mod lod;
 pub mod main_sequence;
+pub mod meanings;
 pub mod modularity;
 pub mod public_api;
 pub mod rename;
@@ -25,6 +26,7 @@ pub mod types;
 pub use compute::{compute_scores, ScoresInput};
 pub use config::ScoresConfig;
 pub use lod::LodChain;
+pub use meanings::{score_meaning, SCORE_MEANINGS};
 pub use type_safety::TypeSafetyCounts;
 pub use types::{
     BusFactorScore, CohesionScore, CouplingScore, DiamondScore, FixRatioScore, FsdScore,

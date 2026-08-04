@@ -19,7 +19,14 @@ use crate::{line_of, parse_with_cm, ARRAY_ITERATION_METHODS};
 /// - The callback-ARGUMENT-ONLY span of a recognized array-iteration call (an [`ARRAY_ITERATION_METHODS`]
 ///   member-call whose first argument is an `Arrow`/`Function` expression) — never the whole call
 ///   expression, so a one-shot call on the RECEIVER (`(await fetch(u)).items.map(...)`) is not
-///   misclassified as loop-body.
+///   misclassified as loop-body. A callback span that starts and ends on ONE line is NOT emitted:
+///   the channel is line-granular, so a `(n, n)` span cannot be told apart from the one-shot calls
+///   sharing that line (`console.log(items.map((i) => i.id).join(','))` — the `.join` and the
+///   `console.log` run once, but they sit on the callback's only line), and emitting it would break
+///   the receiver promise above in exactly the one-line case. Skipping is the never-guess direction
+///   (intended under-reporting: a genuine one-line per-iteration call like `xs.forEach(x => log(x))`
+///   is lost). Statement loops above keep their one-line spans — a `stmt; for (...) f()` line-share
+///   is a rare idiom, a published residual ambiguity (`SourceFile::loop_spans`'s doc owns the rule).
 pub fn extract_loop_spans(file: &str, source: &str) -> Vec<(u32, u32)> {
     let Some((cm, module)) = parse_with_cm(file, source) else {
         return Vec::new();
@@ -41,6 +48,16 @@ impl LoopSpanCollector<'_> {
     fn push_span(&mut self, span: swc_core::common::Span) {
         self.out
             .push((line_of(self.cm, span.lo), line_of(self.cm, span.hi)));
+    }
+
+    /// The callback arm's variant of [`Self::push_span`]: drops single-line spans (module doc — a
+    /// `(n, n)` callback span cannot prove containment on a line-granular channel). Statement-loop
+    /// arms keep using `push_span` unconditionally.
+    fn push_multiline_span(&mut self, span: swc_core::common::Span) {
+        let (start, end) = (line_of(self.cm, span.lo), line_of(self.cm, span.hi));
+        if start < end {
+            self.out.push((start, end));
+        }
     }
 }
 
@@ -77,8 +94,8 @@ impl Visit for LoopSpanCollector<'_> {
                     if ARRAY_ITERATION_METHODS.contains(&name.sym.as_str()) {
                         if let Some(first) = call.args.first() {
                             match &*first.expr {
-                                Expr::Arrow(a) => self.push_span(a.span),
-                                Expr::Fn(f) => self.push_span(f.function.span),
+                                Expr::Arrow(a) => self.push_multiline_span(a.span),
+                                Expr::Fn(f) => self.push_multiline_span(f.function.span),
                                 _ => {}
                             }
                         }
@@ -119,9 +136,29 @@ mod tests {
         assert_eq!(spans, vec![(2, 4)]);
     }
 
+    /// A single-line callback span is deliberately NOT emitted (module doc): a `(1, 1)` span cannot be
+    /// told apart, line-granularly, from the one-shot calls sharing the line. The per-iteration `use(x)`
+    /// here is a real loss — intended under-reporting, pinned as such.
     #[test]
-    fn extract_loop_spans_single_line_arrow_callback_has_equal_start_end() {
+    fn extract_loop_spans_single_line_arrow_callback_is_not_emitted() {
         let src = "arr.forEach(x => use(x));\n";
+        assert!(extract_loop_spans("f.ts", src).is_empty());
+    }
+
+    /// The review-reproduced shape behind the single-line skip: `.map((i) => i.id)`'s callback shares its
+    /// only line with the one-shot `.join` and `console.log`. Emitting `(1, 1)` made `console-in-loop`
+    /// fire on the `console.log` — the exact misclassification the receiver promise above forbids.
+    #[test]
+    fn extract_loop_spans_one_line_map_inside_one_shot_call_is_not_emitted() {
+        let src = "console.log(items.map((i) => i.id).join(','));\n";
+        assert!(extract_loop_spans("f.ts", src).is_empty());
+    }
+
+    /// Statement loops KEEP their one-line spans — the skip above is callback-arm-only. The residual
+    /// `stmt; for (...) f()` line-share ambiguity is published, not fixed (module doc).
+    #[test]
+    fn extract_loop_spans_single_line_for_statement_is_still_emitted() {
+        let src = "for (const x of xs) use(x);\n";
         let spans = extract_loop_spans("f.ts", src);
         assert_eq!(spans, vec![(1, 1)]);
     }

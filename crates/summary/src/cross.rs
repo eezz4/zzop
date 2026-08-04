@@ -1,7 +1,7 @@
 //! `cross_repo`'s cross-layer join summary assembly (`cross_summary`) — see the crate doc: hosts
 //! are thin protocol facades, all shaping logic lives here.
 
-use crate::output::{self, FindingFilters};
+use crate::output::{self, FindingFilters, RunKnobs};
 
 /// Cross-repo analysis — zzop's headline. Config-first mode (`config_path`) runs the config's `trees`;
 /// paths mode tags each root by directory name and LOADS that root's own zzop.config.jsonc (bundled
@@ -14,13 +14,26 @@ pub fn cross_summary(
     config_path: Option<&str>,
     filters: &FindingFilters,
 ) -> Result<String, String> {
+    cross_summary_with(paths, config_path, filters, RunKnobs::default())
+}
+
+/// [`cross_summary`] plus the per-invocation [`RunKnobs`] — same CLI-only rationale as
+/// `analyze_summary_with`. The join's timing report is PER TREE (on each `sources[]` entry), never one
+/// total: see the per-tree insert below for why summing them would describe no real run.
+pub fn cross_summary_with(
+    paths: &[String],
+    config_path: Option<&str>,
+    filters: &FindingFilters,
+    knobs: RunKnobs,
+) -> Result<String, String> {
     // Source-mode exclusivity + config-method gating are enforced in `zzop_config::trees` (shared verbatim
     // with `manifest_json`), not (only) in the hosts — the same centralization `endpoint_summary` gets
     // from `resolve_trees_request`.
     // The operation name rides into the shared loader's error text, so it is the SURFACE-NEUTRAL name of
     // this analysis, never one host's tool spelling — see `zzop_config::trees`'s WIRE NEUTRALITY note.
-    let loaded =
+    let mut loaded =
         zzop_config::trees::load_trees_request("the cross-layer join", paths, config_path)?;
+    crate::analyze::apply_run_knobs(&mut loaded.request, knobs);
     let out = zzop_facade::analyze_trees_json(&loaded.request.to_string())?;
     let v = serde_json::from_str::<serde_json::Value>(&out).map_err(|e| e.to_string())?;
 
@@ -45,7 +58,7 @@ pub fn cross_summary(
         .map(serde_json::Value::String)
         .collect();
     for t in trees {
-        config_warnings.extend(crate::config_warnings::facade_config_warnings(&t["output"]));
+        config_warnings.extend(crate::warnings::facade_config_warnings(&t["output"]));
     }
     let sources: Vec<serde_json::Value> = trees
         .iter()
@@ -66,6 +79,12 @@ pub fn cross_summary(
             // index).
             if let Some(rule_overrides_applied) = t["output"].get("ruleOverridesApplied") {
                 source["ruleOverridesApplied"] = rule_overrides_applied.clone();
+            }
+            // Per-tree rule timing, PER TREE and never summed: each tree is its own engine run with its
+            // own cache state, so one tree can be cold (fully timed) while its neighbour is warm (timed
+            // nowhere). A single joined total would average those two into a number describing neither.
+            if let Some(rule_timings) = output::shape_rule_timings(&t["output"]) {
+                source["ruleTimings"] = rule_timings;
             }
             source
         })

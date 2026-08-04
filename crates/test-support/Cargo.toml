@@ -1,0 +1,19 @@
+[package]
+name = "zzop-test-support"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+# Test-only, and a DEV dependency of every crate that uses it — nothing here is ever linked into a
+# shipped binary. That is the whole reason this is a separate crate rather than a module in
+# `zzop-core`: the one thing it owns is a deliberate `#![allow]`-free, site-local exemption from
+# `clippy::print_stderr`, and parking that inside a shipped library would put the hole exactly where
+# the lint policy (root Cargo.toml) says it must never be.
+[dependencies]
+
+# Inherit the workspace lint policy (root Cargo.toml [workspace.lints.clippy]) — every member does,
+# with no exceptions. Where a single target legitimately violates one, the exemption is a crate-level
+# #![allow] at that target's entry point, never a hole in this table.
+[lints]
+workspace = true

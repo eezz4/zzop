@@ -1,11 +1,15 @@
-// Entry barrel (generated; keep in sync with api/ + services/). Namespace-imports every rule module.
+// Entry barrel (generated; keep in sync with api/ + services/ + src/). Namespace-imports every rule
+// module — a module missing from here is an unimported orphan and picks up `dead-candidates` +
+// `unimported-export` on top of whatever it was planted to test (measured, not assumed: the two nested
+// `sql/nplus1` fixtures did exactly that before they were added below).
 import * as beReliabilityFetchNoTimeout from "./api/be-reliability.fetch-no-timeout";
+import * as crossLayerSensitiveResponseField from "./api/cross-layer.sensitive-response-field";
 import * as httpDevPathNoGuardHint from "./api/http.dev-path-no-guard-hint";
-import * as httpGetRouteNoCacheMarker from "./api/http.get-route-no-cache-marker";
 import * as httpProtectedPathNoAuthEvidence from "./api/http.protected-path-no-auth-evidence";
 import * as sqlCountInLoop from "./api/sql.count-in-loop";
 import * as sqlNplus1 from "./api/sql.nplus1";
 import * as sqlRaceConditionToctou from "./api/sql.race-condition-toctou";
+import * as routesSqlRaceConditionToctouToproutes from "./routes/sql.race-condition-toctou-toproutes";
 import * as beDbClientPerRequest from "./services/be-db.client-per-request";
 import * as beDbEmptyCatchOnWrite from "./services/be-db.empty-catch-on-write";
 import * as beDbExternalCallInTx from "./services/be-db.external-call-in-tx";
@@ -18,6 +22,7 @@ import * as beReliabilityAsyncRouteNoCatch from "./services/be-reliability.async
 import * as beReliabilityAwaitInMap from "./services/be-reliability.await-in-map";
 import * as beReliabilityBodyLimitMissing from "./services/be-reliability.body-limit-missing";
 import * as beReliabilityConsoleInBe from "./services/be-reliability.console-in-be";
+import * as beReliabilityConsoleInLoop from "./services/be-reliability.console-in-loop";
 import * as beReliabilityDebugTrueCommitted from "./services/be-reliability.debug-true-committed";
 import * as beReliabilityEnvNonnullAssert from "./services/be-reliability.env-nonnull-assert";
 import * as beReliabilityEnvOutsideConfig from "./services/be-reliability.env-outside-config";
@@ -27,16 +32,19 @@ import * as beReliabilityProcessExitInLib from "./services/be-reliability.proces
 import * as beReliabilityPromiseAllWrites from "./services/be-reliability.promise-all-writes";
 import * as beReliabilitySyncFsInHandler from "./services/be-reliability.sync-fs-in-handler";
 import * as beSecurityApiKeyInUrl from "./services/be-security.api-key-in-url";
+import * as beSecurityBcryptCostTooLow from "./services/be-security.bcrypt-cost-too-low";
 import * as beSecurityCorsCredentialsWildcard from "./services/be-security.cors-credentials-wildcard";
 import * as beSecurityCorsWildcard from "./services/be-security.cors-wildcard";
 import * as beSecurityErrorLeakToClient from "./services/be-security.error-leak-to-client";
 import * as beSecurityHardcodedSecret from "./services/be-security.hardcoded-secret";
+import * as beSecurityHighEntropySecret from "./services/be-security.high-entropy-secret";
 import * as beSecurityInsecureCookie from "./services/be-security.insecure-cookie";
 import * as beSecurityJwtNoExpiry from "./services/be-security.jwt-no-expiry";
 import * as beSecurityMassAssignment from "./services/be-security.mass-assignment";
 import * as beSecurityOpenRedirect from "./services/be-security.open-redirect";
 import * as beSecurityPathTraversal from "./services/be-security.path-traversal";
 import * as beSecurityRawQueryInterpolation from "./services/be-security.raw-query-interpolation";
+import * as beSecurityShellExecInterpolation from "./services/be-security.shell-exec-interpolation";
 import * as beSecuritySsrfUserUrl from "./services/be-security.ssrf-user-url";
 import * as beSecurityTimingUnsafeCompare from "./services/be-security.timing-unsafe-compare";
 import * as beSecurityWeakPasswordHash from "./services/be-security.weak-password-hash";
@@ -48,16 +56,19 @@ import * as securityTaintFlow from "./services/security.taint-flow";
 import * as sqlAppSideAggregationFilterLength from "./services/sql.app-side-aggregation-filter-length";
 import * as sqlAppSideAggregationReduce from "./services/sql.app-side-aggregation-reduce";
 import * as sqlQueryLogicDensity from "./services/sql.query-logic-density";
+import * as srcApiSqlNplus1Nested from "./src/api/sql.nplus1-nested";
+import * as srcDomainsOrdersRoutesSqlNplus1Domain from "./src/domains/orders/routes/sql.nplus1-domain";
 import * as srcQueries from "./src/queries";
 
 export const registry = {
   beReliabilityFetchNoTimeout,
+  crossLayerSensitiveResponseField,
   httpDevPathNoGuardHint,
-  httpGetRouteNoCacheMarker,
   httpProtectedPathNoAuthEvidence,
   sqlCountInLoop,
   sqlNplus1,
   sqlRaceConditionToctou,
+  routesSqlRaceConditionToctouToproutes,
   beDbClientPerRequest,
   beDbEmptyCatchOnWrite,
   beDbExternalCallInTx,
@@ -70,6 +81,7 @@ export const registry = {
   beReliabilityAwaitInMap,
   beReliabilityBodyLimitMissing,
   beReliabilityConsoleInBe,
+  beReliabilityConsoleInLoop,
   beReliabilityDebugTrueCommitted,
   beReliabilityEnvNonnullAssert,
   beReliabilityEnvOutsideConfig,
@@ -79,16 +91,19 @@ export const registry = {
   beReliabilityPromiseAllWrites,
   beReliabilitySyncFsInHandler,
   beSecurityApiKeyInUrl,
+  beSecurityBcryptCostTooLow,
   beSecurityCorsCredentialsWildcard,
   beSecurityCorsWildcard,
   beSecurityErrorLeakToClient,
   beSecurityHardcodedSecret,
+  beSecurityHighEntropySecret,
   beSecurityInsecureCookie,
   beSecurityJwtNoExpiry,
   beSecurityMassAssignment,
   beSecurityOpenRedirect,
   beSecurityPathTraversal,
   beSecurityRawQueryInterpolation,
+  beSecurityShellExecInterpolation,
   beSecuritySsrfUserUrl,
   beSecurityTimingUnsafeCompare,
   beSecurityWeakPasswordHash,
@@ -100,5 +115,7 @@ export const registry = {
   sqlAppSideAggregationFilterLength,
   sqlAppSideAggregationReduce,
   sqlQueryLogicDensity,
+  srcApiSqlNplus1Nested,
+  srcDomainsOrdersRoutesSqlNplus1Domain,
   srcQueries,
 };

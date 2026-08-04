@@ -80,6 +80,9 @@ fn io_scan_rule(id: &str, m: IoScan) -> RuleDef {
         id: id.to_string(),
         severity: Severity::Warning,
         message: format!("io-scan-e2e/{id} fired"),
+        // The test-region opt-out is for credential-at-rest rules only, and io-scan is not gated by it
+        // at all (see `RuleDef::scan_test_regions`) — false is both the default and the honest value.
+        scan_test_regions: false,
         matcher: Matcher::IoScan(m),
     }
 }
@@ -354,6 +357,7 @@ fn suppress_marker_on_the_registration_line_suppresses_without_it_fires() {
 
 fn envelope_projection(path: &str, provide_key: &str, attrs: Vec<Attribute>) -> FileProjection {
     FileProjection {
+        calls: Vec::new(),
         path: path.to_string(),
         loc: 1,
         symbols: Vec::new(),
@@ -367,6 +371,7 @@ fn envelope_projection(path: &str, provide_key: &str, attrs: Vec<Attribute>) -> 
         class_shape_fragments: Vec::new(),
         io: IoFacts {
             provides: vec![IoProvide {
+                response: None,
                 kind: "http".to_string(),
                 key: provide_key.to_string(),
                 file: path.to_string(),
@@ -382,6 +387,7 @@ fn envelope_projection(path: &str, provide_key: &str, attrs: Vec<Attribute>) -> 
         attributes: attrs,
         loop_spans: Vec::new(),
         function_spans: Vec::new(),
+        test_spans: Vec::new(),
     }
 }
 

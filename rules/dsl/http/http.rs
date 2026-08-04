@@ -1,19 +1,17 @@
 //! Exercises `rules/dsl/http/http.json`'s HTTP-route rules end-to-end via `zzop_engine::analyze_tree` against
 //! real swc-parsed TypeScript fixtures. See `http.json` for each rule's exact matcher shape and message.
 //!
-//! **`get-route-no-cache-marker`'s name**: "read model" means "the path of a read (GET) endpoint" here — not a
-//! CQRS/DDD read-model or a DB read-replica. The rule flags an `apiRoutes.get(...)`-registered GET route
-//! carrying no `// cache:`/`// no-cache:` annotation on its own line (`http.json`'s message has the exact
-//! contract); it never inspects request/response shape or persistence. A vetted case is suppressed by the
-//! DERIVED marker `// zzop-get-route-no-cache-marker-ok` — that channel is not the annotation channel: it also accepts the
-//! line above, and its trailing colon is optional.
+//! The pack's third rule, `get-route-no-cache-marker`, was DELETED 2026-08-02 rather than tested around:
+//! its `require_file` gate (`apiRoutes\.get\(`) was one repository's own router-variable vocabulary, so
+//! for every other user the rule was eternally silent by construction — a house convention has no place
+//! in a shipped pack (old id recorded in `VERSIONING.md`; a config naming it gets the standard
+//! unknown-rule-id warning).
 //!
 //! Ordering-aware and graph-shaped route checks (auth-state-machine transitions, API churn, unsafe-read-endpoint,
 //! non-idempotent-write, FE/BE spec drift) are out of scope for a per-file DSL matcher and stay on the native-analysis backlog.
 //!
-//! All three rules require file paths shaped like `HTTP_SCANNER_DEFAULTS.beHandlerPathPattern`; fixtures
-//! below use `src/routes/apiRoutes.ts` so the `/routes/` alternative matches. `/routes/` and `/controllers/`
-//! require a slash on both sides, so a route file at the tree root with no parent directory would not match.
+//! Both remaining rules are `io-scan` matchers over assembled `http` provides — framework-neutral, and
+//! path-shape-free: their `file_pattern` is a language-extension gate, not a directory convention.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -93,26 +91,5 @@ fn hits<'a>(out: &'a AnalyzeOutput, rule: &str) -> Vec<&'a zzop_core::Finding> {
         .collect()
 }
 
-// --- file_pattern language-scope regression ---
-
-#[test]
-fn java_file_under_an_api_directory_is_out_of_scope() {
-    // Regression: the `(?:^|/)api/`/`/routes/`/`/controllers/` alternatives used to match ANY file
-    // extension sitting under such a directory (a bare path-fragment match with no extension anchor),
-    // so a Java Spring controller living at `.../io/spring/api/CommentsApi.java` (the be-spring corpus
-    // shape) fell into this pack's scope even though every rule's matcher vocabulary
-    // (`apiRoutes.get/post/put/patch/delete(...)`) is a JS/TS-only router-wrapper idiom no Java file can
-    // ever contain. Each alternative now also requires a JS/TS extension, same as `[Hh]andler.ts$`/
-    // `[Cc]ontroller.ts$` already did.
-    let dir = TempDir::new("zzop-http");
-    dir.write(
-        "src/main/java/io/spring/api/CommentsApi.java",
-        "apiRoutes.get(\"/api/admin/users\", api.userList);\napiRoutes.get(\"/api/dev/config\", api.devConfig);\n",
-    );
-    let out = scan(&dir);
-    assert!(out.findings.is_empty(), "{:?}", out.findings);
-}
-
 mod dev_path_no_guard_hint;
-mod get_route_no_cache_marker;
 mod protected_path_no_auth_evidence;

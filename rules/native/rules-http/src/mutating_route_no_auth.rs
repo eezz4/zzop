@@ -13,7 +13,7 @@
 //! `requireBody`-style validation; `requireAuth`/`requireOwner` still match via the stem), and env gates
 //! (`isProduction`/`isLocal`/`isDev` — WHERE code runs, not WHO calls it: route-EXPOSURE, not auth). A
 //! real guard named outside this vocabulary still false-positives — the message points at config
-//! `rules: { "mutating-route-no-auth": "off" }` (embedders: `disabled_rules`), this rule having no marker.
+//! `rules: { "mutating-route-no-auth": "off" }` (embedders: `disabledRules`), this rule having no marker.
 //!
 //! ## Decidable subset
 //! Only mutating provides whose handler resolves to a known symbol are checked

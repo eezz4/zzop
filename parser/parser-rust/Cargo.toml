@@ -9,7 +9,17 @@ publish = false
 syn = { version = "2", features = ["full", "visit"] }
 proc-macro2 = { version = "1", features = ["span-locations"] }
 zzop-core = { path = "../../crates/core" }
+# SQL vocabulary for `adapters::raw_sql` — the statement-shape gate, table extraction and channel
+# casing all live in that crate and only there, exactly as `parser-typescript` consumes it for its own
+# `raw_sql` adapter. A consume key and the DDL provide key for one physical table therefore cannot drift.
+zzop-parser-sql = { path = "../parser-sql" }
 
 # tests/no_panic_proptest.rs — the arbitrary-input panic property every parser frontend carries.
 [dev-dependencies]
 proptest = { workspace = true }
+
+# Inherit the workspace lint policy (root Cargo.toml [workspace.lints.clippy]) — every member does,
+# with no exceptions. Where a single target legitimately violates one, the exemption is a crate-level
+# #![allow] at that target's entry point, never a hole in this table.
+[lints]
+workspace = true

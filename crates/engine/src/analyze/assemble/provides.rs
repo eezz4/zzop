@@ -12,7 +12,8 @@ mod consume_chain;
 use crate::analyze::compose::{
     apply_and_strip_global_prefix, apply_config_mounts, compose_controller_prefix_provides,
     compose_router_mount_provides, compose_trpc_provides, late_resolve_cross_file_consumes,
-    merge_const_map_fragments, resolve_provide_body_refs,
+    merge_const_map_fragments, resolve_provide_body_refs, resolve_provide_response_refs,
+    ShapeMerge,
 };
 use crate::analyze::native_rules::{
     run_csharp_provides_project_pass, run_java_provides_project_pass,
@@ -160,6 +161,9 @@ pub(super) fn compose(
         // a resolved package directory, and `router_mount_pairs` is the only substrate that has them
         // (see `go_fragment_dirs`'s own doc for why this can't instead live inside the composer).
         let go_dirs = go_fragment_dirs(&router_mount_pairs);
+        // Resolved once, outside the closure: the Python branch below resolves against the run's
+        // declared `vocabulary.pythonPackageRoots`, the same list the dep-graph/census resolutions use.
+        let vocab = config.vocabulary.resolve();
         let (composed, attrs) = compose_router_mount_provides(
             router_mount_pairs,
             |specifier, from_file, ident| {
@@ -174,7 +178,13 @@ pub(super) fn compose(
                 // (`<base>.py`/`<base>/__init__.py`) are tried — covers the common one-router-per-module
                 // layout (`router = APIRouter()` defined directly in the mounted module).
                 if is_python_source_ext(from_file) {
-                    return resolve_python_import(specifier, None, from_file, ts_paths);
+                    return resolve_python_import(
+                        specifier,
+                        None,
+                        from_file,
+                        ts_paths,
+                        &vocab.python_package_roots,
+                    );
                 }
                 // axum `.nest("/api", child)`/`.merge(child)` mounts (`from_file` a `.rs`): `specifier`
                 // is the mounted ident's own FULL import specifier (`RouterMountEntry::Mount::specifier`
@@ -223,7 +233,7 @@ pub(super) fn compose(
     // tree-wide (overlay wins on a target+key collision — see `AttributeStore::from_parts`'s doc).
     // Built here (AFTER router-mount composition, which is the only native attribute producer today)
     // rather than at the top of this function — a pure ordering move, overlay-only behavior unchanged.
-    // Shared by both `schema_usage_findings` (unreferenced-model-name/schema-churn read Symbol-keyed
+    // Shared by both `schema_usage_findings` (unreferenced-model-name/model-churn read Symbol-keyed
     // `bound-model`/`model-churn`) and `run_callgraph_rules` (route-level auth-guard evidence) in
     // `super::rules`.
     let attribute_store =
@@ -258,12 +268,14 @@ pub(super) fn compose(
         io_provides.extend(composed);
     }
 
-    // Request-body DTO resolution (`body-shape-v1`) — MUST run here, after every provide-composition
-    // pass above (controller-prefix, global-prefix, tRPC, router-mount, file-convention routes) has
-    // finished pushing into `io_provides`, so a prefix-ref-composed route's carried-through `body` (see
-    // `compose_controller_prefix_provides`'s doc) gets its `dto_ref` resolved too, not just literal-prefix
-    // routes' own directly-emitted provides.
-    resolve_provide_body_refs(&mut io_provides, class_shape_pairs, &mut warnings);
+    // Request-body + declared-response DTO resolution (`body-shape-v1` / `response-shape-v1`) — MUST
+    // run here, after every provide-composition pass above has finished pushing into `io_provides`,
+    // so a prefix-ref-composed route's carried-through `body`/`response` gets resolved too. ONE
+    // shared merge feeds both passes (a name can never resolve differently per axis); the response
+    // pass also strips + discloses the no-return-type sentinel (`response_refs`'s module doc).
+    let shape_merge = ShapeMerge::build(&class_shape_pairs);
+    resolve_provide_body_refs(&mut io_provides, &shape_merge, &mut warnings);
+    resolve_provide_response_refs(&mut io_provides, &shape_merge, &mut warnings);
 
     // Deployment-topology mount apply (`EngineConfig::mounts`, config-declared) — MUST run LAST among
     // provide transforms: after EVERY provide producer above (controller-prefix, global-prefix, tRPC,

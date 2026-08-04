@@ -110,7 +110,9 @@ pub(crate) fn dead_export_findings(
     }
 
     let mut files: Vec<DeadExportInputFile> = Vec::with_capacity(ts_paths.len());
-    for rel in ts_paths {
+    let mut rels: Vec<&String> = ts_paths.iter().collect();
+    rels.sort(); // deterministic `files` order; free next to the per-entry read+parse below
+    for rel in rels {
         if !is_ts_source_ext(rel) {
             continue; // non-TS overlay participant (e.g. .svelte) — not re-parseable as TypeScript
         }

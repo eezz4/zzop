@@ -538,6 +538,41 @@ fn analyze_envelope_subcommand_runs_mode_a_over_a_file_and_prints_the_summary() 
     );
 }
 
+/// `--profile-rules` on the envelope lane — this exact invocation used to be an exit-2 refusal by
+/// name ("Mode A analysis produces no rule timings"), back when `analyze_envelope` ran its packs
+/// outside the engine's timing accumulator. The wiring landed, so the refusal is gone and the flag
+/// produces a real report: exit 0 with a non-empty `ruleTimings` object in the summary.
+#[test]
+fn analyze_envelope_subcommand_takes_profile_rules_and_reports_timings() {
+    let dir = TempDir::new("zzop-analyze-envelope-profile");
+    dir.write("envelope.json", EXAMPLE_ENVELOPE);
+    let path = dir.path().join("envelope.json");
+
+    let out = run(&[
+        "analyze-envelope",
+        path.to_str().unwrap(),
+        "--profile-rules",
+    ]);
+    assert!(
+        out.status.success(),
+        "the old exit-2 refusal must be gone, stderr: {}",
+        stderr(&out)
+    );
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout(&out)).expect("stdout must be the analyze summary JSON");
+    let rules = v["ruleTimings"]["rules"]
+        .as_array()
+        .unwrap_or_else(|| panic!("a profiled Mode A run must carry ruleTimings.rules, got: {v}"));
+    assert!(!rules.is_empty(), "got: {v}");
+
+    // The unprofiled invocation stays byte-identical to the pre-knob lane: no key at all.
+    let off = run(&["analyze-envelope", path.to_str().unwrap()]);
+    assert!(off.status.success(), "stderr: {}", stderr(&off));
+    let off: serde_json::Value =
+        serde_json::from_str(&stdout(&off)).expect("stdout must be the analyze summary JSON");
+    assert!(off.get("ruleTimings").is_none(), "got: {off}");
+}
+
 #[test]
 fn analyze_envelope_subcommand_reports_an_unreadable_file_as_a_runtime_error() {
     let out = run(&["analyze-envelope", "/no/such/envelope.json"]);
@@ -625,12 +660,18 @@ fn explain_reports_an_io_scan_rules_real_exclusion_fields() {
 /// who cannot see the field reads the resulting silence as a false negative — the exact misreading this
 /// section exists to prevent. `reliability/env-outside-config` is the shipped rule that lives on all
 /// three fields; it went silent-by-default in v0.24.0, which is when a reader most needs to be told why.
+///
+/// The rule moved from `line-scan` to `call-scan` in 2026-08-03's call-site wave, and the matcher kind is
+/// asserted here rather than left loose precisely because the three gates are declared SEPARATELY on each
+/// matcher struct: a migration that carried the rule across but dropped a gate would otherwise turn this
+/// rule permanently silent-or-permanently-loud with nothing red. `docs/rules/dsl-reference.md`'s
+/// attribute-gate table is where the two matchers' identical semantics are stated.
 #[test]
-fn explain_reports_a_line_scan_rules_attribute_gates() {
+fn explain_reports_a_call_scan_rules_attribute_gates() {
     let out = run(&["explain", "reliability/env-outside-config"]);
     assert!(out.status.success(), "stderr: {}", stderr(&out));
     let text = stdout(&out);
-    assert!(text.contains("matcher: line-scan"), "got: {text}");
+    assert!(text.contains("matcher: call-scan"), "got: {text}");
     for field in [
         "attr_absent: env-config-module",
         "require_attr_declared: env-config-module",
@@ -642,6 +683,126 @@ fn explain_reports_a_line_scan_rules_attribute_gates() {
     }
     // Printed even when unset, same as the regex lanes: the reader learns which gates the matcher offers.
     assert!(text.contains("attr_present: no"), "got: {text}");
+}
+
+/// The POSITIVE half, end to end, and the pin that other documents now rest on. Nine verbatim copies of
+/// rule `file_pattern` regexes were deleted from rule messages, `docs/rules/catalog.md` and
+/// `site/rules.html` on 2026-08-01 because `zzop explain` is the canonical answer instead — a trade that
+/// only holds while the binary actually prints it, which it did not until the scope block shipped
+/// (`crates/facade/src/explain/scope.rs`).
+///
+/// DERIVED, never copied: the expected regex is read out of the same bundled pack data the binary
+/// renders from, so this pin cannot itself become a tenth stale copy. It covers one rule per matcher
+/// KIND, chosen from what actually ships — a new matcher kind is pinned the moment its first rule lands,
+/// with no table here to update. The per-field completeness sweep (every field of every matcher struct,
+/// including the kinds no pack ships) lives in `crates/facade/src/explain/field_coverage_tests.rs`; this
+/// checks the value survives the real process boundary.
+#[test]
+fn explain_prints_each_shipped_matcher_kinds_own_file_pattern() {
+    let mut per_kind: std::collections::BTreeMap<&'static str, (String, String)> =
+        std::collections::BTreeMap::new();
+    for (rel_path, source) in zzop_config::BUNDLED_PACK_SOURCES {
+        let pack = zzop_core::parse_dsl_pack(source)
+            .unwrap_or_else(|e| panic!("bundled pack {rel_path} must parse: {e}"));
+        for rule in &pack.rules {
+            let (kind, file_pattern) = match &rule.matcher {
+                zzop_core::Matcher::LineScan(m) => ("line-scan", &m.file_pattern),
+                zzop_core::Matcher::MethodScan(m) => ("method-scan", &m.file_pattern),
+                zzop_core::Matcher::SymbolScan(m) => ("symbol-scan", &m.file_pattern),
+                zzop_core::Matcher::IoScan(m) => ("io-scan", &m.file_pattern),
+                zzop_core::Matcher::CallScan(m) => ("call-scan", &m.file_pattern),
+                zzop_core::Matcher::LiteralScan(m) => ("literal-scan", &m.file_pattern),
+            };
+            per_kind
+                .entry(kind)
+                .or_insert_with(|| (format!("{}/{}", pack.id, rule.id), file_pattern.clone()));
+        }
+    }
+    assert!(
+        !per_kind.is_empty(),
+        "no bundled DSL rule found at all — this test would then vouch for nothing"
+    );
+
+    for (kind, (full_id, file_pattern)) in &per_kind {
+        let out = run(&["explain", full_id]);
+        assert!(out.status.success(), "{full_id}: stderr: {}", stderr(&out));
+        let text = stdout(&out);
+        assert!(
+            text.contains(&format!("matcher: {kind}")),
+            "{full_id}: expected matcher kind {kind}: {text}"
+        );
+        assert!(
+            text.contains(&format!("\nfile_pattern: {file_pattern}\n")),
+            "{full_id}: `explain` must print this rule's own file_pattern verbatim — the copies in \
+             catalog.md/site/rules.html were deleted in favour of exactly this line: {text}"
+        );
+    }
+}
+
+/// The rest of the positive scope for the two kinds most rules use, on a shipped rule that exercises
+/// them: `sql/nplus1` is the method-scan whose `require_file` pre-skip and `trigger_in_loop` structural
+/// gate both narrow what it looks at, and printing `patterns` without them would overclaim the rule as
+/// plain co-occurrence. Values are asserted by SHAPE (field present, non-`no`) rather than copied, for
+/// the same no-tenth-copy reason as the test above.
+#[test]
+fn explain_prints_the_pre_skips_and_structural_gates_that_narrow_a_rule() {
+    let out = run(&["explain", "sql/nplus1"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let text = stdout(&out);
+    for field in [
+        "require_file",
+        "require_file_all",
+        "patterns",
+        "trigger",
+        "trigger_in_loop",
+        "after",
+        "after_in_same_function",
+        "skip_comment_lines",
+        "strip_string_literals",
+    ] {
+        assert!(
+            text.contains(&format!("\n{field}: ")),
+            "method-scan scope field `{field}` must be reported: {text}"
+        );
+    }
+    // `require_file` is a whole-FILE pre-skip: a file whose text misses it is never scanned, so a
+    // reader answering "would this rule look at my file?" needs its real value, not just its name.
+    assert!(
+        !text.contains("\nrequire_file: no\n"),
+        "sql/nplus1 declares a require_file pre-skip — printing `no` would be a false report: {text}"
+    );
+    assert!(
+        text.contains("\ntrigger_in_loop: yes\n"),
+        "sql/nplus1's loop-containment gate must be visible, or `patterns` reads as plain \
+         co-occurrence: {text}"
+    );
+    // Not scope and labelled as such — the one matcher field that cannot change whether a rule fires.
+    assert!(
+        text.contains("\nsnippet_max: 160 (snippet truncation only"),
+        "got: {text}"
+    );
+}
+
+/// The reduced NATIVE lane must not grow a scope block. A native analysis has no `file_pattern` at all
+/// (it is compiled Rust, not DSL pack data), so a line claiming one would be pure fabrication — the
+/// failure this whole change exists to avoid, in the opposite direction.
+#[test]
+fn explain_never_prints_a_scope_field_for_a_native_analysis_id() {
+    for query in ["circular", "schema/god-model", "god-model"] {
+        let out = run(&["explain", query]);
+        assert_eq!(out.status.code(), Some(1), "{query} renders no DSL data");
+        let err = stderr(&out);
+        for field in ["file_pattern", "require_file", "line_pattern", "patterns:"] {
+            assert!(
+                !err.contains(field),
+                "{query} is native and has no `{field}` — naming one would fabricate it: {err}"
+            );
+        }
+        assert!(
+            stdout(&out).is_empty(),
+            "{query}: nothing on stdout for a failure"
+        );
+    }
 }
 
 #[test]

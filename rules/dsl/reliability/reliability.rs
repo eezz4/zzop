@@ -1,6 +1,8 @@
 //! End-to-end tests for `rules/dsl/reliability/reliability.json` — exercised via `zzop_engine::analyze_tree` so `Matcher::MethodScan` rules run against real parser-derived `SourceSymbol` body spans (not hand-built spans), same convention as `sql/sql.rs`/`http/http.rs`.
 //!
-//! Covers all rules in the pack: `async-route-no-catch`, `sync-fs-in-handler`, `map-async-no-promise-all`, `promise-all-and-writes`, `json-parse-no-try`, `fetch-no-timeout`, `process-exit-in-lib`, `emitter-async-listener`, `promise-race-no-cancel`, `fs-check-then-use`, `stream-open-no-close-in-loop`, `listener-subscribe-in-loop` (method-scan; the last two via `trigger_in_loop` loop-span containment — see `perf/api-in-loop`'s convention); `env-nonnull-assert`, `debug-true-committed`, `body-limit-missing`, `console-in-be`, `interval-no-clear` (line-scan, uses the `require_file_absent` DSL extension), `env-outside-config`, `await-inside-promise-all-array` (line-scan).
+//! Covers all rules in the pack: `async-route-no-catch`, `sync-fs-in-handler`, `map-async-no-promise-all`, `promise-all-and-writes`, `json-parse-no-try`, `fetch-no-timeout`, `process-exit-in-lib`, `emitter-async-listener`, `promise-race-no-cancel`, `fs-check-then-use`, `stream-open-no-close-in-loop`, `listener-subscribe-in-loop` (method-scan; the last two via `trigger_in_loop` loop-span containment — see `perf/api-in-loop`'s convention); `env-nonnull-assert`, `debug-true-committed`, `body-limit-missing`, `interval-no-clear` (line-scan, uses the `require_file_absent` DSL extension), `await-inside-promise-all-array` (line-scan); `console-in-be`, `console-in-loop`, `env-outside-config` (call-scan, over the projected `call_sites` channel — the last of the three additionally crosses it with `loop_spans` via `in_loop`).
+//!
+//! The three call-scan rules run on `.py` files as well as `.ts`/`.js`, because the channel has TypeScript and Python producers and the rule is one rule rather than one regex per language. That makes some fixtures below Python source in a pack whose other tests are all TypeScript — deliberate, and the point of the migration.
 //!
 //! `fetch-no-timeout` scopes to backend files via a content-based `require_file` pre-gate (server-framework import / server-runtime API / Workers module shape / D1 prepared-statement call) rather than a path heuristic, so a standalone backend repo with no `be`/`api`/`server`-ish path segment is still in scope.
 //!
@@ -14,11 +16,14 @@ use zzop_core::{load_dsl_packs, RulePackDef};
 use zzop_engine::{analyze_tree, AnalyzeOutput, EngineConfig};
 
 mod config_flags;
+mod console_in_loop;
 mod env_outside_config;
 mod fetch_and_process;
 mod routes_and_handlers;
+mod rust_reqwest;
 mod server_hygiene;
 mod suppression;
+mod w2_languages;
 mod writes_and_parsing;
 
 /// A self-cleaning temp directory (std-only mkdtemp equivalent).

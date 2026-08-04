@@ -3,10 +3,17 @@
 //!
 //! ## What it is
 //!
-//! `LineScan::attr_present` / `attr_absent` / `require_attr_declared` (see those fields' docs for the
-//! per-field contract) are evaluated HERE, never inside `crate::dsl::line_scan::eval_line_scan`. The
-//! engine calls [`apply_attr_gates`] once per tree, after the per-file pass and before
+//! `attr_present` / `attr_absent` / `require_attr_declared` (see those fields' docs for the per-field
+//! contract) are evaluated HERE, never inside the matcher that declares them —
+//! `crate::dsl::line_scan::eval_line_scan` and `crate::dsl::call_scan::eval_call_scan` both leave them
+//! alone. The engine calls [`apply_attr_gates`] once per tree, after the per-file pass and before
 //! `registry::merge_findings`.
+//!
+//! TWO matchers declare these gates, and the reason is one property they share rather than two similar
+//! decisions: both produce findings inside the CACHED per-file pass, so both would bake a declaration
+//! into an entry that outlives it (next section). `MethodScan`/`SymbolScan` do not declare the gates at
+//! all; `IoScan`'s same-named fields are a different lookup entirely (a ROUTE key, not this file's path)
+//! evaluated inside the whole-tree io pass, which already runs on the far side of the cache.
 //!
 //! ONE call site, not two, and that is not an omission: Mode A (`analyze_envelope`) strips every
 //! non-`SymbolScan`/`IoScan` rule out of a pack before evaluating it (`envelope::resolve::envelope_rule_pack`)
@@ -51,19 +58,63 @@ use crate::finding::Finding;
 use crate::registry::is_enabled;
 use crate::RuleConfig;
 
-use super::def::{LineScan, Matcher, RulePackDef};
+use super::def::{Matcher, RulePackDef};
 
-/// One enabled `line-scan` rule that declares at least one attribute gate, resolved to the shape the
-/// filter below needs. Built once per rule, not per finding.
+/// The three attribute-gate fields, borrowed off whichever matcher declares them — so this pass reads one
+/// shape instead of branching per matcher kind at every use site.
+struct AttrGates<'a> {
+    present: Option<&'a str>,
+    absent: Option<&'a str>,
+    require_declared: Option<&'a str>,
+}
+
+/// `Some` when `matcher` is a kind that carries the gates AND declares at least one; `None` otherwise.
+///
+/// The `match` has NO wildcard arm on purpose: a new matcher kind cannot be added without someone
+/// deciding, in writing, whether its findings are subject to this post-filter. A wildcard would answer
+/// "no" silently, which for a gate that only ever REMOVES findings means the new matcher quietly ignores
+/// a declaration the pack author wrote — the failure mode `LineScan::attr_absent`'s doc calls out.
+fn attr_gates(matcher: &Matcher) -> Option<AttrGates<'_>> {
+    let (present, absent, require_declared) = match matcher {
+        Matcher::LineScan(m) => (
+            m.attr_present.as_deref(),
+            m.attr_absent.as_deref(),
+            m.require_attr_declared.as_deref(),
+        ),
+        Matcher::CallScan(m) => (
+            m.attr_present.as_deref(),
+            m.attr_absent.as_deref(),
+            m.require_attr_declared.as_deref(),
+        ),
+        // `MethodScan`/`SymbolScan`/`LiteralScan` declare no attribute gates (`LiteralScan` carries
+        // only the fields its one shipped consumer reads — no rule has needed a declaration gate on
+        // this channel yet, and a gate nobody reads would be the speculative-field trap). `IoScan`'s
+        // identically-named fields are NOT these: they resolve against the entry's own `(kind, key)`
+        // route identity inside `ir_scan::eval_io_scan_rule`, whole-tree and post-cache already — see
+        // this module's header.
+        Matcher::MethodScan(_)
+        | Matcher::SymbolScan(_)
+        | Matcher::IoScan(_)
+        | Matcher::LiteralScan(_) => return None,
+    };
+    (present.is_some() || absent.is_some() || require_declared.is_some()).then_some(AttrGates {
+        present,
+        absent,
+        require_declared,
+    })
+}
+
+/// One enabled rule that declares at least one attribute gate, resolved to the shape the filter below
+/// needs. Built once per rule, not per finding.
 struct GatedRule<'a> {
     rule_id: String,
-    m: &'a LineScan,
+    gates: AttrGates<'a>,
     /// `require_attr_declared` is set AND nothing in the store declares that key — so every finding this
     /// rule produced is dropped and the drop is disclosed.
     undeclared: Option<&'a str>,
 }
 
-/// Applies every enabled `line-scan` rule's attribute gates to `findings` IN PLACE, returning one
+/// Applies every enabled gate-declaring rule's attribute gates to `findings` IN PLACE, returning one
 /// disclosure line per rule silenced by an undeclared `require_attr_declared` key (empty when none was).
 ///
 /// `findings` may contain findings from any source — native analyses, io-scan, other packs. Only findings
@@ -84,26 +135,15 @@ pub fn apply_attr_gates(
         .filter(|pack| is_enabled(rule_config, &pack.id))
         .flat_map(|pack| {
             pack.rules.iter().filter_map(move |rule| {
-                let Matcher::LineScan(m) = &rule.matcher else {
-                    return None;
-                };
-                if m.attr_present.is_none()
-                    && m.attr_absent.is_none()
-                    && m.require_attr_declared.is_none()
-                {
-                    return None;
-                }
+                let gates = attr_gates(&rule.matcher)?;
                 let rule_id = format!("{}/{}", pack.id, rule.id);
                 if !is_enabled(rule_config, &rule_id) {
                     return None;
                 }
-                let undeclared = m
-                    .require_attr_declared
-                    .as_deref()
-                    .filter(|key| !attrs.declares(key));
+                let undeclared = gates.require_declared.filter(|key| !attrs.declares(key));
                 Some(GatedRule {
                     rule_id,
-                    m,
+                    gates,
                     undeclared,
                 })
             })
@@ -129,7 +169,7 @@ pub fn apply_attr_gates(
             *suppressed += 1;
             return false;
         }
-        keeps_file(gate.m, attrs, &f.file)
+        keeps_file(&gate.gates, attrs, &f.file)
     });
 
     by_id
@@ -144,13 +184,13 @@ pub fn apply_attr_gates(
 /// The per-file half of the gate: `attr_present` must resolve truthy for this file, `attr_absent` must
 /// not. Both use `AttributeStore::path_attr` (exact `File` target beats the longest covering `PathScope`),
 /// and both are plain conjunctive filters — a rule may set either, neither, or both.
-fn keeps_file(m: &LineScan, attrs: &AttributeStore, file: &str) -> bool {
-    if let Some(key) = &m.attr_present {
+fn keeps_file(gates: &AttrGates<'_>, attrs: &AttributeStore, file: &str) -> bool {
+    if let Some(key) = gates.present {
         if !attrs.path_attr(file, key).is_some_and(attr_is_truthy) {
             return false;
         }
     }
-    if let Some(key) = &m.attr_absent {
+    if let Some(key) = gates.absent {
         if attrs.path_attr(file, key).is_some_and(attr_is_truthy) {
             return false;
         }
@@ -180,7 +220,7 @@ fn undeclared_disclosure(rule_id: &str, key: &str, suppressed: usize) -> String 
          `{{\"target\": {{\"pathScope\": {{\"prefix\": \"<dir>\"}}}}, \"key\": \"{key}\", \"value\": true}}` \
          in a file entry's `attributes` (an exact `{{\"file\": {{\"path\": \"<path>\"}}}}` target overrides a \
          covering scope; see examples/adapters/auth-overlay-adapter for a complete envelope). To leave it off \
-         instead, say so: `rules: {{\"{rule_id}\": \"off\"}}` (embedders: `disabled_rules`)."
+         instead, say so: `rules: {{\"{rule_id}\": \"off\"}}` (embedders: `disabledRules`)."
     )
 }
 

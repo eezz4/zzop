@@ -46,7 +46,7 @@ fn absolute_url_matching_an_internal_route_is_flagged_anchored_at_the_consume() 
     assert_eq!(out[0].line, 10);
     assert!(out[0].message.contains("app.internal.example.com"));
     assert!(out[0].message.contains("Api.java:20"));
-    assert!(out[0].message.contains("disabled_rules"));
+    assert!(out[0].message.contains("disabledRules"));
     let data = out[0].data.as_ref().unwrap();
     assert_eq!(data["host"], "app.internal.example.com");
     assert_eq!(data["normalizedKey"], "GET /api/users");

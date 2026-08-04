@@ -82,6 +82,7 @@ pub use roi::{compute_roi, RecId, RoiResult};
 
 pub use scores::compute::{compute_scores, ScoresInput};
 pub use scores::config::ScoresConfig;
+pub use scores::meanings::{score_meaning, SCORE_MEANINGS};
 // The convention-vocabulary defaults this crate owns, re-exported so `zzop_engine::VocabularyConfig`
 // can name the symbol instead of re-spelling the values (one definition per vocabulary — the rule
 // `zzop_cache::DEFAULT_CACHE_DIR` set).

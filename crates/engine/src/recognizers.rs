@@ -12,10 +12,12 @@
 //! # Why the aggregate is worth more than any one declaration
 //! Grouped by `emits`, this list makes a shape visible that no per-parser reading shows: a language can
 //! carry several recognizers and still fill only ONE side of the cross-layer join. Measured 2026-08-01,
-//! `parser-java-21` declares two provide-side recognizers and zero consume-side ones — a Java service
-//! that calls another service contributes nothing to the join — while `parser-rust`, with fewer
-//! recognizers, covers both. Recognizer COUNT ranks these the wrong way round; the channel grouping
-//! does not, which is why `emits` is a field rather than prose.
+//! `parser-java-21` declared two provide-side recognizers and zero consume-side ones — a Java service
+//! that calls another service contributed nothing to the join — while `parser-rust` covered BOTH sides
+//! with the same two rows. That very asymmetry is what this grouping surfaced, and it closed on
+//! 2026-08-02 (`resttemplate`/`webclient` consume rows landed, plus a `jpa` db row); the point survives
+//! the closure: recognizer COUNT ranked those two parsers the wrong way round the whole time, the
+//! channel grouping did not, which is why `emits` is a field rather than prose.
 
 use zzop_core::FrameworkRecognizer;
 
@@ -75,15 +77,20 @@ mod tests {
         );
     }
 
-    /// The channel vocabulary is closed. A typo'd `emits` string would put a recognizer in a fourth
-    /// bucket that no consumer groups by, and it would look like an absent channel — the same silent
-    /// shape as not declaring at all.
+    /// The channel vocabulary is closed. A typo'd `emits` string would put a recognizer in a bucket
+    /// that no consumer groups by, and it would look like an absent channel — the same silent shape as
+    /// not declaring at all.
     #[test]
-    fn every_declared_channel_is_one_of_the_three_named_constants() {
+    fn every_declared_channel_is_one_of_the_named_constants() {
         use zzop_core::recognizer::channel;
-        let allowed: BTreeSet<&str> = [channel::PROVIDES, channel::CONSUMES, channel::DB]
-            .into_iter()
-            .collect();
+        let allowed: BTreeSet<&str> = [
+            channel::PROVIDES,
+            channel::CONSUMES,
+            channel::DB,
+            channel::AUTH_EVIDENCE,
+        ]
+        .into_iter()
+        .collect();
         for r in framework_recognizers() {
             assert!(!r.emits.is_empty(), "{} declares no channel", r.framework);
             for e in r.emits {
@@ -109,25 +116,10 @@ mod tests {
         }
     }
 
-    /// The asymmetry this mechanism was built to surface, pinned as a fact rather than a comment: as
-    /// of 2026-08-01 java-21 fills the provide side of the cross-layer join and nothing fills its
-    /// consume side. This test does NOT assert the gap stays — it asserts the DISCLOSURE tracks it.
-    /// When a Feign/RestTemplate/WebClient recognizer lands, this test fails and is deleted along with
-    /// the note in that crate's declaration, which is precisely the point: a closed gap must not be
-    /// able to leave a stale "half a join" warning behind it.
-    #[test]
-    fn java_has_no_consume_side_recognizer_and_says_so() {
-        use zzop_core::recognizer::channel;
-        let java = zzop_parser_java_21::FRAMEWORK_RECOGNIZERS;
-        let consumes = java.iter().any(|r| r.emits.contains(&channel::CONSUMES));
-        assert!(
-            !consumes,
-            "java-21 now declares a consume-side recognizer — delete this test AND the asymmetry note \
-             on that crate's FRAMEWORK_RECOGNIZERS, or the disclosure keeps warning about a closed gap"
-        );
-        assert!(
-            java.iter().any(|r| r.emits.contains(&channel::PROVIDES)),
-            "java-21 must still declare the provide side it does have"
-        );
-    }
+    // `java_has_no_consume_side_recognizer_and_says_so` lived here until 2026-08-02, pinning the
+    // "java fills half a join" asymmetry AND its own deletion condition: "when a
+    // Feign/RestTemplate/WebClient recognizer lands, this test fails and is deleted along with the
+    // note in that crate's declaration". The `resttemplate`/`webclient` consume rows landed, so it
+    // was deleted exactly as it directed — the channel binding (`rule_contracts::recognizer_channels`)
+    // is what now holds those rows to their code.
 }

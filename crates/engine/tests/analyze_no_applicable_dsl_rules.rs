@@ -47,12 +47,17 @@ impl Drop for TempDir {
 }
 
 /// Every real shipped pack under `rules/dsl/` — same resolution shape `analyze_minified.rs`'s
-/// `all_shipped_packs` uses. None of the bundled packs carry a `.rs`-matching `file_pattern` (verified by
-/// inspection: every shipped `file_pattern` targets `.ts`/`.tsx`/`.js`/`.jsx`/`.mjs`/`.cjs`/`.java`/
-/// `.jsp`/`.go`/... — no Rust extension anywhere), which is exactly the real-world gap this warning
-/// exists to self-report. (Go WAS this gap too, until the `go` pack's `goroutine-in-loop` rule shipped
-/// with a `.go$` `file_pattern` — see `go_only_tree_with_default_packs_now_has_an_applicable_dsl_rule`
-/// below.)
+/// `all_shipped_packs` uses.
+///
+/// This file has now watched the same transition twice, and the tests below are the record of both. Go
+/// was the documented gap until the `go` pack's `goroutine-in-loop` rule shipped with a `.go$`
+/// `file_pattern`; Rust was the gap after that, until 2026-08-02 widened fifteen rules onto `.rs` and
+/// added three Rust-native ones. So neither language exercises the warning any more, and the fixture
+/// that does has to be a language no shipped `file_pattern` mentions at all — see
+/// `unmatched_extension_tree_with_default_packs_gets_the_no_applicable_dsl_rule_warning`, which uses
+/// `.kt` for exactly the reason `capability_matrix.rs`'s `REPRESENTATIVE_FILES` does: it is a real
+/// language this engine has no parser and no rule for, so it cannot quietly stop being the gap the way
+/// Go and Rust each did.
 fn all_shipped_packs() -> Vec<RulePackDef> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rules/dsl");
     let result = load_dsl_packs(&dir);
@@ -72,11 +77,15 @@ fn config() -> EngineConfig {
     }
 }
 
+/// The POSITIVE direction of the warning, on a language no shipped `file_pattern` names. This test used
+/// to be spelled `rust_only_tree_...`; Rust stopped being the gap on 2026-08-02 (see `all_shipped_packs`
+/// above), and re-pointing it at `.kt` rather than deleting it is deliberate — a contract with only its
+/// negative half left would go vacuously green the day the warning stopped being emitted at all.
 #[test]
-fn rust_only_tree_with_default_packs_gets_the_no_applicable_dsl_rule_warning() {
-    let dir = TempDir::new("zzop-engine-rust-only-fixture");
-    dir.write("src/main.rs", "fn main() {\n    println!(\"hi\");\n}\n");
-    dir.write("src/service.rs", "pub fn run() -> i32 {\n    1\n}\n");
+fn unmatched_extension_tree_with_default_packs_gets_the_no_applicable_dsl_rule_warning() {
+    let dir = TempDir::new("zzop-engine-unmatched-extension-fixture");
+    dir.write("src/Main.kt", "fun main() {\n    println(\"hi\")\n}\n");
+    dir.write("src/Service.kt", "fun run(): Int {\n    return 1\n}\n");
 
     let out = analyze_tree(dir.path(), &config());
 
@@ -89,7 +98,37 @@ fn rust_only_tree_with_default_packs_gets_the_no_applicable_dsl_rule_warning() {
         out.warnings.iter().any(|w| w.contains("DSL rule(s) loaded")
             && w.contains("file_pattern")
             && w.contains("no applicable rules")),
-        "expected the no-applicable-DSL-rule self-report on a Rust-only tree, got: {:?}",
+        "expected the no-applicable-DSL-rule self-report on a tree of an extension no shipped rule \
+         admits, got: {:?}",
+        out.warnings
+    );
+}
+
+/// Closes the gap the test above used to document for Rust, exactly as
+/// `go_only_tree_with_default_packs_now_has_an_applicable_dsl_rule` did for Go: fifteen shipped rules
+/// now admit `.rs` in their `file_pattern` and three (`security/sql-format-interpolation`,
+/// `security/command-and-interpolation`, `reliability/reqwest-no-timeout`) are Rust-native, so the D16
+/// self-report must NOT fire for a Rust-only tree. Note this asserts APPLICABILITY, not detection — the
+/// fixture below is clean Rust and produces no findings; that a `.rs` file can reach a rule at all is
+/// this test's whole claim, and what those rules actually catch is `cases/trees/rust-svc`'s job.
+#[test]
+fn rust_only_tree_with_default_packs_now_has_an_applicable_dsl_rule() {
+    let dir = TempDir::new("zzop-engine-rust-only-fixture");
+    dir.write("src/main.rs", "fn main() {\n    println!(\"hi\");\n}\n");
+    dir.write("src/service.rs", "pub fn run() -> i32 {\n    1\n}\n");
+
+    let out = analyze_tree(dir.path(), &config());
+
+    assert!(
+        !out.packs_loaded.is_empty(),
+        "expected the shipped packs to load, got: {:?}",
+        out.packs_loaded
+    );
+    assert!(
+        !out.warnings
+            .iter()
+            .any(|w| w.contains("DSL rule(s) loaded") && w.contains("no applicable rules")),
+        "shipped rules now carry `.rs` file_patterns — the warning must not fire, got: {:?}",
         out.warnings
     );
 }

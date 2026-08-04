@@ -40,7 +40,7 @@ fn same_path_two_hosts_is_flagged_anchored_at_first_site() {
     assert_eq!(out[0].file, "A.java");
     assert_eq!(out[0].line, 1);
     assert!(out[0].message.contains("/v1/widgets"));
-    assert!(out[0].message.contains("disabled_rules"));
+    assert!(out[0].message.contains("disabledRules"));
     let data = out[0].data.as_ref().unwrap();
     assert_eq!(data["path"], "/v1/widgets");
     assert_eq!(

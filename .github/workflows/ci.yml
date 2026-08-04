@@ -27,10 +27,19 @@ jobs:
   # unused per-guard parallelism for ~14 fewer runner spin-ups and one checkout instead of fifteen.
   #
   # Step order MIRRORS `.githooks/pre-commit`'s GUARDS array so CI and the local hook agree — the two
-  # lists are now element-for-element identical, parser fingerprint-bump guard included. What differs is
-  # only what that last guard READS: the hook judges the working tree, pre-push and this job judge a
-  # base..head RANGE. The range form is the sole reason this job needs `fetch-depth: 0` (a strict superset
-  # of the shallow checkout the other guards need, which is why the two former drift-guards fold in here).
+  # lists are element-for-element identical, and every guard now asks its question of ONE TREE, so the
+  # hook and this job read the same thing as well as run the same list.
+  #
+  # SHALLOW ON PURPOSE (2026-08-01). This job carried `fetch-depth: 0` — a full-history clone on every
+  # run — to serve the one range-shaped guard (`check-parser-fingerprint-bump.sh`, which judged a
+  # base..head range). That guard and its `pre-push` hook were deleted on 2026-07-29, when every
+  # fingerprint became a hash derived from the source that produces the cached bytes. The full clone
+  # outlived its only reader. Measured before removing it: every git call reachable from this job is
+  # `ls-files`, `grep`, `hash-object`, `check-ignore`, `config` or `rev-parse` — all of them read the
+  # index or the working tree, none reads a commit. No `log`, `describe`, `rev-list`, `merge-base`, or
+  # ranged `diff` exists anywhere in `scripts/` or in this file's `run:` blocks. If a guard ever needs a
+  # range again, `fetch-depth: 0` must come back WITH THAT GUARD NAMED HERE — an unexplained full clone
+  # is how this one survived its own justification.
   #
   # NOTE for maintainers: consolidating renames the required status checks. Any branch-protection rule
   # on `main` listing the old per-guard job names must be updated to `{ guards, test, cli-shim-test }`
@@ -39,8 +48,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - name: English-only source guard
         run: bash scripts/check-english-source.sh
       - name: max file lines ratchet guard
@@ -80,11 +87,14 @@ jobs:
         # not held as a built-in guess. scripts/convention-vocab-baseline.txt freezes pre-existing debt
         # and only shrinks — it is not an exemption list.
         run: bash scripts/check-convention-vocab-declarable.sh
-      - name: example-config convention-vocabulary sync
-        # Every committed examples/ config must declare the SAME vocabulary block the starter template
-        # does. Since an undeclared key is a judgment not made, a fixture that omits it would have the
-        # detection benchmark score a deliberately blinded engine.
-        run: bash scripts/check-example-config-vocabulary.sh
+      - name: committed-config convention-vocabulary sync
+        # EVERY committed zzop.config.jsonc — subject derived from `git ls-files`, not a directory
+        # pathspec — must declare the SAME vocabulary block the starter template does. Since an
+        # undeclared key is a judgment not made, a fixture that omits it would have the detection
+        # benchmark score a deliberately blinded engine. Renamed from `example-config` on 2026-08-01:
+        # the old name said `examples/` while the pathspec read `cases/` only, so the two configs
+        # outside `cases/` had never been read (25 committed, 23 checked).
+        run: bash scripts/check-committed-config-vocabulary.sh
       - name: shell pipe-to-grep-q SIGPIPE seal
         run: bash scripts/check-shell-pipe-sigpipe.sh
       - name: version-string parser-completeness guard
@@ -225,6 +235,21 @@ jobs:
             exit 1
           fi
           echo "site graph matches the tree."
+      - name: zzop analyzes zzop — findings pinned at zero, with a canary
+        # The FINDINGS half of the dogfood claim. The dep-graph half is the step directly above; until
+        # now nothing ran `zzop analyze` on this repo at all, so the committed `zzop.config.jsonc` was
+        # answering its one question ("is our own cache lane closed?") only when a human asked by hand.
+        #
+        # Rides this job for the same reason the site step above does: it ALREADY builds `zzop` in
+        # release, so the binary is free here. A sixth job would pay a second release build (minutes) to
+        # answer a question that costs seconds once the binary exists, and would split one dogfood run
+        # across two jobs. A scripts/check-*.sh is not an option either — check-guards-wired.sh would
+        # then require it in .githooks/pre-commit, and a release build is not a per-commit hook's budget.
+        #
+        # The gate pins zero with NO baseline file on purpose, and it plants a real violation and
+        # requires it to be found before it will trust that zero — see the script's header for why the
+        # canary is the larger half of it.
+        run: bash scripts/measure/self-analysis-gate.sh
       - name: CLI shim tests
         # Individual FILE paths, never a bare directory — `node --test test/` fails on Node v22+
         # (verified: the bare-directory form throws MODULE_NOT_FOUND on this runner's Node version).

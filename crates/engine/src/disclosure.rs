@@ -178,7 +178,10 @@ pub const BLINDNESS_REGISTRY: &[BlindnessClass] = &[
                   unknown HTTP method are filtered out by every write-gated rule before evaluation, so \
                   they are out of range rather than clean, and a per-run warning names their count, the \
                   file extensions carrying them, and the two ways to bring them in range \
-                  (`trees[].routes`, or a Mode B overlay). For the rules with a compiled-in sightline \
+                  (`trees[].routes`, or a Mode B overlay). A THIRD signal is one gate finer than the \
+                  extension axis: http routes with no response-shape evidence (outside the one built-in \
+                  Nest capture, or an unreadable annotation) get a per-tree warning counting them \
+                  against the tree's http total. For the rules with a compiled-in sightline \
                   declaration, the CLI-only `zzop coverage` lane lists exactly this (it has no MCP tool twin; an \
                   MCP host reads the same declarations out of this document): its `trees[].blindSpots` crosses \
                   each declaration with the tree's structural extension mix and names, per tree, which \

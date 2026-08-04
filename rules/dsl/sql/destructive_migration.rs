@@ -251,6 +251,83 @@ fn a_drop_that_shares_a_file_with_a_bootstrap_preamble_is_the_documented_residua
     );
 }
 
+// --- the absorbed update-no-where arm: same complete-literal shape as the critical rule -----------
+// The arm's pattern is the critical `sql/update-no-where` rule's `line_pattern`, verbatim — the rule
+// message's "the same complete-literal shapes ... flag in app code" is a claim these two pins keep
+// true. Until 2026-08-03 the arm was a stale copy of the PRE-same-kind-closing shape: any quote kind
+// terminated the literal, so a template literal left OPEN on its line (its WHERE riding on the next
+// line) read as a complete whole-table write the moment the statement contained an inner quote.
+
+#[test]
+fn update_left_open_on_its_line_with_where_on_the_next_line_is_not_flagged() {
+    // Never-guess, inherited intact from the critical rule: the backtick literal is NOT closed on
+    // this line — the statement continues, and the WHERE lives one line down where a line-scan
+    // cannot see it. The old any-quote-terminates copy closed the literal at the inner `"` and
+    // disclosed a "whole-table UPDATE" that never existed.
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "migrations/009_backfill_scoped.ts",
+        "export async function up(queryRunner: any) {\n  await queryRunner.query(\n    `UPDATE partner SET \"createId\" = 'legacy'\n     WHERE \"createId\" IS NULL`);\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "destructive-migration").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn update_closed_literal_with_an_inner_quote_of_another_kind_still_fires() {
+    // The boundary the same-kind alignment must NOT cross, pinned from the other direction (the
+    // migration copy of the critical rule's `..._inner_quote_of_another_kind_still_fires` pin): an
+    // inner `'` inside a `"`-closed literal is statement text, and the whole-table UPDATE around it
+    // is still a complete literal this rule must disclose.
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "migrations/010_anonymize.ts",
+        "export async function up(queryRunner: any) {\n  await queryRunner.query(\"UPDATE users SET name = 'anon'\");\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "destructive-migration");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].severity, zzop_core::Severity::Info);
+    assert_eq!(
+        h[0].data
+            .as_ref()
+            .and_then(|d| d.get("label"))
+            .and_then(|l| l.as_str()),
+        Some("update-no-where"),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn rust_migration_format_interpolated_update_is_silent_in_both_rules() {
+    // Unit mirror of the whole-file negative control `cases/trees/rust-svc/migrations/v2_backfill.rs`:
+    // a Rust migration interpolating an identifier into an UPDATE template. Out of this rule twice
+    // over (`.rs` is outside its `file_pattern`; `UPDATE {} SET` has no table token for the arm) and
+    // out of the critical rule by the shared migration-path exclusion — that silence is what routes
+    // the line to `security/sql-format-interpolation`'s turf, not to either of these.
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "migrations/v2_backfill.rs",
+        "pub fn backfill_sql(table: &str) -> String {\n    format!(\"UPDATE {} SET migrated = 1\", table)\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "destructive-migration").is_empty(),
+        "{:?}",
+        out.findings
+    );
+    assert!(
+        hits(&out, "update-no-where").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
 #[test]
 fn where_scoped_delete_in_a_migration_is_not_flagged() {
     // The absorbed DELETE/UPDATE alternatives carry the same never-guess discipline as the critical

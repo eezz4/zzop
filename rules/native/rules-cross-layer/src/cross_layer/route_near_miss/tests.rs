@@ -49,7 +49,7 @@ fn case_dimension_fires() {
     assert_eq!(out[0].line, 10);
     assert_eq!(out[0].data.as_ref().unwrap()["dimension"], "case");
     assert!(out[0].message.contains("casing"));
-    assert!(out[0].message.contains("disabled_rules"));
+    assert!(out[0].message.contains("disabledRules"));
     assert!(out[0].message.contains("articles.controller.ts:22"));
 }
 

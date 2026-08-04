@@ -214,6 +214,36 @@ fn node_env_gate_alone_does_not_clear_an_internal_route() {
 }
 
 #[test]
+fn go_admin_route_is_out_of_scope_because_go_has_no_auth_guarded_producer() {
+    // 2026-08-02 (U63①, rules-owner FINDING-1, refuter-confirmed): the `attr_absent: "auth-guarded"`
+    // veto only ever clears a route in a language whose recognizers can PRODUCE that attribute —
+    // TS/JS, Java, Python today. Go (and C#) have route recognizers but no auth-evidence producer, so
+    // before the `file_pattern` narrowing every correctly guarded Go/C# admin route was a structurally
+    // guaranteed false positive. This pins the narrowing with a route the Go parser really extracts:
+    // remove `|java|py)$`'s exclusion of go and this fixture goes red again. Re-widen per language
+    // exactly when that language gains an `auth-guarded` producer.
+    let dir = TempDir::new("zzop-http");
+    dir.write(
+        "cmd/server/main.go",
+        "package main\n\nimport \"github.com/gin-gonic/gin\"\n\nfunc main() {\n\tr := gin.Default()\n\tr.GET(\"/admin/users\", listUsers)\n\tr.Run()\n}\n",
+    );
+    let out = scan(&dir);
+    // Anti-vacuity leg: the Go parser really did extract the /admin provide — so the silence below is
+    // attributable to the rule's `file_pattern`, not to extraction failing and proving nothing.
+    let io = out.ir.ir.io.as_ref().expect("go tree yields IoFacts");
+    assert!(
+        io.provides.iter().any(|p| p.key.contains("/admin/users")),
+        "expected the gin adapter to extract GET /admin/users: {:?}",
+        io.provides
+    );
+    assert!(
+        hits(&out, "protected-path-no-auth-evidence").is_empty(),
+        "a Go /admin route must be out of this rule's scope until Go has an auth-guarded producer: {:?}",
+        out.findings
+    );
+}
+
+#[test]
 fn auth_gate_ok_marker_on_the_same_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-http");
     dir.write(

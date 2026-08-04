@@ -63,13 +63,18 @@ pub(in crate::analyze) fn is_python_source_ext(rel: &str) -> bool {
 /// run right after `build_dep_with_workspace` returns) and the `compose_router_mount_provides` resolver
 /// closure in `super::provides` (cross-file `include_router` mount composition) — both need the identical
 /// specifier -> file resolution, just called with a different `original` per call site's own data shape.
+/// `package_roots` is the run's resolved `vocabulary.pythonPackageRoots` (empty when undeclared —
+/// the built-in tree-root/`src/` roots always apply inside the candidate builder), threaded from each
+/// caller's own `config.vocabulary.resolve()` so a declared layout reaches every Python resolution
+/// site identically.
 pub(in crate::analyze) fn resolve_python_import(
     specifier: &str,
     original: Option<&str>,
     from_file: &str,
     all_paths: &HashSet<String>,
+    package_roots: &[&str],
 ) -> Option<String> {
-    zzop_parser_python_3::python_import_candidates(specifier, original, from_file)
+    zzop_parser_python_3::python_import_candidates(specifier, original, from_file, package_roots)
         .into_iter()
         .find(|c| all_paths.contains(c))
 }
@@ -157,13 +162,14 @@ pub(super) fn resolve_go_import_package_dir(
 /// with every other language branch) carries as `ident`, but the closure has no other way to see
 /// fragment names since `router_mount_pairs` is otherwise consumed whole by
 /// `compose_router_mount_provides`. Built once by the caller, from a borrow, before that move.
-/// Per-directory file lists are sorted by rel path so [`find_go_mount_target`] picks deterministically
+/// A BTreeMap (not a HashMap) so the bucket walk is ordered by nature; per-directory file lists are
+/// sorted by rel path on top of that, so [`find_go_mount_target`] picks deterministically
 /// even in the (unexpected) case of an ident collision across two files in the same directory.
 pub(super) fn go_fragment_dirs(
     router_mount_pairs: &[(String, Vec<zzop_core::RouterMountFragment>)],
-) -> std::collections::HashMap<String, Vec<(String, Vec<String>)>> {
-    let mut by_dir: std::collections::HashMap<String, Vec<(String, Vec<String>)>> =
-        std::collections::HashMap::new();
+) -> std::collections::BTreeMap<String, Vec<(String, Vec<String>)>> {
+    let mut by_dir: std::collections::BTreeMap<String, Vec<(String, Vec<String>)>> =
+        std::collections::BTreeMap::new();
     for (file, frags) in router_mount_pairs {
         if !is_go_source_ext(file) {
             continue;
@@ -186,7 +192,7 @@ pub(super) fn go_fragment_dirs(
 /// router-mount-bearing `.go` file in it) or no bucketed file's fragment set names `ident` — the
 /// caller treats this exactly like any other unresolvable mount (conservative: skip the subtree).
 pub(super) fn find_go_mount_target<'a>(
-    dirs: &'a std::collections::HashMap<String, Vec<(String, Vec<String>)>>,
+    dirs: &'a std::collections::BTreeMap<String, Vec<(String, Vec<String>)>>,
     dir: &str,
     ident: &str,
 ) -> Option<&'a str> {

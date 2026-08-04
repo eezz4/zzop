@@ -5,7 +5,7 @@
 //! with the single-tree `http/unprovided-consume` rule; the route-identity predicate (asked only of a
 //! provider MISS, so it is not part of that sequence) is [`super::key::key_carries_route_identity`].
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use super::facts::{
     AmbiguousConsume, CrossLayerEdge, CrossLayerResult, EdgeFrom, EdgeTo, IoConsume, SourceIo,
@@ -44,7 +44,7 @@ pub struct LinkOptions {
 /// gates documented in this module's doc. Pure function (given `opts`).
 pub fn link_cross_layer_io(trees: &[SourceIo], opts: &LinkOptions) -> CrossLayerResult {
     // Index providers by (kind, key). Multiple providers for one key is legal (e.g. two services expose one topic).
-    let mut providers_by_key: HashMap<String, Vec<TaggedProvide>> = HashMap::new();
+    let mut providers_by_key: BTreeMap<String, Vec<TaggedProvide>> = BTreeMap::new();
     for SourceIo { source, io } in trees {
         for p in &io.provides {
             providers_by_key
@@ -224,7 +224,8 @@ pub fn link_cross_layer_io(trees: &[SourceIo], opts: &LinkOptions) -> CrossLayer
             unconsumed_provides.extend(providers);
         }
     }
-    // `providers_by_key` is a HashMap — sort so the serialized `unconsumedProvides` order is stable
+    // `providers_by_key` is a BTreeMap, but its key is `id_key(kind, key)` — NOT the comparator below —
+    // so this sort still has work to do: the serialized `unconsumedProvides` order must be stable
     // run-to-run (deterministic-output contract; every other bucket is already ordered).
     unconsumed_provides.sort_by(|a, b| {
         a.provide

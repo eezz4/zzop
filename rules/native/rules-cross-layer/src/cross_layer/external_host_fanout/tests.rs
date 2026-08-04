@@ -34,7 +34,7 @@ fn host_called_from_three_files_is_flagged() {
     assert_eq!(out[0].file, "A.tsx");
     assert_eq!(out[0].line, 1);
     assert!(out[0].message.contains("api.vendor.com"));
-    assert!(out[0].message.contains("disabled_rules"));
+    assert!(out[0].message.contains("disabledRules"));
     let data = out[0].data.as_ref().unwrap();
     assert_eq!(data["fileCount"], 3);
     assert_eq!(data["siteCount"], 3);

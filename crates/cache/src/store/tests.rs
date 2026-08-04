@@ -68,6 +68,9 @@ fn sample_ir(loc: u32) -> FileIrSlice {
         field_usage_tokens: Vec::new(),
         loop_spans: Vec::new(),
         function_spans: Vec::new(),
+        test_spans: Vec::new(),
+        call_sites: Vec::new(),
+        string_literals: Vec::new(),
     }
 }
 
@@ -161,6 +164,115 @@ fn roundtrip_preserves_function_spans() {
         got.function_spans,
         vec![(1, 9), (3, 5)],
         "function_spans must round-trip exactly"
+    );
+}
+
+#[test]
+fn roundtrip_preserves_call_sites() {
+    // `FileIrSlice::call_sites` — same isolation as the two span fields above. Its degrade direction is
+    // `loop_spans`', i.e. SILENCE, so a warm run that dropped this field would report every `CallScan`
+    // rule as having found nothing, which in the output is indistinguishable from a clean tree. The
+    // vector's ORDER is asserted too: the producer's source order is this channel's determinism contract,
+    // and a serializer that reordered would move every finding's line without changing any count.
+    let dir = scratch_dir("roundtrip-call-sites");
+    let cache = AnalysisCache::open(&dir, "v1").unwrap();
+    let k = key("content", "ts+swc1+logic1", "pack@1");
+    let mut ir = sample_ir(10);
+    ir.call_sites = vec![
+        zzop_core::CallSite {
+            kind: zzop_core::CALL_KIND_CONSOLE_WRITE.to_string(),
+            line: 4,
+            callee: "console.error".to_string(),
+            algorithm: None,
+        },
+        zzop_core::CallSite {
+            kind: zzop_core::CALL_KIND_ENV_READ.to_string(),
+            line: 2,
+            callee: "process.env.HOME".to_string(),
+            algorithm: None,
+        },
+        // W4's `algorithm`, in BOTH of its states, because they serialize differently: `Some` is a
+        // key on the wire and `None` is the key's ABSENCE (`skip_serializing_if`). A round trip that
+        // silently turned the second into `Some("")` would make an `algorithm_pattern` rule match a
+        // site whose algorithm the source never spelled — the never-guess contract broken by the
+        // cache rather than by a producer, which no producer test could catch.
+        zzop_core::CallSite {
+            kind: zzop_core::CALL_KIND_HASH_CALL.to_string(),
+            line: 7,
+            callee: "createHash".to_string(),
+            algorithm: Some("md5".to_string()),
+        },
+        zzop_core::CallSite {
+            kind: zzop_core::CALL_KIND_HASH_CALL.to_string(),
+            line: 9,
+            callee: "createHash".to_string(),
+            algorithm: None,
+        },
+    ];
+    let expected = ir.call_sites.clone();
+
+    cache.put_ir(&k, &ir).unwrap();
+    let got = cache.get_ir(&k).expect("expected IR hit after put");
+    assert_eq!(
+        got.call_sites, expected,
+        "call_sites must round-trip exactly, in order"
+    );
+    assert_eq!(
+        got.call_sites[3].algorithm, None,
+        "an absent `algorithm` must read back as None, never as Some(\"\") — the never-guess \
+         contract has to survive the cache, not only the producer"
+    );
+}
+
+#[test]
+fn a_cached_call_site_written_before_the_algorithm_field_existed_still_loads() {
+    // The additive-field promise, exercised against the WIRE rather than against a struct: a warm
+    // cache written by a pre-W4 build has no `algorithm` key at all, and `#[serde(default)]` is what
+    // keeps that entry loadable instead of silently unreadable (which would degrade to a cold re-parse
+    // — recoverable, but a bump this field deliberately does not need).
+    let json = r#"{"kind":"console-write","line":4,"callee":"console.error"}"#;
+    let site: zzop_core::CallSite = serde_json::from_str(json).expect("pre-W4 shape must load");
+    assert_eq!(site.algorithm, None);
+}
+
+#[test]
+fn roundtrip_preserves_string_literals_bit_exactly() {
+    // `FileIrSlice::string_literals` — same isolation and same SILENCE degrade as `call_sites` above.
+    // Two extra assertions specific to this channel: the f32 `entropy` must round-trip BIT-exactly
+    // (its producer quantizes to 1/8 bit precisely so serialization cannot move it — a cache that
+    // nudged it could flip an `entropy_min` threshold between cold and warm runs), and the stored
+    // payload must carry the value HASH, never a value field (the no-plaintext contract is about
+    // exactly this file-on-disk).
+    let dir = scratch_dir("roundtrip-string-literals");
+    let cache = AnalysisCache::open(&dir, "v1").unwrap();
+    let k = key("content", "ts+swc1+logic1", "pack@1");
+    let mut ir = sample_ir(10);
+    ir.string_literals = vec![
+        zzop_core::BoundStringLiteral {
+            name: "apiKey".to_string(),
+            line: 3,
+            value_hash: zzop_core::value_hash_hex("correct-horse-battery-staple"),
+            entropy: zzop_core::shannon_entropy_bits("correct-horse-battery-staple"),
+        },
+        zzop_core::BoundStringLiteral {
+            name: "kind".to_string(),
+            line: 1,
+            value_hash: zzop_core::value_hash_hex("refresh_token"),
+            entropy: zzop_core::shannon_entropy_bits("refresh_token"),
+        },
+    ];
+    let expected = ir.string_literals.clone();
+
+    cache.put_ir(&k, &ir).unwrap();
+    let got = cache.get_ir(&k).expect("expected IR hit after put");
+    assert_eq!(
+        got.string_literals, expected,
+        "string_literals must round-trip exactly, in order"
+    );
+    assert_eq!(
+        got.string_literals[0].entropy.to_bits(),
+        expected[0].entropy.to_bits(),
+        "entropy must round-trip bit-exactly, not merely approximately"
     );
 }
 

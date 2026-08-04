@@ -385,6 +385,29 @@ fn handle_message_is_the_parsed_value_seam_handle_line_delegates_to() {
     assert!(handle_message(&notification).is_none());
 }
 
+/// The staleness self-report's WIRING, pinned without reading the clock: whatever
+/// `staleness::notice()` decides for this build, `initialize` must carry exactly that — the string
+/// under `instructions` when there is a notice, and NO `instructions` key at all when there is not.
+/// Asserting a concrete presence/absence instead would make this test's meaning depend on when it runs
+/// (a fresh checkout is silent today and would speak in a year), which is how a conditional surface
+/// ends up untested in both directions. The two directions of the DECISION are tested where the
+/// decision is made, over injected inputs: `crate::staleness::tests`.
+///
+/// An emitted `instructions` must be a plain string — the field's spec type. A `Value::String` wrapper
+/// is easy to lose to a `json!` macro that stringifies a struct instead.
+#[test]
+fn initialize_carries_the_staleness_notice_iff_there_is_one() {
+    let reply = handle_line(r#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#)
+        .expect("initialize must be answered");
+    match crate::staleness::notice() {
+        Some(notice) => assert_eq!(reply["result"]["instructions"], Value::String(notice)),
+        None => assert!(
+            reply["result"].get("instructions").is_none(),
+            "a build with nothing to report must not put an empty/blank `instructions` on the wire"
+        ),
+    }
+}
+
 /// Drives the loop over ONE connection carrying several lines, in-process. The measurement harness
 /// gets exactly one shape here (`initialize` then one `tools/call`); everything below varies what the
 /// second and third lines are, which is where the loop-level defects live.

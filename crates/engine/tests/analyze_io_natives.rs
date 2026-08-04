@@ -94,7 +94,7 @@ fn earlier_param_route_shadowing_a_later_literal_route_is_flagged() {
     assert_eq!(found[0].line, 3);
     assert_eq!(found[0].severity, zzop_core::Severity::Warning);
     assert!(found[0].message.contains("line 2"));
-    assert!(found[0].message.contains("disabled_rules"));
+    assert!(found[0].message.contains("disabledRules"));
 }
 
 #[test]
@@ -154,7 +154,7 @@ fn mutating_handler_never_reaching_a_guard_is_flagged() {
     let data = found[0].data.as_ref().unwrap();
     assert_eq!(data["method"], "POST");
     assert_eq!(data["path"], "/users");
-    assert!(found[0].message.contains("disabled_rules"));
+    assert!(found[0].message.contains("disabledRules"));
     // Never fires for the guarded DELETE handler.
     assert!(!found.iter().any(|f| f.line == 3));
 }
@@ -786,7 +786,7 @@ fn unmatched_consume_is_flagged_when_the_tree_also_provides_http_routes() {
         found[0].data.as_ref().unwrap()["key"].as_str(),
         Some("GET /api/missing")
     );
-    assert!(found[0].message.contains("disabled_rules"));
+    assert!(found[0].message.contains("disabledRules"));
     // The matched consume (line 1) never fires.
     assert!(!found.iter().any(|f| f.line == 1));
 }
@@ -940,7 +940,7 @@ fn three_or_more_foreign_unmatched_consumes_fold_into_one_aggregate_finding_end_
         );
         assert!(found[0].message.contains(key), "missing {key} in message");
     }
-    assert!(found[0].message.contains("disabled_rules"));
+    assert!(found[0].message.contains("disabledRules"));
 }
 
 // --- Python call-graph coverage (CALL_GRAPH_COVERED_EXTENSIONS lift) -------------------------

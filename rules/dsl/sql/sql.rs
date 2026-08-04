@@ -73,7 +73,8 @@ impl Drop for TempDir {
 
 /// Loads the real `sql.json` pack, co-located with this test file. Goes through
 /// `zzop_core::parse_dsl_pack` (not a raw `serde_json::from_str`) so `${NAME}` fragment refs (the shared
-/// test-path exclusions plus this pack's own `sql-where-veto`/`test-paths-migrations` fragments) resolve
+/// test-path exclusions — `test-paths-migrations` included, promoted to the shared bundle 2026-08-03 —
+/// plus this pack's own `sql-where-veto` fragment) resolve
 /// exactly like they do at real load time — a raw struct deserialize would leave the literal
 /// `"${sql-where-veto}"` string in place, which is not a valid regex and would silently no-op every
 /// affected rule.

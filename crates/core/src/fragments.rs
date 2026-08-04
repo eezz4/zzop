@@ -19,6 +19,13 @@
 //! "auth-guarded") composed at assemble time into `zzop_core::Attribute`s on the same `zzop_core::AttributeStore`
 //! channel a Mode-B overlay feeds. The kernel never interprets these keys; see `zzop_core::attributes`'s
 //! module doc for the channel itself.
+//!
+//! `ProcedureRouterEntry` and `RouterMountEntry` ride the ADAPTER WIRE (`docs/adapters/envelope.schema.json`
+//! documents them as `procedureRouterEntry`/`routerMountEntry`), and their schema wrappers are
+//! `additionalProperties: false` + `maxProperties: 1` — so a variant the schema does not know makes an
+//! adapter emitting the shape zzop ITSELF emits schema-INVALID. Adding a variant to either enum is
+//! therefore a COMPILE ERROR in `crates/core/tests/envelope_schema_parity/wire_variants.rs` until that
+//! variant has a wire tag, a sample, and a schema entry; that file's module doc has the full chain.
 
 use serde::{Deserialize, Serialize};
 
@@ -198,6 +205,12 @@ pub struct ControllerPrefixRouteFragment {
     /// producers that don't capture bodies) deserialize as `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<crate::io::ProvideBodyShape>,
+    /// The handler's declared response contract (`response-shape-v1`), carried through for the same
+    /// reason as `body` above (the parser's no-return-type sentinel included — assemble strips and
+    /// discloses it after composition, so a prefix-ref route is disclosed exactly like a
+    /// literal-prefix one). Same `#[serde(default)]` back-compat as `body`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response: Option<crate::io::ProvideResponseShape>,
 }
 
 /// The field shape of one class declaration — the per-file half of request-body DTO resolution
@@ -219,4 +232,29 @@ pub struct ClassShapeFragment {
     /// `false` when the field list may be partial: an `extends` clause, constructor parameter
     /// properties, an index signature, or a computed property key.
     pub complete: bool,
+}
+
+/// What one Next.js `pages/api` candidate file's handler scan learned — the fragment the engine's
+/// `compose_pages_api_provides` (analyze/compose) turns into `http` PROVIDEs. Produced by
+/// `zzop_parser_typescript::scan_pages_api_handler` (whose module doc owns the resolution + verb-
+/// witness rules); moved here from that crate (2026-08-03) so the composition crosses the same
+/// `compose_*(zzop_core::…Fragment) -> Io…` typed seam every other recognizer fragment does — the
+/// seam `rule_contracts::recognizer_channels`' type hop derives the channel map from.
+///
+/// UNLIKE its siblings above, this fragment is TRANSIENT and carries no serde: it never rides
+/// `FileProjection` (not an external-producer channel), never enters the cached per-file
+/// `FileIrSlice` (the scan runs at assemble time over a convention-gated disk re-read of candidate
+/// files — see `zzop_engine`'s `file_routes` module doc, "nothing new is cached"), and so takes no
+/// part in any cache key or wire schema. Adding serde here without also deciding those three axes
+/// would be a claim, not a convenience.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct PagesApiHandlerScan {
+    /// 1-based line of the first `export default …` (or `export { x as default }`). `None` means the
+    /// file has no default export (e.g. a config-only file) — or does not parse.
+    pub default_export_line: Option<u32>,
+    /// Sorted, deduped UPPERCASE verbs the RESOLVED handler's body names — see
+    /// `zzop_parser_typescript::adapters::next_pages_api`'s module doc for the resolution + witness
+    /// rules. Empty means either no method narrowing was witnessed (a genuine serve-all handler) or
+    /// the handler's underlying function/parameter could not be resolved.
+    pub verbs: Vec<String>,
 }

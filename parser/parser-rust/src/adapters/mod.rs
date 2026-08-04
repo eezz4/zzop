@@ -3,3 +3,4 @@
 
 pub mod axum;
 pub mod http_clients;
+pub mod raw_sql;

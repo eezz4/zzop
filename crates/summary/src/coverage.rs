@@ -27,14 +27,19 @@ pub fn coverage_summary(paths: &[String], config_path: Option<&str>) -> Result<S
         .as_deref()
         .map(|p| serde_json::Value::String(p.display().to_string()))
         .unwrap_or(serde_json::Value::Null);
-    let mut warnings = loaded.warnings.clone();
-    let engine_side: Vec<String> = serde_json::from_value(serde_json::json!(
-        crate::config_warnings::facade_config_warnings(
-            &serde_json::from_str::<serde_json::Value>(&out).unwrap_or(serde_json::Value::Null)
-        )
-    ))
-    .unwrap_or_default();
-    warnings.extend(engine_side);
+    // Config-loader warnings first, then the engine-side config diagnostics from EVERY tree — see
+    // `crate::warnings`. This lane used to read `configWarnings` off the multi-tree document's TOP
+    // LEVEL, where `MultiAnalyzeOutputView` has no such field at all, so the merge contributed nothing
+    // on every run and a typo'd `disabledRules` id was reported by `analyze`/`cross`/`file` and silently
+    // swallowed here. The published `[]` was not "nothing to report" — it was "never asked".
+    let mut warnings: Vec<serde_json::Value> = loaded
+        .warnings
+        .iter()
+        .cloned()
+        .map(serde_json::Value::String)
+        .collect();
+    let analysis: serde_json::Value = serde_json::from_str(&out).unwrap_or(serde_json::Value::Null);
+    warnings.extend(crate::warnings::tree_config_warnings(&analysis));
     v["configWarnings"] = serde_json::json!(warnings);
     serde_json::to_string_pretty(&v).map_err(|e| e.to_string())
 }

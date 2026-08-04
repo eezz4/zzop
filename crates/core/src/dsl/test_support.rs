@@ -32,6 +32,9 @@ pub(super) fn scan(src: &str, rel: &str) -> Vec<Finding> {
     let files = vec![SourceFile {
         loop_spans: Vec::new(),
         function_spans: Vec::new(),
+        test_spans: Vec::new(),
+        call_sites: Vec::new(),
+        string_literals: Vec::new(),
         rel: rel.into(),
         text: src.into(),
         symbols: vec![],
@@ -58,10 +61,24 @@ pub(super) fn method(name: &str, body_start: u32, body_end: u32) -> SourceSymbol
     }
 }
 
-pub(super) fn scan_methods(src: &str, symbols: Vec<SourceSymbol>) -> Vec<Finding> {
+/// `scan_methods` with hand-supplied `SourceFile::call_sites` — needed by every fixture for a rule
+/// carrying `MethodScan::require_call_kind`, whose exec/API WITNESS is a projected parser fact rather
+/// than a lexical pattern. Hand-built for the same reason [`method`]'s spans are: this crate parses no
+/// Java, so a test must stand in for what `zzop_parser_java_21::extract_call_sites` would project.
+/// Passing an empty vec is therefore a real negative for such a rule, not a setup shortcut — the
+/// channel's degrade direction is silence. `scan_methods` (the no-site spelling every other fixture
+/// uses) is one line of `tests_method_scan`, kept there to stay inside this file's line cap.
+pub(super) fn scan_methods_with_call_sites(
+    src: &str,
+    symbols: Vec<SourceSymbol>,
+    call_sites: Vec<crate::CallSite>,
+) -> Vec<Finding> {
     let files = vec![SourceFile {
         loop_spans: Vec::new(),
         function_spans: Vec::new(),
+        test_spans: Vec::new(),
+        call_sites,
+        string_literals: Vec::new(),
         rel: "C.java".into(),
         text: src.into(),
         symbols,
@@ -120,6 +137,9 @@ pub(super) fn scan_symbols(
     let files = vec![SourceFile {
         loop_spans: Vec::new(),
         function_spans: Vec::new(),
+        test_spans: Vec::new(),
+        call_sites: Vec::new(),
+        string_literals: Vec::new(),
         rel: rel.into(),
         text: String::new(),
         symbols,
@@ -160,6 +180,7 @@ pub(super) fn scan_io_tree(
 
 pub(super) fn io_provide(kind: &str, key: &str, line: u32) -> IoProvide {
     IoProvide {
+        response: None,
         body: None,
         kind: kind.into(),
         key: key.into(),
@@ -211,6 +232,9 @@ pub(super) fn scan_pack(
     let files = vec![SourceFile {
         loop_spans: Vec::new(),
         function_spans: Vec::new(),
+        test_spans: Vec::new(),
+        call_sites: Vec::new(),
+        string_literals: Vec::new(),
         rel: rel.into(),
         text: src.into(),
         symbols,
@@ -232,6 +256,9 @@ pub(super) fn scan_pack_loops(
     let files = vec![SourceFile {
         loop_spans,
         function_spans: Vec::new(),
+        test_spans: Vec::new(),
+        call_sites: Vec::new(),
+        string_literals: Vec::new(),
         rel: rel.into(),
         text: src.into(),
         symbols,
@@ -255,6 +282,9 @@ pub(super) fn scan_pack_fns(
     let files = vec![SourceFile {
         loop_spans: Vec::new(),
         function_spans,
+        test_spans: Vec::new(),
+        call_sites: Vec::new(),
+        string_literals: Vec::new(),
         rel: rel.into(),
         text: src.into(),
         symbols,

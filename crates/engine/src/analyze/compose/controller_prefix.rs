@@ -43,10 +43,13 @@ pub(crate) fn compose_controller_prefix_provides(
                     let full_path = format!("{prefix}/{}", frag.path);
                     out.push(IoProvide {
                         // Carried through so a prefix-ref route's composed `IoProvide` keeps the same
-                        // body evidence a literal-prefix route gets directly (`ControllerPrefixRouteFragment`
-                        // doc) — `resolve_provide_body_refs` (below) resolves its `dto_ref` afterward
-                        // exactly like any other provide's.
+                        // body/response evidence a literal-prefix route gets directly
+                        // (`ControllerPrefixRouteFragment` doc) — `resolve_provide_body_refs` /
+                        // `resolve_provide_response_refs` (below) resolve each `dto_ref` afterward
+                        // exactly like any other provide's (the response no-return-type sentinel
+                        // rides through too, so its disclosure covers prefix-ref routes).
                         body: frag.body.clone(),
+                        response: frag.response.clone(),
                         kind: "http".to_string(),
                         key: http_interface_key(&frag.verb, &full_path),
                         file: file.clone(),
@@ -96,6 +99,7 @@ mod controller_prefix_compose_tests {
         symbol: &str,
     ) -> ControllerPrefixRouteFragment {
         ControllerPrefixRouteFragment {
+            response: None,
             body: None,
             prefix_ref: prefix_ref.to_string(),
             verb: verb.to_string(),

@@ -690,15 +690,15 @@ fn analyze_envelope_json_caller_pack_def_with_a_bundled_id_wins_the_collision_wh
         "the caller's override rule must fire, got: {value}"
     );
     // The replacement itself is silent no longer: a shadow warning must name the id and both
-    // sides' rule counts (bundled "security" ships 44 rules — see rules/dsl/security/security.json —
+    // sides' rule counts (bundled "security" ships 48 rules — see rules/dsl/security/security.json —
     // the caller's def has 1).
     let warnings = value["warnings"].as_array().expect("warnings array");
     assert!(
         warnings.iter().any(|w| {
             let w = w.as_str().unwrap();
-            w.contains("security") && w.contains("44 rules") && w.contains("replacement: 1 rule")
+            w.contains("security") && w.contains("48 rules") && w.contains("replacement: 1 rule")
         }),
-        "expected a shadow warning naming 'security' and both rule counts (44 -> 1), got: {value}"
+        "expected a shadow warning naming 'security' and both rule counts (48 -> 1), got: {value}"
     );
 }
 
@@ -716,7 +716,7 @@ fn analyze_envelope_json_extra_dir_pack_shadowing_the_bundled_security_pack_warn
 {
     // Reproduces the blind-test scenario directly: a custom on-disk pack (loaded the same way
     // `packs.extraDirs` ultimately reaches this engine — as a `packsDir` entry) declares `id:
-    // "security"`, colliding with the bundled 44-rule "security" pack the envelope path auto-seeds as
+    // "security"`, colliding with the bundled 48-rule "security" pack the envelope path auto-seeds as
     // inline `packDefs`. The custom 1-rule pack must win the collision whole (unchanged behavior) AND
     // the collision must now be named in `warnings`.
     let envelope = envelope_with_symbols(&["BadName"]);
@@ -751,7 +751,7 @@ fn analyze_envelope_json_extra_dir_pack_shadowing_the_bundled_security_pack_warn
         "the custom pack's rule must fire, got: {value}"
     );
 
-    // The shadowing is no longer silent: one warning names the id and both rule counts (bundled: 44,
+    // The shadowing is no longer silent: one warning names the id and both rule counts (bundled: 48,
     // replacement: 1), and identifies the winning side as coming from a packs directory.
     let warnings = value["warnings"].as_array().expect("warnings array");
     let shadow = warnings
@@ -760,8 +760,8 @@ fn analyze_envelope_json_extra_dir_pack_shadowing_the_bundled_security_pack_warn
         .find(|w| w.contains("security") && w.contains("packs directory"))
         .unwrap_or_else(|| panic!("expected a shadow warning for 'security', got: {value}"));
     assert!(
-        shadow.contains("44 rules") && shadow.contains("replacement: 1 rule"),
-        "expected both rule counts (bundled 44 -> replacement 1) in the shadow warning, got: {shadow:?}"
+        shadow.contains("48 rules") && shadow.contains("replacement: 1 rule"),
+        "expected both rule counts (bundled 47 -> replacement 1) in the shadow warning, got: {shadow:?}"
     );
 }
 

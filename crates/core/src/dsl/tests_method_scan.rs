@@ -4,18 +4,59 @@
 
 use crate::ir::{SourceSymbol, SourceSymbolKind};
 
-use super::test_support::{method, rule_pack, scan_methods, scan_pack, snippet};
+use super::test_support::{method, rule_pack, scan_methods_with_call_sites, scan_pack, snippet};
 use super::RulePackDef;
+use crate::finding::Finding;
+
+/// The no-projected-call-sites spelling every fixture below except the two `require_call_kind`
+/// positives wants. It lives here rather than in `test_support` only for that module's line cap —
+/// the empty vec is a REAL negative for a `require_call_kind` rule, never a setup shortcut (see
+/// `scan_methods_with_call_sites`' own doc).
+fn scan_methods(src: &str, symbols: Vec<SourceSymbol>) -> Vec<Finding> {
+    scan_methods_with_call_sites(src, symbols, Vec::new())
+}
+
+/// One projected `process-exec` site at `line`, spelled as the Java producer spells it — the witness
+/// a `require_call_kind` fixture must supply.
+fn exec_site(line: u32, callee: &str) -> crate::CallSite {
+    crate::CallSite {
+        kind: crate::CALL_KIND_PROCESS_EXEC.to_string(),
+        line,
+        callee: callee.to_string(),
+        algorithm: None,
+    }
+}
 
 // --- cmd-injection ---
+//
+// W3 moved this rule's EXEC WITNESS from a bare-word `patterns` arm to `MethodScan::require_call_kind`
+// over the projected call-site channel, so every positive below now has to supply the site the Java
+// producer would project. The lexical half (the concatenation) is unchanged and still supplies the
+// trigger line. The negatives split accordingly: one keeps its site and drops the concatenation, and
+// `scan_methods`' empty channel is itself the third negative (no witness = silence, the channel's
+// declared degrade direction).
 
 #[test]
 fn flags_method_that_execs_and_concatenates_dvja_pingaction_pattern() {
     let src = "public class C {\n  private void run() {\n    String[] cmd = { \"/bin/bash\", \"-c\", \"ping \" + getAddress() };\n    Runtime.getRuntime().exec(cmd);\n  }\n}";
-    let f = scan_methods(src, vec![method("run", 2, 5)]);
+    let f = scan_methods_with_call_sites(
+        src,
+        vec![method("run", 2, 5)],
+        vec![exec_site(4, "Runtime.getRuntime().exec")],
+    );
     assert_eq!(f.len(), 1);
     assert_eq!(f[0].data.as_ref().unwrap()["method"], "run");
     assert!(snippet(&f[0]).contains("ping"));
+}
+
+#[test]
+fn the_same_method_without_a_projected_exec_site_is_silent() {
+    // The gate's own pair, and the disclosed COST of structuring this trigger: identical source, no
+    // projected site (a degraded parse, or an exec through a variable receiver the producer cannot
+    // resolve). Evidence-allowing gates degrade to silence, never to the lexical co-occurrence they
+    // replaced — so the bare word `exec` in the text below is no longer a witness at all.
+    let src = "public class C {\n  private void run() {\n    String[] cmd = { \"/bin/bash\", \"-c\", \"ping \" + getAddress() };\n    Runtime rt = getRuntime(); rt.exec(cmd);\n  }\n}";
+    assert!(scan_methods(src, vec![method("run", 2, 5)]).is_empty());
 }
 
 #[test]
@@ -41,7 +82,11 @@ fn does_not_pair_an_exec_in_one_method_with_a_concat_in_another_method_scoped() 
 fn processbuilder_plus_concatenation_is_flagged() {
     let src =
         "public class C { void r(String h){ new ProcessBuilder(\"sh\",\"-c\",\"curl \" + h).start(); } }";
-    let f = scan_methods(src, vec![method("r", 1, 1)]);
+    let f = scan_methods_with_call_sites(
+        src,
+        vec![method("r", 1, 1)],
+        vec![exec_site(1, "new ProcessBuilder")],
+    );
     assert_eq!(f.len(), 1);
 }
 

@@ -22,7 +22,7 @@ use crate::structural::{analyze_schema, SchemaAnalysis, SchemaIssue};
 /// entity-attribute channel — unreferenced-model-name now reads this instead of `SchemaUsage.bound_models`.
 pub const BOUND_MODEL_ATTR: &str = "bound-model";
 /// Attribute key a producer/overlay sets on a model `Symbol` carrying that model's cumulative migration
-/// churn count (a number). Drives schema-churn. Replaces the removed `SchemaUsage.model_churn` slot.
+/// churn count (a number). Drives model-churn. Replaces the removed `SchemaUsage.model_churn` slot.
 pub const MODEL_CHURN_ATTR: &str = "model-churn";
 
 macro_rules! lazy_re {
@@ -181,7 +181,7 @@ pub fn cross_check_schema(
 const CHURN_WARNING_THRESHOLD: u32 = 5;
 const CHURN_CRITICAL_THRESHOLD: u32 = 10;
 
-/// schema-churn rule — detects design instability from accumulated migration churn on a model. Churn count
+/// model-churn rule (spelled `schema-churn` until 2026-08-02 — the id now carries the attribute's own name instead of repeating the pack name; old id in VERSIONING.md) — detects design instability from accumulated migration churn on a model. Churn count
 /// per model is read off the generic entity-attribute channel (`MODEL_CHURN_ATTR` on the model's `Symbol`);
 /// a model with no injected churn attribute is treated as zero, so this self-gates and is safe to always call.
 pub fn apply_churn_rule(models: &[SchemaModel], attrs: &AttributeStore) -> Vec<SchemaIssue> {
@@ -200,7 +200,7 @@ pub fn apply_churn_rule(models: &[SchemaModel], attrs: &AttributeStore) -> Vec<S
             Severity::Warning
         };
         issues.push(SchemaIssue {
-            rule: "schema-churn".to_string(),
+            rule: "model-churn".to_string(),
             severity,
             model: model.name.clone(),
             field: None,

@@ -81,9 +81,11 @@ mod util;
 pub use adapters::extract_go_router_fragments;
 pub use adapters::gorm::{extract_gorm_db_table_consumes, extract_gorm_db_table_provides};
 pub use adapters::http_clients::extract_go_http_consumes;
+pub use lang::call_sites::extract_call_sites;
 pub use lang::imports::parse_imports;
 pub use lang::loop_spans::extract_loop_spans;
 pub use lang::resolve::go_package_dir_of;
+pub use lang::string_literals::extract_string_literals;
 pub use lang::symbols::parse_symbols;
 pub use lang::used_names::parse_local_identifier_refs;
 

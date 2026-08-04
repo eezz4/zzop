@@ -172,7 +172,9 @@ fn a_windows_separator_path_matches_too() {
 #[test]
 fn a_non_trees_analysis_is_a_guided_error_not_a_wrong_answer() {
     let err = query_file_json(r#"{"ir":{},"findings":[]}"#, r#"{"path":"a.ts"}"#).unwrap_err();
-    assert!(err.contains("analyzeTrees"), "{err}");
+    // Spelling-free by contract 15b (host_vocabulary's facade-entry-point sweep): the guidance names
+    // the artifact shape, never the `analyzeTrees` symbol no host user can type.
+    assert!(err.contains("multi-tree analysis output"), "{err}");
 }
 
 #[test]

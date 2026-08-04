@@ -3,7 +3,7 @@
   "$id": "https://zzop.dev/schema/envelope.json",
   "title": "zzop NormalizedEnvelope",
   "description": "External-parser / adapter-overlay envelope contract (docs/NORMALIZED_AST.md; crates/core/src/normalized.rs). Field names, required-ness, and nullability below mirror the Rust serde types field-for-field — a field is 'required' here exactly when its Rust struct field has no #[serde(default)], and 'nullable' exactly when its Rust type is Option<T> deserialized without #[serde(default)] (present key, value may be null) as opposed to omittable-and-defaulting.",
-  "$comment": "TOLERANCE CONTRACT: additionalProperties is true at every object level in this schema except the three externally-tagged enum wrapper objects (procedureRouterEntry, routerMountEntry, entityRef), whose single-discriminator shape is closed. The engine silently ignores fields it does not recognize — it never hard-fails on an unknown field, AND never warns about one either (serde drops unrecognized fields by default; no unknown-field warning code exists anywhere in this crate's envelope/overlay ingestion path). Same tolerant-input philosophy as zzop's config surface (see docs/adapters/README.md's 'Envelope schema & versioning policy'), except that the config surface additionally WARNS on an unknown key via an explicit vocabulary walk (crates/config/src/mapper.rs, warn_unknown_keys) — the envelope path has no such warning layer. A producer emitting a field ahead of this schema, or omitting any field marked optional below, still produces a valid envelope. VERSIONING: `version` is a zzop RELEASE number and moves whenever the SHAPE moves — additive included. It is NOT true that only breaking changes bump it: an ADDITIVE field bumps it too whenever an engine that silently drops the field would produce a different analysis than one that honours it (`overrides` is exactly that case, and carries a floor of 0.27.0). Additive fields that are safe to ignore — a hint an older engine can do without — do not bump it, and are the reason this schema stays additionalProperties: true.",
+  "$comment": "TOLERANCE CONTRACT: additionalProperties is true at every object level in this schema except the three externally-tagged enum wrapper objects (procedureRouterEntry, routerMountEntry, entityRef), whose single-discriminator shape is closed. The engine silently ignores fields it does not recognize — it never hard-fails on an unknown field, AND never warns about one either (serde drops unrecognized fields by default; no unknown-field warning code exists anywhere in this crate's envelope/overlay ingestion path). Same tolerant-input philosophy as zzop's config surface (see docs/adapters/README.md's 'Envelope schema & versioning policy'), except that the config surface additionally WARNS on an unknown key via an explicit vocabulary walk (crates/config/src/mapper.rs, warn_unknown_keys) — the envelope path has no such warning layer. A producer emitting a field ahead of this schema, or omitting any field marked optional below, still produces a valid envelope. VERSIONING: `version` is a zzop RELEASE number and moves whenever the SHAPE moves — additive included. It is NOT true that only breaking changes bump it: an ADDITIVE field bumps it too whenever an engine that silently drops the field would produce a different analysis than one that honours it (`overrides` is exactly that case, and carries a floor of 0.27.0; `calls` is the second such case, floor 0.29.0). A new VARIANT on one of the three closed enum wrappers bumps it too, and for a stronger reason than any field: those wrappers are additionalProperties: false and the Rust enums behind them have no catch-all arm, so an unknown variant is a hard rejection on an older engine rather than a silent drop (routerMountEntry's MountRef, added in 0.29.0). Additive fields that are safe to ignore — a hint an older engine can do without — do not bump it, and are the reason this schema stays additionalProperties: true.",
   "type": "object",
   "required": ["format", "version", "parser", "source", "files"],
   "additionalProperties": true,
@@ -15,7 +15,7 @@
     "version": {
       "type": "string",
       "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
-      "description": "The zzop RELEASE whose envelope shape these bytes conform to, as MAJOR.MINOR.PATCH (e.g. \"0.27.0\") — the same units `zzop version` prints, not an independent counter. A consumer accepts <= its own package version and rejects anything newer. This schema documents 0.27.0."
+      "description": "The zzop RELEASE whose envelope shape these bytes conform to, as MAJOR.MINOR.PATCH (e.g. \"0.29.0\") — the same units `zzop version` prints, not an independent counter. A consumer accepts <= its own package version and rejects anything newer. This schema documents 0.29.0."
     },
     "parser": {
       "type": "string",
@@ -89,7 +89,7 @@
             "maxItems": 2,
             "additionalItems": false
           },
-          "description": "Per-file loop-body line spans (1-based, inclusive) — external-parser counterpart of zzop_core::dsl::SourceFile::loop_spans; each Rust (u32, u32) tuple serializes as a 2-element JSON array. Absent = empty = MethodScan::trigger_in_loop silently skips this file (graceful degrade, same as symbols/io). Canonical wire name is snake_case loop_spans (FileProjection has no rename_all); the frozen camelCase spelling loopSpans is accepted as an input-only alias (#[serde(alias = \"loopSpans\")]) — never emitted, so a serialized envelope only ever carries loop_spans."
+          "description": "Per-file loop-body line spans (1-based, inclusive) — external-parser counterpart of zzop_core::dsl::SourceFile::loop_spans; each Rust (u32, u32) tuple serializes as a 2-element JSON array. Absent = empty = MethodScan::trigger_in_loop silently skips this file (graceful degrade, same as symbols/io). Canonical wire name is snake_case loop_spans (FileProjection has no rename_all); the frozen camelCase spelling loopSpans is accepted as an input-only alias (#[serde(alias = \"loopSpans\")]) — never emitted, so a serialized envelope only ever carries loop_spans. The eager/lazy contract is owned by NORMALIZED_AST.md's loop_spans section: a span asserts a call inside it provably runs once per iteration, so an adapter MUST NOT emit a span for a lazy form (generator expression, lazy iterator adapter, stream, LINQ chain — each runs zero times unless consumed)."
         },
         "function_spans": {
           "type": "array",
@@ -105,6 +105,27 @@
             "additionalItems": false
           },
           "description": "Per-file FUNCTION line spans (1-based, inclusive) with promise-continuation callbacks merged into their call site — external-parser counterpart of zzop_core::dsl::SourceFile::function_spans; each Rust (u32, u32) tuple serializes as a 2-element JSON array. One span per function-like node (declaration/expression/arrow/method/constructor/accessor), nested spans overlap freely, and a function-shaped argument of a .then()/.catch()/.finally() member call has its START pulled up to that call's property-token line so a promise continuation shares one span with the boundary that schedules it. Absent = empty = MethodScan::after_in_same_function degrades to a NO-OP for this file (the rule keeps its coarser symbol-span behavior; it does NOT go silent — the opposite direction from loop_spans). A PARTIAL list degrades the same way but per LINE: any line your spans do not cover reads as \"no gate on this line\" (pre-gate scope), never as \"no pair\" — so omitting spans can only leave the coarser over-report in place, never silence a finding. Canonical wire name is snake_case function_spans; camelCase functionSpans is accepted as an input-only alias."
+        },
+        "test_spans": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "array",
+            "items": [
+              { "type": "integer", "minimum": 0, "description": "1-based start line, inclusive." },
+              { "type": "integer", "minimum": 0, "description": "1-based end line, inclusive." }
+            ],
+            "minItems": 2,
+            "maxItems": 2,
+            "additionalItems": false
+          },
+          "description": "Per-file TEST-ONLY line spans (1-based, inclusive) — external-parser counterpart of zzop_core::dsl::SourceFile::test_spans; each Rust (u32, u32) tuple serializes as a 2-element JSON array. Regions your parser PROVED are compiled out of the shipping build, so DSL rules stop judging them (with the two documented edges below): the native Rust frontend fills this from #[cfg(test)] / #[test]-family items, the one test convention that lives INSIDE a shipping file where no path pattern can see it. This is the only SUBTRACTIVE field on fileProjection — every other one lets a rule say more, this one stops rules from speaking about the lines it names. WHAT IT REACHES, exactly: findings from the per-file matchers (line-scan, method-scan, symbol-scan), minus the rules that declare `scan_test_regions` (the credential-at-rest opt-out — see docs/rules/dsl-reference.md; a committed key is leaked whether or not its module compiles into the shipping build). It does NOT reach io-scan, which queries the assembled whole-tree IO facts the cross-layer join and the coverage census also read — so if your parser declares a span, WITHHOLD the `io` provides/consumes you extracted from inside it as well. Emitting a test-only route and then expecting this field to hide it leaves the route in the join, the endpoint verdict and the coverage census while only the rule findings disappear. Declare it only for regions you can prove; a span over shipped code silently deletes real findings. Absent = empty = nothing is subtracted, so an envelope that omits it keeps its full judgment (the safe direction for a subtractive fact). Path-named test files are NOT this field's job — the rule packs' own ${test-paths-stories} exclusion already covers those. Canonical wire name is snake_case test_spans; camelCase testSpans is accepted as an input-only alias."
+        },
+        "calls": {
+          "type": "array",
+          "default": [],
+          "items": { "$ref": "#/definitions/rawCall" },
+          "description": "Per-file CALL-GRAPH EDGES (calls-v1) — the external-parser counterpart of the RawCall sites native parsers project (crates/core/src/callgraph.rs, same serde type verbatim). This is the channel that lets a producer with no native call-graph parser turn on the call-graph-BFS rule family (mutating-route-no-auth, unsafe-read-endpoint, non-idempotent-write) in envelope mode (analyzeEnvelope / Mode A): the engine resolves each entry against this SAME projection's imports + symbols (cross-file specifiers under the fragment channels' exact/./-relative contract; an unresolvable callee's edge is dropped, never guessed). Requires the envelope to declare version >= 0.29.0 (the release that introduced the field — an older engine drops it silently, and its call-graph rules stay quiet with no trace). Absent = empty = those rules stay silent for this envelope (recall-direction degrade; Mode A discloses the absence in the run warnings when http routes are present). NOT consumed by adapter-overlay application (Mode B) today — the native call graph re-parses dispatched sources itself; an overlay carrying calls gets one aggregate warning naming the ignored channel. Canonical wire name is snake_case calls; no camelCase alias exists (the field is new — there is no frozen-v1 emitter to tolerate)."
         },
         "degraded": {
           "type": "boolean",
@@ -183,6 +204,19 @@
         }
       }
     },
+    "rawCall": {
+      "description": "One call site attributed to its enclosing top-level symbol (crates/core/src/callgraph.rs RawCall; no rename_all — snake_case wire names). Resolution into cross-file symbol edges is the ENGINE's job, per-file name-only extraction is the producer's: emit the callee exactly as written and let the engine resolve it through this projection's imports map and symbol set. A callee resolving through neither is dropped (an external/global call — normal, never an error).",
+      "type": "object",
+      "required": ["from_symbol", "callee_name", "line"],
+      "additionalProperties": true,
+      "properties": {
+        "from_symbol": { "type": "string", "description": "Symbol id of the call site's enclosing top-level symbol, and it MUST be '<this file's path>#<symbol>' — zzop_core::validate_envelope rejects a foreign-file prefix or a missing '#<symbol>' tail (the whole-graph resolver buckets calls by this prefix, so a foreign prefix would resolve the call against another file's imports). For a heritage edge, the class symbol id." },
+        "callee_name": { "type": "string", "minLength": 1, "description": "Target identifier name exactly as written — unresolved for cross-file calls (the engine resolves it via imports/local symbols); for heritage, the super/interface name. Empty is rejected." },
+        "line": { "type": "integer", "minimum": 0, "description": "Call line (1-based)." },
+        "receiver_type": { "type": ["string", "null"], "description": "For recv.method(), the class name of recv when it is a typed/imported class receiver — lets the engine emit a cross-file '<file>#<Class>.<method>' edge. Omittable, or explicit null (#[serde(default, skip_serializing_if = \"Option::is_none\")])." },
+        "is_heritage": { "type": "boolean", "default": false, "description": "true for a class extends/implements edge — callee_name is then the super class or interface name. #[serde(skip_serializing_if)]: omitted on output when false." }
+      }
+    },
     "importBinding": {
       "type": "object",
       "required": ["specifier", "original"],
@@ -234,6 +268,13 @@
             { "type": "null" }
           ],
           "description": "Request-body contract the handler declares, when statically visible (@Body() param with a class DTO type). Additive/optional — absent everywhere it does not apply. Omittable, or explicit null."
+        },
+        "response": {
+          "oneOf": [
+            { "$ref": "#/definitions/provideResponseShape" },
+            { "type": "null" }
+          ],
+          "description": "Response contract the handler DECLARES via its return-type annotation (response-shape-v1: async findOne(): Promise<UserDto>, Promise<X> unwrapped syntactically). Declaration-based only — never inferred from return statements or flow. Additive/optional — absent everywhere it does not apply. Omittable, or explicit null."
         }
       }
     },
@@ -301,6 +342,28 @@
           "type": "boolean",
           "default": false,
           "description": "false when the DTO's field list may be partial (an extends clause, constructor parameter properties, an index signature, or computed keys) — suppresses \"extra key\" claims. #[serde(default)] with no skip_serializing_if — always serialized on output, but omittable on input."
+        }
+      }
+    },
+    "provideResponseShape": {
+      "description": "The response contract a route handler declares via its return-type annotation (async findOne(): Promise<UserDto>) — crates/core/src/io/facts/shapes.rs ProvideResponseShape, #[serde(rename_all = \"camelCase\")]. Emitted by the native parser with only dtoRef set; assemble resolves the ref against the SAME tree-wide merged class/interface shape map the request-body path uses and fills fields. An unresolvable or ambiguous ref drops the whole shape (never guessed). An adapter overlay may instead supply fields directly and leave dtoRef null. NOTE: dtoRef null WITH empty fields is the native parser's internal no-return-type sentinel — the engine strips it during assembly and discloses the undeclared handler via warnings; an adapter has no reason to emit that zero-information shape.",
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "dtoRef": {
+          "type": ["string", "null"],
+          "description": "Unresolved response DTO class/interface name as written in the return-type annotation (Promise<UserDto> -> \"UserDto\"). Present on parser emit; cleared once fields is materialized. Omittable, or explicit null."
+        },
+        "fields": {
+          "type": "array",
+          "default": [],
+          "items": { "$ref": "#/definitions/provideBodyField" },
+          "description": "Resolved declared response fields (empty until assemble resolves dtoRef) — same name+optionality shape as request-body fields (shared provideBodyField definition). #[serde(default, skip_serializing_if = \"Vec::is_empty\")] — omittable when empty."
+        },
+        "complete": {
+          "type": "boolean",
+          "default": false,
+          "description": "false when the field list may be partial (an extends clause, constructor parameter properties, an index signature, or computed keys) — same semantics as provideBodyShape.complete. #[serde(default)] — omittable on input."
         }
       }
     },
@@ -397,7 +460,7 @@
       }
     },
     "routerMountEntry": {
-      "description": "Externally-tagged Rust enum (RouterMountEntry, crates/core/src/fragments.rs) — exactly one of Verb/Mount/ScopedAttr present per entry.",
+      "description": "Externally-tagged Rust enum (RouterMountEntry, crates/core/src/fragments.rs) — exactly one of Verb/Mount/MountRef/ScopedAttr present per entry.",
       "type": "object",
       "additionalProperties": false,
       "minProperties": 1,
@@ -421,6 +484,17 @@
           "additionalProperties": true,
           "properties": {
             "prefix": { "type": "string" },
+            "ident": { "type": "string" },
+            "specifier": { "type": ["string", "null"], "description": "null = the mounted router is a same-file (local) binding. Omittable — see ioConsume's `$comment` on this schema's `required` convention for Option<T> fields with no #[serde(default)]." },
+            "attr_keys": { "type": "array", "items": { "type": "string" }, "description": "Producer-judged attribute keys used only when this mount does NOT resolve to a router fragment (an unresolved mount becomes a PathScope attribute per key). #[serde(default)]: omit when empty." }
+          }
+        },
+        "MountRef": {
+          "type": "object",
+          "required": ["prefix_ref", "ident"],
+          "additionalProperties": true,
+          "properties": {
+            "prefix_ref": { "type": "string", "description": "The prefix argument's verbatim text (e.g. \"settings.API_V1_STR\") for a mount whose prefix the producer could SEE but not READ — resolved at assemble time against the project-wide merged const map, the same one ControllerPrefixRouteFragment.prefix_ref uses. A prefix_ref absent from that map does NOT fall back to \"/\": the mount is dropped and disclosed in the run warnings. Emit Mount instead whenever the prefix IS a literal — a producer must not be able to say literal AND reference, because the composer would then have to pick, and picking is guessing." },
             "ident": { "type": "string" },
             "specifier": { "type": ["string", "null"], "description": "null = the mounted router is a same-file (local) binding. Omittable — see ioConsume's `$comment` on this schema's `required` convention for Option<T> fields with no #[serde(default)]." },
             "attr_keys": { "type": "array", "items": { "type": "string" }, "description": "Producer-judged attribute keys used only when this mount does NOT resolve to a router fragment (an unresolved mount becomes a PathScope attribute per key). #[serde(default)]: omit when empty." }

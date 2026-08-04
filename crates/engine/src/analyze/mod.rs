@@ -29,6 +29,13 @@ pub(crate) use compose::{
     apply_config_client_base, apply_config_mounts, compose_router_mount_provides,
     compose_trpc_provides, late_resolve_cross_file_consumes, merge_const_map_fragments,
 };
+// The pages-api fragment composer, re-exported for `crate::file_routes` (which owns the convention
+// gates and the disk re-read, and hands each scan through this typed seam).
+pub(crate) use compose::compose_pages_api_provides;
+// The `body`/`response` dtoRef resolution trio, re-exported for `envelope::shapes` (Mode A) — the
+// SAME passes `assemble::provides` runs natively, reused so the two lanes cannot drift on merge/
+// poisoning/sentinel semantics (the `eval_io_scan_pack_timed` re-export precedent below).
+pub(crate) use compose::{resolve_provide_body_refs, resolve_provide_response_refs, ShapeMerge};
 // `envelope::analyze_envelope` also reaches the config-diagnostics quartet by this path (config-
 // diagnostics parity with `assemble` — a `disabled_rules` typo / dead exclude filter self-reports on
 // both entry points).
@@ -43,6 +50,9 @@ pub(crate) use diagnostics::{
 pub(crate) use native_rules::{
     circular_findings, dead_candidate_findings, dep_stats_from_dep, unreachable_findings,
 };
+// The profiled whole-tree io-scan evaluator (`assemble::rules::io_scan::eval_pack_timed`), shared by
+// `envelope::ingest` so Mode A's `--profile-rules` runs through the SAME accumulator granularity.
+pub(crate) use assemble::rules::eval_io_scan_pack_timed;
 
 /// Times one whole-graph native analysis (`EngineConfig::profile_rules`): `t0` is `Some` exactly when
 /// profiling is on, so the caller never pays an `Instant::now()` otherwise. Native analysis ids never

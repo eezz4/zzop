@@ -265,7 +265,10 @@ against in both directions. Any FN at all is a regression, and so is `GAP` movin
 upward means a gap closed and must be promoted by hand, downward means an entry was deleted, which the
 floor's third column refuses.
 
-**That is a statement about this fixture set, not about zzop.** These defects were planted here to be
+**That is a statement about this fixture set, not about zzop.** It is also a statement about the
+languages the fixtures are written in: this corpus's source files are `.ts`/`.tsx`, `.rs`, `.java` and
+`.prisma`, so a green benchmark says nothing about the health of Python/Go/C#/SQL detection — those are
+proven by the `crates/engine/tests/analyze_*` integration tests instead. These defects were planted here to be
 found, by the same people who wrote the rules that find them — so a clean score means "the corpus is
 still an accurate model of what the engine does today", which is what it is for: it turns a rule
 change from an opinion into a before/after set difference. It says nothing about what fraction of

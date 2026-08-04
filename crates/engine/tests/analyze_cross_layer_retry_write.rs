@@ -73,6 +73,7 @@ fn find<'a>(findings: &'a [zzop_core::Finding], rule_id: &str) -> Vec<&'a zzop_c
 /// binary/crate, so these small overlay helpers are copied/adapted rather than shared.
 fn projection_with_attrs(path: &str, loc: u32, attrs: Vec<Attribute>) -> FileProjection {
     FileProjection {
+        calls: Vec::new(),
         class_shape_fragments: Vec::new(),
         path: path.to_string(),
         loc,
@@ -91,6 +92,7 @@ fn projection_with_attrs(path: &str, loc: u32, attrs: Vec<Attribute>) -> FilePro
         attributes: attrs,
         loop_spans: Vec::new(),
         function_spans: Vec::new(),
+        test_spans: Vec::new(),
     }
 }
 

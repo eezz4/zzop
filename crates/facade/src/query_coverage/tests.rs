@@ -247,6 +247,68 @@ fn in_dep_graph_counts_only_files_with_a_resolved_outgoing_edge() {
     );
 }
 
+/// F4: the declared-side denominator rides the extension table. A census key present for the
+/// extension becomes a MEASURED cell (the number itself), and an extension with NO key — a parser
+/// that projects no import channel, e.g. prisma, or a docs row — renders `null`, never 0: absence
+/// of data must stay distinguishable from a measured zero.
+#[test]
+fn declared_imports_ride_the_extension_table_and_absent_keys_render_null() {
+    let tree = json!({
+        "sourceId": "py-blind",
+        "output": {
+            "ir": {
+                "loc": { "a.py": 5, "b.py": 5, "db/schema.prisma": 9 },
+                "symbols": [ { "file": "a.py", "name": "f" }, { "file": "b.py", "name": "g" },
+                             { "file": "db/schema.prisma", "name": "User" } ],
+                "dep": { "a.py": [], "b.py": [] }
+            },
+            "degraded": [],
+            // The F4 engine shape on the motivating tree: 12 declared specifiers, nothing resolved.
+            "coverage": { "declaredImportsByExt": { "py": 12 } }
+        }
+    });
+    let v = run(json!([tree]));
+    let exts = v["trees"][0]["extensions"].as_array().expect("array");
+    let py = exts.iter().find(|e| e["ext"] == "py").expect("py row");
+    assert_eq!(
+        py["declaredImports"], 12,
+        "the measured cell must carry the census number: {py}"
+    );
+    assert_eq!(py["inDepGraph"], 0, "{py}");
+    let prisma = exts
+        .iter()
+        .find(|e| e["ext"] == "prisma")
+        .expect("prisma row");
+    assert_eq!(
+        prisma["declaredImports"],
+        Value::Null,
+        "no census key = never measured = null, not 0: {prisma}"
+    );
+    // The yardstick ships with the reply: the definition (pre-resolution specifiers), the non-1:1
+    // disclaimer against resolvedImportEdges, and what null means.
+    let meaning = v["dispatchMeaning"]["declaredImports"]
+        .as_str()
+        .expect("string");
+    assert!(meaning.contains("BEFORE resolution"), "{meaning}");
+    assert!(meaning.contains("NOT 1:1"), "{meaning}");
+    assert!(meaning.contains("null"), "{meaning}");
+}
+
+/// F4's backward edge: an analysis produced by a build (or Mode A envelope ingest) that carries no
+/// `declaredImportsByExt` at all yields `null` in every row — the query must never manufacture a 0
+/// out of a census that measured nothing.
+#[test]
+fn a_census_without_the_declared_map_yields_null_cells_everywhere() {
+    let v = run(json!([mixed_tree()]));
+    for ext in v["trees"][0]["extensions"].as_array().expect("array") {
+        assert_eq!(
+            ext["declaredImports"],
+            Value::Null,
+            "no map, no measurement: {ext}"
+        );
+    }
+}
+
 /// F3: a config with no `vocabulary` walks with an EMPTY skip list (a deliberate contract this
 /// surface must not change) — so when .git internals show up in loc, the reply names the count and
 /// the cause+fix instead of leaving them as cryptic extension rows like `sample: 14`.
@@ -343,6 +405,38 @@ fn no_single_score_field_and_recall_is_declared_unmeasured() {
         .contains("not yours"));
 }
 
+/// The build-capability disclosure that had no user surface at all (framework recognizers stood in
+/// `zzop_engine` reachable only as a library call): every coverage reply now carries the compiled-in
+/// table verbatim, top-level and uncrossed with any tree — a fact of the BUILD, not of this run.
+/// The fastapi probe proves the whole plumbing (parser crate declaration -> engine aggregator ->
+/// this reply) through one known row without restating the roster, which the engine-side contracts
+/// already pin.
+#[test]
+fn framework_recognizers_ride_the_reply_with_their_channels() {
+    let v = run(json!([mixed_tree()]));
+    let rows = v["frameworkRecognizers"].as_array().expect("array");
+    assert!(!rows.is_empty(), "the compiled-in table cannot be empty");
+    for r in rows {
+        for key in ["framework", "extensions", "emits"] {
+            assert!(!r[key].is_null(), "row missing {key}: {r}");
+        }
+        assert!(
+            !r["emits"].as_array().unwrap().is_empty(),
+            "a row with no channel is undeclarable engine-side: {r}"
+        );
+    }
+    let fastapi = rows
+        .iter()
+        .find(|r| r["framework"] == "fastapi" && r["emits"][0] == "io.provides")
+        .expect("the fastapi provide-side row must ride the reply");
+    assert_eq!(fastapi["extensions"], json!(["py"]));
+    // The legend ships with the reply (the blindSpotMeaning discipline) and must keep both
+    // misreading guards: presence is not idiom completeness, absence means no recognizer exists.
+    let legend = v["frameworkRecognizerMeaning"].as_str().expect("string");
+    assert!(legend.contains("every idiom"), "{legend}");
+    assert!(legend.contains("no recognizer in this build"), "{legend}");
+}
+
 #[test]
 fn dispatch_meanings_ship_in_the_reply() {
     let v = run(json!([mixed_tree()]));
@@ -381,5 +475,37 @@ fn extensionless_files_group_by_their_lowercased_name() {
 #[test]
 fn a_non_trees_analysis_is_refused_with_the_reason() {
     let err = crate::query_coverage_json(&json!({"findings": []}).to_string()).unwrap_err();
-    assert!(err.contains("analyzeTrees"), "{err}");
+    // Spelling-free by contract 15b (host_vocabulary's facade-entry-point sweep): the guidance names
+    // the artifact shape, never the `analyzeTrees` symbol no host user can type.
+    assert!(err.contains("multi-tree analysis output"), "{err}");
+}
+
+/// F4 through the REAL pipeline (parse -> assemble census -> this table). The engine census
+/// (`crates/engine/src/analyze/assemble/declared.rs`) and this module's `ext_of` are deliberate
+/// byte-for-byte twins with no shared code, and a grain drift between them does not fail loudly —
+/// the census key misses its table row and the cell degrades to `null` ("never measured"), the exact
+/// misreading F4 exists to prevent. This is the one test that crosses the two halves (every other F4
+/// pin hand-authors one side's fixture), so it also pins the `declaredImportsByExt` wire key both
+/// sides read.
+#[test]
+fn declared_imports_cell_is_measured_end_to_end_from_a_real_engine_run() {
+    let dir = crate::test_support::cycle_fixture();
+    dir.write("schema.prisma", "model A {\n  id Int @id\n}\n");
+    let config = json!({ "trees": [{ "root": dir.path().to_string_lossy(), "sourceId": "e2e" }] });
+    let analysis = crate::analyze_trees_json(&config.to_string()).expect("analyze should succeed");
+    let v: Value = serde_json::from_str(
+        &crate::query_coverage_json(&analysis).expect("coverage should answer"),
+    )
+    .expect("valid JSON");
+    let rows = v["trees"][0]["extensions"].as_array().expect("rows");
+    let cell = |ext: &str| {
+        rows.iter()
+            .find(|r| r["ext"] == ext)
+            .unwrap_or_else(|| panic!("no `{ext}` row"))["declaredImports"]
+            .clone()
+    };
+    // `cycle_fixture`: a.ts <-> b.ts, one relative import each = 2 distinct declared specifiers.
+    assert_eq!(cell("ts"), json!(2));
+    // Same run's unmeasured cell: prisma projects no import channel, so `null` — never 0.
+    assert_eq!(cell("prisma"), Value::Null);
 }

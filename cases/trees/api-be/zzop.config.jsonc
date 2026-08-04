@@ -21,6 +21,11 @@
     // Where Java sources live. A Spring security config only governs routes under its own copy of this
     // segment, so one module's posture never clears a sibling module's routes.
     "javaSourceRoot": "src/main/java/",
+    // Where Python absolute imports resolve from, beyond the tree root and src/ (always tried). An
+    // entry is an extra root directory ("backend") or a package-name mapping ("tml=" maps import name
+    // tml to the tree root — the editable-install symlink idiom). A wrong entry cannot invent an edge;
+    // it is one more candidate that matches no real file. Empty because only you know your layout.
+    "pythonPackageRoots": [],
     // Directories never analyzed at all, and (separately) never walked when "trees": "auto" looks for
     // workspace packages. Build output and tool state are named by you, not by any tool.
     "skipDirs": ["node_modules", "dist", "build", ".next", ".git", "target", ".yarn", ".zzop", "zzop-reports", ".zzop-cache"],
@@ -85,6 +90,16 @@
     // Cross-repo joins: which query parameters carry secrets, how you spell an API version segment, and
     // which routes are fetched from outside every analyzed tree (so "no consumer here" proves nothing).
     "secretParamNames": ["token","access_token","accesstoken","apikey","api_key","api-key","api_token","apitoken","key","secret","client_secret","password","auth","signature","jwt"],
+
+    // Declared response-DTO field names that count as sensitive (cross-layer/sensitive-response-field),
+    // in three matching axes: substrings of the normalized name, whole-name exacts, and suffixes.
+    // NORMALIZATION CONTRACT — different from secretParamNames above, where "api_key"/"api-key" are
+    // distinct legitimate entries: a field name is lowercased and stripped of "_"/"-" BEFORE these three
+    // lists are consulted, so every entry here must be lowercase with no separators ("apikey", never
+    // "api_key" — a separator-carrying entry can never match anything).
+    "sensitiveResponseFieldSubstrings": ["password","passwd","secret","apikey","privatekey","credential","passphrase","salt"],
+    "sensitiveResponseFieldExactNames": ["token","jwt","hash","pwd","ssn","otp"],
+    "sensitiveResponseFieldSuffixes": ["token"],
     "apiVersionSegmentPattern": "(?i)^v[0-9]+(?:\\.[0-9]+)*$",
     "externallyFetchedPaths": ["/","/health","/healthz","/healthcheck","/livez","/readyz","/robots.txt","/sitemap.xml","/sitemap_index.xml","/rss.xml","/feed.xml","/atom.xml","/favicon.ico"],
 

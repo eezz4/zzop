@@ -65,7 +65,7 @@ fn same_table_consumed_by_two_edge_sources_is_flagged_in_each_of_them() {
         assert!(f.message.contains("svc-a"), "{}", f.message);
         assert!(f.message.contains("svc-b"), "{}", f.message);
         assert!(f.message.contains("Verify"), "{}", f.message);
-        assert!(f.message.contains("disabled_rules"), "{}", f.message);
+        assert!(f.message.contains("disabledRules"), "{}", f.message);
     }
     // Each copy names ITS OWN tree as the subject, so a reader knows which side they are on.
     assert_eq!(out[0].data.as_ref().unwrap()["consumeSource"], "svc-a");
@@ -157,6 +157,7 @@ fn ambiguous_consume_of_a_db_table_counts_toward_the_signal() {
             candidates: vec![TaggedProvide {
                 source: "db1".to_string(),
                 provide: zzop_core::IoProvide {
+                    response: None,
                     body: None,
                     kind: "db-table".to_string(),
                     key: "table:orders".to_string(),

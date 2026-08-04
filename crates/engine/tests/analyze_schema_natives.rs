@@ -126,7 +126,7 @@ fn soft_delete_bypass_fires_on_unfiltered_call_and_not_on_filtered_call() {
         Some("deletedAt")
     );
     assert!(found[0].message.contains("deletedAt"));
-    assert!(found[0].message.contains("disabled_rules"));
+    assert!(found[0].message.contains("disabledRules"));
     // Never fires at the filtered call site's line.
     assert!(!found.iter().any(|f| f.line == SOFT_DELETE_NEGATIVE_LINE));
 }
@@ -177,7 +177,7 @@ fn orderby_unindexed_fires_on_uncovered_field_and_not_on_indexed_leading_column(
         Some("total")
     );
     assert!(found[0].message.contains("@@index"));
-    assert!(found[0].message.contains("disabled_rules"));
+    assert!(found[0].message.contains("disabledRules"));
     // The `status`-ordered call (leading column of `@@index([status, createdAt])`) never fires.
     assert!(!found.iter().any(|f| f.line == ORDERBY_NEGATIVE_LINE));
 }
@@ -237,7 +237,7 @@ fn enum_string_drift_fires_on_non_member_literal_and_not_on_valid_member() {
         Some("BOGUS")
     );
     assert!(found[0].message.contains("BOGUS"));
-    assert!(found[0].message.contains("disabled_rules"));
+    assert!(found[0].message.contains("disabledRules"));
     // Never fires at the valid-member call site's line.
     assert!(!found.iter().any(|f| f.line == ENUM_DRIFT_NEGATIVE_LINE));
 }

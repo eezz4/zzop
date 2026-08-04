@@ -75,6 +75,8 @@ pub(super) fn build_overlay(scan_root: &Path, scan_prefix: &str) -> NormalizedEn
             attributes: Vec::new(),
             loop_spans: Vec::new(),
             function_spans: Vec::new(),
+            test_spans: Vec::new(),
+            calls: Vec::new(),
         });
     }
 

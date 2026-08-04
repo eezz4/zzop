@@ -106,6 +106,26 @@ pub(crate) fn annotation_raw_args(node: Node, src: &str) -> Option<String> {
     Some(raw[1..raw.len() - 1].to_string())
 }
 
+/// The interior text of a plain `"…"` `string_literal` node (delimiters stripped, escape sequences left
+/// verbatim — the same "verbatim, no escape decoding" convention `zzop_parser_go`/`zzop_parser_csharp`'s
+/// own `string_literal_text` helpers pin; this crate's HTTP-literal reads never plausibly carry one).
+/// `None` for any other node kind AND for a text block (`"""…"""` — the same `string_literal` kind in
+/// this grammar): a multi-line block is never a URL literal an adapter here reads, and slicing one byte
+/// off each `"""` would corrupt it — never guessed.
+pub(crate) fn string_literal_text(node: Node, src: &str) -> Option<String> {
+    if node.kind() != "string_literal" {
+        return None;
+    }
+    let raw = node_text(node, src);
+    if raw.starts_with("\"\"\"") {
+        return None;
+    }
+    if raw.len() < 2 || !raw.starts_with('"') || !raw.ends_with('"') {
+        return None;
+    }
+    Some(raw[1..raw.len() - 1].to_string())
+}
+
 /// The simple (rightmost-segment) name of a `_type` node used in an `extends`/type-reference position —
 /// `type_identifier` directly, the trailing `type_identifier` of a `scoped_type_identifier`
 /// (`pkg.Base` -> `"Base"`), or a `generic_type`'s own base type recursively (`Base<T>` -> `"Base"`).

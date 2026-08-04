@@ -5,6 +5,7 @@
 //! see only this module's Common IR.
 
 pub mod attributes;
+pub mod call_sites;
 pub mod callgraph;
 pub mod coupling;
 pub mod dsl;
@@ -23,12 +24,20 @@ pub mod registry;
 pub mod schema;
 pub mod serde_util;
 pub mod sightline;
+pub mod string_literals;
 
 pub use attributes::{attr_is_truthy, Attribute, AttributeStore, EntityRef};
+pub use call_sites::{
+    CallKind, CallSite, CALL_KIND_CONSOLE_WRITE, CALL_KIND_ENV_READ, CALL_KIND_HASH_CALL,
+    CALL_KIND_PROCESS_EXEC, RULE_READ_CALL_KINDS,
+};
 pub use coupling::CommitFileSet;
+pub use string_literals::{
+    shannon_entropy_bits, value_hash_hex, BoundStringLiteral, HIGH_ENTROPY_SECRET_MIN_BITS,
+};
 
 pub use fragments::{
-    ClassShapeFragment, ControllerPrefixRouteFragment, ProcedureRouterEntry,
+    ClassShapeFragment, ControllerPrefixRouteFragment, PagesApiHandlerScan, ProcedureRouterEntry,
     ProcedureRouterFragment, RouterMountEntry, RouterMountFragment, WrapperCallFragment,
     WrapperDefFragment,
 };
@@ -47,8 +56,8 @@ pub use io::{
     classify_consume_join, db_table_channel_casing, http_consume_interface_key, http_interface_key,
     key_carries_route_identity, link_cross_layer_io, normalize_http_path, unknown_verb_route_path,
     AmbiguousConsume, ConsumeBodyShape, ConsumeJoin, CrossLayerEdge, CrossLayerResult, IoConsume,
-    IoFacts, IoKind, IoProvide, LinkOptions, ProvideBodyField, ProvideBodyShape, SourceIo,
-    HTTP_KEY_VERBS, RULE_READ_IO_KINDS, UNKNOWN_VERB,
+    IoFacts, IoKind, IoProvide, LinkOptions, ProvideBodyField, ProvideBodyShape,
+    ProvideResponseShape, SourceIo, HTTP_KEY_VERBS, RULE_READ_IO_KINDS, UNKNOWN_VERB,
 };
 pub use ir::{
     ApiEndpoint, CommonIr, DepGraph, ImportBinding, ImportMap, MinimalIr, NonIdempotentKind,
@@ -61,8 +70,8 @@ pub use node::{
 pub use normalized::{
     envelope_hints, parse_contract_version, validate_envelope, validate_envelope_verdict,
     EnvelopeVerdict, FileProjection, NormalizedEnvelope, ProjectionOverrides,
-    MIN_VERSION_FOR_OVERRIDES, NORMALIZED_AST_CONTRACT_VERSION, NORMALIZED_AST_FORMAT,
-    SUPPORTED_NORMALIZED_AST_VERSION,
+    MIN_VERSION_FOR_OVERRIDES, MIN_VERSION_FOR_ROUTER_MOUNT_REF, NORMALIZED_AST_CONTRACT_VERSION,
+    NORMALIZED_AST_FORMAT, SUPPORTED_NORMALIZED_AST_VERSION,
 };
 pub use pack_loader::{
     applies_to, check_dsl_schema_version, load_dsl_packs, pack_regex_issues,
@@ -71,9 +80,9 @@ pub use pack_loader::{
 pub use paths::is_test_file;
 pub use recognizer::FrameworkRecognizer;
 pub use registry::{
-    apply_severity_override, global_exclude_matches_path, is_enabled, is_suppressed,
-    merge_findings, register_native_analysis_stub, suppression_matches_path, GlobalExclude,
-    RuleConfig, RuleRegistry, Suppression, REDACTED,
+    apply_severity_override, global_exclude_matches_path, is_enabled, is_pack_enabled,
+    is_suppressed, merge_findings, register_native_analysis_stub, suppression_matches_path,
+    GlobalExclude, RuleConfig, RuleRegistry, Suppression, REDACTED,
 };
 pub use sightline::RuleSightline;
 

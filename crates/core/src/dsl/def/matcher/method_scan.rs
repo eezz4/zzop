@@ -147,6 +147,23 @@ pub struct MethodScan {
     /// line in the SAME span — e.g. a try/catch guarding a TOCTOU race, or a `$transaction(...)` wrapper.
     #[serde(default)]
     pub absent: Vec<LabeledPattern>,
+    /// Structural PRESENCE gate over the projected call-site channel: when set, the symbol span must
+    /// additionally contain at least one `SourceFile::call_sites` entry of exactly this `kind` (the
+    /// site's own line within `body_start..=body_end`). It is the CO-OCCURRENCE axis a lexical
+    /// `patterns` arm used to approximate with a bare token — W3's "structure only the exec witness,
+    /// keep the co-occurrence evidence lexical": the rule's `trigger`/`patterns`/`absent` clauses stay
+    /// regexes, and only the "did this method really use the process API" half becomes a parser fact
+    /// (so a variable NAMED `exec`, or a mention in a string/comment, no longer counts as the witness).
+    ///
+    /// Degrade direction: SILENCE, `trigger_in_loop`'s family — the gate ALLOWS a finding on evidence,
+    /// so a file with no projected call sites (degraded parse, external parser, lexical fallback, or a
+    /// spelling the producer cannot resolve — a variable receiver like `rt.exec(cmd)`) can never satisfy
+    /// it and the rule says nothing there. A rule setting this field trades exactly that recall for the
+    /// bare-token false-positive class, and must disclose the trade in its own message. The kind
+    /// spelling is bound by `RULE_READ_CALL_KINDS` via `call_kind_readers.rs`, the same contract
+    /// `CallScan::kind` is under.
+    #[serde(default)]
+    pub require_call_kind: Option<String>,
     /// Optional path regex — a file whose `rel` path matches this is skipped entirely. Same rationale as
     /// `LineScan::file_exclude_pattern`.
     #[serde(default)]

@@ -216,20 +216,10 @@ pub(crate) fn compose_file_convention_provides<'a>(
         };
         let Some(text) = read_text(rel) else { continue };
         let scan = zzop_parser_typescript::scan_pages_api_handler(rel, &text);
-        let Some(line) = scan.default_export_line else {
-            continue;
-        };
-        let verbs: Vec<&str> = if scan.verbs.is_empty() {
-            // Serve-all handler naming no method literal: ONE UNKNOWN_VERB sentinel provide (not a
-            // fabricated GET+POST) — the assemble partition lifts the `"? <path>"` key into the
-            // path-level `cross-layer/unknown-verb-route` disclosure channel.
-            vec![zzop_core::UNKNOWN_VERB]
-        } else {
-            scan.verbs.iter().map(String::as_str).collect()
-        };
-        for verb in verbs {
-            out.push(provide(verb, &url, rel, line, "default"));
-        }
+        // The scan→provides step (UNKNOWN_VERB sentinel included) lives behind the typed
+        // `compose_*(zzop_core::PagesApiHandlerScan) -> Vec<IoProvide>` seam — see that unit's doc
+        // for why the seam exists (`analyze/compose/pages_api.rs`).
+        out.extend(crate::analyze::compose_pages_api_provides(rel, &url, &scan));
     }
 
     out.sort_by(|a, b| {
@@ -244,6 +234,7 @@ pub(crate) fn compose_file_convention_provides<'a>(
 
 fn provide(verb: &str, url: &str, rel: &str, line: u32, symbol: &str) -> IoProvide {
     IoProvide {
+        response: None,
         body: None,
         kind: "http".into(),
         key: http_interface_key(verb, url),

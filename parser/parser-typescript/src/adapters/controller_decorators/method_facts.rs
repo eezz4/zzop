@@ -4,9 +4,9 @@
 use swc_core::common::SourceMap;
 use swc_core::ecma::ast::{
     ArrayLit, Callee, ClassMethod, Decorator, Expr, ExprOrSpread, Lit, Param, Pat, PropName, Str,
-    TsEntityName, TsType,
+    TsEntityName, TsType, TsTypeAnn,
 };
-use zzop_core::ProvideBodyShape;
+use zzop_core::{ProvideBodyShape, ProvideResponseShape};
 
 /// Method-level route-decorator name -> the HTTP verb it implies. `All` is intentionally absent —
 /// see module doc.
@@ -18,24 +18,90 @@ const METHOD_DECORATORS: &[(&str, &str)] = &[
     ("Patch", "PATCH"),
 ];
 
-/// `(verb, handler name, anchor line, resolved path(s), `@Body()` request-body contract)` — see
-/// `method_route_facts`'s doc.
-pub(super) type MethodRouteFacts = (String, String, u32, Vec<String>, Option<ProvideBodyShape>);
+/// `(verb, handler name, anchor line, resolved path(s), `@Body()` request-body contract, declared
+/// response contract)` — see `method_route_facts`'s doc.
+pub(super) type MethodRouteFacts = (
+    String,
+    String,
+    u32,
+    Vec<String>,
+    Option<ProvideBodyShape>,
+    Option<ProvideResponseShape>,
+);
 
 /// One method's route facts, independent of its class's own prefix resolution — shared substrate for
 /// both `ControllerCollector::emit_method` (literal-prefix provides) and
 /// `ControllerPrefixFragmentCollector::emit_fragment` (deferred-prefix fragments): the handler name,
-/// verb, anchor line, resolved path(s), and (`body-shape-v1`) the `@Body()` request-body contract. The
+/// verb, anchor line, resolved path(s), (`body-shape-v1`) the `@Body()` request-body contract, and
+/// (`response-shape-v1`) the declared return-type response contract. The
 /// first four are `None` for the same reasons `method_route`/`method_name` individually return `None`
 /// (no recognizable method key, no recognized route decorator, `@All`, or an unresolvable path); `body`
-/// is independently `None`/`Some` per `method_body_shape`'s own never-guess rules and never vetoes the
-/// rest of the tuple.
+/// and `response` are each independently `None`/`Some` per their own never-guess rules and never veto
+/// the rest of the tuple.
 pub(super) fn method_route_facts(cm: &SourceMap, m: &ClassMethod) -> Option<MethodRouteFacts> {
     let name = method_name(&m.key)?;
     let (verb, decorator, paths) = method_route(&m.function.decorators)?;
     let line = crate::line_of(cm, decorator.span.lo);
     let body = method_body_shape(&m.function.params);
-    Some((verb, name, line, paths, body))
+    let response = method_response_shape(m.function.return_type.as_deref());
+    Some((verb, name, line, paths, body, response))
+}
+
+/// `response-shape-v1`: resolves a route method's declared response contract from its return-type
+/// annotation. Declaration only — no return-statement or flow reading, ever. Three outcomes:
+/// - `Some` with `dto_ref: Some(name)` — a capturable declaration: a plain single-identifier type
+///   (`findAll(): UserDto`) or `Promise<X>` around one (`async findOne(): Promise<UserDto>`,
+///   unwrapped syntactically).
+/// - `Some` with `dto_ref: None`, empty `fields` — the NO-ANNOTATION sentinel (the handler declared
+///   nothing): a zero-information shape assemble strips and DISCLOSES ("declare a return type to
+///   enable this analysis") so undeclared handlers never fall out silently. See
+///   `zzop_core::ProvideResponseShape`'s doc.
+/// - `None` — an annotation exists but is not capturable (a primitive/keyword, an array, a union, a
+///   non-`Promise` generic, a qualified name): never guess, same policy as `capturable_dto_ref`.
+fn method_response_shape(return_type: Option<&TsTypeAnn>) -> Option<ProvideResponseShape> {
+    let Some(ann) = return_type else {
+        return Some(ProvideResponseShape {
+            dto_ref: None,
+            fields: Vec::new(),
+            complete: false,
+        });
+    };
+    capturable_response_ref(&ann.type_ann).map(|name| ProvideResponseShape {
+        dto_ref: Some(name),
+        fields: Vec::new(),
+        complete: false,
+    })
+}
+
+/// The declared return type as a capturable single-identifier response DTO ref, with syntactic
+/// `Promise<X>` unwrapping (the one wrapper this recognizer knows — `Observable<X>`/`Partial<X>`/
+/// `X[]`/unions all fall through to `None`, never guessed; unwrapping any single-argument generic
+/// would wrongly read `Partial<X>`'s fields as required and `Array<X>`'s element shape as the body).
+fn capturable_response_ref(ty: &TsType) -> Option<String> {
+    let TsType::TsTypeRef(tr) = ty else {
+        return None;
+    };
+    let TsEntityName::Ident(id) = &tr.type_name else {
+        return None; // a qualified name (`A.B`) — not a plain DTO reference
+    };
+    let name = id.sym.to_string();
+    let Some(params) = &tr.type_params else {
+        // a plain non-generic identifier; bare `Promise` names no payload type at all
+        return (name != "Promise").then_some(name);
+    };
+    if name != "Promise" || params.params.len() != 1 {
+        return None; // a generic that isn't exactly `Promise<X>` — never guess
+    }
+    let TsType::TsTypeRef(inner) = &**params.params.first()? else {
+        return None; // Promise<string> / Promise<X[]> / Promise<A | B> — never guess
+    };
+    if inner.type_params.is_some() {
+        return None; // Promise<Foo<T>> — not a plain DTO reference
+    }
+    let TsEntityName::Ident(inner_id) = &inner.type_name else {
+        return None;
+    };
+    Some(inner_id.sym.to_string())
 }
 
 /// `body-shape-v1`: resolves a method's `@Body()` request-body contract from its parameter list.

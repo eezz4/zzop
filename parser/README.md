@@ -17,7 +17,7 @@ should never leak into the public IR).
 | `parser-rust` | **native syn 2** (parses in Rust, 0 process crossings) — full AST: symbols, imports/dep graph (module-path + workspace `Cargo.toml` resolution), axum router provides, `reqwest` egress consumes |
 | `parser-go` | **native tree-sitter-go** (tree-sitter-go 0.25) — full CST: symbols, imports/dep graph (`go.mod` package-directory resolution), gin/`net/http` router provides, `net/http` egress consumes |
 | `parser-prisma` | parses the Prisma schema DSL — lexical: model `db-table` provides (accessor-cased key, feeds the db-table join channel) |
-| `parser-java-21` | **native tree-sitter-java** (tree-sitter-java 0.23.5, Java 21 grammar coverage) — full CST: symbols, imports/dep graph, Spring MVC HTTP route provides |
+| `parser-java-21` | **native tree-sitter-java** (tree-sitter-java 0.23.5, Java 21 grammar coverage) — full CST: symbols, imports/dep graph, Spring MVC HTTP route provides, call sites for the whole-repo call graph, Spring Security method-security auth-guard evidence |
 | `parser-sql` | owns the SQL vocabulary for BOTH directions of the `db-table` channel — lexical/regex, no grammar. PROVIDE: `CREATE TABLE` in a `.sql` file (quote-stripped, schema-qualifier dropped, lower-first canonical key — twin of the Prisma provide, for ORM-less migration stacks). CONSUME: the tables one SQL STATEMENT STRING reads/writes (`FROM`/`JOIN`/`INTO`/`UPDATE … SET`), for callers that hold such a string — `parser-typescript`'s `raw_sql` adapter hands it every string literal a `.ts` file contains, which is how a raw-SQL stack (Cloudflare D1, `better-sqlite3`, `pg`, `mysql2`) reaches the channel with no ORM symbol to key off. Both keys come out of one transform, so they cannot drift |
 | `parser-csharp` | **native tree-sitter-c-sharp** (tree-sitter-c-sharp 0.23.5) — full CST: symbols, imports/dep graph (`using` directives, namespace→files resolution), ASP.NET Core attribute-controller + Minimal-API HTTP route provides, `HttpClient` literal egress consumes |
 
@@ -38,8 +38,9 @@ that would drift apart. Its module doc owns the rationale — why the property i
 A new language does not get its own crate here by default — it arrives via the **external-parser
 envelope protocol** (`docs/NORMALIZED_AST.md`): any out-of-process tool that emits a `NormalizedEnvelope`
 JSON document (validated by `zzop_core::validate_envelope`, consumed by `zzop_engine::analyze_envelope`)
-plugs in without touching this workspace at all. `examples/adapters/jsp-envelope.example.json` is a worked example
-of exactly that for JSP.
+plugs in without touching this workspace at all. `docs/contracts/example-envelope.json` is a worked
+example of exactly that for JSP — it is also the `example-envelope` contract both binaries serve
+(`zzop contract example-envelope`), so the sample and the shipped document are the same bytes.
 
 Promotion out of the envelope path happens on the **commonality criterion** that governs zzop's native
 middleware recognizers (see `docs/ARCHITECTURE.md`'s "Language support" section): a language common

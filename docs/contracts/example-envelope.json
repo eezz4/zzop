@@ -1,6 +1,6 @@
 {
   "format": "zzop-normalized-ast",
-  "version": "0.27.0",
+  "version": "0.29.0",
   "parser": "jsp-lexical/1",
   "source": "legacy-webapp",
   "files": [
@@ -28,6 +28,13 @@
       "imports": {},
       "re_exports": [],
       "used_names": ["getUser", "renderProfile", "session", "request"],
+      "calls": [
+        {
+          "from_symbol": "webapp/legacy/user.jsp#getUser",
+          "callee_name": "renderProfile",
+          "line": 15
+        }
+      ],
       "io": {
         "provides": [
           {
@@ -35,7 +42,14 @@
             "key": "GET /legacy/user.jsp",
             "file": "webapp/legacy/user.jsp",
             "line": 12,
-            "symbol": "webapp/legacy/user.jsp#getUser"
+            "symbol": "webapp/legacy/user.jsp#getUser",
+            "response": {
+              "fields": [
+                { "name": "displayName", "optional": false },
+                { "name": "email", "optional": true }
+              ],
+              "complete": true
+            }
           }
         ],
         "consumes": [

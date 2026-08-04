@@ -32,3 +32,13 @@ zzop-rules-http = { path = "../../rules/native/rules-http" }
 # joined by slashes) rather than a bare name mention is the whole point — see that test's own doc for
 # the drift a looser matcher let through — and that needs a real regex, not `str::contains`.
 regex = { workspace = true }
+# `skip_notice!` — the one stderr writer `tests/host_dispatch.rs` is allowed. An integration test is
+# its own crate root, so the crate-level `#![allow]` that covers every other stderr writer in the
+# workspace cannot reach `tests/`; a dev-dependency can.
+zzop-test-support = { path = "../test-support" }
+
+# Inherit the workspace lint policy (root Cargo.toml [workspace.lints.clippy]) — every member does,
+# with no exceptions. Where a single target legitimately violates one, the exemption is a crate-level
+# #![allow] at that target's entry point, never a hole in this table.
+[lints]
+workspace = true

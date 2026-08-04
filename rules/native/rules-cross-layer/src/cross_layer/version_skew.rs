@@ -174,7 +174,7 @@ mod tests {
         assert_eq!(out[0].line, 5);
         assert!(out[0].message.contains("`v1`"));
         assert!(out[0].message.contains("`v2`"));
-        assert!(out[0].message.contains("disabled_rules"));
+        assert!(out[0].message.contains("disabledRules"));
     }
 
     #[test]

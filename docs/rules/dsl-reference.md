@@ -1,6 +1,6 @@
 # DSL rule pack reference
 
-Normative schema for `rules/dsl/*.json`. Source of truth: `crates/core/src/dsl.rs` (interpreter) and
+Normative schema for `rules/dsl/<pack>/<pack>.json` packs. Source of truth: `crates/core/src/dsl.rs` (interpreter) and
 `crates/core/src/pack_loader.rs` (loader/schema-version gate). Every field below is read directly from
 those files — if they diverge, the Rust source wins.
 
@@ -20,7 +20,7 @@ names a label no `patterns` entry declares).
   "id": "sql",
   "framework": "any",
   "schema_version": 1,
-  "fragments": { "sql-where-veto": "(?i)\\bWHERE\\b|\\$\\{|\\+\\s*[\"'`]|[\"'`]\\s*\\+" },
+  "fragments": { "sql-where-veto": "(?i)\\bWHERE\\b|\\$\\{|\\+\\s*[\"'`]|[\"'`]\\s*(?:\\.to_(?:string|owned)\\(\\)\\s*)?\\+" },
   "rules": [ /* RuleDef[] */ ]
 }
 ```
@@ -91,14 +91,14 @@ factored out the duplication, it never changed which files any rule scans.
 | `id` | string | — | Rule id within the pack. |
 | `severity` | `"critical"` \| `"warning"` \| `"info"` | — | Default severity (overridable per-id via `RuleConfig::severity_overrides`). |
 | `message` | string | — | Human-facing cause/fix-hint, copied verbatim into every finding — but NOT the whole of what ships: the engine auto-appends a disable hint at runtime (see the note right below this table). |
-| `matcher` | `Matcher` | — | One of the four matcher shapes below (`type` tag, kebab-case). |
+| `matcher` | `Matcher` | — | One of the matcher shapes below (`type` tag, kebab-case). |
 
 There is **no `suppress_marker` field** — the inline ok-marker is DERIVED as `zzop-<id>-ok`
 (`RuleDef::suppress_marker()`), so it is never authored or stored. See
 [Suppress-marker semantics](#suppress-marker-semantics).
 
 **Do not hand-write a disable hint in `message`.** At runtime the engine appends one more sentence to
-every DSL finding's `message`, after whatever you write: `` Disable via config `rules: { "<pack>/<rule>": "off" }` (embedders: `disabled_rules`) `` (`zzop_core::disable_hint`, appended by
+every DSL finding's `message`, after whatever you write: `` Disable via config `rules: { "<pack>/<rule>": "off" }` (embedders: `disabledRules`) `` (`zzop_core::disable_hint`, appended by
 `crates/engine/src/pipeline/findings.rs::append_disable_hints`) — the exact same fragment native findings
 carry, built from the one shared helper. Write the cause, the fix, and your rule's own derived `zzop-<id>-ok`
 marker in `message`; a hand-written "disable via config ..." sentence renders TWICE. See
@@ -106,8 +106,9 @@ marker in `message`; a hand-written "disable via config ..." sentence renders TW
 
 ## Matchers
 
-`Matcher` is tagged on `"type"` (kebab-case): `line-scan`, `method-scan`, `symbol-scan`, `io-scan`.
-Whole-graph / cross-file queries are out of scope for all four — see
+`Matcher` is tagged on `"type"` (kebab-case): `line-scan`, `method-scan`, `symbol-scan`, `io-scan`,
+`call-scan`, `literal-scan`.
+Whole-graph / cross-file queries are out of scope for all of them — see
 [authoring-guide.md#when-a-rule-does-not-fit-the-dsl](authoring-guide.md#when-a-rule-does-not-fit-the-dsl).
 
 ### `line-scan` (`LineScan`)
@@ -125,6 +126,7 @@ Per-line regex scan over a file's raw text — the DSL's lexical matcher.
 | `line_pattern` | regex \| null | `null` | Single flag regex — mutually exclusive with `any` (see below). |
 | `any` | `LabeledPattern[]` \| null | `null` | Labeled alternatives; **first match per line wins**, its `label` becomes `data.label`. Takes precedence over `line_pattern` when both are present. |
 | `exclude_pattern` | regex \| null | `null` | A line that matches the main pattern is skipped entirely when it **also** matches this regex (e.g. excluding `^\s*import` lines from an `as`-cast scan). |
+| `line_call_kind` | string \| null | `null` | Structural gate — a call **kind** (plain string, not a regex, not fragment-expanded). A matched line fires only when the file's projected `call_sites` carry an entry of that kind **on that same line**: the regex says the shape is there, this asks the parser whether the line really *calls* the named API family. Degrades to **silence** (`call-scan`'s direction, not `after_in_same_function`'s no-op): a file with no projected call sites — degraded parse, an environment with no producer, or a callee spelling the producer cannot resolve — can never fire a gated rule where the bare regex used to, so a rule setting it must disclose that trade in its own message. Kind spellings are bound by `zzop_core::RULE_READ_CALL_KINDS`. |
 | `attr_present` | string \| null | `null` | Attribute gate — plain attribute name, **not** a regex and **not** fragment-expanded. Keeps a finding only when this file carries a truthy attribute of that name. See [Attribute gates](#attribute-gates-consuming-a-declaration). |
 | `attr_absent` | string \| null | `null` | Same lookup, inverted: keeps a finding only when the file carries **no** truthy value for the attribute. |
 | `require_attr_declared` | string \| null | `null` | The rule runs only when that attribute name is declared *somewhere* in the analysis. Nothing declared = the rule emits nothing and the run's `warnings` say so. |
@@ -164,6 +166,7 @@ one function" matcher (e.g. `Runtime.exec` + string concatenation in the same me
 | `after` | string \| null | `null` | Lexical-ORDER gate on the trigger pattern: names another `patterns[].label` that must already have matched **before** a trigger match counts (for both satisfaction and the finding's line). "Before" = an earlier line in the same span, or — on the **same** line — the ordering pattern's FIRST match starting before the trigger pattern's FIRST match. Only those two first-match offsets are compared, never every match: `p.then(r => setX(r))` counts, `setX(v); await f();` does not, and `setX(a); await f(); setY(b);` on one line does NOT count either, because the trigger's first match (`setX`) precedes the boundary even though `setY` follows it (an accepted under-report on dense one-liners). Proves lexical order in the source text, **not** execution order — a trigger in an `else` branch, or one that follows a boundary which only runs conditionally, still counts; a rule using it should say "lexically after". Naming a label no `patterns` entry declares is malformed → the rule is skipped. |
 | `after_in_same_function` | bool | `false` | Structural PAIRING gate on `after` (no-op without it): the ordering match must fall **inside** the innermost `function_spans` entry (see below) that contains the trigger — not merely inside the same symbol body span. CONTAINMENT, not span identity: the test is "ordering line ≥ that entry's START line" (it is already at or before the trigger line, which is inside the entry). Identity would be wrong — a line holding both an outer `await` and a merged continuation callback (`await import(m).then((x) => x.f());`) resolves innermost to the callback, which would hide the enclosing function's own boundary from the setter on the next line. Exists because a method-scan span is a *declared symbol's* body — a React component's whole function — so `after` otherwise pairs a setter in one closure with an `await` in an unrelated **sibling** closure. A file with no projected `function_spans` degrades to a **no-op** (every line resolves to "no enclosing function", so all lines count as the same one), leaving the rule's pre-gate behavior intact — the opposite direction from `trigger_in_loop`, and deliberate: this gate only ever *removes* pairings, so "remove nothing" preserves coverage instead of deleting it. |
 | `absent` | `LabeledPattern[]` | `[]` | Veto patterns: after every `patterns` entry is satisfied, the finding is dropped if **any** of these also matches a line in the **same span** (encodes "a guard makes this not a violation" — e.g. a `try {` wrapping a read-then-write, or a `$transaction(` wrapper). |
+| `require_call_kind` | string \| null | `null` | Structural gate — a call **kind** (plain string, not a regex). The span must contain at least one projected `call_sites` entry of that kind, i.e. the parser witnessed a real use of the API family somewhere inside this symbol's body. It replaces the *co-occurrence* half a rule would otherwise spell as a bare-token `patterns` arm (a variable named `exec` satisfies a regex; a projected site cannot be one). The remaining `patterns`/`absent`/`trigger` clauses stay lexical, so only the witness becomes structural. Degrades to **silence**, like `trigger_in_loop` and for the same reason (the gate *allows* on evidence): no projected sites, or a callee the producer cannot resolve, means no finding — a rule setting it must disclose the trade in its own message. |
 | `snippet_max` | usize | `160` | Same as line-scan. |
 
 Span semantics:
@@ -183,13 +186,20 @@ Span semantics:
 - A symbol with no body span (e.g. a `type`/`interface`, or a parser that couldn't project one) is not
   scannable and is skipped.
 - **Loop spans** (`trigger_in_loop`'s substrate): alongside `symbols`, the parser projects each file's
-  `loop_spans` — 1-based, inclusive line ranges covering every `for`/`for-of`/`for-in`/`while`/`do-while`
-  statement (header line included) plus the callback-argument span of an array-iteration call
-  (`.map`/`.forEach`/`.filter`/`.reduce`/...; the callback body only, not the whole call expression). Line
+  `loop_spans` — 1-based, inclusive line ranges covering every statement loop
+  (`for`/`for-of`/`for-in`/`foreach`/`while`/`do-while`/`loop`, header line included) plus
+  callback/comprehension forms **only where eager evaluation is proven**: the callback-argument span of a
+  TS array-iteration call (`.map`/`.forEach`/`.filter`/`.reduce`/...; the callback body only, not the
+  whole call expression) and a Python list/set/dict comprehension. Lazy forms (Python generator
+  expressions, Rust iterator adapters, Java Streams, C# LINQ) are deliberately never spans — their
+  bodies run zero times unless consumed, so "inside a loop" would be a lie there. Line
   ranges, not byte offsets — a trigger match sharing a line with a loop span's line counts as contained
-  even if it is, byte-wise, outside the loop (e.g. a receiver expression on the same line as a one-line
-  `.map()` callback). Empty when the parser has no support / falls back lexically, same graceful-degrade
-  policy as `symbols`.
+  even if it is, byte-wise, outside the loop. For that reason a callback/comprehension span that starts
+  and ends on ONE line is never emitted at all (a one-shot call sharing the callback's only line would
+  be swept in): a genuinely-per-iteration call in a one-line `.map()`/comprehension is deliberately
+  under-reported, while one-line STATEMENT loops keep their spans (a `stmt; for (...) f()` line-share is
+  the published residual ambiguity). Empty when the parser has no support / falls back lexically, same
+  graceful-degrade policy as `symbols`.
 - **Function spans** (`after_in_same_function`'s substrate): the parser also projects each file's
   `function_spans` — 1-based, inclusive line ranges, one per function-like node (declaration,
   expression, arrow, class/object method, constructor, accessor). Nested functions overlap; the gate
@@ -212,7 +222,8 @@ Span semantics:
   (`loadRates().then((d) => {`) the token and the callback already share a line and the merge is a
   no-op. Nothing else merges (`.map`, `setTimeout`, `useEffect`, a bare or aliased `then`). Empty when
   the parser has no support — see the field's row above for why the degrade is a no-op rather than
-  silence. **TypeScript only today** (`loop_spans` is TypeScript + Go); the coverage matrix lives in
+  silence. **TypeScript only today** (`loop_spans`, by contrast, covers TypeScript, Go, Python, Java,
+  C# and Rust); the coverage matrix lives in
   [`NORMALIZED_AST.md`](../NORMALIZED_AST.md).
 
   The no-op degrade is decided **per line, not per file**, and that is the contract, not an accident: a
@@ -289,6 +300,108 @@ io-scan iterates the tree's already-assembled `provides` then `consumes` lists d
 order (the determinism contract). Finding `data` is `{ "snippet": <key or "<unresolved>">, "kind": <kind> }`;
 `line` is the entry's own line.
 
+### `call-scan` (`CallScan`)
+
+Query over a file's projected **call sites** — one fact per witnessed use of an API family (`kind`), each
+carrying the callee **exactly as the source wrote it**. It is the structural counterpart to a `line-scan`
+over the same idea: a site comes from a parse, so a mention inside a string literal or a comment is not
+one, one rule covers every language whose parser projects the channel, and `in_loop` can cross a site with
+the file's loop spans — a question raw text cannot answer.
+
+> **Coverage today: TypeScript/JavaScript, Python, Go, Java, and C# produce `console-write`,
+> `env-read` and `process-exec`; Rust produces `env-read` and `process-exec`; Prisma, SQL, and the
+> lexical fallback produce nothing.** Which spellings each language counts — and every deliberate
+> exclusion (structured loggers everywhere, Go's configurable `log.Print*`, Rust's compile-time
+> `env!()`, and for `process-exec` every third-party runner: `execa`/`zx`, Python's `sh`,
+> `tokio::process`) — is each producer module's documented contract. `process-exec` is where the
+> channel's "the callee resolves, or there is no site" line does the most work: the family's members
+> are not globals, so the TypeScript producer resolves `exec` against the file's own `child_process`
+> bindings (a `RegExp`'s `.exec` is not a site), and an exec reached through a variable receiver
+> (`rt.exec(cmd)`, `proc.Start()`) is silent in every language. Rust's blank `console-write` half is a judgment, not a gap: `println!` is
+> a console write in the fact layer but a CLI's normal output, so the console rules never admit `.rs` and
+> producing the fact would give it no reader. Its absent-fact degrade is **silence** (the `loop_spans`
+> family, not `function_spans`' no-op): an empty channel means the rule said nothing, never that the file
+> is clean, so a `call-scan` rule under-reports on an unproducing environment rather than over-reporting.
+> The per-environment truth is the `call_sites` column of
+> `crates/engine/tests/rule_contracts/capability_matrix.rs`'s declared table, which is measured against a
+> real run by that file's `call-scan-probe` canary rather than merely asserted.
+
+> **A `call-scan` rule may not silently admit an environment with no producer.** The capability matrix's
+> rule-side sweep fails any shipped rule whose `file_pattern` reaches one, because such a rule is
+> FOREVER-SILENT there — so widening a rule to a new language and landing that language's producer are one
+> change, never two.
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `file_pattern` | regex | required | Path regex — narrows the file set before any site filter applies. |
+| `file_exclude_pattern` | regex \| null | `null` | Path regex — a file whose `rel` path matches is skipped entirely, checked right after `file_pattern`. Same escape hatch as `line-scan`'s field of the same name — see [Path-exclusion semantics](#path-exclusion-semantics). |
+| `kind` | string \| null | `null` | Exact match against a site's `kind` (open vocabulary — e.g. `"console-write"`; the authoritative list of spellings this build's rules read is `zzop_core::RULE_READ_CALL_KINDS`, pinned by `rule_contracts::call_kind_readers`, and each producer's module doc names which families its language emits). Absent = any family. |
+| `callee_pattern` | regex \| null | `null` | Regex on the callee as written (`console.error`, `os.environ.get`). |
+| `algorithm_pattern` | regex \| null | `null` | Regex on the site's captured `algorithm` (the one argument-capture exception: a literal algorithm name like `md5`, captured only when spelled literally at the site — a site whose algorithm could not be resolved carries `None` and can never match, so the gate degrades to silence, never a guess). |
+| `line_pattern` | regex \| null | `null` | Lexical residual on the site's own source line — the co-occurrence half a structural trigger keeps lexical (e.g. a credential word on the same line as a weak-digest site). Absent = no lexical gate. |
+| `in_loop` | bool | `false` | Structural gate: the site counts only when its line falls inside one of the file's projected `loop_spans`, i.e. the parser proved the call runs once per iteration. Same fact and same silence-on-absence contract as `method-scan`'s `trigger_in_loop`. |
+| `attr_present` / `attr_absent` / `require_attr_declared` | string \| null | `null` | The same three declaration gates `line-scan` carries, with the same whole-tree post-filter placement — see [Attribute gates](#attribute-gates-consuming-a-declaration). |
+| `snippet_max` | usize | `160` | Max snippet length (the site's own source line, trimmed). |
+
+**Why there is no `level`, `stream`, or `severity` field.** JavaScript's `console.error` carries its level
+as a member-name *tag*, Python's `print(file=sys.stderr)` carries its stream as an *argument*, and only
+Rust's `log::error!` names a real severity. Those are not the same fact, so one field could only be filled
+by asserting an equivalence the source never made. The channel carries spelling + position + family, and
+the judgment lives in `callee_pattern`, where a rule matches the spelling the author actually wrote.
+
+A call whose callee cannot be resolved statically produces **no site at all** — never an approximated one
+(never-guess), so this channel under-reports by construction.
+
+Finding `data` is `{ "snippet": <the site's line, trimmed>, "callee": <as written>, "kind": <kind> }`;
+`line` is the site's own line. Suppress markers are recognized in a `//` **or** `#` line comment (the
+channel is multi-language by construction, so it follows io-scan's leader set rather than line-scan's
+`//`-only). A site whose line the file text cannot supply — envelope mode carries no source lines — still
+fires, with an empty snippet and nothing able to suppress it: the site is the evidence, the line text only
+a courtesy.
+
+### `literal-scan` (`LiteralScan`)
+
+Query over a file's projected **bound string literals** — one fact per string literal initializing a
+NAMED binding (`const apiKey = "…"`, a field initializer, a TS object property), carrying the binding
+name, the value's FNV-1a-64 hash, and the value's total Shannon entropy computed at extraction — **never
+the value itself**. That reduction is the channel's point: it opens the two judgments a `line-scan`
+structurally cannot make — comparing the value to its own binding name (regex has no cross-group
+backreference), and judging entropy (not computable from a match) — without ever writing a candidate
+secret into the plain-text analysis cache. The same contract keeps the channel **off the external
+envelope entirely**: an unsalted 64-bit hash of a real secret is offline-crackable, so `FileProjection`
+has no counterpart field and a `literal-scan` rule is silent on every envelope-projected file.
+
+> **Coverage today: TypeScript/JavaScript, Python, Java, C#, Go, and Rust all produce the channel**
+> (landed together in the A17 wave); Prisma, SQL, and the lexical fallback produce nothing — PSL/DDL
+> declare no named string binding. Which binding shapes each language emits — and every deliberate
+> silence (assignments, destructuring, template/interpolated strings, concatenations; only TS includes
+> object properties) — is each producer module's documented contract
+> (`zzop_parser_*::extract_string_literals`). Absent-fact degrade is **silence**, exactly as
+> `call-scan`'s: an empty channel means the rule said nothing, never that the file is clean. The
+> per-environment truth is the `string_literals` column of
+> `crates/engine/tests/rule_contracts/capability_matrix.rs`'s declared table, measured by that file's
+> `literal-scan-probe` canary.
+
+> **A `literal-scan` rule may not silently admit an environment with no producer** — the same
+> capability-matrix rule-side sweep that guards `call-scan`.
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `file_pattern` | regex | required | Path regex — narrows the file set before any entry filter applies. |
+| `file_exclude_pattern` | regex \| null | `null` | Path regex — a file whose `rel` path matches is skipped entirely. See [Path-exclusion semantics](#path-exclusion-semantics). |
+| `name_pattern` | regex \| null | `null` | Regex on the binding NAME exactly as written (`apiKey`, `CLIENT_SECRET`). Absent = every named literal. |
+| `name_exclude_pattern` | regex \| null | `null` | Negated regex on the binding NAME (mock/test/placeholder hygiene lives here — a VALUE-side veto is impossible on this channel by design, since the value is hashed at extraction). |
+| `entropy_min` | number \| null | `null` | Floor in TOTAL Shannon bits over the value's UTF-8 bytes (`zzop_core::shannon_entropy_bits` — per-byte Shannon entropy x byte count, quantized to 1/8 bit at extraction). The entry matches only when `entropy >= entropy_min`. |
+| `skip_value_equals_name` | bool | `false` | Veto an entry whose value is LITERALLY its own binding name (`refresh_token = "refresh_token"`), decided by hash equality — exact equality only; a hash cannot case-fold or normalize separators. |
+
+Finding `data` is `{ "name": <binding name>, "entropy": <f32> }` and nothing else — unlike every
+sibling scan matcher there is no `snippet_max` field and no echoed `snippet`: the literal's own source
+line IS the candidate secret, so echoing it would write the value into the findings cache, stdout and
+MCP replies, and the value hash does not ride either (an unsalted 64-bit hash of a real secret is
+offline-crackable). The finding names the evidence; the reader opens the line. The suppress marker
+honors `//` **or** `#` comment leaders, like `call-scan` and unlike per-file `line-scan`, because the
+channel is multi-language from its first wave.
+
 ## Attribute gates: consuming a declaration
 
 Some rules rest on a fact the source cannot state — which directory is the config module, which tree is
@@ -303,6 +416,7 @@ The declaration channel is the one every cross-cutting fact already uses: an ove
 | Matcher | Gate is looked up against | Resolution |
 |---|---|---|
 | `line-scan` | the scanned file's repo-relative path | exact `{"file": {"path": ...}}` wins, else the longest covering `{"pathScope": {"prefix": ...}}` |
+| `call-scan` | the scanned file's repo-relative path | identical to `line-scan`'s — same lookup, same post-filter placement |
 | `io-scan` | the io entry's `(kind, key)` | exact `{"ioKey": ...}` wins, else the longest covering `{"pathScope": {"prefix": ...}}` (route paths) |
 
 A value is "present" when it is truthy — `null`/`false`/`0`/`""` count as absent, so a narrow explicit
@@ -316,7 +430,7 @@ declaration was meant to replace. That is fine for an attribute the *engine* min
 run's `warnings` disclose which rule did not run, which name it needed, how many candidate sites went
 unjudged, and how to declare one. A rule with no candidate sites stays quiet — `0` there is a real `0`.
 
-**Where the gate runs, and what that constrains.** Line-scan attribute gates are a whole-tree
+**Where the gate runs, and what that constrains.** Line-scan and call-scan attribute gates are a whole-tree
 **post-filter** applied after the per-file pass, not a check inside it. A per-file finding is cached under
 `(content hash, parser fingerprint, scope, ruleset fingerprint)` and the attribute set is none of those:
 gating inside the cached unit would freeze a declaration into entries that outlive it, so editing the
@@ -327,7 +441,7 @@ gate that had to change which lines match could not live here.
 
 ## Path-exclusion semantics
 
-`file_exclude_pattern` (on `line-scan` and `method-scan`) exists for one reason: `file_pattern` is
+`file_exclude_pattern` (on `line-scan`, `method-scan`, `io-scan` and `call-scan`) exists for one reason: `file_pattern` is
 positive-only — one regex naming the files a rule scans — and the `regex` crate (used everywhere in this
 DSL) does not support lookaround/lookbehind, so there is no way to write a single `file_pattern` that
 means "match this extension, but not under `scripts/`" or "match this extension, but not a `*.test.ts`
@@ -336,6 +450,73 @@ path, checked immediately after `file_pattern` passes and before `require_file`/
 per-line or per-symbol scan — a match skips the file entirely for that rule. Like every other regex field
 in the DSL, a `file_exclude_pattern` that fails to compile skips the whole rule (zero findings), not just
 the exclusion.
+
+## Test-region exclusion (the default for every rule, with one declared opt-out)
+
+`file_exclude_pattern` can only ask about a PATH. That is enough for TypeScript, Python, Go, Java and C#,
+whose tests live in a file the path names (`*.test.ts`, `tests/test_x.py`, `src/test/java/...`) — which is
+what the shared `${test-paths-stories}` fragment matches. It is not enough for Rust, whose dominant
+convention puts unit tests **inside the shipping file** as `#[cfg(test)] mod tests { ... }`; no path regex
+can see that.
+
+So the exclusion has a second form of evidence, and unlike `file_exclude_pattern` it is **not a matcher
+field**: a parser may project TEST-ONLY LINE SPANS for a file (`FileProjection::test_spans` in the
+external-parser contract — see `docs/NORMALIZED_AST.md`), and a finding anchored on a line inside one of
+those spans is dropped after the matcher runs. Nothing is spelled in a pack to get this; it is the default.
+
+**Which matchers it reaches.** `line-scan`, `method-scan` and `symbol-scan` — the three that are evaluated
+per FILE, against a `SourceFile` that carries the spans. **`io-scan` is not gated by it**, and that is a
+placement decision rather than a gap: io-scan queries the ASSEMBLED whole-tree IO facts, which the
+cross-layer join, the coverage census and the endpoint verdict all read too. Dropping only the io-scan
+FINDINGS would leave the same test-only route sitting in the join, which is a worse inconsistency than the
+one it closed. An IO fact is therefore gated where it is EXTRACTED — zzop's own Rust frontend skips
+test-gated subtrees so the `db-table` channel is clean for every consumer, and an external producer that
+declares `test_spans` must likewise withhold the `io` provides/consumes it extracted from those spans (the
+external-parser contract says so at the field).
+
+Why it is the default rather than something each rule asks for: almost every pack rule already declares the
+same intent as `"file_exclude_pattern": "${test-paths-stories}"`. The gate is that intent with a second kind
+of evidence, not a second policy — and making it opt-IN would mean every Rust-facing rule ever written has
+to remember to ask for what almost all of them already want.
+
+What it costs you: nothing, unless your language projects the fact. Among zzop's own parsers only Rust
+fills it today (`#[cfg(test)]` plus the `#[test]`/`#[tokio::test]`/`#[sqlx::test]` attribute family), so on a
+natively-parsed tree no rule targeting another extension changes behavior. That is today's parser coverage
+and not a ceiling — the wire field is open to any language. `cfg(not(test))` is deliberately NOT a test
+region: that code ships.
+
+### The opt-out: `scan_test_regions`
+
+"Almost every rule" is not "every rule". A rule-level boolean (a sibling of `id`/`severity`/`message`, NOT a
+matcher field — the gate runs after the matcher and never looks at its shape) turns the gate off for one
+rule:
+
+```jsonc
+{
+  "id": "private-key-committed",
+  "severity": "critical",
+  "scan_test_regions": true,
+  "message": "... a PEM header sitting in a test fixture is still a committed key ...",
+  "matcher": { "type": "line-scan", "...": "..." }
+}
+```
+
+Set it for exactly one class of rule: findings about a **credential at rest**, where the COMMIT is the leak
+and the execution status of the surrounding code is irrelevant to the verdict. A `-----BEGIN RSA PRIVATE
+KEY-----` or a `postgres://user:pw@host` inside `#[cfg(test)] mod tests` is in git history, in every fork and
+every clone, and has to be rotated regardless. Every other rule class judges code that RUNS, and test-only
+code does not run in production — for those the gate is right and this flag stays `false`.
+
+Two constraints ride with it, both machine-checked over the bundled packs
+(`crates/facade/src/test_region_promise_tests.rs`):
+
+- A rule that sets it must NOT also set `file_exclude_pattern`. Excluding test PATHS while insisting on test
+  SPANS is one decision made both ways at once.
+- The flag and the published promise move together, in BOTH directions. A rule whose `message` or whose
+  `docs/rules/catalog.md` / `site/rules.html` row says *"scans test paths too"* must carry the flag, and a
+  rule carrying the flag must say so in the catalog and on the site. A promise with no flag is a false
+  advertisement whose findings are silently deleted; a flag with no promise is behavior no reader was told
+  about.
 
 ## Suppress-marker semantics
 

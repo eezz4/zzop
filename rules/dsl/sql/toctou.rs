@@ -81,6 +81,28 @@ fn nested_prisma_model_receiver_toggle_is_flagged() {
     );
 }
 
+/// The 2026-08-03 anchor alignment: the `routes/` and `controllers/` arms used to spell `.*/` — at
+/// least one directory ABOVE them — while the `api/` arm was `(?:^|/)`, so this exact fixture (a
+/// TOP-LEVEL `routes/` directory, the layout `express-generator` scaffolds) was silently out of scope.
+/// All three directory arms now share the `(?:^|/)` idiom, the same verdict `sql/nplus1`'s root anchor
+/// received. The old spelling structurally cannot match a path with no `/` before `routes/`, so this
+/// fixture asserts the alignment's entire gain: reverting it takes this from 1 finding to 0.
+#[test]
+fn a_toggle_in_a_top_level_routes_directory_is_flagged() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "routes/likes.ts",
+        "declare const likeStore: any;\nexport async function toggle() {\n  const existing = await likeStore.findOne((l: any) => l.id === \"x\");\n  if (!existing) {\n    await likeStore.create({ id: \"y\" });\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    assert_eq!(
+        hits(&out, "race-condition-toctou").len(),
+        1,
+        "{:?}",
+        out.findings
+    );
+}
+
 #[test]
 fn transaction_wrapped_toggle_is_still_flagged() {
     // A bare $transaction does NOT close a check-then-act race at READ COMMITTED — two concurrent

@@ -90,6 +90,34 @@ fn parser_fingerprint_differs_by_language() {
 }
 
 #[test]
+fn every_parser_fingerprint_arm_carries_the_engine_source_hash() {
+    // The gap this closes: `crates/engine` produces cached bytes (`pipeline/io_projection.rs` fills
+    // `FileIrSlice.io`, `pipeline/fresh.rs` decides what a slice contains, `pipeline/findings.rs`
+    // authors the stored message) but is structurally absent from every `FP_*` closure, because it is
+    // the crate that DEPENDS on them. An engine-only fix used to leave every warm cache serving the old
+    // answer. The suffix is applied once after the match so an arm cannot skip it — this asserts the
+    // suffix stays SHARED if anyone ever moves it back into the arms.
+    let config = EngineConfig::default();
+    for language in [
+        Some(Language::TypeScript),
+        Some(Language::Prisma),
+        Some(Language::Java21),
+        Some(Language::Python),
+        Some(Language::Rust),
+        Some(Language::Go),
+        Some(Language::Sql),
+        Some(Language::CSharp),
+        None,
+    ] {
+        let fp = parser_fingerprint(language, &config);
+        assert!(
+            fp.contains(&format!("+engine={FP_ENGINE}")),
+            "{language:?} arm is missing the engine source hash: {fp}"
+        );
+    }
+}
+
+#[test]
 fn parser_fingerprint_changes_with_size_cap() {
     let mut config = EngineConfig::default();
     let fp1 = parser_fingerprint(Some(Language::TypeScript), &config);
@@ -144,6 +172,81 @@ fn parser_fingerprint_changes_with_io_router_names_for_typescript_only() {
         parser_fingerprint(Some(Language::CSharp), &config)
     );
     assert_eq!(none_before, parser_fingerprint(None, &config));
+}
+
+/// The invalidation contract of the surfaced stamp, pinned at the composition seam: change one
+/// character of the hash input (what a one-character parser-source edit does to `FP_*` via
+/// `build.rs`) and the surfaced value moves; leave it alone and two runs are byte-identical. The
+/// constants themselves cannot be perturbed inside a test — they are compile-time — so the pin holds
+/// the seam every constant flows through.
+#[test]
+fn surfaced_stamp_moves_with_the_source_hash_and_is_byte_stable_without_it() {
+    assert_eq!(
+        derived("rust/syn-2", "aaaaaaaaaaaaaaaa"),
+        derived("rust/syn-2", "aaaaaaaaaaaaaaaa"),
+        "same id + same source hash must stamp byte-identically"
+    );
+    assert_ne!(
+        derived("rust/syn-2", "aaaaaaaaaaaaaaaa"),
+        derived("rust/syn-2", "aaaaaaaaaaaaaaab"),
+        "a moved source hash must move the surfaced stamp"
+    );
+    // Two calls of the whole surface in one build: byte-identical, so nothing nondeterministic
+    // (map iteration, time, randomness) can ever leak into the stamp.
+    assert_eq!(
+        surface::parser_fingerprints(),
+        surface::parser_fingerprints()
+    );
+}
+
+/// The surfaced list and the cache key describe ONE set of parsers: every per-language arm of
+/// [`parser_fingerprint`] starts with exactly one surfaced value (its config-independent base), and
+/// every surfaced entry backs some arm. A ninth parser wired into dispatch fails here until it is
+/// surfaced; a surfaced entry no arm produces fails here too (a stamp for a parser that cannot run).
+#[test]
+fn parser_fingerprints_surface_matches_every_dispatch_arm() {
+    let surfaced = surface::parser_fingerprints();
+    // Sorted + unique by crate name — the determinism the doc promises is checkable, not asserted.
+    let names: Vec<&str> = surfaced.iter().map(|(n, _)| *n).collect();
+    let mut sorted = names.clone();
+    sorted.sort_unstable();
+    sorted.dedup();
+    assert_eq!(names, sorted, "entries must be sorted and unique by name");
+
+    let config = EngineConfig::default();
+    let mut matched: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+    for language in [
+        Language::TypeScript,
+        Language::Prisma,
+        Language::Java21,
+        Language::Python,
+        Language::Rust,
+        Language::Go,
+        Language::Sql,
+        Language::CSharp,
+    ] {
+        let fp = parser_fingerprint(Some(language), &config);
+        let (name, _) = surfaced
+            .iter()
+            .find(|(_, v)| fp.starts_with(&format!("{v}+")))
+            .unwrap_or_else(|| {
+                panic!("no surfaced fingerprint is the base of {language:?}'s cache-key arm: {fp}")
+            });
+        matched.insert(name);
+    }
+    assert_eq!(
+        matched.len(),
+        surfaced.len(),
+        "every surfaced entry must back a dispatch arm (unbacked: {:?})",
+        surfaced
+            .iter()
+            .map(|(n, _)| *n)
+            .filter(|n| !matched.contains(n))
+            .collect::<Vec<_>>()
+    );
+    // The engine suffix on every arm and the surfaced engine fingerprint are the same value — the
+    // stamp cannot claim an engine the cache key does not use.
+    assert_eq!(surface::engine_fingerprint(), FP_ENGINE);
 }
 
 #[test]

@@ -69,6 +69,15 @@ fn envelope_schema_matches_normalized_envelope_field_for_field() {
         props(def(&schema, "writeSite")),
     );
 
+    // $.files[0].calls[0] -> definitions.rawCall
+    let call0 = idx(field(file0, "calls", "$.files[0]"), 0, "$.files[0].calls");
+    assert_parity(
+        "$.files[0].calls[0]",
+        "rawCall",
+        call0,
+        props(def(&schema, "rawCall")),
+    );
+
     // $.files[0].imports.prisma -> definitions.importBinding (ImportMap is keyed by localName;
     // the schema models this via `additionalProperties: { $ref: importBinding }`, not a `properties`
     // entry — take the one value we inserted).
@@ -164,6 +173,30 @@ fn envelope_schema_matches_normalized_envelope_field_for_field() {
         "$.files[0].io.provides[0].body.fields[0]",
         "provideBodyField",
         provide_body_field0,
+        props(def(&schema, "provideBodyField")),
+    );
+    // $.files[0].io.provides[0].response -> definitions.provideResponseShape (response-shape-v1;
+    // its `fields` items are the SAME provideBodyField definition the body path just checked).
+    let provide_response0 = field(provide0, "response", "$.files[0].io.provides[0]");
+    assert_parity(
+        "$.files[0].io.provides[0].response",
+        "provideResponseShape",
+        provide_response0,
+        props(def(&schema, "provideResponseShape")),
+    );
+    let provide_response_field0 = idx(
+        field(
+            provide_response0,
+            "fields",
+            "$.files[0].io.provides[0].response",
+        ),
+        0,
+        "$.files[0].io.provides[0].response.fields",
+    );
+    assert_parity(
+        "$.files[0].io.provides[0].response.fields[0]",
+        "provideBodyField",
+        provide_response_field0,
         props(def(&schema, "provideBodyField")),
     );
 
@@ -298,5 +331,42 @@ fn envelope_schema_matches_normalized_envelope_field_for_field() {
         "$.files[0].router_mount_fragments[0].entries[*]",
         mount_entry_def,
         &mount_tags_seen,
+    );
+
+    // $.files[0].attributes[*] -> definitions.attribute, and each entry's `target` ->
+    // definitions.entityRef (externally-tagged `EntityRef`). The fixture carries one attribute per
+    // `EntityRef` variant, derived from `wire_variants.rs`'s one variant list — before that binding
+    // existed the fixture's `attributes` was empty, so both definitions were documented and never
+    // checked against anything.
+    let attributes = field(file0, "attributes", "$.files[0]")
+        .as_array()
+        .expect("attributes must be an array");
+    let attribute_def = def(&schema, "attribute");
+    let entity_ref_def = def(&schema, "entityRef");
+    let mut entity_tags_seen = Vec::new();
+    for (i, attr) in attributes.iter().enumerate() {
+        let pointer = format!("$.files[0].attributes[{i}]");
+        assert_parity(&pointer, "attribute", attr, props(attribute_def));
+
+        let target_pointer = format!("{pointer}.target");
+        let target = field(attr, "target", &pointer);
+        let (tag, inner) = assert_variant_tag_known(&target_pointer, target, entity_ref_def);
+        entity_tags_seen.push(tag);
+        let variant_props = props(
+            field(entity_ref_def, "properties", &target_pointer)
+                .get(tag)
+                .unwrap(),
+        );
+        assert_parity(
+            &format!("{target_pointer}.{tag}"),
+            &format!("entityRef.{tag}"),
+            inner,
+            variant_props,
+        );
+    }
+    assert_all_variants_covered(
+        "$.files[0].attributes[*].target",
+        entity_ref_def,
+        &entity_tags_seen,
     );
 }

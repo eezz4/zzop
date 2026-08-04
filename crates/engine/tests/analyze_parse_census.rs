@@ -51,7 +51,9 @@ impl Drop for TempDir {
 /// Measured on a default `EngineConfig` (no cache, no packs, no git) over a tree holding exactly one
 /// well-formed `.ts` file. Update this constant WITH the measurement when the pipeline's extractor set
 /// changes; never adjust it to make a red test green without knowing which extractor moved.
-const PARSES_PER_TS_FILE: u64 = 35;
+/// 36 -> 37 (2026-08-03): the A17 `string_literals` extractor joined `pipeline::fresh` — one more
+/// whole-file swc parse per pass, the same one-parse-per-extractor pattern as its 36 siblings.
+const PARSES_PER_TS_FILE: u64 = 37;
 
 #[test]
 fn one_analyze_pass_parses_one_ts_file_this_many_times() {

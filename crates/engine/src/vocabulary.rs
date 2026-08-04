@@ -72,6 +72,16 @@ pub struct VocabularyConfig {
     /// The source-root segment a Spring security config's scope is cut at, so one module's posture never
     /// exempts a sibling module's routes. Defaults to the Maven/Gradle layout, which a project can relocate.
     pub java_source_root: Option<String>,
+    /// Extra places this project's Python ABSOLUTE imports resolve from, on top of the two built-in
+    /// ecosystem-fact roots (tree root and `src/`, which always apply). Each entry is either an extra
+    /// root directory (`"backend"` — `app.api.main` also tries `backend/app/api/main.py`) or a
+    /// package-name mapping (`"tml="` / `"tml=lib"` — the editable-install idiom where the import name
+    /// points at a tree directory that does not carry it). Candidates only: the engine filters every
+    /// one against the paths that actually exist, so a wrong declaration adds a failed lookup and can
+    /// never invent an edge (`zzop_parser_python_3::python_import_candidates`). No built-in — which
+    /// directories carry a project's packages is knowable only to that project, so `built_in()` ships
+    /// it empty and an empty declaration is byte-for-byte the undeclared behavior.
+    pub python_package_roots: Vec<String>,
     /// Directory names never walked while analyzing a tree — build output and tool state, both of which a
     /// project names itself. Carried into `DispatchConfig::skip_dirs` by the facade.
     pub skip_dirs: Vec<String>,
@@ -146,6 +156,19 @@ pub struct VocabularyConfig {
     /// Query/path parameter names this project uses for secrets, which must never appear in a URL
     /// (`zzop_rules_cross_layer::SECRET_PARAM_NAMES`).
     pub secret_param_names: Vec<String>,
+    /// Response DTO field-name SUBSTRINGS this project treats as sensitive — matched against
+    /// lowercased, `_`/`-`-stripped declared response field names by
+    /// `cross-layer/sensitive-response-field`
+    /// (`zzop_rules_cross_layer::SENSITIVE_RESPONSE_FIELD_SUBSTRINGS`). Three sibling keys rather
+    /// than one because the three matching axes answer different false-positive classes — see the
+    /// consts' own docs; each axis follows the declared-or-not-judged rule independently.
+    pub sensitive_response_field_substrings: Vec<String>,
+    /// Response DTO field names that are sensitive only as the WHOLE normalized name (`token`, not
+    /// `tokenCount`) (`zzop_rules_cross_layer::SENSITIVE_RESPONSE_FIELD_EXACT`).
+    pub sensitive_response_field_exact_names: Vec<String>,
+    /// Response DTO field-name SUFFIXES that are sensitive (`accessToken` ends in `token`)
+    /// (`zzop_rules_cross_layer::SENSITIVE_RESPONSE_FIELD_SUFFIXES`).
+    pub sensitive_response_field_suffixes: Vec<String>,
     /// How this project spells an API VERSION segment, stripped before cross-tree route keys are compared
     /// (`zzop_rules_cross_layer::VERSION_SEGMENT_PATTERN`).
     pub api_version_segment_pattern: Option<String>,
@@ -203,74 +226,4 @@ pub struct FsdVocab {
 /// takes the resolved value as an argument) because a declarable vocabulary has exactly one default and
 /// this module is where every one of them is assembled.
 pub(crate) const DEFAULT_JAVA_SOURCE_ROOT: &str = "src/main/java/";
-
-impl VocabularyConfig {
-    /// zzop's own suggested value for every convention vocabulary, each one naming the constant its
-    /// consumer already owns — no second copy anywhere in the workspace.
-    ///
-    /// This is NOT what an undeclared run uses. Since 2026-07-27 an undeclared vocabulary makes no
-    /// judgment at all ([`resolved`]), and these values reach a run only by being written into the user's
-    /// own `zzop.config.jsonc` — `crates/config`'s starter template is generated from exactly this
-    /// struct, and `template_tests` pins the two together. So the suggestions are a document the user
-    /// owns and edits, never an assumption the engine makes behind them.
-    pub fn built_in() -> Self {
-        fn owned(v: &[&str]) -> Vec<String> {
-            v.iter().map(|s| (*s).to_string()).collect()
-        }
-        let router = zzop_parser_typescript::RouterMountVocab::built_in();
-        let write = zzop_parser_typescript::WriteSiteVocab::built_in();
-        let python = zzop_parser_python_3::PythonGuardVocab::built_in();
-        VocabularyConfig {
-            auth_guard_pattern: Some(zzop_rules_http::DEFAULT_AUTH_GUARD_PATTERN.to_string()),
-            auth_guard_qualifier_tokens: owned(zzop_rules_http::QUALIFIER_GUARD_TOKENS),
-            auth_acquisition_standalone_pattern: Some(
-                zzop_rules_http::AUTH_ACQUISITION_STANDALONE_PATTERN.to_string(),
-            ),
-            auth_acquisition_conditional_pattern: Some(
-                zzop_rules_http::AUTH_ACQUISITION_CONDITIONAL_PATTERN.to_string(),
-            ),
-            auth_family_path_pattern: Some(zzop_rules_http::AUTH_FAMILY_PATH_PATTERN.to_string()),
-            api_segment_pattern: Some(zzop_rules_http::API_SEGMENT_PATTERN.to_string()),
-            java_source_root: Some(DEFAULT_JAVA_SOURCE_ROOT.to_string()),
-            skip_dirs: owned(crate::dispatch::DEFAULT_SKIP_DIRS),
-            prisma_client_getter: Some(zzop_parser_typescript::PRISMA_CLIENT_GETTER.to_string()),
-            retry_wrappers: owned(&zzop_parser_typescript::RETRY_WRAPPERS),
-            middleware_guard_callees: owned(router.middleware_guard_callees),
-            router_name_veto_suffixes: owned(router.router_name_veto_suffixes),
-            wrapper_guard_prefixes: owned(router.wrapper_guard_prefixes),
-            env_axis_veto_substrings: owned(router.env_axis_veto_substrings),
-            idempotency_header_names: owned(router.idempotency_header_names),
-            orm_receiver_pattern: write.orm_receiver_pattern.map(str::to_string),
-            orm_write_methods: owned(write.write_methods),
-            money_tokens: owned(zzop_rules_schema::MONEY_TOKENS),
-            fetch_wrapper_export_names: owned(crate::framework_silence::WRAPPER_EXPORT_NAMES),
-            generated_file_markers: owned(crate::generated_banner::MARKERS),
-            python_guard_substrings: owned(python.substrings),
-            python_guard_anonymous_veto_substrings: owned(python.anonymous_veto_substrings),
-            python_guard_report_veto_prefixes: owned(python.report_veto_prefixes),
-            python_guard_report_veto_suffixes: owned(python.report_veto_suffixes),
-            rust_optional_extractor_prefixes: owned(
-                zzop_parser_rust::RUST_OPTIONAL_EXTRACTOR_PREFIXES,
-            ),
-            // No built-in anchor on purpose — see the field's own doc. `zzop init` writes the key with a
-            // comment telling the author what to put there, which is the honest form of "we cannot know
-            // this": the key is present and visible, and it judges nothing until they answer.
-            cache_lane_anchor_pattern: None,
-            file_read_callees: owned(zzop_rules_graph::DEFAULT_FILE_READ_CALLEES),
-            secret_param_names: owned(zzop_rules_cross_layer::SECRET_PARAM_NAMES),
-            api_version_segment_pattern: Some(
-                zzop_rules_cross_layer::VERSION_SEGMENT_PATTERN.to_string(),
-            ),
-            externally_fetched_paths: owned(zzop_rules_cross_layer::EXTERNALLY_FETCHED_PATHS),
-            schema_usage_skip_fields: owned(zzop_rules_schema::SKIP_FIELD_NAMES),
-            router_names: owned(crate::io::DEFAULT_ROUTER_NAMES),
-            hierarchy_shared_dirs: owned(zzop_metrics::DEFAULT_HIERARCHY_SHARED_DIRS),
-            fsd: FsdVocab {
-                slice_containers: owned(zzop_metrics::DEFAULT_FSD_SLICE_CONTAINERS),
-                entry: owned(zzop_metrics::DEFAULT_FSD_ENTRY),
-                shared: owned(zzop_metrics::DEFAULT_FSD_SHARED),
-                base_dirs: owned(zzop_metrics::DEFAULT_FSD_BASE_DIRS),
-            },
-        }
-    }
-}
+mod built_in;

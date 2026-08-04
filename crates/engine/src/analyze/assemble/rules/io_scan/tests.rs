@@ -44,6 +44,7 @@ fn pack() -> RulePackDef {
 fn provides() -> Vec<IoProvide> {
     vec![
         IoProvide {
+            response: None,
             kind: "http".to_string(),
             key: "GET /admin/users".to_string(),
             file: "src/routes.ts".to_string(),
@@ -52,6 +53,7 @@ fn provides() -> Vec<IoProvide> {
             body: None,
         },
         IoProvide {
+            response: None,
             kind: "http".to_string(),
             key: "GET /public/health".to_string(),
             file: "src/routes.ts".to_string(),

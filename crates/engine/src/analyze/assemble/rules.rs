@@ -20,6 +20,10 @@ use crate::analyze::record_native_timing;
 
 mod io_scan;
 
+// Re-exported (through `assemble` -> `crate::analyze`) for `envelope::ingest`'s profiled whole-tree
+// io-scan pass — Mode A shares the one pack-splitting profiled evaluator instead of growing a twin.
+pub(crate) use io_scan::eval_pack_timed as eval_io_scan_pack_timed;
+
 /// The whole-graph inputs the three graph analyses (`circular`, `unreachable`, `dead-candidates`) read,
 /// grouped so [`run`] stays readable — it took 21 positional parameters before this, and threading the
 /// overlay entry set as a 22nd would have made the signature itself the defect. Every field here is

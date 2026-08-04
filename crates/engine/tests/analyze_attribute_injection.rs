@@ -7,9 +7,9 @@
 //!   guard the call-graph BFS cannot see is completed by an injected `AUTH_GUARDED_ATTR` attribute, either
 //!   as an exact route `IoKey` or a `PathScope` prefix — either clears the route, composing with (not
 //!   replacing) the native BFS.
-//! - `zzop_rules_schema::usage` (`unreferenced-model-name` / `schema-churn`): the retrofitted Symbol-keyed
+//! - `zzop_rules_schema::usage` (`unreferenced-model-name` / `model-churn`): the retrofitted Symbol-keyed
 //!   `BOUND_MODEL_ATTR`/`MODEL_CHURN_ATTR` attributes — store-binding and migration-churn are environment
-//!   facts with no native recognizer any more, so `unreferenced-model-name` is suppressible and `schema-churn` is only
+//!   facts with no native recognizer any more, so `unreferenced-model-name` is suppressible and `model-churn` is only
 //!   reachable at all through this channel.
 //!
 //! Self-contained: helpers (`TempDir`, `config`, `projection`, `overlay`) are copied/adapted from
@@ -81,6 +81,7 @@ fn hits<'a>(out: &'a AnalyzeOutput, rule: &str) -> Vec<&'a zzop_core::Finding> {
 /// `projection()` helper uses.
 fn projection(path: &str, loc: u32) -> FileProjection {
     FileProjection {
+        calls: Vec::new(),
         class_shape_fragments: Vec::new(),
         path: path.to_string(),
         loc,
@@ -99,6 +100,7 @@ fn projection(path: &str, loc: u32) -> FileProjection {
         attributes: Vec::new(),
         loop_spans: Vec::new(),
         function_spans: Vec::new(),
+        test_spans: Vec::new(),
     }
 }
 
@@ -262,7 +264,7 @@ fn bound_model_symbol_injection_suppresses_dead_model() {
 }
 
 #[test]
-fn model_churn_symbol_injection_fires_schema_churn_critical() {
+fn model_churn_symbol_injection_fires_model_churn_critical() {
     let dir = TempDir::new("zzop-attr-injection-model-churn");
     dir.write(
         "prisma/schema.prisma",
@@ -285,7 +287,7 @@ fn model_churn_symbol_injection_fires_schema_churn_critical() {
         baseline.findings
     );
     assert_eq!(
-        hits(&baseline, "schema/schema-churn").len(),
+        hits(&baseline, "schema/model-churn").len(),
         0,
         "{:?}",
         baseline.findings
@@ -305,7 +307,7 @@ fn model_churn_symbol_injection_fires_schema_churn_critical() {
         }],
     )];
     let out = analyze_tree(dir.path(), &cfg);
-    let churn = hits(&out, "schema/schema-churn");
+    let churn = hits(&out, "schema/model-churn");
     assert_eq!(churn.len(), 1, "{:?}", out.findings);
     assert_eq!(churn[0].severity, zzop_core::Severity::Critical);
     assert_eq!(

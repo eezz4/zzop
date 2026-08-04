@@ -22,9 +22,12 @@ mod bucket_keys;
 mod disclosure;
 #[cfg(test)]
 mod tests;
+mod timings;
 
 pub(crate) use bucket_keys::{distinct_bucket_keys, KEY_BUCKETS};
 pub(crate) use disclosure::fold as fold_disclosure;
+pub(crate) use timings::shape_rule_timings;
+pub use timings::RunKnobs;
 
 /// Caller-facing filters for a findings list. Two constructors, one validation vocabulary:
 /// [`FindingFilters::new`] is WIRE-NEUTRAL (already-parsed values — what the CLI has after argv

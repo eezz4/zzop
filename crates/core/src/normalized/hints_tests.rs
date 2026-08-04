@@ -11,6 +11,7 @@ fn provide(kind: &str, key: &str, file: &str, line: u32) -> IoProvide {
         line,
         symbol: None,
         body: None,
+        response: None,
     }
 }
 

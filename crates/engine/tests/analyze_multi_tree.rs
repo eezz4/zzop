@@ -83,6 +83,7 @@ fn config(source_id: &str) -> EngineConfig {
 /// cares about.
 fn projection(path: &str, loc: u32) -> FileProjection {
     FileProjection {
+        calls: Vec::new(),
         class_shape_fragments: Vec::new(),
         path: path.to_string(),
         loc,
@@ -101,6 +102,7 @@ fn projection(path: &str, loc: u32) -> FileProjection {
         attributes: Vec::new(),
         loop_spans: Vec::new(),
         function_spans: Vec::new(),
+        test_spans: Vec::new(),
     }
 }
 
@@ -390,6 +392,7 @@ fn user_injected_route_resolves_a_dropped_non_literal_be_route_across_trees() {
     // wholesale — leaves it intact. `source: "be"` matches the tree so no intra-source mismatch is claimed.
     let mut injected = projection("injected/routes.json", 1);
     injected.io.provides.push(IoProvide {
+        response: None,
         body: None,
         kind: "http".to_string(),
         key: "GET /api/users".to_string(),

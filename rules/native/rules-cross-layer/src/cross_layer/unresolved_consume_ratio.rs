@@ -149,7 +149,7 @@ mod tests {
         // anchored at first unresolved consume sorted by (file, line)
         assert_eq!(out[0].file, "a.ts");
         assert_eq!(out[0].line, 5);
-        assert!(out[0].message.contains("disabled_rules"));
+        assert!(out[0].message.contains("disabledRules"));
         let data = out[0].data.as_ref().unwrap();
         assert_eq!(data["source"], "fe");
         assert_eq!(data["unresolvedCount"], 3);

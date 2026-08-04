@@ -6,6 +6,12 @@
 //! Usage: `cargo run --release -p zzop-engine --example dep_graph_export -- <root> [dot|mermaid]`
 //! Output is deterministic; files with no edges in either direction are omitted for readability.
 
+// This target PRINTS BY DESIGN — on BOTH streams — so the workspace `print_stdout`/`print_stderr`
+// lints are exempted here rather than being weakened for everyone. See root Cargo.toml
+// [workspace.lints.clippy]: both measured zero in every library `src/`, and Cargo's lint table
+// cannot be scoped to a single target.
+#![allow(clippy::print_stdout, clippy::print_stderr)]
+
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
@@ -23,6 +29,10 @@ fn main() {
     let dep = &out.ir.ir.dep;
 
     let mut edges: BTreeSet<(&str, &str)> = BTreeSet::new();
+    #[allow(
+        clippy::iter_over_hash_type,
+        reason = "iteration order cannot reach the output: every edge lands in the BTreeSet `edges`, which is what gets printed"
+    )]
     for (from, tos) in dep.iter() {
         for to in tos {
             edges.insert((from.as_str(), to.as_str()));

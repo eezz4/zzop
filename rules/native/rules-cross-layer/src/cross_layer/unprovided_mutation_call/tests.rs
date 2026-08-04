@@ -47,7 +47,7 @@ fn dangling_write_consume_is_flagged_anchored_at_the_consume() {
     assert!(out[0].message.contains("cross-layer/method-mismatch"));
     assert!(out[0].message.contains("cross-layer/version-skew"));
     assert!(out[0].message.contains("cross-layer/path-near-miss"));
-    assert!(out[0].message.contains("disabled_rules"));
+    assert!(out[0].message.contains("disabledRules"));
     assert!(!out[0].message.contains("provider-side blind spot"));
     let data = out[0].data.as_ref().unwrap();
     assert_eq!(data["method"], "POST");

@@ -22,6 +22,11 @@
 //! struct with no hashmap inside it" reasoning as [`ruleset_fingerprint`] below). Scoped to the
 //! TypeScript branch only — Prisma/lexical-fallback entries never consult `io`.
 //!
+//! The third ingredient is `FP_ENGINE`, a source hash of THIS crate, appended to every arm. The
+//! per-language `FP_*` constants each cover one parser crate; the code that turns a parse into a cached
+//! `FileIrSlice` or `Finding` lives here, and `crates/engine` cannot be a subject of its own
+//! dependents' closures. See [`parser_fingerprint`] and `build.rs` for the subject and its scoping.
+//!
 //! ## Scope: the path-identity gap `CacheKey::scope` closes
 //!
 //! A file's cache key must include its own path, not just content + fingerprints: a `FileIrSlice`'s
@@ -104,8 +109,10 @@ pub const CACHE_SCHEMA_VERSION: &str = CACHE_SCHEMA_VERSION_DERIVED;
 /// lexical fallback (`pipeline::compute_fresh_artifact`'s oversized branch, which short-circuits
 /// before any language-specific parse call). Both produce their result via this engine's own
 /// text-only heuristics (`pipeline::lexical_loc`), never a parser crate, so there is no
-/// `PARSER_FINGERPRINT` to borrow an id from. The VERSION half is `FP_LEXICAL`, a source hash of this
-/// crate's `pipeline` module — where those heuristics actually live.
+/// `PARSER_FINGERPRINT` to borrow an id from — and no version half either: those heuristics live in
+/// this crate, so `FP_ENGINE` already versions them from the shared suffix
+/// [`parser_fingerprint`] puts on every arm. (This arm carried its own `FP_LEXICAL`, a hash of
+/// `src/pipeline`, until that subject became a strict subset of `FP_ENGINE`'s.)
 const LEXICAL_FALLBACK_ID: &str = "lexical";
 
 /// `ruleset_fingerprint`'s native-rule-logic-version token for `pipeline::schema_findings`
@@ -128,8 +135,10 @@ fn schema_structural_fingerprint() -> String {
 /// `schema_structural_fingerprint` closes for native rule logic. Pack JSON already self-invalidates via
 /// `{pack:?}` above, but a pure-Rust interpreter semantics change (matcher evaluation, suppress-marker
 /// window, ...) alters findings for byte-identical source AND identical pack content — invisible to the
-/// key without this token. Restamp with the current `CARGO_PKG_VERSION` on any such change (2026-07-22
-/// version reform: cache-bust tokens are package-version stamps).
+/// key without this token. **Nothing to restamp by hand**: `FP_DSL` is a derived source hash
+/// (`crates/engine/build.rs`), so an interpreter change moves it on its own. The instruction that used
+/// to sit here — "restamp with the current `CARGO_PKG_VERSION`" — outlived the 2026-07-29 derivation
+/// reform and would have had a reader edit a value that is not written by hand.
 const DSL_INTERPRETER_FINGERPRINT: &str = FP_DSL;
 
 /// Opens the on-disk cache at `config.cache_dir`, if set. Never panics: an open failure (bad permissions,
@@ -153,14 +162,21 @@ pub(crate) fn open_cache(
     }
 }
 
-/// The parser-fingerprint half of a file's `CacheKey` (see module doc for the `size_cap`/`io` additions
-/// beyond the borrowed `PARSER_FINGERPRINT` constants).
+/// The parser-fingerprint half of a file's `CacheKey` (see module doc for the `engine`/`size_cap`/`io`
+/// additions beyond the borrowed `PARSER_FINGERPRINT` constants).
 ///
-/// The TypeScript branch's `+degrade-v2` suffix marks which degraded-file detection logic
-/// `pipeline::parse_typescript` uses to classify a file — a change to that logic changes which files this
-/// engine reports as `degraded` for byte-identical content, dispatched language, and `size_cap`, so it
-/// needs its own fingerprint ingredient scoped to the TypeScript branch (Prisma/lexical-fallback entries
-/// are unaffected and should not be invalidated by a TS-only logic change).
+/// **`+engine=` is a SHARED suffix on every arm, and it is what makes this key honest about who produced
+/// the cached bytes.** Each arm's `FP_*` covers only the parser crate that did the *parse*; everything
+/// downstream of it — `pipeline/io_projection.rs`, every gate in `pipeline/fresh.rs`, the message text
+/// `pipeline/findings.rs` authors into a cached `Finding`, `vocabulary/resolved.rs` — lives in THIS
+/// crate, which is structurally absent from those closures because it is the crate that depends on them.
+/// Without the suffix, an engine-only bugfix left every warm cache serving the old answer as fresh.
+/// `FP_ENGINE`'s subject and the reason it is this crate's own `src` rather than its dependency closure
+/// are in `build.rs`.
+///
+/// A hand-stamped `+degrade-v2` token used to sit on the TypeScript arm, versioning
+/// `pipeline::parse_typescript`'s degraded-file classification. That code is under `crates/engine/src`,
+/// so `FP_ENGINE` now derives it; the token is gone and nothing in this key is stamped by hand.
 ///
 /// `config.io` is folded in via `{:?}` rather than a `serde_json` serialization, same as
 /// [`ruleset_fingerprint`]'s use of `Debug` for `RulePackDef`: `IoOptions` has no `Serialize` impl, and
@@ -170,7 +186,7 @@ pub(crate) fn parser_fingerprint(language: Option<Language>, config: &EngineConf
     let base = match language {
         Some(Language::TypeScript) => {
             format!(
-                "{}+degrade-v2+io={:?}",
+                "{}+io={:?}",
                 derived(zzop_parser_typescript::PARSER_FINGERPRINT, FP_TYPESCRIPT),
                 config.io
             )
@@ -183,9 +199,9 @@ pub(crate) fn parser_fingerprint(language: Option<Language>, config: &EngineConf
         Some(Language::Go) => derived(zzop_parser_go::PARSER_FINGERPRINT, FP_GO),
         Some(Language::Sql) => derived(zzop_parser_sql::PARSER_FINGERPRINT, FP_SQL),
         Some(Language::CSharp) => derived(zzop_parser_csharp::PARSER_FINGERPRINT, FP_CSHARP),
-        None => derived(LEXICAL_FALLBACK_ID, FP_LEXICAL),
+        None => LEXICAL_FALLBACK_ID.to_string(),
     };
-    format!("{base}+size_cap={}", config.size_cap)
+    format!("{base}+engine={FP_ENGINE}+size_cap={}", config.size_cap)
 }
 
 /// The `scope` half of a file's `CacheKey` (see module doc, "Scope: the path-identity gap `CacheKey::scope`
@@ -279,5 +295,6 @@ impl CacheCounters {
     }
 }
 
+pub(crate) mod surface;
 #[cfg(test)]
 mod tests;

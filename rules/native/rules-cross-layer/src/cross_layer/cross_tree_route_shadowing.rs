@@ -190,7 +190,7 @@ mod tests {
         assert_eq!(out[0].file, "be/routes.rs");
         assert_eq!(out[0].line, 10);
         assert!(out[0].message.contains("shared first-match gateway"));
-        assert!(out[0].message.contains("disabled_rules"));
+        assert!(out[0].message.contains("disabledRules"));
         let data = out[0].data.as_ref().unwrap();
         assert_eq!(data["patternKey"], "GET /users/{}");
         assert_eq!(data["shadowedCount"], 1);

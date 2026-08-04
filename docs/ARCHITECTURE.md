@@ -109,10 +109,10 @@ because each tier stands behind a different, honestly-scoped set of structural f
 |---|---|---|---|
 | TypeScript / JavaScript | Full AST (native, swc) | `.ts, .tsx, .js, .jsx, .mjs, .cjs, .mts, .cts` | Symbols, imports/dep graph, calls, HTTP provides/consumes across Express/Hono/NestJS/Next.js/tRPC and more, router-mount fragments, middleware guard attributes, ORM `db-table` facts (Prisma client accessors and TypeORM `@Entity` classes / `@InjectRepository`/`getRepository` references), and ORM-LESS `db-table` consumes — the tables named inside a raw SQL statement string (`env.DB.prepare("SELECT … FROM ledger")`, `` sql`…` ``), read through `parser-sql` so the key matches the migration-side provide. Recognition needs the string to OPEN a statement head with UPPERCASE keywords: that is the only thing separating a query from English prose like "Select a date from the list", which is a structurally valid `SELECT`. Lower-case SQL is therefore not recognized (a silent under-report, never a claim of "no table access"), and an interpolated table name (`` `… FROM ${t}` ``) is dropped rather than guessed |
 | Python | Full AST (native, ruff) | `.py, .pyi` | **Python 3** syntax (ruff's parser linked as a Rust library — no Python runtime required; Python-2-only syntax degrades to the lexical fallback like any parse failure; the crate path (`parser-python-3`) names that supported major version, the same convention as `parser-java-21`). Symbols (`def`/`class`/methods, `__all__`-aware exports), imports/dep graph (incl. relative `from .x import y`), FastAPI route provides (decorators, `APIRouter` literal prefix, cross-file `include_router` composition), Django URLconf route provides (a top-level `urlpatterns` list's `url()`/`re_path()`/`path()` entries, with `include('<dotted.module>')` composed cross-file through the same router-mount pass FastAPI uses; the HTTP method lives in the view class, not the URLconf, so every such route is emitted verb-unknown rather than guessed — it drives the `cross-layer/unknown-verb-route` disclosure and never joins by exact method), `requests`/`httpx` literal egress consumes (module-level calls plus `Session`/`Client`/`AsyncClient` instances bound by assignment or a `with`/`async with` block), CALL SITES for the whole-repo call graph (so the handler-reachability rules run on Python routes — see the `mutating-route-no-auth` row in [rules/catalog.md](rules/catalog.md)), AUTH-GUARD evidence (FastAPI `Depends(...)` in a route decorator's `dependencies=`, a parameter default, an `Annotated[..., Depends(...)]` parameter, or an `Annotated` alias that is BOUND in the route's own file and resolved tree-wide; Django REST Framework `permission_classes` on a view class, joined to its URLconf route by view name. In every shape the injected callable's NAME must read as a guard — see the not-recognized list below), and ORM `db-table` facts — SQLModel/SQLAlchemy model classes (`table=True` or a `__tablename__`) and Django models (field-driven, through any abstract base) project `db-table` provides, and their query sites (`select(X)`/`session.get(X)`; `X.objects…`) project `db-table` consumes resolved cross-file against the model class |
-| Rust | Full AST (native, syn 2) | `.rs` | Symbols (top-level fn/struct/enum/trait/type-alias/const/static/union, plus `impl` block methods/assoc consts), imports/dep graph (`use`/`mod` items, `crate::`/`super::`/`self::` module-path resolution, plus same-workspace crate resolution via `Cargo.toml` manifest scan), axum router provides (builder chains, `.nest`/`.merge` cross-file composition), `reqwest` literal egress consumes, CALL SITES for the whole-repo call graph (resolved crate-locally AND across same-workspace crates, so the handler-reachability rules run on Rust routes), and AUTH-GUARD evidence in the shape Rust actually uses — a request EXTRACTOR in the handler signature (`async fn create(user: AuthUser, ..)`) is projected as a call-graph edge out of the handler, so the ordinary guard-name vocabulary matches it; an OPTIONAL extractor (`vocabulary.rustOptionalExtractorPrefixes`, default `maybe`/`optional`) never counts. Auth applied at the ROUTER level (a tower `.route_layer`/`.wrap`) is NOT visible — every run whose Rust routes are in range discloses that gap in its own `warnings` |
+| Rust | Full AST (native, syn 2) | `.rs` | Symbols (top-level fn/struct/enum/trait/type-alias/const/static/union, plus `impl` block methods/assoc consts), imports/dep graph (`use`/`mod` items, `crate::`/`super::`/`self::` module-path resolution, plus same-workspace crate resolution via `Cargo.toml` manifest scan), axum router provides (builder chains, `.nest`/`.merge` cross-file composition), `reqwest` literal egress consumes, raw-SQL `db-table` consumes (the tables named inside a SQL statement string, including inside a `sqlx::query!`-style macro's token stream, read through `parser-sql` so the key matches the migration-side provide; recognition needs the string to OPEN a statement head with UPPERCASE keywords, the same discriminator against English prose the TypeScript row describes, so lower-case SQL — `sqlx::query("select id from ledger")` — is not recognized, a silent under-report that can leave a migration-side `table:` provide reading as "declared, consumed by nobody", never a claim of "no table access"; a table name built by interpolation, `format!("… FROM {t}")`, is dropped rather than guessed), CALL SITES for the whole-repo call graph (resolved crate-locally AND across same-workspace crates, so the handler-reachability rules run on Rust routes), and AUTH-GUARD evidence in the shape Rust actually uses — a request EXTRACTOR in the handler signature (`async fn create(user: AuthUser, ..)`) is projected as a call-graph edge out of the handler, so the ordinary guard-name vocabulary matches it; an OPTIONAL extractor (`vocabulary.rustOptionalExtractorPrefixes`, default `maybe`/`optional`) never counts. Auth applied at the ROUTER level (a tower `.route_layer`/`.wrap`) is NOT visible — every run whose Rust routes are in range discloses that gap in its own `warnings` |
 | Go | Full CST (native, tree-sitter-go 0.25) | `.go` | Symbols (top-level func/method/type/const/var, grouped declarations expanded one symbol per spec-name), imports/dep graph (`import` declarations, `go.mod` `module` directive resolution — an import path resolves to its whole PACKAGE directory, so every file directly in that package gets a real dep-graph edge, not just one guessed file), gin and `net/http` router provides (route groups, cross-file mount composition — a router received as a function parameter is mounted from a call site in another file, including a multi-argument call resolved when exactly one argument is a mountable receiver — Go 1.22 `"METHOD /path"` mux pattern syntax), `net/http` literal egress consumes (package free functions plus the same convenience methods on a bound `http.Client` value, including `fmt.Sprintf`-reassembled path literals), and GORM ORM `db-table` facts (a `gorm.Model`-embedding or `gorm:`-tagged struct projects a `db-table` provide named by `TableName()` or GORM's default; a model composite-literal in a query method projects a `db-table` consume resolved cross-file against the struct); an ERROR CST region is never guessed past — extraction stops at the boundary of what actually parsed |
-| Java | Full CST (native, tree-sitter-java 0.23.5) | `.java` | Symbols (top-level + nested class/interface/enum/record/annotation-type declarations, methods/constructors as dot-qualified `Outer.Inner.method` with body spans, `static final`/interface-constant fields), imports/dep graph (`import` declarations — plain/glob/static — resolved via an in-tree `(package, type)` index; a glob import fans out to every file in the target package, the same package-directory-wide fanout Go's own resolver uses), Spring MVC HTTP route provides (`@RestController`/`@Controller`, class + method-level `@RequestMapping`/`@GetMapping`/etc., cross-file `extends`-chain and constant-prefix resolution via the whole-corpus project pass) — Java 21 grammar coverage (records/sealed classes/pattern-switch parse as ordinary CST, though sealed-permits and pattern-switch carry no dedicated symbol extraction of their own in v1); the crate path (`parser-java-21`) names the pinned grammar version, the representative Java release this frontend targets, not a hard floor on the source dialect it can parse |
-| C# | Full CST (native, tree-sitter-c-sharp 0.23.5) | `.cs` | Symbols (top-level + nested class/interface/struct/enum/record/delegate as dot-qualified `Outer.Inner` names, methods/constructors/properties with body spans, `const`/`static readonly` fields; `public`-modifier exports), imports/dep graph (`using` directives incl. `static`/alias/`global`, resolved by a namespace→files index — a `using Foo.Bar;` fans out to every file declaring namespace `Foo.Bar`, the same package-directory-fanout honesty Go/Java use), ASP.NET Core HTTP route provides (`[ApiController]`/`[Controller]` attribute controllers with class `[Route("api/[controller]")]` + method `[HttpGet]`/`[HttpPost("{id}")]`/… composition and the `[controller]` token, plus same-file Minimal-API `app.MapGet`/`MapGroup` literal routes), `HttpClient` literal HTTP egress consumes (`GetAsync`/`PostAsync`/`GetFromJsonAsync`/… with `$"…"` interpolation reassembly) |
+| Java | Full CST (native, tree-sitter-java 0.23.5) | `.java` | Symbols (top-level + nested class/interface/enum/record/annotation-type declarations, methods/constructors as dot-qualified `Outer.Inner.method` with body spans, `static final`/interface-constant fields), imports/dep graph (`import` declarations — plain/glob/static — resolved via an in-tree `(package, type)` index; a glob import fans out to every file in the target package, the same package-directory-wide fanout Go's own resolver uses), Spring MVC HTTP route provides (`@RestController`/`@Controller`, class + method-level `@RequestMapping`/`@GetMapping`/etc., cross-file `extends`-chain and constant-prefix resolution via the whole-corpus project pass), CALL SITES for the whole-repo call graph (attributed to the enclosing method/constructor body, riding the same `SymbolGraph`/BFS the TypeScript and Python rows do — so the handler-reachability rules run on Spring MVC routes), AUTH-GUARD evidence (Spring Security method-security annotations — `@PreAuthorize`/`@PostAuthorize`/`@Secured`/`@RolesAllowed`, class-level guarding every route the controller declares — feeding the same framework-neutral `(file, line)` exemption set NestJS `@UseGuards` does, since an annotation application is not a call edge the BFS could see), `RestTemplate`/`WebClient` literal HTTP egress consumes (client-specific method names + `.get().uri("…")` chains; `exchange`/`.method(...)` only with a literal `HttpMethod.X`; a variable/concatenated URL stays honestly unresolved; Feign and `java.net.http.HttpClient` are not recognized — disclosed), and JPA ORM `db-table` provides (`@Entity` classes: `@Table(name = "…")` literal verbatim, else Spring Boot's snake-case class-name default; a non-literal `@Table` name skips the class rather than guessing) — Java 21 grammar coverage (records/sealed classes/pattern-switch parse as ordinary CST, though sealed-permits and pattern-switch carry no dedicated symbol extraction of their own in v1); the crate path (`parser-java-21`) names the pinned grammar version, the representative Java release this frontend targets, not a hard floor on the source dialect it can parse |
+| C# | Full CST (native, tree-sitter-c-sharp 0.23.5) | `.cs` | Symbols (top-level + nested class/interface/struct/enum/record/delegate as dot-qualified `Outer.Inner` names, methods/constructors/properties with body spans, `const`/`static readonly` fields; `public`-modifier exports), imports/dep graph (`using` directives incl. `static`/alias/`global`, resolved by a namespace→files index — a `using Foo.Bar;` fans out to every file declaring namespace `Foo.Bar`, the same package-directory-fanout honesty Go/Java use), ASP.NET Core HTTP route provides (`[ApiController]`/`[Controller]` attribute controllers with class `[Route("api/[controller]")]` + method `[HttpGet]`/`[HttpPost("{id}")]`/… composition and the `[controller]` token, plus same-file Minimal-API `app.MapGet`/`MapGroup` literal routes), `HttpClient` literal HTTP egress consumes (`GetAsync`/`PostAsync`/`GetFromJsonAsync`/… with `$"…"` interpolation reassembly), and EF Core ORM `db-table` provides (`DbSet<T>` properties named by EF's property-name convention + `[Table("…")]` attribute renames, which override the convention; a non-literal `[Table]` argument skips the class rather than guessing) |
 | Prisma | Lexical schema (native) | `.prisma` | Schema models/fields — structural, plus usage-aware schema rules; each model also projects a `db-table` io provide (accessor-cased `table:` key, joining the TS client-side `db-table` consumes) |
 | SQL (DDL) | Lexical DDL (native) | `.sql` | `CREATE TABLE` statements → `db-table` io provides only (`table:<name>`, quote-stripped, schema qualifier dropped, accessor-cased to match the Prisma/TS db-table key — same lower-first transform; persistent tables only — a session-local `CREATE TEMP`/`TEMPORARY TABLE` mints no provide, since no other layer can join a connection-scoped name, while `UNLOGGED` — crash-unsafe but cross-connection — still provides) — migration files (Flyway/Liquibase-style) light up the db-table channel for MyBatis/JDBC-style stacks; no symbols/imports, and a `.sql` FILE never projects a consume. The crate does own the channel's consume-side reader (the tables one SQL statement string names), but it is called by another parser holding such a string — see the TypeScript row — so both keys come out of one transform and cannot drift |
 | Everything else | External adapter | any | First-class via the Normalized AST envelope protocol — Mode A (`analyzeEnvelope`, stands in for a whole tree) or Mode B (overlays facts onto a natively-parsed tree); see [NORMALIZED_AST.md](NORMALIZED_AST.md) |
@@ -146,11 +146,33 @@ covers the remaining shapes today — see
 which remains the escape hatch for exactly what native v1 skips.
 
 Rust's v1 scope is similarly deliberate: Rocket/warp/actix-web decorator- or macro-attribute-style route
-registration, axum `Extension`/`State`-based auth guards, and Diesel/SQLx ORM table facts are roadmap —
-only axum's builder-chain route registration and `reqwest` literal egress are extracted natively today.
+registration, axum `Extension`/`State`-based auth guards, and the ORM SCHEMA DSLs (Diesel's `table!`,
+SeaORM's `DeriveEntityModel`) are roadmap — axum's builder-chain route registration, `reqwest` literal
+egress, and raw-SQL `db-table` touches are what is extracted natively today. That last one is
+shape-keyed rather than crate-keyed: an UPPERCASE-headed SQL statement STRING in a `.rs` file names its
+tables wherever it sits, so sqlx (`query!`/`query_as!` included), tokio-postgres, rusqlite,
+`diesel::sql_query` and `sea_orm::Statement::from_string` all land through one recognizer — while
+lower-case SQL (`query("select id from ledger")`) falls outside the shared statement gate and is not
+recognized at all, and a table named only by interpolation (`format!("SELECT * FROM {t}")`) is dropped
+rather than guessed.
 `macro_rules!`-defined items and identifiers used only inside a macro invocation's argument tokens are
-also out of scope (syn parses macro arguments as an opaque token stream, not a structured tree) — see
-`zzop_parser_rust`'s own crate doc for the exact v1 gaps.
+also out of scope for the SYMBOL and call-graph layers (syn parses macro arguments as an opaque token
+stream, not a structured tree; the raw-SQL adapter reads string literals out of that stream, which is
+all it needs) — see `zzop_parser_rust`'s own crate doc for the exact v1 gaps.
+
+Rust also carries one exclusion no other language has yet, and it changes what a run REPORTS rather than
+what it extracts: a finding whose line sits inside a `#[cfg(test)]`/`#[test]`-gated item — a `mod`, `fn`,
+`impl` or trait member, or a whole file under an inner `#![cfg(test)]` — is dropped, and the raw-SQL and
+egress adapters skip those regions rather than extract from them. Every other language this workspace
+parses names its tests in the PATH (`foo.test.ts`, `tests/test_foo.py`), which the shared path-shaped
+exclusion already sees; Rust's dominant convention puts unit tests INSIDE the shipping file, where no
+path regex can reach them. The exception is the credential-at-rest rule family, which opts out and keeps
+judging test regions — a committed key is leaked whether or not the compiler keeps it. Both halves are
+disclosed per rule in [rules/catalog.md](rules/catalog.md). The axis is per-file and attribute-driven,
+so a file whose test-ness is declared only by its parent (`#[cfg(test)] mod helpers;`) carries no
+attribute of its own and is not covered by it; the path axis still owns "the whole file is a test file".
+External adapters can project the same spans (`testSpans` in [NORMALIZED_AST.md](NORMALIZED_AST.md)), so
+the exclusion is Rust-only by who ships it today, not by construction.
 
 Go's v1 scope is deliberate too: echo/chi/fiber decorator-free route registration idioms,
 `client.Do(req)` request dispatch (where the URL rides an `*http.Request` value built elsewhere), and
@@ -178,20 +200,32 @@ crate never guesses past an `ERROR`/`MISSING` region: a single malformed stateme
 subtree, extracting from every other still-valid region of the same file — see `zzop_parser_go`'s own
 crate doc for the exact v1 gaps and the never-guess discipline.
 
-Java's v1 scope is deliberate too, same shape as Python's/Rust's/Go's own: this engine has no Java-side
-HTTP-egress extractor yet (`RestTemplate`/`WebClient` consumes are not extracted — see
-`framework_silence`'s `org.springframework.web.client` disclosure vocab, the escape hatch for exactly this
-gap), functional/lambda `RouterFunction` route registration and non-Spring frameworks (JAX-RS, Micronaut,
-Quarkus) are roadmap, and record-component accessors/annotation-type elements are not projected as method
-symbols (structurally implicit, never a written declaration — see `zzop_parser_java_21`'s own crate doc
-for the exact v1 gaps). `tree-sitter-java` is a full CST (not merely lexical), and — like `zzop_parser_go`
-— never guesses past an `ERROR`/`MISSING` region.
+Java's v1 scope is deliberate too, same shape as Python's/Rust's/Go's own: `RestTemplate`/`WebClient`
+literal egress IS extracted (client-specific method names like `getForObject`, `exchange` with a literal
+`HttpMethod.X`, and `.get().uri("…")` chains — `RestTemplate.put`/`.delete` are deliberately not
+recognized, since those generic names would false-key `Map.put` and friends; a variable/concatenated URL
+stays an unresolved consume rather than a guess), but Feign `@FeignClient` interfaces and
+`java.net.http.HttpClient` (URL not visible at the `send` call site) remain unrecognized — the
+`framework_silence` `org.springframework.web.client` tripwire now signals an unrecognized idiom rather
+than guaranteed blindness. JPA `@Entity`/`@Table(name = "…")` classes provide `db-table` facts (a
+non-literal `@Table` name skips the class; a missing one derives Spring Boot's snake-case default), with
+no query-site consume arm yet. Functional/lambda `RouterFunction` route registration and non-Spring
+frameworks (JAX-RS, Micronaut, Quarkus) are roadmap, and record-component accessors/annotation-type
+elements are not projected as method symbols (structurally implicit, never a written declaration — see
+`zzop_parser_java_21`'s own crate doc for the exact gaps). `tree-sitter-java` is a full CST (not merely
+lexical), and — like `zzop_parser_go` — never guesses past an `ERROR`/`MISSING` region.
 
 C#'s v1 scope is deliberate too, same shape as the others': attribute-controller + same-file Minimal-API
-route provides and `HttpClient` literal egress are extracted natively today; cross-file base-controller
-`[Route]` inheritance, cross-statement Minimal-API group variables (`var g = app.MapGroup("/api");
-g.MapGet(...)`), `HttpClient.SendAsync(HttpRequestMessage)`, conventional routing (`MapControllerRoute`),
-and SDK-injected implicit/`global` usings beyond what the source itself declares are roadmap. Namespace
+route provides, `HttpClient` literal egress, and EF Core `db-table` provides (`DbSet<T>` properties —
+table named after the property, EF's convention — and `[Table("…")]` attributes, which override the
+convention; a non-literal `[Table]` argument skips the class, and a same-file `[Table]` suppresses the
+DbSet convention name, while a CROSS-file rename is a documented per-file limit — the stale
+convention-named provide simply never joins) are extracted natively today; fluent
+`modelBuilder.Entity<T>().ToTable(...)` mapping, query-site `db-table` consumes, cross-file
+base-controller `[Route]` inheritance, cross-statement Minimal-API group variables (`var g =
+app.MapGroup("/api"); g.MapGet(...)`), `HttpClient.SendAsync(HttpRequestMessage)`, conventional routing
+(`MapControllerRoute`), and SDK-injected implicit/`global` usings beyond what the source itself declares
+are roadmap. Namespace
 resolution is namespace-level: a `using` that targets a TYPE (via `using static`/alias) resolves to
 nothing — an accepted under-approximation with no by-type index, the same honesty argument the other
 fanout resolvers make. See `zzop_parser_csharp`'s own crate doc for the exact v1 gaps. `tree-sitter-c-sharp`
@@ -202,13 +236,21 @@ begins with a stable technique+grammar-version stem — `zzop-parser-python-3`'s
 `zzop-parser-prisma`'s `prisma/…`, `zzop-parser-rust`'s `rust/syn-2/…`, `zzop-parser-go`'s
 `go/tree-sitter-go-0.25.0/…`, `zzop-parser-java-21`'s `java21/tree-sitter-java-0.23.5/…`,
 `zzop-parser-csharp`'s `csharp/tree-sitter-c-sharp-0.23.5/…`, `zzop-parser-sql`'s `sql/…` — followed by a
-`vN` and a chain of `+feature-vN` tags that grows with each projection-changing extraction bump (so a
-literal copy here would go stale on the next bump — deliberately elided). The TypeScript, Prisma, Python,
-Java, Rust, Go, C#, and SQL fingerprints are each carried in full by `zzop_facade::version_string()`,
-which reaches a user surface as the `tool` field of `zzop manifest` and as what `zzop version --verbose`
-(and `zzop-mcp version --verbose`, byte-identical) prints — so a given build's actual parser identity is
-machine-checkable there, not asserted by this table. Plain `zzop version`/`--version` prints the bare
-release number only, and carries no fingerprints.
+`vN` and a chain of `+feature-vN` tags recording projection-shape generations (so a literal copy here
+would go stale — deliberately elided). Each fingerprint is an **ID, not a version**: it names the pinned
+frontend and the projection generation, and it does not have to move when extraction code changes,
+because `crates/engine/build.rs` hashes each parser crate's whole dependency closure into the cache key
+beside it. Correctness no longer depends on remembering to bump the string.
+
+The consequence for reading a fingerprint off a surface: `zzop_facade::version_string()` carries each
+of these as `zzop-parser-<x>=<id>/<hash>` — the frontend ID joined to that same derived closure hash
+(`zzop_engine::parser_fingerprints()`) — plus a `zzop-engine=<hash>` token for the engine's own source
+(the one producer of cached bytes that sits in no parser's closure), and reaches a user as the `tool`
+field of `zzop manifest`/`zzop facts`, `zzop graph`'s `%% tool:` line, and what `zzop version --verbose`
+(and `zzop-mcp version --verbose`, byte-identical) prints. So the string answers **which build analyzed
+your files**, not merely which frontend read them: two builds whose extraction differs print two
+different strings, because the stamp moves with the exact hashes that would invalidate a warm cache.
+Plain `zzop version`/`--version` prints the bare release number only, and carries no fingerprints.
 
 A normal-sized file whose extension has no native parser is not counted in `degraded` (that's a
 size-cap/parse-failure fact, not a coverage one) — instead it self-reports as a per-extension entry in

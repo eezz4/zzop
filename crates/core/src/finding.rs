@@ -25,7 +25,11 @@ pub struct RuleExplain {
 }
 
 /// The canonical disable-hint fragment every native finding message embeds: config-file dialect first
-/// (`rules: { "<id>": "off" }`), the embedder-facing field name in the parenthetical (`disabled_rules`) —
+/// (`rules: { "<id>": "off" }`), the embedder-facing field name in the parenthetical (`disabledRules`,
+/// the WIRE spelling — every embedder request surface serializes with
+/// `#[serde(rename_all = "camelCase")]` and deliberately without `deny_unknown_fields`, so the
+/// snake_case `disabled_rules` this hint printed until 2026-08-02 was a spelling the wire silently
+/// ignores: a user who typed the hint verbatim into a JSON request got a no-op, not an error) —
 /// one shared builder so this fragment cannot drift per call site the way it did before this function
 /// existed. A 2026-07-10 audit swept 31 native message sites that had each hand-written a slightly
 /// different rendering of this same fragment, plus one plain-string (non-`format!`) site that shipped a
@@ -36,7 +40,7 @@ pub struct RuleExplain {
 /// `native_rule_files_that_build_findings_mention_disabled_rules` test, for the "how to exclude" leg every
 /// native finding message must carry.
 pub fn disable_hint(id: &str) -> String {
-    format!("Disable via config `rules: {{ \"{id}\": \"off\" }}` (embedders: `disabled_rules`)")
+    format!("Disable via config `rules: {{ \"{id}\": \"off\" }}` (embedders: `disabledRules`)")
 }
 
 #[cfg(test)]
@@ -67,11 +71,18 @@ mod disable_hint_tests {
     }
 
     #[test]
-    fn renders_the_embedder_field_name() {
+    fn renders_the_wire_spelled_embedder_field_name() {
         let hint = disable_hint("example-rule");
         assert!(
-            hint.contains("disabled_rules"),
-            "disable_hint must name the disabled_rules embedder field: {hint:?}"
+            hint.contains("disabledRules"),
+            "disable_hint must name the disabledRules embedder field in its WIRE (camelCase) spelling — \
+             the request surfaces are `#[serde(rename_all = \"camelCase\")]` without \
+             `deny_unknown_fields`, so a snake_case `disabled_rules` in a JSON request is a silent \
+             no-op: {hint:?}"
+        );
+        assert!(
+            !hint.contains("disabled_rules"),
+            "disable_hint must not print the snake_case spelling the wire silently ignores: {hint:?}"
         );
     }
 
@@ -82,7 +93,7 @@ mod disable_hint_tests {
         // intentional diff here too.
         assert_eq!(
             disable_hint("example-rule"),
-            "Disable via config `rules: { \"example-rule\": \"off\" }` (embedders: `disabled_rules`)"
+            "Disable via config `rules: { \"example-rule\": \"off\" }` (embedders: `disabledRules`)"
         );
     }
 }

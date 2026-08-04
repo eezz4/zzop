@@ -3,6 +3,10 @@
 //! Every pin reads both sides from what actually ships (a hand-copied list in this file would just be a
 //! third mirror to drift). Two boundaries so far: pack↔pack (a DSL rule cannot reference another pack's
 //! pattern) and crate↔pack (a JSON pack cannot reference a Rust constant).
+//!
+//! A third pack↔pack pin lives in the sibling `path_anchor_pin.rs` rather than here — the path-anchor
+//! idiom `(?:^|/)` shared across `sql`/`http`, whose structural analyzer is large enough that folding it
+//! into this file would bury it.
 
 use std::collections::BTreeSet;
 
@@ -61,7 +65,10 @@ fn patterns_labeled(packs: &[RulePackDef], label: &str) -> Vec<(String, String)>
             let patterns: Vec<&LabeledPattern> = match &rule.matcher {
                 Matcher::LineScan(m) => m.any.iter().flatten().collect(),
                 Matcher::MethodScan(m) => m.patterns.iter().collect(),
-                Matcher::SymbolScan(_) | Matcher::IoScan(_) => Vec::new(),
+                Matcher::SymbolScan(_)
+                | Matcher::IoScan(_)
+                | Matcher::CallScan(_)
+                | Matcher::LiteralScan(_) => Vec::new(),
             };
             for lp in patterns {
                 if lp.label == label {
@@ -323,4 +330,24 @@ fn every_respelling_of_the_write_verb_set_equals_the_rule_crates_own() {
              `egress/body_shape.rs` already does."
         );
     }
+}
+
+/// crate↔crate pin: `zzop_core::recognizer::channel::AUTH_EVIDENCE` quotes the `auth-guarded`
+/// attribute key as a literal, because `zzop-core` sits BELOW the rules crates and cannot name
+/// `zzop_rules_http::mutating_route_no_auth::AUTH_GUARDED_ATTR` as a symbol. This test crate sits
+/// above both, so the relationship is asserted here: the channel spelling is `evidence.` + the
+/// attribute the evidence is ultimately minted into. Renaming the attribute without re-spelling the
+/// channel would leave the capability disclosure naming an attribute that no longer exists.
+#[test]
+fn auth_evidence_channel_spells_the_auth_guarded_attribute() {
+    assert_eq!(
+        zzop_core::recognizer::channel::AUTH_EVIDENCE,
+        format!(
+            "evidence.{}",
+            zzop_rules_http::mutating_route_no_auth::AUTH_GUARDED_ATTR
+        ),
+        "channel::AUTH_EVIDENCE drifted from AUTH_GUARDED_ATTR — the channel's doc promises it is \
+         spelled after the attribute the evidence mints; keep the two in lockstep or record the \
+         deliberate divergence here (T3) with its reason."
+    );
 }

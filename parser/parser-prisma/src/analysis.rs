@@ -46,6 +46,7 @@ pub fn build_common_ir(source_id: &str, files: &[(String, String)]) -> zzop_core
             });
             for key in db_table_provide_keys(m) {
                 provides.push(zzop_core::IoProvide {
+                    response: None,
                     kind: "db-table".into(),
                     key,
                     file: rel.clone(),

@@ -154,7 +154,7 @@ mod tests {
         assert_eq!(out[0].line, 7);
         assert!(out[0].message.contains("GET /users/active/profile"));
         assert!(out[0].message.contains("Api.java:14"));
-        assert!(out[0].message.contains("disabled_rules"));
+        assert!(out[0].message.contains("disabledRules"));
     }
 
     #[test]

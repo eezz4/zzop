@@ -35,6 +35,7 @@ pub(super) fn merge_python_dep_edges(
     dep: &mut DepGraph,
     ts_import_pairs: &[(String, ImportMap)],
     all_paths: &HashSet<String>,
+    python_package_roots: &[&str],
 ) {
     for (rel, imports) in ts_import_pairs {
         if !is_python_source_ext(rel) {
@@ -44,9 +45,13 @@ pub(super) fn merge_python_dep_edges(
         let mut seen: HashSet<String> = entry.iter().cloned().collect();
         for binding in imports.values() {
             let original = (binding.original != "*").then_some(binding.original.as_str());
-            if let Some(target) =
-                resolve_python_import(&binding.specifier, original, rel, all_paths)
-            {
+            if let Some(target) = resolve_python_import(
+                &binding.specifier,
+                original,
+                rel,
+                all_paths,
+                python_package_roots,
+            ) {
                 if seen.insert(target.clone()) {
                     entry.push(target);
                 }
@@ -128,6 +133,10 @@ pub(super) fn merge_go_dep_edges(
     // Package directory -> its own non-test `.go` files (sorted, deterministic) — computed once, not per
     // import, since every resolved import needs the same lookup.
     let mut dir_files: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    #[allow(
+        clippy::iter_over_hash_type,
+        reason = "iteration order cannot reach the result: every path lands in `dir_files`, a BTreeMap whose per-directory Vec is sorted immediately below"
+    )]
     for path in all_paths {
         if !is_go_source_ext(path) || is_go_test_file(path) {
             continue;

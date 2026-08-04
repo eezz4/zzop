@@ -12,6 +12,7 @@ fn unconsumed_provide(
     TaggedProvide {
         source: source.to_string(),
         provide: IoProvide {
+            response: None,
             body: None,
             kind: kind.to_string(),
             key: key.to_string(),
@@ -83,7 +84,7 @@ fn dead_write_endpoint_is_flagged_with_method_and_source() {
     assert!(out[0].message.contains("DELETE /api/users/{}"));
     assert!(out[0].message.contains("standing attack surface"));
     assert!(out[0].message.contains("cross-layer/unconsumed-endpoint"));
-    assert!(out[0].message.contains("disabled_rules"));
+    assert!(out[0].message.contains("disabledRules"));
     assert!(!out[0].message.contains("near-miss"));
     let data = out[0].data.as_ref().unwrap();
     assert_eq!(data["method"], "DELETE");

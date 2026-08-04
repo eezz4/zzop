@@ -25,9 +25,14 @@ fn hammer(rel: &str, text: &str) {
     let _ = rs::parse_imports(text);
     let _ = rs::parse_calls(rel, text);
     let _ = rs::parse_local_identifier_refs(text);
+    let _ = rs::extract_loop_spans(rel, text);
+    let _ = rs::extract_call_sites(rel, text);
+    let _ = rs::extract_string_literals(rel, text);
     let _ = rs::rust_import_candidates(text, rel);
     let _ = rs::extract_axum_router_fragments(rel, text);
     let _ = rs::extract_rust_http_consumes(rel, text);
+    let _ = rs::extract_rust_raw_sql_db_table_consumes(rel, text);
+    let _ = rs::extract_test_spans(rel, text);
 
     let built_in = rs::RustGuardVocab {
         optional_extractor_prefixes: rs::RUST_OPTIONAL_EXTRACTOR_PREFIXES,

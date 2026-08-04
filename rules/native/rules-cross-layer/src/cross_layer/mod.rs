@@ -74,6 +74,12 @@
 //!   body literal (`body-shape-v1`'s `ConsumeBodyShape`) disagrees with the BE handler's resolved DTO
 //!   (`ProvideBodyShape`): a missing required field, an undeclared extra key (only when the DTO's field
 //!   list is complete), or a missing `@Body('subKey')` wrapper (`cross-layer/body-field-drift`, warning).
+//! - [`sensitive_response_field`]: a route's DECLARED response shape (`response-shape-v1`,
+//!   `IoProvide::response` resolved at assemble time) contains a sensitive-NAMED field (`password`/
+//!   `token`/`secret`/hash-family) — provide-side only, so it fires with zero edges; an `http` edge
+//!   landing on the route escalates it to critical as witnessed-live response surface
+//!   (`cross-layer/sensitive-response-field`, warning/critical — see the module doc for the
+//!   deliberate substrate boundary vs the DSL `security` pack's literal-VALUE secret rules).
 //! - [`retrying_write_no_idempotency`]: a retry-configured frontend WRITE (`IoConsume::retry_configured`)
 //!   resolving to a provider route with no witnessed `idempotency-guarded` attribute — the two-sided check
 //!   that justifies critical (`cross-layer/retrying-write-no-idempotency`, emitted at critical).
@@ -136,6 +142,7 @@ pub mod prefix_drift;
 pub mod retrying_write_no_idempotency;
 pub mod route_near_miss;
 pub mod sdk_import_no_visible_consume;
+pub mod sensitive_response_field;
 pub mod shared_db_table;
 pub mod unconsumed_endpoint;
 pub mod unconsumed_mutation_endpoint;
@@ -172,6 +179,9 @@ pub use route_near_miss::{
     route_near_miss_findings, route_near_miss_results, NearMissTargetRef, RouteNearMissOutput,
 };
 pub use sdk_import_no_visible_consume::sdk_import_no_visible_consume_findings;
+pub use sensitive_response_field::{
+    sensitive_response_field_findings, ResponseProvideSite, SensitiveResponseVocab,
+};
 pub use shared_db_table::shared_db_table_findings;
 pub use unconsumed_endpoint::unconsumed_endpoint_findings;
 pub use unconsumed_mutation_endpoint::unconsumed_mutation_endpoint_findings;

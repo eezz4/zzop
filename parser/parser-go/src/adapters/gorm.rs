@@ -166,6 +166,7 @@ fn collect_model_provides(
             .cloned()
             .unwrap_or_else(|| naming::default_table_name(struct_name));
         out.push(IoProvide {
+            response: None,
             kind: "db-table".to_string(),
             key: format!("table:{}", zzop_core::db_table_channel_casing(&table)),
             file: rel.to_string(),

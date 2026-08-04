@@ -221,10 +221,10 @@ defaults — a house extension, your own guard names, a gateway prefix, a rule t
 |---|---|
 | TypeScript / JavaScript (`.ts, .tsx, .js, .jsx, .mjs, .cjs, .mts, .cts`) | Native, full AST (swc): symbols, imports, calls, HTTP routes/egress, `db-table` consumes from ORM accessors AND from raw SQL statement strings |
 | Python (`.py, .pyi`) | Native, full AST (ruff, Python 3 — Python-2-only syntax falls back to lexical): symbols, imports, FastAPI route provides, Django URLconf route provides (`urlpatterns` `url()`/`re_path()`/`path()` entries with cross-file `include('<dotted.module>')` mounts, emitted verb-unknown since the method lives in the view class), `requests`/`httpx` consumes (module-level calls plus `Session`/`Client`/`AsyncClient` instances), SQLModel/SQLAlchemy + Django ORM `db-table` provides and their query-site consumes — v1 scope |
-| Rust (`.rs`) | Native, full AST (syn 2): symbols, imports/`mod` tree (incl. same-workspace crate resolution), axum route provides, `reqwest` consumes, call sites for the whole-repo call graph, extractor-based auth-guard evidence — v1 scope |
+| Rust (`.rs`) | Native, full AST (syn 2): symbols, imports/`mod` tree (incl. same-workspace crate resolution), axum route provides, `reqwest` consumes, raw-SQL `db-table` consumes (sqlx/tokio-postgres/rusqlite/…), call sites for the whole-repo call graph, extractor-based auth-guard evidence — v1 scope |
 | Go (`.go`) | Native, full CST (tree-sitter-go 0.25): symbols, imports/dep graph (`go.mod` module resolution, package-directory-wide edges), gin + `net/http` route provides (cross-file mount composition — a function-parameter router mounted from another file's call site — incl. Go 1.22 `"METHOD /path"` mux syntax), `net/http` literal egress consumes (package free functions plus bound `http.Client` values) — v1 scope |
-| Java (`.java`) | Native, full CST (tree-sitter-java 0.23.5, Java 21 grammar): symbols (incl. nested types, dot-qualified method names, real visibility), imports/dep graph (`(package, type)`-indexed resolution, glob package-directory-wide edges), Spring MVC route provides (cross-file `extends`-chain + constant-prefix resolution) — v1 scope |
-| C# (`.cs`) | Native, full CST (tree-sitter-c-sharp 0.23.5): symbols (incl. nested types, dot-qualified method names, `public` visibility), imports/dep graph (namespace→files index, `using` package-directory-wide edges), ASP.NET Core route provides (attribute controllers with `[Route("api/[controller]")]` + `[HttpGet]`/… composition, plus same-file Minimal-API `app.MapGet`/`MapGroup`), `HttpClient` literal egress consumes — v1 scope |
+| Java (`.java`) | Native, full CST (tree-sitter-java 0.23.5, Java 21 grammar): symbols (incl. nested types, dot-qualified method names, real visibility), imports/dep graph (`(package, type)`-indexed resolution, glob package-directory-wide edges), Spring MVC route provides (cross-file `extends`-chain + constant-prefix resolution), `RestTemplate`/`WebClient` literal egress consumes (Feign and `java.net.http` not recognized; `RestTemplate.put`/`.delete` deliberately not recognized, generic names that would false-key `Map.put` — disclosed), JPA `@Entity`/`@Table` `db-table` provides — v1 scope |
+| C# (`.cs`) | Native, full CST (tree-sitter-c-sharp 0.23.5): symbols (incl. nested types, dot-qualified method names, `public` visibility), imports/dep graph (namespace→files index, `using` package-directory-wide edges), ASP.NET Core route provides (attribute controllers with `[Route("api/[controller]")]` + `[HttpGet]`/… composition, plus same-file Minimal-API `app.MapGet`/`MapGroup`), `HttpClient` literal egress consumes, EF Core `DbSet<T>`/`[Table]` `db-table` provides — v1 scope |
 | Prisma schema (`.prisma`) | Native, lexical schema: models/fields (structural + usage-aware schema rules) + `db-table` provides joining the client-side consumes |
 | SQL (`.sql`) | Native, lexical: `CREATE TABLE` → `db-table` provides (migration files light up the db-table channel for MyBatis/JDBC-style stacks). The crate also owns the channel's consume-side statement reader, which other parsers call on the SQL strings they hold |
 | Anything else (Ruby, JSP, ...) | Lexical fallback in-tree (line count + `line-scan` rules only), or first-class support via an external parser adapter conforming to the [Normalized AST protocol](docs/NORMALIZED_AST.md) |
@@ -234,6 +234,13 @@ each parser's fingerprint — in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#lan
 fingerprints are not in `zzop version`'s default output, which prints the bare release number so scripts
 can parse one token; `zzop version --verbose` — and `zzop-mcp version --verbose`, the identical string —
 prints them, and `zzop manifest`'s `tool` field carries the same string inside the artifact.)
+
+Rust carries one reporting rule no other language has: a finding whose line sits inside a
+`#[cfg(test)]`/`#[test]`-gated item is dropped, because Rust's unit tests live inside the shipping file
+where the path-shaped test exclusion every other language relies on (`foo.test.ts`, `tests/test_foo.py`)
+cannot see them. The credential-at-rest rules opt out and keep judging those regions — a committed key is
+leaked whether or not the compiler keeps it — and each says so in its own catalog row. Both halves:
+[docs/rules/catalog.md](docs/rules/catalog.md).
 
 A normal-sized file whose extension has no native parser also self-reports in the output's `warnings`
 — naming the extension, a file count, and a path sample — instead of vanishing silently; point it at an
@@ -303,9 +310,9 @@ Cold/warm benchmark over a real tree:
 cargo run --release -p zzop-engine --example bench -- <root> --packs rules/dsl --cache <dir> --git
 ```
 
-Other `crates/engine/examples/` ad hoc harnesses: `cross_layer_rule_counts` (per-`cross-layer/*`-rule
-finding counts across 1+ tree roots; set `ZZOP_DUMP_MESSAGES=<n>` to print sample messages),
-`dep_graph_export` (exports the file-level dependency graph as Graphviz DOT or Mermaid), and
+`crates/engine/examples/` holds several more ad hoc measurement harnesses — `ls` that directory for the
+current set, since each one's own header says what it measures and a list here would only go stale.
+One of them is not ad hoc and is documented as a reference:
 `fastapi_overlay_adapter` (reference external adapter — a lexical FastAPI/Python router scanner feeding
 `EngineConfig::adapter_overlays`, Mode B; now the reference for what native Python v1 deliberately skips
 — non-literal prefixes, Flask, custom conventions — since native FastAPI and Django URLconf extraction cover the

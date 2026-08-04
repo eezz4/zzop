@@ -133,7 +133,7 @@ fn finding_message_is_byte_identical_to_the_pre_sweep_text() {
              form a closed island nothing outside it can reach, so it's effectively dead despite having \
              in-repo references. Delete the island, or wire it back to a real entrypoint if it should be \
              reachable. Disable via config `rules: { \"unreachable\": \"off\" }` (embedders: \
-             `disabled_rules`) if this island is reached by a mechanism this graph doesn't see (e.g. \
+             `disabledRules`) if this island is reached by a mechanism this graph doesn't see (e.g. \
              dynamic `require`, a plugin loader)."
         );
 }

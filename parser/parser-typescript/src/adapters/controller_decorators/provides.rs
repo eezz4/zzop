@@ -51,13 +51,14 @@ impl Visit for ControllerCollector<'_> {
 
 impl ControllerCollector<'_> {
     fn emit_method(&mut self, prefix: &str, m: &ClassMethod) {
-        let Some((verb, name, line, paths, body)) = method_route_facts(self.cm, m) else {
+        let Some((verb, name, line, paths, body, response)) = method_route_facts(self.cm, m) else {
             return;
         };
         for path in paths {
             let full_path = format!("{prefix}/{path}");
             self.out.push(IoProvide {
                 body: body.clone(),
+                response: response.clone(),
                 kind: "http".to_string(),
                 key: http_interface_key(&verb, &full_path),
                 file: self.file.to_string(),
@@ -118,12 +119,13 @@ impl Visit for ControllerPrefixFragmentCollector<'_> {
 
 impl ControllerPrefixFragmentCollector<'_> {
     fn emit_fragment(&mut self, prefix_ref: &str, m: &ClassMethod) {
-        let Some((verb, name, line, paths, body)) = method_route_facts(self.cm, m) else {
+        let Some((verb, name, line, paths, body, response)) = method_route_facts(self.cm, m) else {
             return;
         };
         for path in paths {
             self.out.push(ControllerPrefixRouteFragment {
                 body: body.clone(),
+                response: response.clone(),
                 prefix_ref: prefix_ref.to_string(),
                 verb: verb.clone(),
                 path,

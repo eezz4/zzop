@@ -171,6 +171,67 @@ fn a_warm_cache_does_not_serve_the_old_ir_after_the_client_getter_changes() {
     );
 }
 
+/// Seals the `vocabulary.pythonPackageRoots` axis (U56): after a warm cache is established with no
+/// declaration, declaring the editable-install package mapping must produce the dep edge the previous
+/// runs did not have — the warm entries must not pin the old resolution. The fingerprint side needs no
+/// hand-listing (it hashes the WHOLE struct's serialization), but that only holds if the new field
+/// serializes unconditionally, which the serialization assertion here pins.
+#[test]
+fn a_warm_cache_does_not_pin_the_old_import_resolution_after_python_package_roots_change() {
+    let tree = TempDir::new("zzop-vocab-cache-pyroots");
+    let cache = TempDir::new("zzop-vocab-cache-pyroots-dir");
+    tree.write("projects/home/model.py", "def build():\n    return 1\n");
+    tree.write(
+        "core/train.py",
+        "from tml.projects.home import model\n\ndef run():\n    return model.build()\n",
+    );
+
+    let edges = |out: &AnalyzeOutput| {
+        out.ir
+            .ir
+            .dep
+            .get("core/train.py")
+            .cloned()
+            .unwrap_or_default()
+    };
+
+    let cold = run(&tree, cache.path(), VocabularyConfig::built_in());
+    assert_eq!(
+        edges(&cold),
+        Vec::<String>::new(),
+        "built_in ships no package roots, so the symlinked-package import stays unresolved"
+    );
+    let warm = run(&tree, cache.path(), VocabularyConfig::built_in());
+    assert!(
+        warm.cache.as_ref().is_some_and(|c| c.hits > 0),
+        "the second identical run must hit the cache, or this test proves nothing"
+    );
+
+    let declared = run(
+        &tree,
+        cache.path(),
+        VocabularyConfig {
+            python_package_roots: vec!["tml=".to_string()],
+            ..VocabularyConfig::built_in()
+        },
+    );
+    assert_eq!(
+        edges(&declared),
+        vec!["projects/home/model.py".to_string()],
+        "declaring the mapping against a warm cache must resolve the edge, never replay the old answer"
+    );
+
+    // The fingerprint contract's precondition, pinned where this axis lives: the field must serialize
+    // unconditionally (a `skip_serializing_if` would make two different declarations hash the same —
+    // `vocabulary.rs`'s module-doc rule for every field).
+    let serialized = serde_json::to_value(VocabularyConfig::built_in()).unwrap();
+    assert!(
+        serialized.get("pythonPackageRoots").is_some(),
+        "pythonPackageRoots must appear in the serialized vocabulary even when empty — it is a cache \
+         key ingredient through vocabulary_fingerprint's whole-struct hash"
+    );
+}
+
 /// The INVALIDATION check the two tests above need to mean anything: it shows, at the store layer, what a
 /// key WITHOUT `vocabulary_fingerprint` would do. Two lookups against one stored entry — one whose key
 /// carries a different vocabulary fingerprint (the shipped behavior: a miss, so the run recomputes) and one

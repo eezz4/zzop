@@ -85,6 +85,20 @@ pub struct RuleConfig {
     /// Rule/pack/native-analysis ids to skip entirely. Exact string match against a rule's full id — no
     /// prefix/glob semantics.
     pub disabled_rules: Vec<String>,
+    /// DSL pack ALLOWLIST — when non-empty, a pack whose id is absent from it does not run. The opt-IN
+    /// half of the pack axis, and the reason it exists: `disabled_rules` can only express "everything
+    /// except these", so a caller who wants one pack out of the dozen bundled ones had to enumerate the
+    /// other eleven and re-edit that list every time a pack ships. EMPTY MEANS NO ALLOWLIST (every
+    /// loaded pack runs), never "allow nothing" — the absent-is-not-a-claim direction every optional
+    /// filter in this struct takes.
+    ///
+    /// Scoped to DSL PACKS ONLY, deliberately: native analyses (`dead-candidates`, `scores`, …) carry
+    /// bare ids in the same id space but are not packs, so an allowlist of pack ids says nothing about
+    /// them and must not silently switch them off — `disabled_rules` remains their lever. Composes with
+    /// `disabled_rules` rather than overriding it: the allowlist selects, `disabled_rules` still
+    /// subtracts, so `only ["security"] + disabled ["security/hardcoded-secret"]` means what it reads
+    /// like. Enforced in [`is_pack_enabled`], which is what every pack-level gate calls.
+    pub only_packs: Vec<String>,
     /// Per-rule severity remap, keyed by the same id space as `disabled_rules`. Exists because that id
     /// space spans both layers — native analyses and DSL pack rules — and a user may want to
     /// promote/demote a specific id without forking the pack (a DSL rule's severity otherwise comes from
@@ -249,6 +263,18 @@ fn glob_to_regex(glob: &str) -> String {
 /// checked directly against `is_enabled` before the corresponding analysis runs).
 pub fn is_enabled(config: &RuleConfig, rule_id: &str) -> bool {
     !config.disabled_rules.iter().any(|d| d == rule_id)
+}
+
+/// The gate every PACK-level call site uses: [`is_enabled`] plus [`RuleConfig::only_packs`]. Split from
+/// `is_enabled` rather than folded into it because the two take different id spaces — `is_enabled` is
+/// called with pack ids, `"<pack>/<rule>"` ids AND bare native ids, and an allowlist of pack ids must
+/// not answer for the other two (a rule id is never in it, so folding would disable every rule the
+/// moment an allowlist existed).
+pub fn is_pack_enabled(config: &RuleConfig, pack_id: &str) -> bool {
+    if !config.only_packs.is_empty() && !config.only_packs.iter().any(|p| p == pack_id) {
+        return false;
+    }
+    is_enabled(config, pack_id)
 }
 
 /// Returns `finding` with its severity replaced by `config.severity_overrides[finding.rule_id]`, if any

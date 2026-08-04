@@ -125,6 +125,43 @@ pub fn pack_regex_issues(pack: &RulePackDef) -> Vec<String> {
                 // `attr_present`/`attr_absent` are plain attribute-key strings, not regexes — never
                 // checked here (see `IoScan`'s doc).
             }
+            Matcher::CallScan(m) => {
+                check("file_pattern", &m.file_pattern);
+                if let Some(p) = &m.file_exclude_pattern {
+                    check("file_exclude_pattern", p);
+                }
+                if let Some(p) = &m.callee_pattern {
+                    check("callee_pattern", p);
+                }
+                // `kind` is an EXACT-match call-kind string and the three `attr_*` are attribute keys —
+                // none is regex-compiled, so none is checked here (see `CallScan`'s field docs). No
+                // STRUCTURAL class either: a call-scan with no `kind` and no `callee_pattern` still
+                // matches every projected site in the selected files, which is a broad rule rather than a
+                // dead one. The way THIS matcher goes dead is a `kind` no producer emits, and that is not
+                // decidable from the pack alone: a kind is an open vocabulary, so a spelling this build
+                // never heard of may still be a family some Mode-B adapter fills. It is caught one level
+                // out instead, by `RULE_READ_CALL_KINDS` and the contract test that binds it to the
+                // shipped rules (`rule_contracts/call_kind_readers.rs`), which is where a build DOES know
+                // both halves.
+            }
+            Matcher::LiteralScan(m) => {
+                check("file_pattern", &m.file_pattern);
+                if let Some(p) = &m.file_exclude_pattern {
+                    check("file_exclude_pattern", p);
+                }
+                if let Some(p) = &m.name_pattern {
+                    check("name_pattern", p);
+                }
+                if let Some(p) = &m.name_exclude_pattern {
+                    check("name_exclude_pattern", p);
+                }
+                // `entropy_min` is an f32 and `skip_value_equals_name` a bool — nothing to compile. No
+                // STRUCTURAL class, for `CallScan`'s reason verbatim: a literal-scan with no
+                // `name_pattern` and no `entropy_min` matches every projected named literal in the
+                // selected files — a broad rule, not a dead one. The way THIS matcher goes dead is a
+                // language whose parser projects no `string_literals`, which is not decidable from the
+                // pack alone; the capability matrix's declared table is where both halves are known.
+            }
         }
         // `check`'s borrow of `issues` ends at its last use above (NLL), so the structural lines can
         // join the same list here — after every regex line for this rule, keeping the order stable.

@@ -131,6 +131,84 @@ const BASELINE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 // reaches the diff before any snapshot is read.
 const FIELDS = ["expectations", "benign", "gap"];
 
+// ---- the tree registry ----------------------------------------------------------------------------
+// The corpus's own `zzop.config.jsonc`, beside the ground truth. It is the file that decides which
+// trees a run measures, so it — never EXPECTED.jsonc's own key prefixes — is where the coverage
+// floor's subject set comes from. Until 2026-08-03 `countsOf` derived the subjects from the ground
+// truth's keys, so a tree with ZERO labels (depedge, bearticles, beinvoices — the negative-case
+// backends and the dep-graph tree) had NO ROW in the floor at all: it sat outside the only ratchet
+// built to notice the corpus shrinking, and deleting it from the registry was silent. Measured before
+// this change: the committed floor held 20 rows over a 23-tree registry. Seeding every registered
+// tree with a zero row puts those trees ON the floor (`<tree> 0 0 0`), and a floor row whose tree has
+// left the registry goes red BY NAME in `diffAgainstBaseline`. It also gives `assertBenignOnDisk` the
+// sourceId -> tree-root mapping it needs to resolve a control path to a real file.
+function loadRegistry() {
+  const p = path.join(path.dirname(expectedPath), "zzop.config.jsonc");
+  if (!fs.existsSync(p)) {
+    fail(
+      `no tree registry at ${p} — the corpus config is what names the trees this benchmark claims to\n` +
+        "  measure, and the coverage floor's subject set is derived from it (a ground truth's own keys\n" +
+        "  cannot see a tree with zero labels)."
+    );
+  }
+  let doc;
+  try {
+    doc = JSON.parse(stripJsonComments(fs.readFileSync(p, "utf8")));
+  } catch (e) {
+    fail(`tree registry ${p} could not be parsed: ${e.message}\n  The floor's subject set comes from this file; guessing it would seed the wrong floor.`);
+  }
+  const bad = [];
+  const trees = new Map();
+  for (const t of Array.isArray(doc.trees) ? doc.trees : []) {
+    if (!t || typeof t.sourceId !== "string" || typeof t.root !== "string") {
+      bad.push(JSON.stringify(t));
+      continue;
+    }
+    trees.set(t.sourceId, path.resolve(path.dirname(p), t.root));
+  }
+  if (bad.length || trees.size === 0) {
+    fail(
+      `tree registry ${p} is not a usable trees[] list` +
+        (bad.length ? `: ${bad.length} entr(y/ies) lack root/sourceId —\n    ${bad.join("\n    ")}` : " — it names ZERO trees") +
+        "\n  A dropped entry is a tree off the coverage floor, so it is refused rather than skipped."
+    );
+  }
+  return trees;
+}
+const registry = loadRegistry(); // Map<sourceId, absolute tree root>
+
+// ---- benign controls must exist on disk -----------------------------------------------------------
+// A `benign` entry whose file is not there is not "quiet" — it is UNMEASURED. The control still lives
+// in the benign count (and in the decoy tree's precision claim) while a walker that never sees the
+// file can never fire in it, so a typo'd or deleted control keeps asserting "no false positive here"
+// about nothing, forever. Runs BEFORE any score or floor write: scoring first would print a precision
+// number that silently includes ghosts, and `--update-baseline` would freeze them into the floor.
+// Resolved through the registry (sourceId prefix -> tree root), the same mapping the keys are built on.
+function assertBenignOnDisk(benignList) {
+  const ghosts = [];
+  for (const b of benignList || []) {
+    const nb = norm(b);
+    const slash = nb.indexOf("/");
+    const sid = slash === -1 ? nb : nb.slice(0, slash);
+    const rel = slash === -1 ? "" : nb.slice(slash + 1);
+    const root = registry.get(sid);
+    if (!root) {
+      ghosts.push(`${b}  (sourceId '${sid}' is not in the tree registry)`);
+    } else if (!rel || !fs.existsSync(path.join(root, rel))) {
+      ghosts.push(`${b}  (nothing on disk at ${path.join(root, rel)})`);
+    }
+  }
+  if (ghosts.length) {
+    fail(
+      `${ghosts.length} benign control(s) in the ground truth name files that DO NOT EXIST:\n    ` +
+        ghosts.join("\n    ") +
+        "\n\n  A control file that is not on disk is never walked, so it asserts nothing while still living\n" +
+        "  in the benign count. Fix the path, or delete the label and lower the floor's benign column by\n" +
+        "  hand with the reason in the diff — the ratchet refusing the silent version is it doing its job."
+    );
+  }
+}
+
 if (baselineOnly) runBaselineMaintenance(); // never returns
 
 if (!fs.existsSync(path.join(runDir, "meta.json"))) {
@@ -427,8 +505,10 @@ function stripJsonComments(src) {
 // silently stopped covering whatever it forgot. The distinction is FAIL-OPEN vs FAIL-CLOSED, not "is
 // there a second file":
 //   - the baseline names nothing of its own. Every sourceId in it comes from EXPECTED.jsonc's own keys
-//     and every number is produced by `countsOf`, the same code the score path calls. It is the fixed
-//     point of a derivation, not an independently authored list — there is nothing in it to forget;
+//     or from the corpus registry's trees[] (since 2026-08-03 — the registry is what lets a tree with
+//     ZERO labels have a row at all), and every number is produced by `countsOf`, the same code the
+//     score path calls. It is the fixed point of a derivation, not an independently authored list —
+//     there is nothing in it to forget;
 //   - the check is EQUALITY in both directions. A row too low is a surrendered detection; a row too high,
 //     or missing, is an unrecorded one. Both are red. There is no state in which the baseline and
 //     EXPECTED.jsonc quietly disagree, which is precisely what a fail-open list is for.
@@ -499,9 +579,14 @@ function firedGaps(gapMap) {
  * (the same shape both the score path and `writeGroundTruth` already build) and `benignList` the raw
  * `benign` array. The sourceId is the key prefix — the same prefix the rest of this file treats as
  * load-bearing.
+ *
+ * SEEDED from the tree registry first: every registered tree gets a row even when nothing in the
+ * ground truth anchors there, so a zero-label tree's floor row is `<sourceId> 0 0 0` — the row's
+ * EXISTENCE is what the ratchet defends for those trees, because there is no count to defend.
  */
 function countsOf(expectations, benignList, gapMap) {
   const out = new Map();
+  for (const id of registry.keys()) out.set(id, { expectations: 0, benign: 0, gap: 0 });
   const bump = (id, field, n) => {
     if (!out.has(id)) out.set(id, { expectations: 0, benign: 0, gap: 0 });
     out.get(id)[field] += n;
@@ -560,6 +645,11 @@ function renderBaseline(counts) {
     "# high or a missing row is an unrecorded one, and both are red. So this file cannot silently drift out\n" +
     "# of agreement with the ground truth the way a hand-kept list can.\n" +
     "#\n" +
+    "# The ROW SET is seeded from the corpus registry (the zzop.config.jsonc beside the ground truth), not\n" +
+    "# from the ground truth's own keys: a tree with zero labels still has its `<sourceId> 0 0 0` row, and\n" +
+    "# for those trees the row's EXISTENCE is the whole floor — removing the tree from the registry goes\n" +
+    "# red by name here instead of silently, which no count-only derivation could see.\n" +
+    "#\n" +
     "# Maintained by: node scripts/measure/benchmark.mjs --expected cases/EXPECTED.jsonc --update-baseline\n" +
     "# That mode GROWS ONLY. Lowering a number, or removing a row, is a hand edit — on purpose, so that\n" +
     "# giving up a detection is an act with an author and a reason in the diff, never a side effect of\n" +
@@ -575,10 +665,22 @@ function diffAgainstBaseline(base, counts) {
   const grew = [];
   for (const id of [...new Set([...base.keys(), ...counts.keys()])].sort()) {
     const b = base.get(id);
-    const c = counts.get(id) || { expectations: 0, benign: 0, gap: 0 };
+    const c = counts.get(id);
     if (!b) {
       grew.push(
         `  NEW   ${id}: ${c.expectations} expectation(s), ${c.benign} benign control(s), ${c.gap} gap(s) — not in the floor yet`
+      );
+      continue;
+    }
+    // A floor row with NO derived counterpart is not a row of zeros — it is a tree that has left both
+    // the ground truth and the registry. Defaulting it to zeros would make removing a ZERO-LABEL tree
+    // from the registry silent (0 -> 0 shrinks nothing), and the zero-label trees are exactly the ones
+    // whose only defense is this row's existence.
+    if (!c) {
+      shrunk.push(
+        `  MISSING ${id}: in the committed floor but in neither the ground truth nor the tree registry\n` +
+          `          (the zzop.config.jsonc beside it) — a tree removed from the registry is never scored at all,\n` +
+          `          which is quieter than any false negative`
       );
       continue;
     }
@@ -599,9 +701,15 @@ function enforceRatchet(counts, { allowGrowth = false, subject = "cases/EXPECTED
   // An empty derivation is a broken read, never a corpus with no expectations — the same "an empty
   // subject set is a broken guard, not a clean tree" rule check-guards-wired.sh and check-max-file-lines.sh
   // both had to learn. Without this, a ground truth reduced to zero keys would sail past a floor
-  // comparison that has nothing to compare.
-  if (counts.size === 0) {
-    fail(`expectation ratchet: derived ZERO trees from ${subject}. That is a broken read, not a clean corpus.`);
+  // comparison that has nothing to compare. Counted over CLAIMS, not rows, because registry seeding
+  // means the row set can never be empty — a ground truth that contributes nothing to any seeded row
+  // is the same broken read wearing 23 rows of zeros.
+  const claims = [...counts.values()].reduce((a, c) => a + FIELDS.reduce((x, f) => x + c[f], 0), 0);
+  if (counts.size === 0 || claims === 0) {
+    fail(
+      `expectation ratchet: derived ZERO claims from ${subject} — no expectations, benign controls or\n` +
+        "  gaps anchored in any tree. That is a broken read, not a clean corpus."
+    );
   }
   if (!fs.existsSync(BASELINE)) {
     fail(
@@ -650,8 +758,12 @@ function runBaselineMaintenance() {
     if (k === "benign" || k === "untracked" || k === "gap") continue;
     expectations.set(norm(k), new Set(v));
   }
+  assertBenignOnDisk(doc.benign);
   const counts = countsOf(expectations, doc.benign, gapOf(doc));
-  if (counts.size === 0) fail(`expectation ratchet: derived ZERO trees from ${expectedPath} — refusing to write a floor of nothing.`);
+  const claims = [...counts.values()].reduce((a, c) => a + FIELDS.reduce((x, f) => x + c[f], 0), 0);
+  if (counts.size === 0 || claims === 0) {
+    fail(`expectation ratchet: derived ZERO claims from ${expectedPath} — refusing to write a floor of nothing.`);
+  }
 
   const exists = fs.existsSync(BASELINE);
   if (bootstrapBaseline && exists) {
@@ -712,6 +824,10 @@ function writeGroundTruth() {
       );
     }
   }
+
+  // Ghost controls stop regeneration too: `benign` is carried across verbatim, so writing here would
+  // re-commit a control that asserts nothing (see assertBenignOnDisk) into a fresh-looking file.
+  assertBenignOnDisk(carriedBenign);
 
   // A fired gap stops regeneration too, and not only scoring. Without this, `--write-expected` is a
   // ONE-COMMAND bypass of the promotion refusal below: it would emit the fired finding as an ordinary
@@ -804,9 +920,12 @@ for (const [k, v] of Object.entries(expectedRaw)) {
 if (expected.size === 0) fail(`${expectedPath} has no expectations.`);
 const gapTotal = [...gap.values()].reduce((a, s) => a + s.size, 0);
 
-// Before any score is computed: the ground truth must still claim everything the committed floor says it
-// claims. Scoring a tampered answer key first and reporting the ratchet second would print a 100% recall
-// line above the failure, and that number is the thing a reader remembers.
+// Before any score is computed: every benign control must be a real file (see assertBenignOnDisk — a
+// ghost control asserts nothing while living in the precision claim), and the ground truth must still
+// claim everything the committed floor says it claims. Scoring a tampered answer key first and
+// reporting the ratchet second would print a 100% recall line above the failure, and that number is
+// the thing a reader remembers.
+assertBenignOnDisk(expectedRaw.benign);
 enforceRatchet(countsOf(expected, expectedRaw.benign, gap), { subject: expectedPath });
 
 // Refuse a legacy (tree-relative, un-prefixed) ground truth instead of scoring it into a number that

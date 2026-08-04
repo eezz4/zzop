@@ -294,3 +294,203 @@ fn cross_file_route_constant_resolves_through_the_engine_project_pass() {
         "the sibling literal route must survive too, got: {keys:?}"
     );
 }
+
+// --- The db-table half: EF Core provides x a Rust service tree's raw-SQL consumes ----------------------
+
+/// Both EF Core provide shapes in one tree: a `DbSet<T>` convention name (`Users` -> `table:users`) and
+/// a `[Table("legacy_orders")]` attribute rename. Joined by the same raw-SQL Rust consumer
+/// `analyze_rust_cross_layer.rs`'s db half uses — this is the arm that gave `.cs` a db channel at all
+/// (2026-08-02, `zzop_parser_csharp::adapters::ef_core` wired through `io::extract_csharp_file_io`).
+#[test]
+fn ef_core_provides_join_a_rust_trees_raw_sql_db_table_consumes() {
+    let ef = TempDir::new("zzop-engine-csharp-db-ef");
+    ef.write(
+        "Data/AppDbContext.cs",
+        concat!(
+            "using Microsoft.EntityFrameworkCore;\n",
+            "public class AppDbContext : DbContext {\n",
+            "    public DbSet<User> Users { get; set; }\n",
+            "}\n",
+            "public class User { public long Id { get; set; } }\n",
+        ),
+    );
+    ef.write(
+        "Models/Order.cs",
+        concat!(
+            "using System.ComponentModel.DataAnnotations.Schema;\n",
+            "[Table(\"legacy_orders\")]\n",
+            "public class Order { public long Id { get; set; } }\n",
+        ),
+    );
+    let svc = TempDir::new("zzop-engine-csharp-db-rust-svc");
+    svc.write(
+        "src/db.rs",
+        concat!(
+            "pub async fn load_user(pool: &sqlx::PgPool, id: i64) {\n",
+            "    sqlx::query!(\"SELECT id FROM users WHERE id = $1\", id);\n",
+            "}\n",
+            "\n",
+            "pub async fn load_orders(client: &tokio_postgres::Client) {\n",
+            "    client.query(\"SELECT id FROM legacy_orders\", &[]).await.ok();\n",
+            "}\n",
+        ),
+    );
+
+    let trees = vec![
+        (ef.path().to_path_buf(), config("svc-csharp")),
+        (svc.path().to_path_buf(), config("svc-rust")),
+    ];
+    let out = analyze_trees(&trees);
+
+    let mut db_edges: Vec<_> = out
+        .cross_layer
+        .edges
+        .iter()
+        .filter(|e| e.kind == "db-table")
+        .collect();
+    db_edges.sort_by(|a, b| a.key.cmp(&b.key));
+    assert_eq!(
+        db_edges.len(),
+        2,
+        "expected one db-table edge per touched table, got: {:?}",
+        out.cross_layer.edges
+    );
+    assert_eq!(db_edges[0].key, "table:legacy_orders");
+    assert_eq!(db_edges[0].to.file, "Models/Order.cs");
+    assert_eq!(db_edges[0].to.symbol.as_deref(), Some("Order"));
+    assert_eq!(db_edges[1].key, "table:users");
+    assert_eq!(db_edges[1].to.file, "Data/AppDbContext.cs");
+    assert_eq!(db_edges[1].to.symbol.as_deref(), Some("User"));
+    for e in &db_edges {
+        assert_eq!(e.from.source, "svc-rust", "the Rust file is the CONSUMER");
+        assert_eq!(
+            e.to.source, "svc-csharp",
+            "the EF Core side is the PROVIDER"
+        );
+        assert!(e.cross_source);
+    }
+}
+
+/// Invalidation guard for the C# arm of `zzop_core::is_test_file` (2026-08-03): a conventional C#
+/// test project's DbSet fixture (`Api.Tests/UserServiceTests.cs` — `.Tests/` directory AND `*Tests.cs`
+/// file name) must NOT reach the cross-layer join. Before the arm existed this fixture's
+/// `table:fixtures` provide joined the Rust consume as ordinary production surface; the production
+/// context's `table:users` edge pins that the filter is not vacuous.
+#[test]
+fn a_csharp_test_projects_dbset_fixture_is_filtered_from_the_cross_layer_join() {
+    let ef = TempDir::new("zzop-engine-csharp-db-testproj-ef");
+    ef.write(
+        "Data/AppDbContext.cs",
+        concat!(
+            "using Microsoft.EntityFrameworkCore;\n",
+            "public class AppDbContext : DbContext {\n",
+            "    public DbSet<User> Users { get; set; }\n",
+            "}\n",
+            "public class User { public long Id { get; set; } }\n",
+        ),
+    );
+    ef.write(
+        "Api.Tests/UserServiceTests.cs",
+        concat!(
+            "using Microsoft.EntityFrameworkCore;\n",
+            "public class FixtureDbContext : DbContext {\n",
+            "    public DbSet<Fixture> Fixtures { get; set; }\n",
+            "}\n",
+            "public class Fixture { public long Id { get; set; } }\n",
+        ),
+    );
+    let svc = TempDir::new("zzop-engine-csharp-db-testproj-rust");
+    svc.write(
+        "src/db.rs",
+        concat!(
+            "pub async fn load_user(client: &tokio_postgres::Client) {\n",
+            "    client.query(\"SELECT id FROM users\", &[]).await.ok();\n",
+            "}\n",
+            "\n",
+            "pub async fn load_fixtures(client: &tokio_postgres::Client) {\n",
+            "    client.query(\"SELECT id FROM fixtures\", &[]).await.ok();\n",
+            "}\n",
+        ),
+    );
+
+    let trees = vec![
+        (ef.path().to_path_buf(), config("svc-csharp-testproj")),
+        (svc.path().to_path_buf(), config("svc-rust-testproj")),
+    ];
+    let out = analyze_trees(&trees);
+
+    let db_edges: Vec<_> = out
+        .cross_layer
+        .edges
+        .iter()
+        .filter(|e| e.kind == "db-table")
+        .collect();
+    assert!(
+        db_edges.iter().any(|e| e.key == "table:users"),
+        "the production DbSet must still join (filter must not be vacuous), got: {:?}",
+        out.cross_layer.edges
+    );
+    assert!(
+        db_edges.iter().all(|e| e.key != "table:fixtures"),
+        "a `.Tests/` project's DbSet fixture must never join a cross-layer edge, got: {:?}",
+        out.cross_layer.edges
+    );
+    assert!(
+        db_edges
+            .iter()
+            .all(|e| !e.to.file.starts_with("Api.Tests/")),
+        "no edge may anchor inside the test project, got: {:?}",
+        out.cross_layer.edges
+    );
+}
+
+/// Negative twin: a non-literal `[Table]` rename emits NOTHING (and suppresses the DbSet convention
+/// name in the same file), so the Rust consume stays honestly unjoined instead of joining a table the
+/// mapping renamed away.
+#[test]
+fn a_non_literal_table_rename_produces_no_provide_and_no_edge() {
+    let ef = TempDir::new("zzop-engine-csharp-db-neg-ef");
+    ef.write(
+        "Data/AppDbContext.cs",
+        concat!(
+            "using Microsoft.EntityFrameworkCore;\n",
+            "using System.ComponentModel.DataAnnotations.Schema;\n",
+            "public class AppDbContext : DbContext {\n",
+            "    public DbSet<Order> Orders { get; set; }\n",
+            "}\n",
+            "[Table(TableNames.Orders)]\n",
+            "public class Order { public long Id { get; set; } }\n",
+        ),
+    );
+    let svc = TempDir::new("zzop-engine-csharp-db-neg-rust");
+    svc.write(
+        "src/db.rs",
+        concat!(
+            "pub async fn load_orders(client: &tokio_postgres::Client) {\n",
+            "    client.query(\"SELECT id FROM orders\", &[]).await.ok();\n",
+            "}\n",
+        ),
+    );
+
+    let trees = vec![
+        (ef.path().to_path_buf(), config("svc-csharp-neg")),
+        (svc.path().to_path_buf(), config("svc-rust-neg")),
+    ];
+    let out = analyze_trees(&trees);
+    assert!(
+        out.cross_layer.edges.iter().all(|e| e.kind != "db-table"),
+        "a renamed-but-unreadable table must never join under its convention name: {:?}",
+        out.cross_layer.edges
+    );
+
+    // Direct confirmation on the EF tree alone: zero db-table provides at all.
+    let solo = analyze_tree(ef.path(), &config("svc-csharp-neg-solo"));
+    let provides = solo
+        .ir
+        .ir
+        .io
+        .as_ref()
+        .map(|io| io.provides.iter().filter(|p| p.kind == "db-table").count())
+        .unwrap_or(0);
+    assert_eq!(provides, 0, "no provide may survive the non-literal rename");
+}

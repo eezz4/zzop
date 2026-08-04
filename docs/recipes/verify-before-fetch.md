@@ -71,25 +71,31 @@ zzop cross ./web ./api                       # once — the coverage/warning rea
 zzop endpoint "/api/articles/{}/favorite" ./web ./api   # per key — the verdict (Step 3)
 ```
 
-The order is load-bearing. `check_endpoint`'s reply carries `pattern`, `verdict`, `counts`,
-`matches`, `relatedFindings`, `suggestions` (on `not-found`), the run-global `disclosure` fold,
-and this host's `config`/`configWarnings` — **and no per-tree `coverage` or `warnings`**. Those are
-the blindness signals, and they ride `cross_repo`/`analyze_repo` replies instead
-([Output contract](../modules/mcp.md#output-contract)). A verdict read without them is a verdict you
-cannot calibrate.
+The order is load-bearing, though less so than it once was. `check_endpoint`'s reply carries `pattern`,
+`verdict`, `counts`, `matches`, `relatedFindings`, `suggestions` (on `not-found`), the run-global
+`disclosure` fold, and this host's `config`/`configWarnings`/`warnings` — that last one being the
+engine's own self-reports (framework silence, unparsed extensions, an `exclude` that removed paths),
+carried since 2026-08-02 because this lane runs the identical `analyzeTrees` call over the identical
+trees and was simply throwing them away. The reply still carries **no per-tree `coverage`**, which is a
+census rather than a self-report and rides `cross_repo`/`analyze_repo`
+([Output contract](../modules/mcp.md#output-contract)). Two of the four signals below therefore now
+reach you inside the verdict reply itself; the two `coverage.*` counts still require the `cross` call. A
+verdict read without them is a verdict you cannot calibrate.
 
 ---
 
 ## Step 2 — Read the coverage signals *before* the verdict
 
-Four signals, all from the `cross_repo` reply, each ruling out a different way a "no" can be false.
+Four signals, each ruling out a different way a "no" can be false. The two `coverage.*` counts come only
+from the `cross_repo` reply; the two prose channels also ride the `check_endpoint` reply's own
+`warnings` (flattened — run-level first, then every tree's, rather than split per `sources[]` entry).
 
 | Signal | Where it appears | What a hit means |
 |---|---|---|
-| `coverage.joinContributionZero` | `sources[].coverage`, a boolean | That tree analyzed files but extracted **zero joinable io** — it is structurally invisible to the join. Any bucket verdict about it is meaningless. Field semantics: [facade.md](../modules/facade.md#the-zzop-facade-json-contract). |
-| Framework-silence self-reports | `sources[].warnings`, prose strings | A lexical tripwire fired: the tree looks like it carries a server framework, an HTTP client, an ORM schema, a committed OpenAPI spec, or a hand-rolled `fetch` wrapper, while the matching io channel stayed near-zero. The tripwires and their gates are documented in `crates/engine/src/framework_silence.rs`. |
-| Unparsed-extension diagnostics | `sources[].warnings`, prose strings | Files whose extension has no native parser, named per extension with counts and sample paths (`crates/engine/src/analyze/diagnostics/capability.rs`). If the other side's routes live in one of those, they were never candidates for the join. |
-| `coverage.ioConsumesUnresolved` | `sources[].coverage`, a count | Call sites the extractor saw but could not statically key. They cannot join — they are not evidence of absence either way. |
+| `coverage.joinContributionZero` | `sources[].coverage`, a boolean — `cross_repo` only | That tree analyzed files but extracted **zero joinable io** — it is structurally invisible to the join. Any bucket verdict about it is meaningless. Field semantics: [facade.md](../modules/facade.md#the-zzop-facade-json-contract). |
+| Framework-silence self-reports | `sources[].warnings` on `cross_repo`; `warnings` on `check_endpoint`/`check_file` | A lexical tripwire fired: the tree looks like it carries a server framework, an HTTP client, an ORM schema, a committed OpenAPI spec, or a hand-rolled `fetch` wrapper, while the matching io channel stayed near-zero. The tripwires and their gates are documented in `crates/engine/src/framework_silence.rs`. |
+| Unparsed-extension diagnostics | `sources[].warnings` on `cross_repo`; `warnings` on `check_endpoint`/`check_file` | Files whose extension has no native parser, named per extension with counts and sample paths (`crates/engine/src/analyze/diagnostics/capability.rs`). If the other side's routes live in one of those, they were never candidates for the join. |
+| `coverage.ioConsumesUnresolved` | `sources[].coverage`, a count — `cross_repo` only | Call sites the extractor saw but could not statically key. They cannot join — they are not evidence of absence either way. |
 
 A worked negative, measured on `corpus/oss`:
 

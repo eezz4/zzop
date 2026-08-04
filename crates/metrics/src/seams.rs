@@ -73,6 +73,10 @@ pub fn compute_seams(
     // Every analyzed file is a dep key; a target outside this set is external.
     let in_repo: HashSet<&str> = dep.keys().map(|s| s.as_str()).collect();
     let mut file_count: BTreeMap<&str, usize> = BTreeMap::new();
+    #[allow(
+        clippy::iter_over_hash_type,
+        reason = "iteration order cannot reach the result: `file_count` is a BTreeMap of integer counters"
+    )]
     for file in &in_repo {
         let folder = folder_of(file);
         if is_noise_folder(folder) {
@@ -84,6 +88,10 @@ pub fn compute_seams(
     let mut internal: BTreeMap<&str, u32> = BTreeMap::new();
     let mut inbound: BTreeMap<&str, u32> = BTreeMap::new();
     let mut outbound: BTreeMap<&str, u32> = BTreeMap::new();
+    #[allow(
+        clippy::iter_over_hash_type,
+        reason = "iteration order cannot reach the result: the three accumulators are BTreeMaps of integer counters; output rows are built from `file_count`'s BTreeMap walk and sorted with a `folder` tie-break"
+    )]
     for (importer, imports) in dep {
         let from = folder_of(importer);
         if is_noise_folder(from) {

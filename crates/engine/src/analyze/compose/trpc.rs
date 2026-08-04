@@ -138,6 +138,7 @@ pub(crate) fn compose_trpc_provides(
                         (false, false) => format!("{}.{key}", path.join(".")),
                     };
                     out.push(IoProvide {
+                        response: None,
                         body: None,
                         kind: "trpc".to_string(),
                         key: format!("{verb} {full_path}"),

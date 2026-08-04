@@ -9,8 +9,9 @@
 //!   type-nested classes/interfaces/structs/records/delegates, methods/constructors/properties/consts
 //!   with body spans), `ImportMap` extraction (`imports`, `using` directives), identifier-reference
 //!   collection (`used_names`), and every namespace this file declares (`namespaces`).
-//! - `adapters` — ASP.NET Core cross-layer IO: attribute-routed + minimal-API HTTP route PROVIDES
-//!   (`adapters::provides`), and `HttpClient` literal HTTP egress CONSUMES (`adapters::http_clients`).
+//! - `adapters` — cross-layer IO: ASP.NET Core attribute-routed + minimal-API HTTP route PROVIDES
+//!   (`adapters::provides`), `HttpClient` literal HTTP egress CONSUMES (`adapters::http_clients`), and
+//!   EF Core `DbSet<T>`/`[Table]` `db-table` PROVIDES (`adapters::ef_core`).
 //!
 //! ## Tree-sitter discipline (mirrors `zzop_parser_go`'s crate-root doc verbatim — see that crate for
 //! the fuller rationale; summarized here)
@@ -42,15 +43,24 @@ pub const FRAMEWORK_RECOGNIZERS: &[FrameworkRecognizer] = &[
         extensions: &["cs"],
         emits: &[channel::CONSUMES],
     },
+    FrameworkRecognizer {
+        framework: "ef core",
+        extensions: &["cs"],
+        emits: &[channel::DB],
+    },
 ];
 
 #[cfg(test)]
 mod node_kinds;
 
+pub use adapters::ef_core::extract_ef_core_db_table_provides;
 pub use adapters::http_clients::extract_csharp_http_consumes;
 pub use adapters::provides::extract_csharp_http_provides;
+pub use lang::call_sites::extract_call_sites;
 pub use lang::imports::parse_imports;
+pub use lang::loop_spans::extract_loop_spans;
 pub use lang::namespaces::csharp_namespaces_of;
+pub use lang::string_literals::extract_string_literals;
 pub use lang::symbols::parse_symbols;
 pub use lang::used_names::parse_local_identifier_refs;
 pub use project::{extract_csharp_http_provides_project, CSharpProjectProvidesReport};

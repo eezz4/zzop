@@ -28,14 +28,16 @@ pub(crate) fn node_text<'a>(node: Node, src: &'a str) -> &'a str {
     node.utf8_text(src.as_bytes()).unwrap_or("")
 }
 
-/// The decoded-ish text of a Go string literal node (`interpreted_string_literal` or
+/// The VERBATIM text of a Go string literal node (`interpreted_string_literal` or
 /// `raw_string_literal`): the node's own span includes its delimiter (`"..."` or `` `...` ``, both
 /// exactly one byte each), so stripping the first/last byte yields the interior text. Deliberately
-/// NOT full escape-sequence decoding (`\n` stays the two literal characters `\` `n`) — this crate
-/// only ever reads import paths and HTTP literals through this helper, neither of which plausibly
-/// carries an escape sequence in practice; full decoding would mean walking the node's
-/// `escape_sequence`/`*_content` children and is not worth the complexity for a v1 "verbatim string"
-/// contract. `None` for any other node kind (never guessed).
+/// NOT escape-sequence decoding (`\n` stays the two literal characters `\` `n`) — full decoding
+/// would mean walking the node's `escape_sequence`/`*_content` children, and no caller needs it:
+/// the import-path and HTTP-literal readers consume spellings that never plausibly carry an escape,
+/// and the one ESCAPE-SENSITIVE caller (`lang::string_literals`, which hashes arbitrary credential
+/// values) applies its own gate ON TOP — an interpreted literal containing `\` is SILENCED there
+/// rather than decoded, so this helper's verbatim contract stays a single, simple thing. `None` for
+/// any other node kind (never guessed).
 pub(crate) fn string_literal_text(node: Node, src: &str) -> Option<String> {
     match node.kind() {
         "interpreted_string_literal" | "raw_string_literal" => {

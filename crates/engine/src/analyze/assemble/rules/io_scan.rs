@@ -9,7 +9,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::time::Instant;
 
 use zzop_core::{
-    eval_pack_io_scan, is_enabled, Attribute, AttributeStore, EntityRef, Finding, IoConsume,
+    eval_pack_io_scan, is_pack_enabled, Attribute, AttributeStore, EntityRef, Finding, IoConsume,
     IoProvide, IoScanTreeContext, Matcher, RulePackDef,
 };
 
@@ -107,7 +107,8 @@ impl<'a> LineCache<'a> {
 /// `"{pack}/{rule}"` entry per `IoScan` rule that ran, into the same `rule_time` accumulator every
 /// per-file DSL rule and whole-graph native rule feeds — see [`eval_pack_timed`] for the granularity and
 /// the reason the profiled path splits the pack. Mode A (`envelope::ingest`'s own `eval_pack_io_scan`
-/// call) needs no counterpart: it emits `rule_timings: None` unconditionally, for every rule class.
+/// call) shares [`eval_pack_timed`] itself (re-exported as `crate::analyze::eval_io_scan_pack_timed`)
+/// rather than growing a second pack-splitting twin — one granularity decision, one implementation.
 pub(super) fn run(
     root: &std::path::Path,
     config: &EngineConfig,
@@ -123,7 +124,7 @@ pub(super) fn run(
     let mut gated_packs: Vec<RulePackDef> = config
         .packs
         .iter()
-        .filter(|p| is_enabled(&config.rule_config, &p.id))
+        .filter(|p| is_pack_enabled(&config.rule_config, &p.id))
         .map(|p| crate::pipeline::gate_pack_rules(p, &config.rule_config))
         .collect();
 
@@ -171,7 +172,7 @@ pub(super) fn run(
 /// `pack` is drained (a moved-out rule list, non-`IoScan` rules dropped) instead of cloned per rule —
 /// `gated_packs` is this function's own local, dead after the loop, so mutating it costs nothing and
 /// avoids an O(rules^2) clone of every pack.
-fn eval_pack_timed(
+pub(crate) fn eval_pack_timed(
     pack: &mut RulePackDef,
     ctx: &IoScanTreeContext,
     rule_time: &mut HashMap<String, (u128, usize)>,

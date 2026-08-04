@@ -151,7 +151,7 @@ mod tests {
         assert!(out[0].message.contains("POST /api/users"));
         assert!(out[0].message.contains("GET"));
         assert!(out[0].message.contains("Api.java:20"));
-        assert!(out[0].message.contains("disabled_rules"));
+        assert!(out[0].message.contains("disabledRules"));
     }
 
     #[test]

@@ -45,6 +45,10 @@ pub fn circular_from_dep_excluding(
 ) -> Vec<Vec<String>> {
     let mut node_set: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     let mut edges = Vec::new();
+    #[allow(
+        clippy::iter_over_hash_type,
+        reason = "iteration order cannot reach the result: node ids go through a BTreeSet and `edges` is sorted by (source, target) before `find_cycles` sees it"
+    )]
     for (from, tos) in dep {
         node_set.insert(from.clone());
         for to in tos {

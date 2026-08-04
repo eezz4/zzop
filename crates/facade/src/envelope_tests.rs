@@ -82,6 +82,33 @@ fn analyze_envelope_json_unknown_rule_overrides_land_in_config_warnings_not_warn
     );
 }
 
+/// `profileRules` over the envelope WIRE path — the request field that deliberately did not exist
+/// until the engine's Mode A lane fed the shared timing accumulator (see
+/// `EnvelopeAnalyzeRequest::profile_rules`). The engine-side timing content is pinned in
+/// `crates/engine/src/envelope/tests/rules_and_diagnostics.rs`; this pins the PLUMBING: the field
+/// deserializes, reaches `EngineConfig::profile_rules`, and `ruleTimings` comes back non-null.
+#[test]
+fn analyze_envelope_json_profile_rules_populates_rule_timings_over_the_wire() {
+    let out = analyze_envelope_json(
+        &tiny_envelope_json(),
+        r#"{"sourceId": "legacy", "profileRules": true}"#,
+    )
+    .expect("analyze_envelope_json should succeed");
+    let value: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
+    let timings = value["ruleTimings"]
+        .as_array()
+        .expect("profiled Mode A run must serialize a ruleTimings array");
+    // Non-empty without naming specific rules: the zero-config bundled packs' io-scan rules and the
+    // whole-graph native analyses (`circular`/`dead-candidates`) all ride the shared accumulator.
+    assert!(!timings.is_empty(), "{value}");
+
+    // Default (field absent) stays the pre-knob behavior: `ruleTimings` serialized as null.
+    let off = analyze_envelope_json(&tiny_envelope_json(), r#"{"sourceId": "legacy"}"#)
+        .expect("analyze_envelope_json should succeed");
+    let off: serde_json::Value = serde_json::from_str(&off).expect("valid JSON");
+    assert!(off["ruleTimings"].is_null(), "{off}");
+}
+
 #[test]
 fn analyze_envelope_json_round_trips_a_tiny_envelope() {
     let config = r#"{"sourceId": "legacy"}"#;
@@ -192,6 +219,97 @@ fn analyze_envelope_json_client_base_prefixes_relative_consume_keys_over_the_wir
         vec!["GET /api/orders", "GET /api/users"],
         "clientBase sent over the analyzeEnvelope config wire must prefix the suffix-only consume and \
          leave the already-based one alone, got: {value}"
+    );
+}
+
+/// A Mode A envelope whose mutating route's handler calls `save` (declared in the same file, so the
+/// edge RESOLVES) — the substrate for the two vocabulary pins below.
+fn callgraph_envelope_json() -> String {
+    format!(
+        r#"{{
+        "format": "zzop-normalized-ast",
+        "version": "{}",
+        "parser": "java-lexical/1",
+        "source": "legacy",
+        "files": [
+            {{
+                "path": "src/main/java/OrderController.java",
+                "loc": 40,
+                "symbols": [
+                    {{"id": "src/main/java/OrderController.java#createOrder", "file": "src/main/java/OrderController.java", "name": "createOrder", "kind": "function", "line": 5, "exported": true}},
+                    {{"id": "src/main/java/OrderController.java#save", "file": "src/main/java/OrderController.java", "name": "save", "kind": "function", "line": 25, "exported": false}}
+                ],
+                "io": {{
+                    "provides": [{{"kind": "http", "key": "POST /orders", "file": "src/main/java/OrderController.java", "line": 5, "symbol": "createOrder"}}],
+                    "consumes": []
+                }},
+                "calls": [{{"from_symbol": "src/main/java/OrderController.java#createOrder", "callee_name": "save", "line": 7}}]
+            }}
+        ]
+    }}"#,
+        zzop_core::NORMALIZED_AST_CONTRACT_VERSION
+    )
+}
+
+fn finding_rule_ids(out: &str) -> Vec<String> {
+    let value: serde_json::Value = serde_json::from_str(out).expect("valid JSON");
+    value["findings"]
+        .as_array()
+        .expect("findings array")
+        .iter()
+        .map(|f| f["ruleId"].as_str().expect("ruleId").to_string())
+        .collect()
+}
+
+/// B4 red->green: a `vocabulary` declared on the `analyzeEnvelope` config wire must REACH Mode A's
+/// call-graph pass. Before this field existed, `{"vocabulary": {...}}` deserialized to nothing
+/// (`EnvelopeAnalyzeRequest` had no such field and no `deny_unknown_fields`), and the lane ran on the
+/// engine default it happened to inherit — a declaration the wire accepted and silently discarded.
+#[test]
+fn analyze_envelope_json_declared_vocabulary_reaches_the_callgraph_pass() {
+    // Undeclared: the product default (built-in vocabulary) does not treat `save` as an auth guard,
+    // so the unguarded mutating route fires.
+    let base = analyze_envelope_json(&callgraph_envelope_json(), r#"{"sourceId": "legacy"}"#)
+        .expect("analyze_envelope_json should succeed");
+    assert!(
+        finding_rule_ids(&base)
+            .iter()
+            .any(|id| id == "mutating-route-no-auth"),
+        "without a declaration the built-in vocabulary must leave the route flagged: {base}"
+    );
+
+    // Declared: the project says `^save$` IS its guard spelling — the same declaration a tree request
+    // carries — so the reached `save` symbol clears the route.
+    let declared = analyze_envelope_json(
+        &callgraph_envelope_json(),
+        r#"{"sourceId": "legacy", "vocabulary": {"authGuardPattern": "^save$"}}"#,
+    )
+    .expect("analyze_envelope_json should succeed");
+    assert!(
+        !finding_rule_ids(&declared)
+            .iter()
+            .any(|id| id == "mutating-route-no-auth"),
+        "a declared authGuardPattern must clear the route it matches: {declared}"
+    );
+}
+
+/// The other half of the same contract: a request that declares NO vocabulary gets the PRODUCT
+/// default (`VocabularyConfig::built_in()`) assigned explicitly at the facade chokepoint — the same
+/// place the bundled-pack default lives — never by falling through to whatever `EngineConfig`'s
+/// default happens to be. `verifyToken` matches the built-in auth-guard vocabulary, so the route
+/// clears; if an undeclared vocabulary meant "no judgment" here (the tree-lane empty declaration),
+/// this route would fire instead.
+#[test]
+fn analyze_envelope_json_undeclared_vocabulary_keeps_the_product_default() {
+    // Rename the callee symbol wholesale: `verifyToken` is in the built-in guard vocabulary.
+    let envelope = callgraph_envelope_json().replace("save", "verifyToken");
+    let out = analyze_envelope_json(&envelope, r#"{"sourceId": "legacy"}"#)
+        .expect("analyze_envelope_json should succeed");
+    assert!(
+        !finding_rule_ids(&out)
+            .iter()
+            .any(|id| id == "mutating-route-no-auth"),
+        "undeclared vocabulary must keep the built-in guard vocabulary (verifyToken clears): {out}"
     );
 }
 

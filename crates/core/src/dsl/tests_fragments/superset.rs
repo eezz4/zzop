@@ -6,8 +6,9 @@
 //! a concatenation (pinned by `expansion_tests::expand_fragments_errs_on_a_nested_fragment_reference_
 //! rather_than_chaining`). So a fragment that wants "everything `test-paths` excludes, plus one more arm"
 //! has no choice but to HAND-COPY the shared body — the exact duplication the fragment mechanism exists to
-//! abolish, reappearing inside the mechanism. Two such copies ship today: `test-paths-stories` (in the
-//! shared bundle itself) and `sql`'s `test-paths-migrations`. Nothing else notices when the shared body
+//! abolish, reappearing inside the mechanism. Two such copies ship today, both in the shared bundle
+//! itself: `test-paths-stories` and `test-paths-migrations` (promoted out of the `sql` pack 2026-08-03,
+//! when `security`'s `sql-format-interpolation` became its second referencing pack). Nothing else notices when the shared body
 //! gains an arm and the copies silently keep the old one: each pack's fixtures only exercise its own
 //! `file_exclude_pattern`, and a MISSING exclusion buys extra findings on test files nobody attributes to
 //! a stale copy.

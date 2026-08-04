@@ -38,6 +38,7 @@
 use serde_json::{json, Map, Value};
 
 mod blind_spots;
+mod recognizers;
 
 /// One sentence per dispatch class (plus the per-row `inDepGraph` derived count), shipped in the
 /// reply so the vocabulary is self-describing — the same discipline as `query_file`'s
@@ -58,8 +59,21 @@ fn legend() -> Value {
                        edge (a non-empty source entry in the dep graph). A LOW count against `files` \
                        on a structural extension is the import-resolution blindness signal: the \
                        files were parsed, but their imports did not resolve to in-tree files. NOT a \
-                       declared-imports count — the output carries only resolved edges, so how many \
-                       imports FAILED to resolve is not derivable from this reply"
+                       declared-imports count — the dep graph carries only resolved edges; the \
+                       declared side is `declaredImports`' axis, so read the two together",
+        "declaredImports": "sum over this extension's parsed files of each file's DISTINCT declared \
+                            import specifiers (import/use/using bindings, re-exports, dynamic \
+                            import()), counted BEFORE resolution — package imports and specifiers \
+                            no resolver could map are still in it, so `declaredImports` high with \
+                            `inDepGraph` low is the import-resolution blindness signal read directly. \
+                            NOT 1:1 with the census's `resolvedImportEdges`: a declaration is a \
+                            specifier and an edge is a resolved (importer, file) pair — several \
+                            specifiers can land on one file, and one glob import can fan out to \
+                            several edges. `null` means NEVER MEASURED for this extension (its \
+                            parser projects no import channel — e.g. prisma/sql — or the tree was \
+                            ingested as a Mode A envelope, which measures nothing here): absence of \
+                            data, not 0. A degraded file counts 0 declared — read the row's \
+                            `degraded` column beside it"
     })
 }
 
@@ -72,7 +86,8 @@ pub fn query_coverage_json(analysis_json: &str) -> Result<String, String> {
         .get("trees")
         .and_then(Value::as_array)
         .ok_or_else(|| {
-            "this analysis has no `trees` — the coverage query runs over an analyzeTrees output"
+            "this analysis has no `trees` — the coverage query runs over a multi-tree analysis \
+             output (the kind with a `trees` array)"
                 .to_string()
         })?;
 
@@ -86,6 +101,16 @@ pub fn query_coverage_json(analysis_json: &str) -> Result<String, String> {
     );
     out.insert("dispatchMeaning".to_string(), legend());
     out.insert("blindSpotMeaning".to_string(), blind_spots::legend());
+    // The other CAPABILITY table this build carries, and until now the one with no user surface at
+    // all: which frameworks the compiled-in parsers recognize, channel by channel. Top-level and
+    // UNCROSSED with any tree, deliberately — it is a fact of the code (true before any tree is
+    // walked), and crossing it with a tree's extension mix would manufacture a per-run claim the
+    // declarations do not make. `blindSpots` is the crossed cell; this is the raw capability half.
+    out.insert("frameworkRecognizers".to_string(), recognizers::table());
+    out.insert(
+        "frameworkRecognizerMeaning".to_string(),
+        recognizers::legend(),
+    );
     // UNMEASURED cells — a schema position, so no consumer can receive the measured axes without
     // receiving the statement of what was never measured. Fixed content by design: it changes when the
     // capability changes, not per run.
@@ -130,6 +155,18 @@ fn tree_view(tree: &Value, sightlines: &[zzop_core::RuleSightline]) -> Value {
         structural.extend(dep.keys().map(String::as_str));
     }
 
+    // Fetched before the extension table below, which reads its `declaredImportsByExt` half (F4);
+    // forwarded verbatim as the `census` field further down, exactly as before.
+    let census = tree
+        .pointer("/output/coverage")
+        .cloned()
+        .unwrap_or(Value::Null);
+    // F4 declared-side lookup: an extension key ABSENT here renders as a `null` cell — never measured
+    // (channel-less parser, or a Mode A envelope run), not 0. See the `declaredImports` legend.
+    let declared = census
+        .get("declaredImportsByExt")
+        .and_then(Value::as_object);
+
     // ext -> (files, structural, lexical_only, degraded, in_dep_graph). BTreeMap: deterministic
     // output order. `in_dep_graph` counts files with a NON-EMPTY dep source entry — key presence
     // alone is not edge participation (the engine gives every parsed file a dep entry, possibly
@@ -166,7 +203,9 @@ fn tree_view(tree: &Value, sightlines: &[zzop_core::RuleSightline]) -> Value {
         .iter()
         .map(|(ext, (files, s, l, d, in_dep))| {
             json!({ "ext": ext, "files": files, "structural": s, "lexicalOnly": l, "degraded": d,
-                    "inDepGraph": in_dep })
+                    "inDepGraph": in_dep,
+                    "declaredImports": declared.and_then(|m| m.get(ext)).cloned()
+                                               .unwrap_or(Value::Null) })
         })
         .collect();
     // The extensions with 1+ structural file — the measured half of the `blindSpots` cross.
@@ -176,10 +215,6 @@ fn tree_view(tree: &Value, sightlines: &[zzop_core::RuleSightline]) -> Value {
         .map(|(ext, _)| ext.clone())
         .collect();
 
-    let census = tree
-        .pointer("/output/coverage")
-        .cloned()
-        .unwrap_or(Value::Null);
     let join_zero = census
         .get("joinContributionZero")
         .and_then(Value::as_bool)
@@ -237,7 +272,11 @@ fn tree_view(tree: &Value, sightlines: &[zzop_core::RuleSightline]) -> Value {
 }
 
 /// Lowercased tail after the last `.` of the last path segment; whole name (lowercased) when there is
-/// no dot, so `Makefile` groups as `makefile` rather than vanishing into an empty key.
+/// no dot, so `Makefile` groups as `makefile` rather than vanishing into an empty key. MIRROR of the
+/// engine census's `ext_of` (`crates/engine/src/analyze/assemble/declared.rs`) — the two must agree
+/// byte-for-byte or a measured `declaredImportsByExt` key misses its table row and degrades to the
+/// `null` ("never measured") cell. The end-to-end pin in `tests.rs` is what crosses the two halves;
+/// every other F4 test authors one side's fixture by hand.
 fn ext_of(rel: &str) -> String {
     let base = rel.rsplit('/').next().unwrap_or(rel);
     match base.rsplit_once('.') {

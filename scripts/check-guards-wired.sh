@@ -4,11 +4,7 @@
 # mechanically enforces that a newly authored guard actually runs anywhere; without this, a guard
 # can be written, committed, and quietly never invoked again.
 #
-# NO per-guard exceptions. There was one until 2026-07-29 — check-parser-fingerprint-bump.sh
-# additionally had to be wired into .githooks/pre-push, because its question was range-shaped.
-# That guard is gone: every fingerprint it policed is derived from a hash of the source that
-# produces the cached bytes (crates/engine/build.rs), so there is no bump to forget. The pre-push
-# hook went with it — it had no other subject — and this script is back to one flat rule.
+# NO per-guard exceptions: two locations, every guard, one flat rule.
 #
 # This script wires itself the same way its siblings are wired (see .githooks/pre-commit and
 # ci.yml, both updated alongside this file) rather than special-casing itself out of the
@@ -19,7 +15,7 @@
 # TRACKED-file enumeration (see its own header comment), so a missing lib silently breaks every
 # guard that depends on it at the `. ./scripts/lib/tracked-grep.sh` line -- worth a fast, specific
 # failure here rather than each guard's own less obvious "command not found: tracked_files_matching".
-# It is NOT itself wired into pre-commit/CI/pre-push the way a scripts/check-*.sh guard is: it lives
+# It is NOT itself wired into pre-commit/CI the way a scripts/check-*.sh guard is: it lives
 # under scripts/lib/, has no independent exit status of its own, and is only ever sourced by a real
 # guard -- the `git ls-files -z -- 'scripts/check-*.sh'` glob below does not (and must not) match it.
 #
@@ -34,6 +30,15 @@
 # would remove it, and the only symptom is a site that quietly stops updating. That is a literal
 # cross-file constant with nothing checking it, i.e. the same shape this repo spent 2026-07-28 removing
 # from sixteen guards, committed in the very edit that added the gate.
+#
+# NOTE — limitation recorded rather than fixed (2026-08-01): `invoked_in` reads ci.yml as a flat stream
+# of LINES and cannot see JOB boundaries. A guard invoked inside a job that never runs (`if: false`, or
+# a job no trigger can reach) therefore still counts as wired, and this script would vouch for a fleet
+# that CI never executes. Not a live hole today — ci.yml runs every guard from its single `guards` job,
+# so any invocation this awk finds is an invocation that runs. It becomes a REQUIRED fix the moment that
+# job is split or conditioned. Closing it means reading ci.yml as YAML (jobs -> steps -> run, plus each
+# job's `if:`) instead of grepping lines, which is a larger change than this file has needed so far;
+# recorded here so the split does not land without it.
 #
 # No deps beyond git + grep + awk. Exit 1 on any violation, listing the exact (guard,
 # missing-location) pairs.
@@ -58,10 +63,11 @@ count=0
 #     "clean (18 guards checked)" — the one thing that is supposed to notice a guard that stopped
 #     running instead vouched for the disabled step's own tombstone. Fixed by skipping full-line
 #     comments (a real invocation with a trailing `# note` still counts).
-#  2. Skipping comments was not enough: `.githooks/pre-push` prints an ERROR MESSAGE naming the
-#     script it just ran (`echo "pre-push: scripts/check-parser-fingerprint-bump.sh FAILED ..."`),
-#     and a bare substring test accepted that string as the wiring. Measured: commenting out the
-#     one real invocation and leaving the echo behind still reported "clean (18 guards checked)".
+#  2. Skipping comments was not enough: the `.githooks/pre-push` hook of the day (deleted 2026-07-29
+#     along with the range-shaped guard it existed to run) printed an ERROR MESSAGE naming the script
+#     it had just run (`echo "pre-push: scripts/check-foo.sh FAILED ..."`), and a bare substring test
+#     accepted that string as the wiring. Measured: commenting out the one real invocation and leaving
+#     the echo behind still reported "clean (18 guards checked)".
 #
 # So the needle is no longer "the path appears" but "the path appears in INVOCATION FORM" — one of
 # `bash <path>`, `sh <path>`, `./<path>` — plus their combinations (`bash ./<path>`, flags in between,
@@ -74,7 +80,7 @@ count=0
 # used to cite `.githooks/pre-commit`, which actually spells it `bash "scripts/$g.sh"`, a VARIABLE.
 # That line can never match this needle, which interpolates a literal base name — and does not need
 # to: pre-commit is checked by the line-anchored GUARDS-array grep below, not by `invoked_in`, which
-# only ever reads ci.yml and pre-push).
+# only ever reads ci.yml).
 #
 # ## Residual: two legitimate spellings ARE rejected (measured, deliberately not closed)
 # This block used to claim "narrowing to them costs no legitimate spelling". That is an absolute
@@ -95,13 +101,12 @@ count=0
 # The residual therefore shows up as a false RED, and the escape-hatch risk that creates is answered
 # by naming the accepted spellings in the failure output below rather than by widening the needle.
 #
-# ## Rejected: the own-line rule that check-parser-fingerprint-bump.sh uses for its marker
-# That guard settles the same mention-vs-real question by requiring its marker to stand ON ITS OWN
-# LINE (see its header). Checked here, and it does NOT transfer — measured against this very tree,
-# where NO invocation is line-leading:
+# ## Rejected: an own-line rule for the invocation
+# Requiring the call to STAND ON ITS OWN LINE settles the same mention-vs-real question elsewhere in
+# this repo (a marker that must lead its line cannot be quoted inside a sentence). Checked here, and it
+# does NOT transfer — measured against this very tree, where NO invocation is line-leading:
 #   * .github/workflows/ci.yml — `        run: bash scripts/check-english-source.sh` (YAML key first)
-#   * .githooks/pre-push       — `  if ! out="$(FINGERPRINT_DIFF_RANGE="$range" bash scripts/...`
-# Requiring line-leading would false-red both files on day one, and false red is the more dangerous
+# Requiring line-leading would false-red the file on day one, and false red is the more dangerous
 # failure here: a guard that cries wolf gets silenced with an escape hatch, and the escape hatch is
 # what turns a lane off for good. (`.githooks/pre-commit` is the one place the own-line rule DOES
 # hold, and the check below already uses it: the GUARDS array entry is line-anchored, which is why
@@ -109,14 +114,14 @@ count=0
 #
 # ## Known limitation, deliberately not closed
 # A string that quotes a COMPLETE invocation still counts — e.g. a hint message
-# `echo "on failure run: bash scripts/check-policy-census.sh --update"` inside pre-push would
-# satisfy this check on its own. Closing it needs "is this offset inside a quoted string", and the
-# obvious implementations break on the real code: naive quote-pairing on pre-push's own invocation
-# line (`out="$(VAR="$range" bash scripts/... )"`) pairs the wrong quotes across the `$( )` and
-# strips the REAL call — i.e. the cure produces exactly the false red described above. The residual
-# is strictly narrower than what was there before (a bare mention no longer counts at all), it is
-# confined to two hand-edited files of ~50 and ~100 lines, and it is recorded here rather than left
-# for someone to rediscover.
+# `echo "on failure run: bash scripts/check-policy-census.sh --update"` inside a ci.yml `run:` block
+# would satisfy this check on its own. Closing it needs "is this offset inside a quoted string", and
+# the obvious implementations break on real code: naive quote-pairing on a line that nests `$( )`
+# inside double quotes (`out="$(VAR="$x" bash scripts/... )"`) pairs the wrong quotes across the
+# `$( )` and strips the REAL call — i.e. the cure produces exactly the false red described above. The
+# residual is strictly narrower than what was there before (a bare mention no longer counts at all),
+# it is confined to one hand-edited file, and it is recorded here rather than left for someone to
+# rediscover.
 invoked_in() { # <file> <guard base name>
   awk -v base="$2" '
     BEGIN {
@@ -246,7 +251,7 @@ if [ "$missing" -ne 0 ] && [ "$wiring_missing" -ne 0 ]; then
   echo "check-guards-wired: every scripts/check-*.sh must run in BOTH .githooks/pre-commit and"
   echo ".github/workflows/ci.yml's guards job."
   echo
-  echo "If the guard IS wired and this still fails, check the SPELLING: ci.yml/pre-push invocations"
+  echo "If the guard IS wired and this still fails, check the SPELLING: ci.yml invocations"
   echo "are recognized only as 'bash scripts/<name>.sh', 'sh scripts/<name>.sh', './scripts/<name>.sh'"
   echo "(flags and a quoted path are fine, anywhere on the line). A bare 'scripts/<name>.sh' with no"
   echo "interpreter, or a variable path prefix, is NOT recognized — deliberately, see this script's"

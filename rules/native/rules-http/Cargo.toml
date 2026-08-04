@@ -17,3 +17,9 @@ serde_json = { workspace = true }
 # real parser-computed fact rather than a re-implemented test double. Production code in this crate
 # still depends on `zzop-core` only (see `lib.rs`'s module doc).
 zzop-parser-typescript = { path = "../../../parser/parser-typescript" }
+
+# Inherit the workspace lint policy (root Cargo.toml [workspace.lints.clippy]) — every member does,
+# with no exceptions. Where a single target legitimately violates one, the exemption is a crate-level
+# #![allow] at that target's entry point, never a hole in this table.
+[lints]
+workspace = true

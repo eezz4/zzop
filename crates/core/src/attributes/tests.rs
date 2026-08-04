@@ -341,6 +341,8 @@ fn overlay_with_attrs(attrs: Vec<Attribute>) -> crate::NormalizedEnvelope {
             attributes: attrs,
             loop_spans: Vec::new(),
             function_spans: Vec::new(),
+            test_spans: Vec::new(),
+            calls: Vec::new(),
         }],
     }
 }

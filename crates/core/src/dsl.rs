@@ -4,7 +4,7 @@
 //!
 //! ## Fused execution contract
 //!
-//! Per-file DSL rules (`LineScan`/`MethodScan`/`SymbolScan`) run **in the parse pass**, before the file's
+//! Per-file DSL rules (`LineScan`/`MethodScan`/`SymbolScan`/`CallScan`) run **in the parse pass**, before the file's
 //! AST is dropped: for each file the engine parses, projects Common IR, runs the DSL rule packs against
 //! that file's slice via `eval_pack`, then drops the AST — one pass, no re-read/re-parse. Raw AST is
 //! deliberately not part of this contract, so a rule sees only source lines (`SourceFile::text`, for
@@ -32,15 +32,17 @@
 //! evaluation entry points), `diagnostics` (rule-skip warning sink), `prefilter` (RegexSet line-scan
 //! pre-filter), `markers`
 //! (suppress-marker/require-file helpers), and one module per matcher family (`line_scan`,
-//! `method_scan`, `ir_scan`). Every public item stays importable at `crate::dsl::X`.
+//! `method_scan`, `call_scan`, `ir_scan`). Every public item stays importable at `crate::dsl::X`.
 
 mod attr_gate;
+mod call_scan;
 mod def;
 mod diagnostics;
 mod eval;
 mod fragments;
 mod ir_scan;
 mod line_scan;
+mod literal_scan;
 mod markers;
 mod method_scan;
 mod prefilter;
@@ -48,7 +50,11 @@ mod source;
 mod string_mask;
 
 #[cfg(test)]
+mod inline_census_tests;
+#[cfg(test)]
 mod test_support;
+#[cfg(test)]
+mod tests_call_scan;
 #[cfg(test)]
 mod tests_diagnostics;
 #[cfg(test)]
@@ -62,6 +68,8 @@ mod tests_ir_scan;
 #[cfg(test)]
 mod tests_line_scan;
 #[cfg(test)]
+mod tests_literal_scan;
+#[cfg(test)]
 mod tests_markers;
 #[cfg(test)]
 mod tests_method_scan;
@@ -70,12 +78,14 @@ mod tests_method_scan_after;
 #[cfg(test)]
 mod tests_method_scan_same_fn;
 #[cfg(test)]
+mod tests_test_regions;
+#[cfg(test)]
 mod tests_trigger_in_loop;
 
 pub use attr_gate::apply_attr_gates;
 pub use def::{
-    IoDirection, IoScan, LabeledPattern, LineScan, Matcher, MethodScan, RuleDef, RulePackDef,
-    SymbolScan,
+    CallScan, IoDirection, IoScan, LabeledPattern, LineScan, LiteralScan, Matcher, MethodScan,
+    RuleDef, RulePackDef, SymbolScan,
 };
 pub use eval::{eval_pack, eval_pack_into, eval_pack_profiled, eval_pack_profiled_into};
 pub use fragments::FragmentError;

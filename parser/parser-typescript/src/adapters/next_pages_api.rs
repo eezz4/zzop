@@ -32,17 +32,12 @@
 mod collector;
 mod resolve;
 
-/// What `scan_pages_api_handler` learned about one candidate file.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct PagesApiHandlerScan {
-    /// 1-based line of the first `export default …` (or `export { x as default }`). `None` means the
-    /// file has no default export (e.g. a config-only file) — or does not parse.
-    pub default_export_line: Option<u32>,
-    /// Sorted, deduped UPPERCASE verbs the RESOLVED handler's body names — see the module doc for the
-    /// resolution + witness rules. Empty means either no method narrowing was witnessed (a genuine
-    /// serve-all handler) or the handler's underlying function/parameter could not be resolved.
-    pub verbs: Vec<String>,
-}
+/// What `scan_pages_api_handler` learned about one candidate file. The TYPE lives in `zzop_core`
+/// (fragment convention — the engine composes it into `http` provides through the typed
+/// `compose_pages_api_provides(… zzop_core::PagesApiHandlerScan …) -> Vec<IoProvide>` seam, the
+/// same `compose_*` shape every other recognizer fragment crosses); re-exported here so this
+/// module stays the one public path consumers import the scan from.
+pub use zzop_core::PagesApiHandlerScan;
 
 /// Scan one `pages/api` candidate file's text. Parses via the shared swc entry (extension-driven
 /// syntax); a parse failure yields the empty scan (no default export, no verbs).

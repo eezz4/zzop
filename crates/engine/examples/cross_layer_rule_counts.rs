@@ -6,6 +6,12 @@
 //! Each root's folder name becomes its `source_id`. DSL packs are NOT loaded — every `cross-layer/*`
 //! rule is native, so skipping packs keeps large runs fast without changing the reported numbers.
 
+// This target PRINTS BY DESIGN — on BOTH streams — so the workspace `print_stdout`/`print_stderr`
+// lints are exempted here rather than being weakened for everyone. See root Cargo.toml
+// [workspace.lints.clippy]: both measured zero in every library `src/`, and Cargo's lint table
+// cannot be scoped to a single target.
+#![allow(clippy::print_stdout, clippy::print_stderr)]
+
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 

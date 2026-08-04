@@ -34,6 +34,7 @@ fn provide(source: &str, kind: &str, key: &str) -> TaggedProvide {
     TaggedProvide {
         source: source.to_string(),
         provide: IoProvide {
+            response: None,
             body: None,
             kind: kind.to_string(),
             key: key.to_string(),
@@ -356,7 +357,7 @@ fn the_message_discloses_count_split_keys_and_how_to_exclude() {
     assert!(m.contains("2 with no provider anywhere"), "split: {m}");
     assert!(m.contains("1 matching 2+ trees"), "split: {m}");
     assert!(m.contains("GET /articles"), "keys: {m}");
-    assert!(m.contains("disabled_rules"), "exclude: {m}");
+    assert!(m.contains("disabledRules"), "exclude: {m}");
     // §9: only knobs that EXIST may be named. Both sides now have one, and the consume-side knob is the
     // one this finding's own diagnosis points at — a message that named only the serving side would be
     // sending a reader with a calling-side base to the wrong end of the join.

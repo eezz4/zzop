@@ -106,6 +106,20 @@ fn const_spec_with_multiple_names_emits_one_symbol_each() {
 }
 
 #[test]
+fn a_multi_name_const_spec_emits_exactly_its_names_and_no_comma_ghost() {
+    // Reproduced defect (the fielded-comma quirk): tree-sitter-go 0.25 attaches the `name` FIELD to
+    // a const_spec's comma tokens too, and this walk had no kind gate, so `const A, B = "x", "y"`
+    // emitted a third symbol spelled "," (id `a.go#,`) into the graph/dead-export/count machinery.
+    // The strict full-list assertion is the pin the finder-style test above cannot provide.
+    let src = "package main\n\nconst A, B = \"x\", \"y\"\n";
+    let names: Vec<String> = parse_symbols("a.go", src)
+        .into_iter()
+        .map(|s| s.name)
+        .collect();
+    assert_eq!(names, vec!["A".to_string(), "B".to_string()]);
+}
+
+#[test]
 fn top_level_var_maps_to_const_kind() {
     let src = "package main\n\nvar Counter = 0\n";
     let syms = parse_symbols("a.go", src);

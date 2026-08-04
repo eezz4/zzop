@@ -165,7 +165,12 @@ fn unknown_suppression_rule_ids(config: &EngineConfig) -> Vec<String> {
 /// sets those two functions use (`true`/`false` `include_bare_pack_ids` splits identically, for the same
 /// reasons documented on each) — never a second "known" definition to drift out of sync.
 ///
-/// `None` when neither `disabled_rules` nor `severity_overrides` has any entry — nothing was requested,
+/// `only` is the third knob (v0.29.0) and reads a DIFFERENT known-set — the loaded pack ids, because
+/// `registry::is_pack_enabled` compares an allowlist entry against `pack.id` alone. That is one
+/// definition per id space, not a second definition of the same one.
+///
+/// `None` when none of `disabled_rules`/`severity_overrides`/`only_packs` has any entry — nothing was
+/// requested,
 /// so there is nothing to positively confirm (the quieter of the two conventions
 /// `AnalyzeOutput::rule_overrides_applied`'s own doc allows). A request that matched NOTHING (every entry
 /// a typo) still yields `Some` with empty lists rather than `None`: something was requested, and
@@ -174,6 +179,7 @@ fn unknown_suppression_rule_ids(config: &EngineConfig) -> Vec<String> {
 pub(crate) fn rule_overrides_applied(config: &EngineConfig) -> Option<crate::RuleOverridesApplied> {
     if config.rule_config.disabled_rules.is_empty()
         && config.rule_config.severity_overrides.is_empty()
+        && config.rule_config.only_packs.is_empty()
     {
         return None;
     }
@@ -200,8 +206,24 @@ pub(crate) fn rule_overrides_applied(config: &EngineConfig) -> Option<crate::Rul
     severity_remapped.sort();
     severity_remapped.dedup();
 
+    // The pack allowlist's own known-id set is the LOADED pack ids, not `known_rule_ids`: `only_packs`
+    // is compared against `pack.id` alone by `registry::is_pack_enabled`, so a `"<pack>/<rule>"` id or a
+    // native-analysis id in this list gates nothing and must not be reported as applied.
+    let loaded_pack_ids: std::collections::HashSet<&str> =
+        config.packs.iter().map(|p| p.id.as_str()).collect();
+    let mut only: Vec<String> = config
+        .rule_config
+        .only_packs
+        .iter()
+        .filter(|id| loaded_pack_ids.contains(id.as_str()))
+        .cloned()
+        .collect();
+    only.sort();
+    only.dedup();
+
     Some(crate::RuleOverridesApplied {
         disabled,
         severity_remapped,
+        only,
     })
 }

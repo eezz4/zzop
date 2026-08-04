@@ -7,6 +7,7 @@ mod body_shape;
 mod guards;
 mod provides;
 mod provides_shapes;
+mod response_shape;
 
 fn keys(out: &[IoProvide]) -> Vec<String> {
     out.iter().map(|p| p.key.clone()).collect()

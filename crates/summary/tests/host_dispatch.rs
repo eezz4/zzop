@@ -2,7 +2,7 @@
 //! inject the build.rs-embedded bundled packs as inline `packDefs` — so `packsLoaded` here reports
 //! `source: "inline"` for every bundled pack). These call this crate's entry points EXACTLY as the two
 //! host products do — the `zzop` CLI's subcommands and the `zzop-mcp` server's `tools/call` handlers
-//! both land on `analyze_summary`/`cross_summary`/`endpoint_summary`/the two validators — so they pin
+//! both land on `analyze_summary`/`cross_summary`/`endpoint_summary`/`file_summary`/the two validators — so they pin
 //! the host-facing answer, from outside the crate, over the real engine. They deliberately do NOT pin
 //! the shaping logic's internals; that logic's own unit tests live beside it in `src/` (e.g.
 //! `config_warnings`, `output`). The MCP-surface half of this coverage (`tools/list` schema pins and
@@ -16,6 +16,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use zzop_test_support::skip_notice;
 
 /// The unfiltered default findings view, built through the WIRE-NEUTRAL constructor — the same call the
 /// `zzop` CLI makes for `analyze`/`cross` (no MCP `tools/call` JSON fabricated anywhere).
@@ -778,9 +779,7 @@ fn git_history_fixture() -> TempDir {
 #[test]
 fn analyze_repo_carries_a_compact_architecture_summary_when_git_signals_ran() {
     if !git_available() {
-        eprintln!(
-            "skipping analyze_repo_carries_a_compact_architecture_summary_when_git_signals_ran: git not on PATH"
-        );
+        skip_notice!("git not on PATH");
         return;
     }
     let dir = git_history_fixture();
@@ -830,4 +829,82 @@ fn analyze_repo_omits_architecture_when_git_signals_did_not_run() {
             "gitWindow must be null (never a populated window) with no git history, got: {v}"
         );
     }
+}
+
+/// The file query must carry the SAME two honesty channels `analyze` does — the engine's `warnings` and
+/// the engine-side half of `configWarnings`.
+///
+/// Until 2026-08-02 it carried neither, and the two failures had different shapes:
+/// - `warnings` was simply absent from the reply. That lane runs the identical `analyzeTrees` call over
+///   the identical trees, so every self-report was computed and then dropped — a user debugging through
+///   `zzop file` had one eye fewer than a user running `zzop analyze` on the same tree, with nothing in
+///   the reply saying so.
+/// - `configWarnings` was present and read `[]` on runs that had something to say, which is worse: the
+///   merge read the field off the MULTI-tree document's top level, where `MultiAnalyzeOutputView` has no
+///   such field, so it silently contributed nothing on every run. An empty array is this repo's honest
+///   "nothing to report" signal, so a broken merge published a false all-clear rather than a gap.
+///
+/// The fixture plants ONE config problem per channel, each landing on the side that owns it — a
+/// `parsers.globOverrides` entry naming a language this build has no parser for (`warnings`, via the
+/// facade's declared-knob pass), and an unknown rule id under `rules` (`configWarnings`, via the engine's
+/// override diagnostics). Both are compared against what `analyze` reports for the same tree, so the pin
+/// is "these lanes agree", not a copy of either message's wording.
+#[test]
+fn check_file_carries_the_same_warnings_and_config_diagnostics_analyze_does() {
+    let dir = TempDir::new("zzop-summary-file-warnings");
+    dir.write("api.ts", "export const load = () => fetch('/api/users');\n");
+    dir.write(
+        zzop_config::DEFAULT_CONFIG_FILENAME,
+        "{\n  \"parsers\": { \"globOverrides\": [ { \"glob\": \"**/*.zig\", \"language\": \"zig\" } ] },\n  \"rules\": { \"circular-typo\": \"off\" }\n}\n",
+    );
+    let root = dir.path().display().to_string();
+
+    let file_out = zzop_summary::file_summary("api.ts", None, Some(&root), &[], None)
+        .expect("the file query should succeed");
+    let f: serde_json::Value = serde_json::from_str(&file_out).unwrap();
+    let analyze_out = analyze(&root).expect("analyze should succeed");
+    let a: serde_json::Value = serde_json::from_str(&analyze_out).unwrap();
+
+    let strings = |v: &serde_json::Value| -> Vec<String> {
+        v.as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|w| w.as_str())
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let file_warnings = strings(&f["warnings"]);
+    let analyze_warnings = strings(&a["warnings"]);
+    assert!(
+        f["warnings"].is_array(),
+        "`warnings` must be present and an array, empty included — a lane with no warnings channel and \
+         a lane with nothing to say must not be the same bytes: {f}"
+    );
+    let named_language = |ws: &[String]| ws.iter().any(|w| w.contains("parsers.globOverrides"));
+    assert!(
+        named_language(&analyze_warnings),
+        "fixture check: analyze must report the unknown-language override, or this test proves nothing \
+         about the file lane: {analyze_warnings:?}"
+    );
+    assert!(
+        named_language(&file_warnings),
+        "the file query runs the SAME analysis, so a warning analyze reports for this tree must reach \
+         this reply too: {file_warnings:?}"
+    );
+
+    let file_config_warnings = strings(&f["configWarnings"]);
+    let analyze_config_warnings = strings(&a["configWarnings"]);
+    let named_rule_id = |ws: &[String]| ws.iter().any(|w| w.contains("circular-typo"));
+    assert!(
+        named_rule_id(&analyze_config_warnings),
+        "fixture check: analyze must report the unknown rule id: {analyze_config_warnings:?}"
+    );
+    assert!(
+        named_rule_id(&file_config_warnings),
+        "the engine-side config diagnostics ride EACH TREE's output, not the multi-tree document's top \
+         level — a merge that reads the top level publishes `[]`, i.e. a false all-clear: \
+         {file_config_warnings:?}"
+    );
 }

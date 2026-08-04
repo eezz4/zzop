@@ -63,6 +63,9 @@ pub(super) fn process_file(
                 field_usage_tokens: Vec::new(),
                 loop_spans: Vec::new(),
                 function_spans: Vec::new(),
+                test_spans: Vec::new(),
+                call_sites: Vec::new(),
+                string_literals: Vec::new(),
             };
         }
     };
@@ -104,7 +107,15 @@ pub(super) fn process_file(
                 SpanFacts {
                     loop_spans: &ir.loop_spans,
                     function_spans: &ir.function_spans,
+                    test_spans: &ir.test_spans,
                 },
+                // Straight off the CACHED slice, like the spans beside it. This is the arm that must not
+                // be forgotten: on a ruleset-only change the IR is reused and never recomputed, so a
+                // `&[]` here would make every `CallScan` rule silent on warm files while a cold run found
+                // them — the same trap `function_spans`' field doc records.
+                &ir.call_sites,
+                // Same must-not-be-forgotten arm for `LiteralScan` — straight off the cached slice.
+                &ir.string_literals,
                 config.profile_rules,
             );
             if schema_findings_eligible(language, ir.degraded) {
@@ -155,6 +166,9 @@ pub(super) fn process_file(
             field_usage_tokens: artifact.field_usage_tokens.clone(),
             loop_spans: artifact.loop_spans.clone(),
             function_spans: artifact.function_spans.clone(),
+            test_spans: artifact.test_spans.clone(),
+            call_sites: artifact.call_sites.clone(),
+            string_literals: artifact.string_literals.clone(),
         };
         let _ = cache.put_ir(key, &ir_slice);
         let _ = cache.put_findings(key, &artifact.findings);
@@ -198,5 +212,8 @@ fn artifact_from_ir(
         field_usage_tokens: ir.field_usage_tokens,
         loop_spans: ir.loop_spans,
         function_spans: ir.function_spans,
+        test_spans: ir.test_spans,
+        call_sites: ir.call_sites,
+        string_literals: ir.string_literals,
     }
 }

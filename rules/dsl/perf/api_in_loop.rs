@@ -182,12 +182,16 @@ fn fetch_in_a_for_of_retry_loop_mentioning_backoff_is_not_flagged() {
 
 #[test]
 fn fetch_inside_promise_all_map_callback_is_flagged() {
+    // MULTILINE callback on purpose: a single-line `ids.map(async (id) => fetch(url(id)))` gets NO
+    // loop span anymore (single-line callback spans prove nothing line-granularly — see the boundary
+    // test at the bottom of this file), so the per-iteration claim is only made where the callback
+    // body has lines of its own.
     let f = scan(
         "svc.ts",
-        "declare const ids: string[];\ndeclare function url(id: string): string;\nexport async function f() {\n  await Promise.all(ids.map(async (id) => fetch(url(id))));\n}\n",
+        "declare const ids: string[];\ndeclare function url(id: string): string;\nexport async function f() {\n  await Promise.all(ids.map(async (id) => {\n    return fetch(url(id));\n  }));\n}\n",
     );
     assert_eq!(f.len(), 1, "{f:?}");
-    assert_eq!(f[0].line, 4);
+    assert_eq!(f[0].line, 5);
     assert!(snippet(&f[0]).contains("fetch"));
 }
 
@@ -239,29 +243,28 @@ fn single_fetch_then_regex_exec_while_loop_is_not_flagged() {
     assert!(f.is_empty(), "{f:?}");
 }
 
-/// BOUNDARY FINDING (documented deviation, not forced green): `(await fetch(url)).items.map(x => x.id)`
-/// all on ONE line. Byte-wise the fetch is in the RECEIVER, outside the `.map()` callback's own span, so
-/// this "should" be silent by the same logic as the multi-line REDDIT-shape negative above. But
-/// `MethodScan::trigger_in_loop`'s containment check is LINE-based (`SourceFile::loop_spans` stores
-/// 1-based line numbers, not byte offsets — see `extract_loop_spans`'s doc), and the one-liner's map
-/// callback span is `(line, line)` for that single line. Since the fetch call and the callback share that
-/// same line number, the trigger's line falls "within" the callback span and the rule FIRES — a real
-/// false positive on the single-line receiver shape that the line-granularity containment check cannot
-/// distinguish from genuine in-callback placement. Multi-line receiver shapes (see
-/// `extract_loop_spans_map_callback_excludes_receiver_line` in parser-typescript) are unaffected because
-/// the receiver's line differs from the callback's line range.
+/// The single-line callback boundary, now SILENT from the producer: `(await fetch(url)).items.map(x =>
+/// x.id)` all on ONE line. Byte-wise the fetch is in the RECEIVER, outside the `.map()` callback's own
+/// span — but the containment channel is LINE-based, so a `(line, line)` callback span could not be told
+/// apart from the one-shot receiver call sharing that line, and this shape used to FIRE (it was pinned
+/// here as a documented line-granularity false positive). The parser now drops single-line callback
+/// spans entirely (`SourceFile::loop_spans`'s doc owns the rule), so both one-line shapes below are
+/// silent: the receiver-fetch one (a false positive retired) and the network-call-around-the-map one
+/// (the review-reproduced `client.get(ids.map(...).join(...))`). Cost, published as intended
+/// under-reporting: a GENUINE per-iteration network call in a one-line callback (`ids.map(async (id) =>
+/// fetch(url(id)))` on one line) is also lost — the multiline positive
+/// `fetch_inside_promise_all_map_callback_is_flagged` is the pair proving real ones still fire.
 #[test]
-fn single_line_receiver_fetch_before_map_callback_is_a_known_line_granularity_false_positive() {
+fn single_line_map_callback_shapes_are_silent_because_the_span_is_not_emitted() {
     let f = scan(
         "svc.ts",
         "export async function f(url: string) {\n  return (await fetch(url)).items.map((x: any) => x.id);\n}\n",
     );
-    assert_eq!(
-        f.len(),
-        1,
-        "documented boundary finding: single-line receiver+callback share a line number under \
-         line-granularity containment, so this fires instead of staying silent; if this assertion \
-         ever flips to empty, the containment check has gained column/byte precision and this test \
-         (and its doc comment) should be updated to assert silence instead — {f:?}"
+    assert!(f.is_empty(), "{f:?}");
+
+    let g = scan(
+        "svc2.ts",
+        "declare const client: any;\ndeclare const ids: string[];\nexport async function f() {\n  return await client.get(ids.map((i) => i).join(','));\n}\n",
     );
+    assert!(g.is_empty(), "{g:?}");
 }

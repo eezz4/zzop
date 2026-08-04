@@ -40,21 +40,17 @@ pub fn call(params: Option<&serde_json::Value>) -> serde_json::Value {
             // Every declared-type violation (a non-array `paths`, a non-string element inside it, a
             // non-string `configPath`) is a named error here — see `zzop_summary::args`'s module doc
             // for the silent-fallback class this replaces.
+            //
+            // Source-mode exclusivity is NOT decided here, exactly as in `analyze_repo` above: both
+            // sources are passed through and `zzop_config::trees::load_trees_request` owns "exactly one
+            // source" for every host. This arm used to re-state "not both" / "pass one" locally, which
+            // gave the MCP user one sentence and the CLI twin another for the same judgment — the
+            // per-host drift the shared handler exists to prevent, reintroduced by the copy meant to
+            // help. Pinned by `tests::cross_repo_source_mode_errors_are_the_shared_handlers_verbatim`.
             let paths = args::optional_string_array(args, "paths")?;
             let config_path = args::optional_string(args, "configPath")?;
-            match (paths.is_empty(), config_path) {
-                (false, Some(_)) => {
-                    Err("pass either `paths` or `configPath`, not both".to_string())
-                }
-                (true, None) => Err(
-                    "pass `paths` (2+ tree roots) or `configPath` (a zzop.config.jsonc whose trees define the join)"
-                        .to_string(),
-                ),
-                _ => {
-                    let filters = FindingFilters::from_args(args)?;
-                    zzop_summary::cross_summary(&paths, config_path, &filters)
-                }
-            }
+            let filters = FindingFilters::from_args(args)?;
+            zzop_summary::cross_summary(&paths, config_path, &filters)
         })(),
         "check_file" => (|| {
             let target = args::required_string(args, "target")?;

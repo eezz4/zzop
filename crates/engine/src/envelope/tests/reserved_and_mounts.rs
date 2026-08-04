@@ -15,6 +15,7 @@ use super::{config, envelope, projection};
 fn nest_global_prefix_provide_is_dropped_and_warned_in_envelope_mode() {
     let mut a = projection("legacy.jsp", 3);
     a.io.provides.push(IoProvide {
+        response: None,
         body: None,
         kind: zzop_parser_typescript::NEST_GLOBAL_PREFIX_KIND.to_string(),
         key: "api".to_string(),
@@ -27,6 +28,7 @@ fn nest_global_prefix_provide_is_dropped_and_warned_in_envelope_mode() {
     // tree-wide re-prefix step to prove absent here the way the Mode B e2e test does; this instead
     // pins that the drop itself does not disturb an ordinary sibling provide.
     a.io.provides.push(IoProvide {
+        response: None,
         body: None,
         kind: "http".to_string(),
         key: "GET /widgets".to_string(),
@@ -104,6 +106,7 @@ fn ordinary_io_kinds_are_not_dropped_or_warned_in_envelope_mode() {
     // false-positive reach (mirrors `overlay_with_only_ordinary_io_kinds_merges_with_no_drop_warning`).
     let mut a = projection("a.jsp", 3);
     a.io.provides.push(IoProvide {
+        response: None,
         body: None,
         kind: "http".to_string(),
         key: "GET /widgets".to_string(),
@@ -143,6 +146,7 @@ fn ordinary_io_kinds_are_not_dropped_or_warned_in_envelope_mode() {
 fn config_mount_prepends_gateway_prefix_to_an_http_provide_key_in_envelope_mode() {
     let mut a = projection("users.jsp", 5);
     a.io.provides.push(IoProvide {
+        response: None,
         body: None,
         kind: "http".to_string(),
         key: "GET /users".to_string(),
@@ -172,6 +176,7 @@ fn config_mount_matching_nothing_emits_the_same_had_no_effect_warning_as_the_nat
 ) {
     let mut a = projection("users.jsp", 5);
     a.io.provides.push(IoProvide {
+        response: None,
         body: None,
         kind: "http".to_string(),
         key: "GET /users".to_string(),
@@ -199,6 +204,7 @@ fn config_mount_matching_nothing_emits_the_same_had_no_effect_warning_as_the_nat
 fn config_mount_leaves_non_http_provide_kinds_untouched_in_envelope_mode() {
     let mut a = projection("router.jsp", 5);
     a.io.provides.push(IoProvide {
+        response: None,
         body: None,
         kind: "trpc".to_string(),
         key: "widgets.list".to_string(),

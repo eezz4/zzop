@@ -108,7 +108,7 @@ fn happy_drift_reports_both_missing_required_and_extra_key() {
     assert!(out[0].message.contains("Api.java:20"));
     assert!(out[0].message.contains("witnessed literals only"));
     assert!(out[0].message.contains("cross-layer/body-field-drift"));
-    assert!(out[0].message.contains("disabled_rules"));
+    assert!(out[0].message.contains("disabledRules"));
     let data = out[0].data.as_ref().unwrap();
     assert_eq!(data["missingRequired"], serde_json::json!(["email"]));
     assert_eq!(data["extraKeys"], serde_json::json!(["extra"]));

@@ -16,10 +16,13 @@ use crate::request::{EnvelopeAnalyzeRequest, PacksDir};
 /// `EnvelopeAnalyzeRequest`, and runs `zzop_engine::analyze_envelope`. Same JSON-string-in/JSON-string-out,
 /// `AnalyzeOutputView`-serialized shape as `analyze_json`/`analyze_trees_json`.
 ///
-/// ## Bundled-pack default (the one facade-level default in this crate)
-/// The tree entry points (`analyze`/`analyzeTrees`) get their bundled-pack default from `zzop-config`'s
-/// mapper (inline `packDefs`). The envelope path has no host config front-end on the Rust side at all,
-/// so the same "an empty config still means full analysis" default is applied HERE, once, for every host: the bundled
+/// ## Facade-level defaults (this crate's only two, both on this lane)
+/// The tree entry points (`analyze`/`analyzeTrees`) get their defaults from `zzop-config`'s
+/// mapper (inline `packDefs`) and from `zzop init`'s starter file (the vocabulary). The envelope path
+/// has no host config front-end on the Rust side at all,
+/// so the same "an empty config still means full analysis" defaults are applied HERE, once, for every
+/// host — the bundled packs AND, for a request that declares no `vocabulary`, the product's built-in
+/// convention vocabulary (see the assignment below): the bundled
 /// packs (`zzop_config::BUNDLED_PACK_SOURCES`) are seeded as inline `packDefs` BEFORE any
 /// caller-supplied `packDefs`/`packsDir`, so the existing collision rules are untouched — a caller pack
 /// with a bundled id wins the collision whole (later inline def wins; a directory pack always wins).
@@ -58,6 +61,7 @@ pub fn analyze_envelope_json(envelope_json: &str, config_json: &str) -> Result<S
         &pack_defs,
         &packs_dirs,
         &req.disabled_rules,
+        &req.packs_only,
         &req.severity_overrides,
         &req.suppressions,
         &req.global_excludes,
@@ -70,6 +74,19 @@ pub fn analyze_envelope_json(envelope_json: &str, config_json: &str) -> Result<S
     config.mounts = fold_mounts(&req.mounts, req.mounted_at.as_deref());
     // The calling-side counterpart, plumbed for the same origin-agnostic reason (see the field's doc).
     config.client_base = req.client_base.clone();
+    // Same one-line plumbing `build_engine_config` gives the tree path — the engine's envelope lane
+    // reads this through the shared timing accumulator now (see `EnvelopeAnalyzeRequest::profile_rules`).
+    config.profile_rules = req.profile_rules;
+    // Convention vocabulary — assigned UNCONDITIONALLY, like every facade lane, so no engine-side
+    // default is ever reached by accident: declared -> the declaration whole (the tree lane's
+    // `apply_declared` rule), undeclared -> the PRODUCT default (`built_in()`), which lives at this
+    // chokepoint for the same reason the bundled-pack seed does (the envelope lane has no config
+    // front-end to write it anywhere else). See `EnvelopeAnalyzeRequest::vocabulary` for why the
+    // two lanes' undeclared defaults differ.
+    config.vocabulary = req
+        .vocabulary
+        .clone()
+        .unwrap_or_else(zzop_engine::VocabularyConfig::built_in);
     let mut output = zzop_engine::analyze_envelope(&envelope, &config);
     warnings.append(&mut output.warnings);
     output.warnings = warnings;

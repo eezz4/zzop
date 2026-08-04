@@ -25,9 +25,13 @@ fn hammer(rel: &str, text: &str) {
     let _ = cs::parse_symbols(rel, text);
     let _ = cs::parse_imports(text);
     let _ = cs::parse_local_identifier_refs(text);
+    let _ = cs::extract_loop_spans(rel, text);
+    let _ = cs::extract_call_sites(rel, text);
+    let _ = cs::extract_string_literals(rel, text);
     let _ = cs::csharp_namespaces_of(text);
     let _ = cs::extract_csharp_http_provides(rel, text);
     let _ = cs::extract_csharp_http_consumes(rel, text);
+    let _ = cs::extract_ef_core_db_table_provides(rel, text);
 
     // Two files, same text: the project walker's cross-file class index has to survive two rows that
     // collide on every key it builds.

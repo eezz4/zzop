@@ -38,9 +38,15 @@ zzop file ./frontend/src/api.ts ./frontend ./backend   # everything zzop knows a
                               # symbols, io, BOTH edge directions, every finding anchored there (uncapped).
                               # Its verdict says whether the file was ANALYZED, not whether it is healthy.
 zzop file ./frontend/src/api.ts --config ./zzop.config.jsonc
+zzop file ./frontend/src/api.ts --source-id web ./frontend ./backend   # …saying WHICH tree the file is being
+                              # asked about, when more than one could contain that path. Without it the reply
+                              # answers from one tree and lists the rest in otherTrees — the same
+                              # disambiguation the check_file MCP tool has always had.
 zzop endpoint users ./frontend ./backend
 zzop manifest ./frontend ./backend > contracts.json   # structural contract manifest: identity only, no file/line
 zzop diff ./contracts.json ./contracts.new.json       # what MOVED between two runs (bucket transitions first)
+zzop diff ./a.json ./b.json --allow-tool-drift        # …comparing manifests two different zzop builds wrote
+                              # (without it, a tool-version mismatch is an error, not a silent comparison)
 zzop coverage ./frontend ./backend                    # how much of each tree zzop can actually SEE: the
                               # per-extension dispatch table, blind spots crossed against each rule's
                               # declared sightline, and the axes this run did NOT measure. The surface
@@ -55,7 +61,11 @@ zzop graph . --domain dep --top 40                   # or the FILE import graph:
 zzop graph . --domain risk                           # or blast-radius hubs + extraction seams; arrows mean
                                                      # CONTAINMENT there, not imports
 zzop graph . --domain posture                        # or the mutating attack surface by guard status
-                              # inside the document. The one subcommand that prints text, not JSON.
+                              # inside the document.
+zzop graph . --domain dep --format cosmograph-nodes  # or the SAME dep graph as UNCAPPED NDJSON tables for an
+zzop graph . --domain dep --format cosmograph-links  # interactive viewer — one JSON object per line, census on
+                              # stderr so stdout stays parseable. --format defaults to mermaid.
+                              # The one subcommand whose product is not a JSON document.
 zzop init                     # write the annotated starter zzop.config.jsonc into the current directory
 zzop init --force             # …overwriting an existing one (without --force it refuses, exit 1)
 zzop contract                 # list the embedded authoring contracts
@@ -65,7 +75,8 @@ zzop explain sql/nplus1       # print one bundled DSL rule's compiled-in data (i
                               # by naming the full schema/cross-layer id config matches; an io-scan rule's
                               # marker is printed with its native-parse-only condition.
 zzop version | --version      # this binary's version (equals the MCP serverInfo.version)
-zzop version --verbose        # …plus every parser's fingerprint (which parser build produced an analysis)
+zzop version --verbose        # …plus every parser's fingerprint: which parser FRONTEND read the files (an ID,
+                              # not a per-build hash — see docs/ARCHITECTURE.md)
 zzop help | --help | -h       # the usage line plus one elaboration per subcommand (exit 0)
 zzop <subcommand> --help | -h # just that subcommand's own line (exit 0, stdout — never an error)
 ```
@@ -76,8 +87,9 @@ job (below), and a bare `zzop` says so on the error path. The three findings-vie
 (`--severity`/`--rule`/`--limit`) apply to exactly `analyze`, `analyze-envelope` and `cross` — the same
 three tools that declare them over MCP, parsed into the same shared filter.
 
-Prints pretty-printed JSON to stdout — with one deliberate exception, `graph`, whose product is mermaid
-text because its consumer is a renderer. A failure prints to stderr and exits non-zero.
+Prints pretty-printed JSON to stdout — with one deliberate exception, `graph`, whose consumer is a
+renderer rather than a program: mermaid text by default, or NDJSON tables (one object per line, not one
+document) under `--format cosmograph-*`. A failure prints to stderr and exits non-zero.
 
 `graph` is the join's picture, and it is honest about being one. zzop renders **no pixels**: it emits a
 standard `flowchart LR` document and an external renderer (mermaid.js, a chat client, `mmdc`) draws it.

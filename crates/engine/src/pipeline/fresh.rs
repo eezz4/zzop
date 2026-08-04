@@ -1,11 +1,19 @@
-//! Fresh (non-cached) artifact computation for one file.
+//! Fresh (non-cached) artifact computation for one file. The three AST-derived SPAN projections it
+//! threads (loop / function / test) live in the `spans` submodule beside it — see that module doc for
+//! the per-language table and for why "empty" degrades in a DIFFERENT direction for each. The
+//! `call_sites` and `string_literals` submodules are their siblings for the two named (non-span)
+//! channels, each with its own per-language table and degrade note.
+
+mod call_sites;
+mod spans;
+mod string_literals;
 
 use zzop_core::{ImportMap, IoFacts, RulePackDef};
 
 use crate::dispatch::Language;
 use crate::EngineConfig;
 
-use super::findings::{eval_packs, schema_findings, schema_findings_eligible, SpanFacts};
+use super::findings::{eval_packs, schema_findings, schema_findings_eligible};
 use super::parsers::{
     lexical_loc, parse_csharp, parse_go, parse_java21, parse_prisma, parse_python, parse_rust,
     parse_typescript,
@@ -41,10 +49,11 @@ pub(super) fn compute_fresh_artifact(
             text,
             &[],
             None,
-            SpanFacts {
-                loop_spans: &[],
-                function_spans: &[],
-            },
+            spans::ProjectedSpans::none().facts(),
+            // No AST ⇒ no call sites, no bound string literals: `CallScan`/`LiteralScan` are silent
+            // on an oversized file (recall-side degrade); line-scan still runs on the raw text.
+            &[],
+            &[],
             config.profile_rules,
         );
         return FileArtifact {
@@ -72,6 +81,9 @@ pub(super) fn compute_fresh_artifact(
             query_call_sites: Vec::new(),
             loop_spans: Vec::new(),
             function_spans: Vec::new(),
+            test_spans: Vec::new(),
+            call_sites: Vec::new(),
+            string_literals: Vec::new(),
             field_usage_tokens: sorted_field_usage_tokens(rel, text),
         };
     }
@@ -205,24 +217,10 @@ pub(super) fn compute_fresh_artifact(
         }
         _ => Vec::new(),
     };
-    // Loop-body line spans (`loop-spans-v1`): AST-derived, so it follows the `symbols`-style per-language/non-degraded gate above (TypeScript + Go today, never the `store_bound_models`/`field_usage_tokens` regex-scan gate below) — `MethodScan::trigger_in_loop`'s substrate.
-    let loop_spans = match language {
-        Some(Language::TypeScript) if !degraded => {
-            zzop_parser_typescript::extract_loop_spans(rel, text)
-        }
-        Some(Language::Go) if !degraded => zzop_parser_go::extract_loop_spans(rel, text),
-        _ => Vec::new(),
-    };
-    // Function line spans with promise-continuation callbacks merged into their call site
-    // (`function-spans-v1`): same AST-derived gate as `loop_spans` above — `MethodScan::
-    // after_in_same_function`'s substrate. TypeScript only today; every other language is a documented
-    // matrix blank, where the gate degrades to a no-op rather than to silence (see the field's doc).
-    let function_spans = match language {
-        Some(Language::TypeScript) if !degraded => {
-            zzop_parser_typescript::extract_function_spans(rel, text)
-        }
-        _ => Vec::new(),
-    };
+    let spans = spans::project(language, degraded, rel, text);
+    // Siblings of the span projections, same `!degraded` AST gate — each module doc owns its table.
+    let call_sites = call_sites::project(language, degraded, rel, text);
+    let string_literals = string_literals::project(language, degraded, rel, text);
     // Store-binding and field-usage-token facts are both raw-text regex scans, never an AST parse, so — like the removed `scan_store_map`/`scan_field_usage` filesystem walks they replace — they run unconditionally on `rel`/`text` here regardless of `language`/`degraded`; each gates its own applicability internally (the store-file convention, the `.ts`/`.tsx` extension, respectively).
     let field_usage_tokens = sorted_field_usage_tokens(rel, text);
     let (mut findings, rule_timings, minified_or_generated) = eval_packs(
@@ -231,10 +229,9 @@ pub(super) fn compute_fresh_artifact(
         text,
         &symbols,
         io.clone(),
-        SpanFacts {
-            loop_spans: &loop_spans,
-            function_spans: &function_spans,
-        },
+        spans.facts(),
+        &call_sites,
+        &string_literals,
         config.profile_rules,
     );
     if schema_findings_eligible(language, degraded) {
@@ -269,8 +266,11 @@ pub(super) fn compute_fresh_artifact(
         class_shape_fragments,
         query_call_sites,
         field_usage_tokens,
-        loop_spans,
-        function_spans,
+        loop_spans: spans.loop_spans,
+        function_spans: spans.function_spans,
+        test_spans: spans.test_spans,
+        call_sites,
+        string_literals,
     }
 }
 

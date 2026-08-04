@@ -76,7 +76,7 @@ mod tests {
              every other member, making the group hard to reason about, test, or refactor in isolation. \
              Break the cycle by extracting the shared pieces into a module both sides import, or invert \
              one dependency direction (e.g. an interface/callback in place of a direct import). Disable \
-             via config `rules: { \"circular\": \"off\" }` (embedders: `disabled_rules`) if this cycle is \
+             via config `rules: { \"circular\": \"off\" }` (embedders: `disabledRules`) if this cycle is \
              an intentional, reviewed pattern (e.g. mutually recursive types re-exported through a \
              barrel)."
         );

@@ -40,15 +40,22 @@ pub struct FrameworkRecognizer {
     /// Extensions this recognizer can fire on, lowercased and without the dot. Quoted from the owning
     /// crate's own dispatch constant where it has one, never restated as a literal beside it.
     pub extensions: &'static [&'static str],
-    /// Which cross-layer channels this recognizer FILLS, as the wire spells them (`io.provides`,
-    /// `io.consumes`, `io.provides:db-table`). This is the field that makes the disclosure load-bearing
-    /// rather than decorative: a language can look covered by recognizer COUNT while emitting only one
-    /// half of the join, which is exactly the state java-21 was measured in (routes yes, egress none) —
-    /// a service that CALLS another service was invisible, and no count would have shown it.
+    /// Which channels this recognizer FILLS, as the engine spells them: the cross-layer io sides
+    /// (`io.provides`, `io.consumes`, `io.provides:db-table`) plus the one non-io channel,
+    /// auth-guard evidence (`evidence.auth-guarded`). This is the field that makes the disclosure
+    /// load-bearing rather than decorative: a language can look covered by recognizer COUNT while
+    /// emitting only one half of the join, which is exactly the state java-21 was measured in (routes
+    /// yes, egress none) — a service that CALLS another service was invisible, and no count would have
+    /// shown it.
+    ///
+    /// Machine-checked against what each recognizer's own code constructs by
+    /// `rule_contracts::recognizer_channels`, so a row cannot claim a side it does not fill (the `hono`
+    /// defect) nor a channel it never builds. One row sits outside that binding and is pinned there by
+    /// name — read that contract's `CHANNEL_NOT_CODE_DERIVED` before trusting this field on it.
     pub emits: &'static [&'static str],
 }
 
-/// Channel spellings, so a declaration cannot invent a fourth one by typo. These are the names the
+/// Channel spellings, so a declaration cannot invent a new one by typo. The io three are the names the
 /// cross-layer join itself uses; a consumer grouping by channel compares against these constants.
 pub mod channel {
     /// A route/handler DECLARATION — the provide side of the join.
@@ -58,4 +65,16 @@ pub mod channel {
     pub const CONSUMES: &str = "io.consumes";
     /// A table/model declaration or query — the db half, keyed separately from http.
     pub const DB: &str = "io.provides:db-table";
+    /// Auth-guard EVIDENCE — the one channel that is not an io side at all. It says the row's modules
+    /// ALSO construct guard evidence, not that they construct nothing else: `spring security` emits it
+    /// alone (its modules build no io), while `fastapi`/`django`/`nestjs` emit it beside their io
+    /// channels — a module may build both. The evidence feeds the framework-neutral decorator-guard
+    /// side channel the engine's callgraph gate consumes (`analyze/native_rules/callgraph/decorator_gate.rs`), which
+    /// SUPPRESSES or fills OTHER rules' findings (`mutating-route-no-auth`'s route-auth exemption)
+    /// rather than adding rows to the join. Spelled after the `auth-guarded` attribute that evidence is
+    /// ultimately minted into (`zzop_rules_http::mutating_route_no_auth::AUTH_GUARDED_ATTR` — quoted
+    /// here as a literal because `zzop-core` sits below the rules crates). Without this channel a
+    /// recognizer whose whole output is guard evidence had to either lie (`spring security` declared
+    /// `io.provides` for months) or be undeclarable (`emits` must be non-empty).
+    pub const AUTH_EVIDENCE: &str = "evidence.auth-guarded";
 }

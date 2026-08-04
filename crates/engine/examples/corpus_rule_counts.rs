@@ -5,6 +5,12 @@
 //! Loads `rules/dsl` from the repo root (relative to CWD), runs `analyze_tree` once, and prints the
 //! total finding count plus up to 5 sampled `(file:line)` snippets per requested rule id.
 
+// This target PRINTS BY DESIGN — on BOTH streams — so the workspace `print_stdout`/`print_stderr`
+// lints are exempted here rather than being weakened for everyone. See root Cargo.toml
+// [workspace.lints.clippy]: both measured zero in every library `src/`, and Cargo's lint table
+// cannot be scoped to a single target.
+#![allow(clippy::print_stdout, clippy::print_stderr)]
+
 use std::path::PathBuf;
 
 use zzop_engine::{analyze_tree, EngineConfig};

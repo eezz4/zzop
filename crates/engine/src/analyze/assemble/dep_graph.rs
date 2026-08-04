@@ -74,7 +74,12 @@ pub(super) fn build(
     // wiring shape and why. Every Python file already has an entry in `dep` (possibly empty) from the
     // call above, since `ts_import_pairs` carries its `ImportMap` too (`ts_slot`'s shared participation —
     // see `pipeline::FileArtifact::imports`'s doc); this only adds edges, never removes what's there.
-    merge_python_dep_edges(&mut dep, ts_import_pairs, ts_paths);
+    merge_python_dep_edges(
+        &mut dep,
+        ts_import_pairs,
+        ts_paths,
+        &config.vocabulary.resolve().python_package_roots,
+    );
     // Rust dep-graph edges — an additive, separate post-hoc pass mirroring `merge_python_dep_edges`
     // exactly (deliberately NOT generalized together: the two resolvers have different shapes —
     // `resolve_rust_import` also needs `rust_workspace`, `resolve_python_import` does not — and folding

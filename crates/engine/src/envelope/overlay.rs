@@ -250,6 +250,26 @@ pub(crate) fn apply_adapter_overlays(
         {
             warnings.push(w);
         }
+        // The `calls` channel (call-graph edges) has NO Mode B consumer today: the native call-graph
+        // pass re-parses this tree's dispatched sources itself, and no overlay-merge branch folds
+        // envelope edges into that re-parse's graph. An overlay carrying it would otherwise no-op in
+        // the exact silent way this module's other censuses exist to abolish — so it is named, once
+        // per overlay, with the mode that DOES consume the channel. Deliberately NOT counted by
+        // `overlay_file_carries_facts` either: a channel nothing consumes must not silence the
+        // zero-fact census above it.
+        let calls_declared: usize = overlay.files.iter().map(|f| f.calls.len()).sum();
+        if calls_declared > 0 {
+            warnings.push(format!(
+                "adapter overlay \"{}\" (parser {}): its {calls_declared} `calls` entr{} ignored \
+                 — adapter-overlay application (Mode B) does not consume the call-graph-edge channel; \
+                 the native pass re-parses this tree's own sources for call edges. `calls` lights the \
+                 call-graph rules in whole-envelope analysis only (Mode A: `zzop analyze-envelope` / \
+                 MCP tool `analyze_envelope`).",
+                overlay.source,
+                overlay.parser,
+                if calls_declared == 1 { "y was" } else { "ies were" },
+            ));
+        }
         if fact_carrying == 0 && declared_n > 0 {
             let plural = if declared_n == 1 { "y" } else { "ies" };
             warnings.push(format!(

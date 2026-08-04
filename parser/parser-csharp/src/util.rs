@@ -139,12 +139,14 @@ pub(crate) fn attribute_raw_args(node: Node, src: &str) -> Option<String> {
     Some(raw[1..raw.len() - 1].to_string())
 }
 
-/// The decoded-ish text of a plain `string_literal` node: the node's own span includes its `"..."`
+/// The VERBATIM text of a plain `string_literal` node: the node's own span includes its `"..."`
 /// delimiters (exactly one byte each), so stripping the first/last byte yields the interior text —
 /// mirrors `zzop_parser_go::util::string_literal_text`'s "verbatim, no escape decoding" convention
-/// exactly (this crate's own HTTP-literal reads never plausibly carry an escape sequence). `None` for
-/// any other node kind (an interpolated/verbatim/raw string literal is a DIFFERENT grammar node kind —
-/// never guessed at here).
+/// exactly. No caller needs decoding: the HTTP-literal reads consume spellings that never plausibly
+/// carry an escape, and the one ESCAPE-SENSITIVE caller (`lang::string_literals`, hashing arbitrary
+/// credential values) applies its own gate ON TOP — a `string_literal` containing `\` is SILENCED
+/// there rather than decoded. `None` for any other node kind (an interpolated/verbatim/raw string
+/// literal is a DIFFERENT grammar node kind — never guessed at here).
 pub(crate) fn string_literal_text(node: Node, src: &str) -> Option<String> {
     if node.kind() != "string_literal" {
         return None;

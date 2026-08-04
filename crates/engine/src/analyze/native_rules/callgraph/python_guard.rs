@@ -79,8 +79,15 @@ pub(super) fn resolve_python_call_target(
     specifier: &str,
     from_file: &str,
     ts_paths: &HashSet<String>,
+    python_package_roots: &[&str],
 ) -> Option<String> {
-    crate::analyze::assemble::helpers::resolve_python_import(specifier, None, from_file, ts_paths)
+    crate::analyze::assemble::helpers::resolve_python_import(
+        specifier,
+        None,
+        from_file,
+        ts_paths,
+        python_package_roots,
+    )
 }
 
 /// What [`collect`] gathers: the directly-anchored FastAPI lines, plus the by-name Django verdicts that

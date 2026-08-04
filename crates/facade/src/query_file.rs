@@ -109,8 +109,8 @@ pub fn query_file_json(analysis_json: &str, query_json: &str) -> Result<String, 
         .get("trees")
         .and_then(Value::as_array)
         .ok_or_else(|| {
-            "this analysis has no `trees` — the file query runs over an analyzeTrees output \
-             (a single-tree `analyze` output has no tree identity to report)"
+            "this analysis has no `trees` — the file query runs over a multi-tree analysis output \
+             (the kind with a `trees` array; a single-tree output has no tree identity to report)"
                 .to_string()
         })?;
 

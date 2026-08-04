@@ -81,7 +81,7 @@ pub fn facts_json(paths: &[String], config_path: Option<&str>) -> Result<String,
         .collect();
     let empty = Vec::new();
     for t in v["trees"].as_array().unwrap_or(&empty) {
-        config_warnings.extend(crate::config_warnings::facade_config_warnings(&t["output"]));
+        config_warnings.extend(crate::warnings::facade_config_warnings(&t["output"]));
     }
     Ok(project(&v, config.as_deref(), config_warnings))
 }

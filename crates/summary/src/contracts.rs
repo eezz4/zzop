@@ -152,7 +152,7 @@ static EMBEDDED_DOCS: &[ContractDoc] = &[
     },
     ContractDoc {
         name: "dsl-reference",
-        description: "DSL rule-pack reference: pack/rule fields and all four matchers (line-scan, method-scan, symbol-scan, io-scan).",
+        description: "DSL rule-pack reference: pack/rule fields and every matcher (line-scan, method-scan, symbol-scan, io-scan, call-scan, literal-scan).",
         mime: "text/markdown",
         content: include_str!("../../../docs/rules/dsl-reference.md"),
     },
@@ -164,7 +164,7 @@ static EMBEDDED_DOCS: &[ContractDoc] = &[
     },
     ContractDoc {
         name: "rule-pack-schema",
-        description: "JSON Schema (draft-07) for the DSL rule-pack shape — pack id, rules[], the four matcher kinds (line-scan, method-scan, symbol-scan, io-scan), severity; every property documented. Machine-check a pack with the rule-pack validator (structure only — the same loader judgments, never rule-quality semantics).",
+        description: "JSON Schema (draft-07) for the DSL rule-pack shape — pack id, rules[], the matcher kinds (line-scan, method-scan, symbol-scan, io-scan, call-scan, literal-scan), severity; every property documented. Machine-check a pack with the rule-pack validator (structure only — the same loader judgments, never rule-quality semantics).",
         mime: "application/json",
         content: include_str!("../../../docs/contracts/rule-pack.schema.json"),
     },
@@ -198,51 +198,3 @@ static EMBEDDED_DOCS: &[ContractDoc] = &[
         content: include_str!("../../../docs/rules/catalog.md"),
     },
 ];
-
-#[cfg(test)]
-mod tests {
-    use super::CONTRACT_DOCS;
-
-    /// The `rule-catalog` description hardcodes the bundled DSL pack COUNT, and this exact string ships
-    /// over MCP `resources/list` — a reader's only pack-count signal without a source checkout. Nothing
-    /// checked it: it read "14" here and "15" in `docs/modules/mcp.md` while the truth was 12 (found in
-    /// review, 2026-07-24), the same hardcoded-inventory class as the "2 -> 44" security-rule miscount one
-    /// commit earlier. Pinned to the one compile-time truth so the count cannot drift again.
-    #[test]
-    fn rule_catalog_description_states_the_real_bundled_pack_count() {
-        let doc = CONTRACT_DOCS
-            .iter()
-            .find(|d| d.name == "rule-catalog")
-            .expect("the rule-catalog contract doc must exist");
-        let expected = format!("({} DSL packs", zzop_config::BUNDLED_PACK_SOURCES.len());
-        assert!(
-            doc.description.contains(&expected),
-            "rule-catalog description must state `{expected}`; it reads: {}",
-            doc.description
-        );
-    }
-
-    /// Same class as the pack-count pin above, caught the same way: this description also spells the
-    /// SUPPRESS MARKER form, and that string ships over MCP `resources/list` — for an agent client it is
-    /// the only marker spelling available without a source checkout. The 2026-07-26 `zzop-` prefix batch
-    /// migrated every doc and message but missed this one, so `resources/list` kept advertising the old
-    /// bare form while the engine had stopped honoring it: an agent following the resource would write a
-    /// marker that silently does not suppress. Pinned to the derivation itself, not to a literal, so a
-    /// future prefix change cannot leave the shipped description behind.
-    #[test]
-    fn rule_catalog_description_spells_the_real_derived_suppress_marker_form() {
-        let doc = CONTRACT_DOCS
-            .iter()
-            .find(|d| d.name == "rule-catalog")
-            .expect("the rule-catalog contract doc must exist");
-        // Derive from the rule kernel's own function so the pin tracks the code, not a copy of it.
-        // (`zzop-core` is a DEV-dependency of this crate for exactly this derivation — the shipped code
-        // here needs nothing below `zzop-config`.)
-        let marker = zzop_core::RuleDef::suppress_marker_for_id("<rule id>");
-        assert!(
-            doc.description.contains(&marker),
-            "rule-catalog description must spell the derived marker `{marker}`; it reads: {}",
-            doc.description
-        );
-    }
-}

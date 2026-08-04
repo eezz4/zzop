@@ -1,13 +1,21 @@
 //! Fully-populated sample builders — every `Option` `Some`, every `Vec`/`Map` non-empty,
 //! recursively, so every `skip_serializing_if`-gated field actually appears in the serialized
 //! JSON. See the target doc in `main.rs` for the method.
+//!
+//! STRUCT shapes are built here. Externally-tagged ENUM shapes are NOT: their per-variant samples
+//! live in `wire_variants.rs`, next to the exhaustive match that makes a new variant a compile
+//! error, and the containers below derive their entry lists from that one variant list — a
+//! hand-written entry list here is exactly how `RouterMountEntry::MountRef` once escaped coverage.
 
 use zzop_core::{
     ClassShapeFragment, ConsumeBodyShape, FileProjection, ImportBinding, IoConsume, IoFacts,
-    IoProvide, NonIdempotentKind, NormalizedEnvelope, ProcedureRouterEntry,
-    ProcedureRouterFragment, ProjectionOverrides, ProvideBodyField, ProvideBodyShape, ReExport,
-    RouterMountEntry, RouterMountFragment, SourceSymbol, SourceSymbolKind, WriteSite,
-    NORMALIZED_AST_FORMAT,
+    IoProvide, NonIdempotentKind, NormalizedEnvelope, ProcedureRouterFragment, ProjectionOverrides,
+    ProvideBodyField, ProvideBodyShape, ReExport, RouterMountFragment, SourceSymbol,
+    SourceSymbolKind, WriteSite, NORMALIZED_AST_FORMAT,
+};
+
+use crate::wire_variants::{
+    sample_attributes, ProcedureRouterVariant, RouterMountVariant, WireEnum,
 };
 
 /// One fully-populated `ProvideBodyField` — every `Option` `Some`, nothing to default.
@@ -27,6 +35,14 @@ pub(crate) fn sample_provide_body_shape() -> ProvideBodyShape {
     }
 }
 
+pub(crate) fn sample_provide_response_shape() -> zzop_core::ProvideResponseShape {
+    zzop_core::ProvideResponseShape {
+        dto_ref: Some("UserDto".to_string()),
+        fields: vec![sample_provide_body_field()],
+        complete: true,
+    }
+}
+
 pub(crate) fn sample_consume_body_shape() -> ConsumeBodyShape {
     ConsumeBodyShape {
         keys: vec!["user".to_string(), "user.email".to_string()],
@@ -40,6 +56,18 @@ pub(crate) fn sample_write_site() -> WriteSite {
         line: 42,
         sink: "prisma.user.update".to_string(),
         kind: Some(NonIdempotentKind::Create),
+    }
+}
+
+/// One fully-populated `RawCall` — `receiver_type` `Some` and `is_heritage` `true` so both
+/// `skip_serializing_if`-gated fields actually appear in the serialized JSON.
+pub(crate) fn sample_raw_call() -> zzop_core::callgraph::RawCall {
+    zzop_core::callgraph::RawCall {
+        from_symbol: "src/user.controller.ts#createUser".to_string(),
+        callee_name: "requireAuth".to_string(),
+        line: 12,
+        receiver_type: Some("AuthService".to_string()),
+        is_heritage: true,
     }
 }
 
@@ -84,6 +112,7 @@ pub(crate) fn sample_io_provide() -> IoProvide {
         line: 15,
         symbol: Some("createUser".to_string()),
         body: Some(sample_provide_body_shape()),
+        response: Some(sample_provide_response_shape()),
     }
 }
 
@@ -109,74 +138,27 @@ pub(crate) fn sample_class_shape_fragment() -> ClassShapeFragment {
     }
 }
 
-pub(crate) fn sample_trpc_leaf() -> ProcedureRouterEntry {
-    ProcedureRouterEntry::Leaf {
-        key: "get".to_string(),
-        verb: "QUERY".to_string(),
-        line: 3,
-    }
-}
-
-pub(crate) fn sample_trpc_ref() -> ProcedureRouterEntry {
-    ProcedureRouterEntry::Ref {
-        key: "sub".to_string(),
-        ident: "subRouter".to_string(),
-        specifier: Some("./sub".to_string()),
-    }
-}
-
-pub(crate) fn sample_trpc_nested() -> ProcedureRouterEntry {
-    ProcedureRouterEntry::Nested {
-        key: "nested".to_string(),
-        entries: vec![sample_trpc_leaf()],
-    }
-}
-
+/// Entries = EVERY `ProcedureRouterEntry` variant, derived from `wire_variants.rs`'s one variant
+/// list — so a new variant is walked by the key-set parity guard without an edit here.
 pub(crate) fn sample_trpc_fragment() -> ProcedureRouterFragment {
     ProcedureRouterFragment {
         name: "appRouter".to_string(),
-        entries: vec![sample_trpc_leaf(), sample_trpc_ref(), sample_trpc_nested()],
+        entries: ProcedureRouterVariant::all()
+            .iter()
+            .map(|&v| v.sample())
+            .collect(),
     }
 }
 
-pub(crate) fn sample_mount_verb() -> RouterMountEntry {
-    RouterMountEntry::Verb {
-        method: "POST".to_string(),
-        path: "/setup".to_string(),
-        handler: Some("handler".to_string()),
-        line: 7,
-        // Non-empty so the `#[serde(default, skip_serializing_if)]` field actually serializes —
-        // the parity probes only see fields the fully-populated sample emits (this file's rule).
-        attr_keys: vec!["auth-guarded".to_string()],
-    }
-}
-
-pub(crate) fn sample_mount_mount() -> RouterMountEntry {
-    RouterMountEntry::Mount {
-        prefix: "/two-factor".to_string(),
-        ident: "twoFactorRoute".to_string(),
-        specifier: Some("./two-factor".to_string()),
-        // Non-empty for the same serialize-visibility reason as `sample_mount_verb`.
-        attr_keys: vec!["auth-guarded".to_string()],
-    }
-}
-
-pub(crate) fn sample_mount_scoped_attr() -> RouterMountEntry {
-    RouterMountEntry::ScopedAttr {
-        prefix: "/admin".to_string(),
-        key: "auth-guarded".to_string(),
-        line: 3,
-    }
-}
-
+/// Entries = EVERY `RouterMountEntry` variant — see [`sample_trpc_fragment`] for why the list is
+/// derived rather than written out.
 pub(crate) fn sample_router_mount_fragment() -> RouterMountFragment {
     RouterMountFragment {
         name: "auth".to_string(),
-        entries: vec![
-            sample_mount_verb(),
-            sample_mount_mount(),
-            sample_mount_scoped_attr(),
-        ],
+        entries: RouterMountVariant::all()
+            .iter()
+            .map(|&v| v.sample())
+            .collect(),
     }
 }
 
@@ -207,12 +189,18 @@ pub(crate) fn sample_file_projection() -> FileProjection {
         },
         loop_spans: vec![(10, 20)],
         function_spans: vec![(5, 30)],
+        test_spans: vec![(40, 60)],
+        calls: vec![sample_raw_call()],
         degraded: true,
         is_entry: true,
         overrides: ProjectionOverrides {
             imports: vec!["displacedLocalName".to_string()],
         },
-        attributes: Vec::new(),
+        // One `Attribute` per `EntityRef` variant. This was `Vec::new()` until the wire-variant
+        // binding landed, which meant the `attribute`/`entityRef` definitions — a whole
+        // externally-tagged enum on the envelope wire — were documented but never checked against
+        // anything.
+        attributes: sample_attributes(),
     }
 }
 

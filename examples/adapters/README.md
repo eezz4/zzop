@@ -6,13 +6,16 @@ Runnable references for the two authoring modes, both speaking the Normalized-AS
 dependency — copy it, point it at your repo. Approach, usage and limitations live in each folder's
 own README.
 
-**Why only three.** This directory held nine adapters until 2026-07-28. Six of them
+**Why so few.** This directory held nine adapters until 2026-07-28. Six of them
 (`openapi-sdk`, `oazapfts`, `react-query`, `svelte`, `wrapper`, `rust-parser`) demonstrated the same
 contract over a different framework's idioms, and that is the long tail this engine has already
 decided it cannot win by enumeration — chasing it in examples is the same losing race run in
-documentation instead of code. What survives covers the contract itself: the shared library, one
-Mode B overlay, one minimal channel-filling adapter. A framework flavor is not a new thing to learn;
-a new *channel* is.
+documentation instead of code. What survives covers the contract itself rather than any framework:
+the shared library, and one example per *distinct thing the contract can be asked to do* — inject an
+attribute, fill a channel minimally, name a package the tree never declares, and the one tree where
+adding facts cannot fix the graph at all. A framework flavor is not a new thing to learn; a new
+*channel*, or a new failure mode of the contract, is. (`ls` this directory for the current set — a
+count written here would be the first thing to go stale.)
 
 ⚠ **`adapter-kit` mirrors engine logic, and the mirror is now enforced.** Its key normalization must
 stay byte-identical to `zzop_core::io::key` — that module's own header says so ("their logic must not

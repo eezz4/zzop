@@ -269,6 +269,114 @@ fn parser_dispatched_equals_files_on_an_all_source_tree() {
     assert_eq!(tree.coverage.parser_dispatched, 2);
 }
 
+// --- F4: `declared_imports_by_ext` — the declared-side denominator for `resolved_import_edges` ---
+
+/// The F4 pin proper: the same three package imports the resolved-edge test above shows being dropped
+/// stay COUNTED on the declared side — `declared 3` next to `resolvedImportEdges 0` is the
+/// import-resolution blindness ratio the bare edge number could never show.
+#[test]
+fn declared_imports_keep_counting_the_package_imports_resolution_drops() {
+    let dir = package_imports_only_tree();
+    let trees = vec![(dir.path().to_path_buf(), config("pkg-imports-declared"))];
+    let out = analyze_trees(&trees);
+    let (_, _, tree) = &out.trees[0];
+
+    assert_eq!(
+        tree.coverage.resolved_import_edges, 0,
+        "{:?}",
+        tree.coverage
+    );
+    assert_eq!(
+        tree.coverage.declared_imports_by_ext.get("ts"),
+        Some(&3),
+        "react/axios/zod are three declared specifiers whether or not any resolves: {:?}",
+        tree.coverage.declared_imports_by_ext
+    );
+}
+
+/// The motivating low-resolution tree shape (`analyze_python_package_roots.rs`'s editable-install
+/// fixture, the 91-files/3-edges class): every internal import is absolute under a package name no
+/// tree directory carries, so the dep graph stays EMPTY — and before F4 nothing in the output said
+/// the tree had declared anything at all. The denominator must surface: declared > 0, resolved 0.
+#[test]
+fn a_low_resolution_python_tree_surfaces_declared_over_zero_resolved() {
+    let dir = TempDir::new("zzop-engine-cov-f4-py");
+    dir.write("projects/home/model.py", "def build():\n    return 1\n");
+    dir.write(
+        "core/train.py",
+        "from tml.projects.home import model\n\ndef run():\n    return model.build()\n",
+    );
+    let trees = vec![(dir.path().to_path_buf(), config("py-low-res"))];
+    let out = analyze_trees(&trees);
+    let (_, _, tree) = &out.trees[0];
+
+    assert_eq!(
+        tree.coverage.resolved_import_edges, 0,
+        "{:?}",
+        tree.coverage
+    );
+    let declared_py = tree
+        .coverage
+        .declared_imports_by_ext
+        .get("py")
+        .copied()
+        .expect("py has an import channel, so the key must be MEASURED even at low resolution");
+    assert!(
+        declared_py > 0,
+        "the declared side must survive the resolution drop: {:?}",
+        tree.coverage.declared_imports_by_ext
+    );
+}
+
+/// Normal-tree parity: on a tree with no glob-fanout imports the declared total covers the resolved
+/// total (each edge came from a counted specifier), and a parsed file with ZERO imports still lands
+/// in its extension's sum as a measured 0 — `util.ts` contributes nothing, yet `ts` stays 1, not 2.
+#[test]
+fn declared_imports_cover_resolved_edges_on_a_normal_tree() {
+    let dark = dark_tree();
+    let trees = vec![(dark.path().to_path_buf(), config("dark-declared"))];
+    let out = analyze_trees(&trees);
+    let (_, _, tree) = &out.trees[0];
+
+    assert_eq!(
+        tree.coverage.resolved_import_edges, 1,
+        "{:?}",
+        tree.coverage
+    );
+    assert_eq!(
+        tree.coverage.declared_imports_by_ext.get("ts"),
+        Some(&1),
+        "main.ts declares './util' and util.ts declares nothing (measured 0): {:?}",
+        tree.coverage.declared_imports_by_ext
+    );
+    let declared_total: usize = tree.coverage.declared_imports_by_ext.values().sum();
+    assert!(declared_total >= tree.coverage.resolved_import_edges);
+}
+
+/// The never-guess half: an extension whose parser projects NO import channel (prisma — and docs/data
+/// files, which no parser claims) gets no key at all, so absence stays distinguishable from a
+/// measured 0 and the facade can render UNMEASURED instead of a fake zero.
+#[test]
+fn channel_less_extensions_are_absent_from_declared_imports_not_zero() {
+    let dir = TempDir::new("zzop-engine-cov-f4-channelless");
+    dir.write(
+        "src/app.ts",
+        "import React from \"react\";\nexport const a = 1;\n",
+    );
+    dir.write("db/schema.prisma", "model User {\n  id Int @id\n}\n");
+    dir.write("README.md", "# docs\n");
+    let trees = vec![(dir.path().to_path_buf(), config("channel-less"))];
+    let out = analyze_trees(&trees);
+    let (_, _, tree) = &out.trees[0];
+
+    let declared = &tree.coverage.declared_imports_by_ext;
+    assert_eq!(declared.get("ts"), Some(&1), "{declared:?}");
+    assert!(
+        !declared.contains_key("prisma") && !declared.contains_key("md"),
+        "no import channel means no key — absence, never 0: {declared:?}"
+    );
+}
+
 #[test]
 fn parser_dispatched_is_zero_when_the_walk_finds_no_parseable_file_at_all() {
     // The disclosure that matters most: a tree that looks non-empty (`files > 0`) but where zzop parsed

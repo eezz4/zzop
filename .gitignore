@@ -35,9 +35,9 @@
 # than only here: the expectation is listed in EXPECTED.jsonc's `untracked` array, and benchmark.mjs
 # prints that reason next to the FN it produces. The rule itself is NOT unmeasured —
 # rules/dsl/security/vendor_token_committed.rs covers it with split literals written to a temp dir at
-# test time. Open question for whoever wires the CI gate: synthesize this file OUTSIDE the ignored path
-# before a run (copying the corpus to a temp dir works — an in-place recreate does not), or drop the
-# expectation and accept the coverage loss.
+# test time. The CI gate does NOT pay this cost: scripts/measure/detection-gate.sh copies the corpus to
+# a temp dir — beyond every ancestor .gitignore, which an in-place recreate never escapes — and
+# synthesizes the fixture there from two separate strings, so the scored run sees it.
 /cases/trees/api-be/services/be-security.hardcoded-secret.ts
 
 # zzop's own derived artifacts inside an analyzed tree — today `.zzop/cache/` (the default `cacheDir`,

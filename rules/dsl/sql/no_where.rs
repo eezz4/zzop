@@ -255,6 +255,157 @@ fn update_set_string_concatenation_is_not_flagged() {
     );
 }
 
+// --- update-no-where, Rust `format!` interpolation (the `.rs` lane's false-positive class) ---
+//
+// The arc that added `.rs` to this rule's `file_pattern` left the interpolation proof JS-only: the
+// `${...}`/concat vetoes in `${sql-where-veto}` know nothing about Rust's `{}` / `{name}` format
+// placeholders, so `format!("UPDATE accounts SET balance = {}", b)` matched the "closed literal, no
+// WHERE" shape and fired at CRITICAL — telling the reader a whole-table update was proven when the
+// value (and any WHERE riding with it) is spliced in at runtime. The fix is in `line_pattern`, not in
+// the shared veto: the evidence lives INSIDE the literal (`[^"'`{}]*` between `SET` and the closing
+// quote), which is the only field that can see inside it, and that keeps the three rules sharing
+// `${sql-where-veto}` — and every `.ts` finding — byte-identically where they were.
+
+#[test]
+fn update_set_rust_format_positional_placeholder_is_not_flagged() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "src/db.rs",
+        "pub fn zero_balances(b: i64) -> String {\n    format!(\"UPDATE accounts SET balance = {}\", b)\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "update-no-where").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn update_set_rust_format_named_placeholder_is_not_flagged() {
+    // Rust's inline-named form takes no trailing argument at all, so "the macro has no args" is not a
+    // usable signal either — the placeholder itself is the whole proof.
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "src/db.rs",
+        "pub fn zero_balances(bal: i64) -> String {\n    let _ = bal;\n    format!(\"UPDATE accounts SET balance = {bal}\")\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "update-no-where").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn update_set_rust_format_with_an_interpolated_where_clause_is_not_flagged() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "src/db.rs",
+        "pub fn zero_one(b: i64) -> String {\n    format!(\"UPDATE accounts SET balance = {} WHERE id = 1\", b)\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "update-no-where").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+/// The under-detection boundary the fix must NOT cross: a Rust literal with no placeholder in it is
+/// still a complete statement, and a whole-table UPDATE written that way is exactly what this rule is
+/// for. Dropping `.rs` from the `file_pattern` would have silenced this too.
+#[test]
+fn update_set_rust_closed_literal_with_no_placeholder_still_fires() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "src/db.rs",
+        "pub fn zero_balances(conn: &Conn) -> usize {\n    conn.execute(\"UPDATE accounts SET balance = 0\")\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "update-no-where");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 2);
+}
+
+/// Second half of that boundary: the `{}`/`{name}` evidence only counts INSIDE the SQL literal. A brace
+/// pair elsewhere on the line (here an empty struct literal passed as the params argument) is not
+/// interpolation into the statement, so it must not launder a genuine whole-table UPDATE — the
+/// line-wide veto this fix deliberately did not widen is what would have gotten this wrong.
+#[test]
+fn update_set_rust_closed_literal_with_an_unrelated_brace_pair_on_the_line_still_fires() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "src/db.rs",
+        "pub fn zero_balances(conn: &Conn) -> usize {\n    conn.execute(\"UPDATE accounts SET balance = 0\", Params {})\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "update-no-where");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 2);
+}
+
+/// The partition promise, honored: the message says a `{}` between the `SET` and the closing quote
+/// keeps this rule silent, but the old matcher accepted ANY quote kind as the terminator — the inner
+/// `'` in `format!("UPDATE users SET name = '{}'", name)` was read as the literal's closing quote,
+/// the `{}` fell outside the scanned span, and this rule co-fired at CRITICAL on top of
+/// `security/sql-format-interpolation`, telling the reader two different stories about one line.
+/// Same-kind quote termination (each alternation branch closes only with the quote that opened it)
+/// makes the message's sentence true: this line is the warning-severity interpolation rule's alone.
+#[test]
+fn update_set_rust_format_with_the_placeholder_inside_inner_single_quotes_is_not_flagged() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "src/db.rs",
+        "pub fn rename_all(name: &str) -> String {\n    format!(\"UPDATE users SET name = '{}'\", name)\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "update-no-where").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+/// The boundary the same-kind fix must NOT cross, pinned from the other direction: an inner quote of
+/// a DIFFERENT kind with NO placeholder is statement text inside a genuinely closed literal — a
+/// whole-table UPDATE that must keep firing. A fix that treated any inner quote as "can't prove
+/// closed" would have silently traded the false co-fire for this false negative.
+#[test]
+fn update_set_closed_literal_with_an_inner_quote_of_another_kind_still_fires() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "src/db.rs",
+        "pub fn anonymize(conn: &Conn) -> usize {\n    conn.execute(\"UPDATE users SET name = 'anon'\")\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "update-no-where");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 2);
+}
+
+/// The other half of the `.rs` lane: the concat veto in `${sql-where-veto}` was spelled for JS
+/// (`"literal" +`), and Rust cannot write that — `&str` has no `Add`, so the compiling form is
+/// `"literal".to_string() + expr`, which puts `.to_string()` between the quote and the `+` and sailed
+/// past the veto. A WHERE riding in `cond` would have been invisible and the rule would have fired at
+/// CRITICAL. `.to_string()`/`.to_owned()` is Rust-only vocabulary (JS spells it `.toString()`, a
+/// different token), so admitting it into the shared fragment cannot move a `.ts` finding.
+#[test]
+fn update_set_rust_to_string_concatenation_is_not_flagged() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "src/db.rs",
+        "pub fn zero_some(cond: &str) -> String {\n    \"UPDATE accounts SET balance = 0\".to_string() + cond\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "update-no-where").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
 #[test]
 fn sql_update_no_where_ok_marker_suppresses_the_finding() {
     let dir = TempDir::new("zzop-sql");

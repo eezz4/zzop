@@ -31,9 +31,8 @@ rule's veto arm, which is the part most likely to rot unnoticed.
 
 * **Synthetic values only** — no real secrets, no real company names. Hosts are `*.example.net`.
 * **No http provides.** A route here would immediately draw `cross-layer/unconsumed-endpoint` and turn a
-  control into a false positive. `http/protected-path-no-auth-evidence`, `dev-path-no-guard-hint` and
-  `get-route-no-cache-marker` therefore keep
-  their existing in-module `good` controls instead of getting decoys here.
+  control into a false positive. `http/protected-path-no-auth-evidence` and `dev-path-no-guard-hint`
+  therefore keep their existing in-module `good` controls instead of getting decoys here.
 * **Exactly one outbound consume** (`services/reliability.fetch-no-timeout.decoy.ts`) on a host used
   nowhere else, so the tree perturbs no cross-layer aggregate.
 * **Everything is imported by `index.ts`.** An unreferenced control file makes `dead-candidates` /

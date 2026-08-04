@@ -144,6 +144,19 @@ pub(super) fn eval_line_scan(
                     .map(|(_, label)| label.as_str()),
             };
             let Some(label) = label else { continue };
+            // Structural line gate over the call-site channel — see `LineScan::line_call_kind`. The
+            // regex said the SHAPE is on this line; the gate asks the parser whether the line really
+            // CALLS the named family. Evidence-allowing: an empty channel silences, never widens.
+            if let Some(kind) = &m.line_call_kind {
+                let line_no = (i + 1) as u32;
+                if !f
+                    .call_sites
+                    .iter()
+                    .any(|s| s.kind == *kind && s.line == line_no)
+                {
+                    continue;
+                }
+            }
             if marker_suppresses(&marker_re, &lines, i) {
                 continue;
             }

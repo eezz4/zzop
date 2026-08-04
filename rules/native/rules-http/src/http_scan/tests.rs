@@ -147,7 +147,7 @@ fn unsafe_read_endpoint_message_is_byte_identical_to_the_pre_sweep_text() {
          the write behind a mutating method (POST/PUT/PATCH/DELETE), or make this endpoint genuinely \
          read-only. If the write is deliberate and safe to repeat (e.g. a fire-and-forget audit log), \
          mark it with `// idempotent-ok: <reason>` on the body-start line or up to 3 lines above, or disable via \
-         config `rules: { \"unsafe-read-endpoint\": \"off\" }` (embedders: `disabled_rules`) if this \
+         config `rules: { \"unsafe-read-endpoint\": \"off\" }` (embedders: `disabledRules`) if this \
          applies more broadly. LANGUAGE SIGHTLINE: this check needs store-write evidence that only the \
          TypeScript parser produces (ts/tsx/js/jsx/mjs/cjs/mts/cts) — `SourceSymbol::write_sites`, \
          which parser-python-3/go/rust/csharp/java-21 all leave empty, so a handler in those languages \
@@ -464,7 +464,7 @@ fn non_idempotent_write_message_is_byte_identical_to_the_pre_sweep_text() {
          row; PUT must be idempotent. Add an idempotency key or a dedup/uniqueness check before the \
          write, or mark it with `// idempotent-ok: <reason>` on the body-start line or up to 3 lines above if a retry is \
          genuinely safe here. Disable via config `rules: { \"non-idempotent-write\": \"off\" }` \
-         (embedders: `disabled_rules`) if this applies more broadly. LANGUAGE SIGHTLINE: this check \
+         (embedders: `disabledRules`) if this applies more broadly. LANGUAGE SIGHTLINE: this check \
          needs store-write evidence that only the TypeScript parser produces \
          (ts/tsx/js/jsx/mjs/cjs/mts/cts) — `SourceSymbol::write_sites`, which \
          parser-python-3/go/rust/csharp/java-21 all leave empty, so a handler in those languages has \

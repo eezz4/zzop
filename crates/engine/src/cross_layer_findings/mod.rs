@@ -63,13 +63,11 @@ pub(crate) fn compute_cross_layer_findings(
     let http_provides = partition::http_provide_sites(source_ios);
 
     let http_consume_totals = join_maps::http_consume_totals(source_ios);
-    let join_maps::JoinMaps {
-        consume_bodies,
-        provide_bodies,
-        retry_sites,
-    } = join_maps::build(source_ios);
+    // Consumed whole by `join_maps::push_shape_rule_findings` below (the three shape/edge-keyed
+    // rule gates live beside the maps they read).
+    let maps = join_maps::build(source_ios);
 
-    let mut sources: Vec<Vec<Finding>> = Vec::with_capacity(26);
+    let mut sources: Vec<Vec<Finding>> = Vec::with_capacity(27);
 
     if zzop_core::is_enabled(&gate, "cross-layer/unknown-verb-route") {
         sources.push(zzop_rules_cross_layer::unknown_verb_route_findings(
@@ -275,22 +273,14 @@ pub(crate) fn compute_cross_layer_findings(
             &unconsumed_provides,
         ));
     }
-    if zzop_core::is_enabled(&gate, "cross-layer/body-field-drift") {
-        sources.push(zzop_rules_cross_layer::body_field_drift_findings(
-            &cross_layer.edges,
-            &consume_bodies,
-            &provide_bodies,
-        ));
-    }
-    if zzop_core::is_enabled(&gate, "cross-layer/retrying-write-no-idempotency") {
-        sources.push(
-            zzop_rules_cross_layer::retrying_write_no_idempotency_findings(
-                &cross_layer.edges,
-                &retry_sites,
-                attribute_stores,
-            ),
-        );
-    }
+    join_maps::push_shape_rule_findings(
+        &mut sources,
+        &gate,
+        &cross_layer.edges,
+        &maps,
+        vocab.sensitive_response(),
+        attribute_stores,
+    );
 
     // After the overrides and sort; filtering preserves order, and an empty `unjoined` is a no-op pass.
     zzop_rules_cross_layer::retain_non_subsumed_sources(

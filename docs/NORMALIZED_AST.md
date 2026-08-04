@@ -16,7 +16,7 @@ the linker is an exact join on normalized keys, never AST matching).
 ```json
 {
   "format": "zzop-normalized-ast",
-  "version": "0.27.0",
+  "version": "0.29.0",
   "parser": "<parser id>/<impl version>",
   "source": "<tree/source id>",
   "files": [ <FileProjection> ]
@@ -24,15 +24,18 @@ the linker is an exact join on normalized keys, never AST matching).
 ```
 
 - `version` is the zzop RELEASE whose envelope shape these bytes conform to, as `MAJOR.MINOR.PATCH` —
-  the same units `zzop version` prints, NOT an independent counter. **Emit `"0.27.0"`**, the current
+  the same units `zzop version` prints, NOT an independent counter. **Emit `"0.29.0"`**, the current
   contract version. A consumer accepts anything at or below its own package version and rejects
   anything newer — same "reject newer, never guess" policy as the DSL pack `schema_version`.
 
-  It moves only when the SHAPE moves, so an adapter that emits `"0.27.0"` keeps being accepted through
+  It moves only when the SHAPE moves, so an adapter that emits `"0.29.0"` keeps being accepted through
   every later release that did not change the shape; you do not re-emit it every release. It moves for
   an ADDITIVE field too whenever an engine that silently drops that field would produce a different
   analysis than one that honours it — `overrides` is exactly that case (see "The `overrides` version
-  floor" below). Additive fields an older engine can safely ignore do not move it.
+  floor" below). Additive fields an older engine can safely ignore do not move it. A new VARIANT on one
+  of the externally-tagged fragment enums moves it as well, and less arguably than any field: nothing
+  drops an unknown variant, an older engine rejects the whole envelope at deserialization. `0.29.0` is
+  such a move — `RouterMountEntry` gained `MountRef` (below).
 
   A bare integer (`"version": 1`) is what adapters written before 0.27.0 emitted; it is now rejected as
   malformed rather than coerced. This is a one-time break, taken deliberately under the `0.x` no-
@@ -69,6 +72,8 @@ the linker is an exact join on normalized keys, never AST matching).
   "overrides": { "imports": ["localNameWhoseNativeBindingThisReplaces"] },
   "loop_spans": [[10, 14]],
   "function_spans": [[4, 20], [9, 12]],
+  "test_spans": [[30, 48]],
+  "calls": [ { "from_symbol": "relative/slash/path.ext#handler", "callee_name": "verifyToken", "line": 7 } ],
   "attributes": [ <Attribute> ]
 }
 ```
@@ -128,6 +133,16 @@ Field semantics (all mirror the Rust `zzop-core` serde types — those are the n
     supplied directly and `dtoRef` omitted. Feeds `cross-layer/body-field-drift`; see
     `crates/core/src/io.rs`'s `ConsumeBodyShape`/`ProvideBodyShape` for the normative semantics
     (evidence-only: anything not statically witnessed is omitted, never approximated).
+  - OPTIONAL declared-response evidence (additive since `response-shape-v1`; omit and nothing
+    changes): an `IoProvide` may carry `response: { "dtoRef": "UserDto", "fields": [{"name": "id",
+    "optional": false}], "complete": true }` — the response contract the handler DECLARES via its
+    return-type annotation (the native TS parser unwraps `Promise<X>` syntactically; declarations
+    only, never inferred from return statements or flow). Same two supply modes as `body`: `dtoRef`
+    set (resolved at assemble time against `class_shape_fragments`) or `fields`/`complete` supplied
+    directly with `dtoRef` omitted. Feeds `cross-layer/sensitive-response-field`; normative semantics
+    in `crates/core/src/io/facts/shapes.rs`'s `ProvideResponseShape` — including the one shape an adapter
+    should NOT emit (`dtoRef` omitted AND `fields` empty, the native parser's internal
+    "handler declared no return type" sentinel, which the engine strips and discloses).
   - OPTIONAL handler provenance: an `IoProvide` may carry `symbol`, the name of the function that handles
     **this** route. Three native rules start a call-graph BFS from it (`mutating-route-no-auth`,
     `unsafe-read-endpoint`, `non-idempotent-write`) and `duplicate-route` compares it for equality, so a
@@ -151,11 +166,18 @@ Field semantics (all mirror the Rust `zzop-core` serde types — those are the n
     that saw routes OUTSIDE it says so in its own `warnings`, naming the language and the silenced rule),
     and `unsafe-read-endpoint` /
     `non-idempotent-write` additionally need `writeSites`, which you may emit yourself (it is in the
-    symbol contract below) but which no non-TypeScript parser here fills. A Ruby or JSP route is therefore
-    invisible to all three no matter how carefully you name its handler — emit `symbol` for
-    `duplicate-route`'s sake and for the day a `RawCall` extractor for your language exists, not on the
-    expectation of an auth-reachability verdict. Per-rule language sightlines:
-    [rules/catalog.md](rules/catalog.md).
+    symbol contract below) but which no non-TypeScript parser here fills.
+    **In whole-envelope analysis (Mode A) you can supply the missing edges yourself**: the `calls`
+    channel (below) is exactly the per-file `RawCall` fact those re-parse loops produce natively, and an
+    envelope that carries it gets the same BFS over its own resolved graph — `unsafe-read-endpoint`/
+    `non-idempotent-write` for ANY language (they gate on `writeSites` evidence, not extension), and
+    `mutating-route-no-auth` for routes whose extension is in `CALL_GRAPH_COVERED_EXTENSIONS` (its
+    candidate gate still applies; a Mode A run with supplied calls and routes outside that set names the
+    residual in `warnings` rather than letting the exemption read as a verdict). Without the channel, a
+    Ruby or JSP route stays invisible to all three no matter how carefully you name its handler — emit
+    `symbol` for `duplicate-route`'s sake and for the run where `calls` (or a native `RawCall` extractor)
+    exists, not on the expectation of an auth-reachability verdict without edges. Per-rule language
+    sightlines: [rules/catalog.md](rules/catalog.md).
 - `const_map_fragment`, `procedure_router_fragments`, `router_mount_fragments`, `class_shape_fragments` —
   all four are OPTIONAL
   (`#[serde(default)]`; absent = empty; a projection with none of them is still fully valid and
@@ -178,9 +200,28 @@ Field semantics (all mirror the Rust `zzop-core` serde types — those are the n
     (`{method, path, handler, line}`) or a `Mount` sub-router mount (`{prefix, ident, specifier}`). See
     `crates/core/src/fragments.rs`'s `RouterMountFragment`/`RouterMountEntry` for the normative field
     names.
+    - **`MountRef: {prefix_ref, ident, specifier}` — since `"0.29.0"`, and NOT emittable below it** (an
+      engine that predates the variant rejects the whole envelope at deserialization; there is no
+      silent-drop mode to fall back to, which is why this variant moved the contract version). It is a
+      `Mount` whose prefix the producer could SEE but not READ — FastAPI's
+      `include_router(api_router, prefix=settings.API_V1_STR)`, where the value lives in another file.
+      `prefix_ref` is the argument's verbatim text (`"settings.API_V1_STR"`), resolved at assemble time
+      against the same project-wide merged const map `controller_prefix_route_fragments`' `prefix_ref`
+      uses. Emit `Mount` whenever the prefix IS a literal: a producer must not be able to express
+      "literal AND reference", because the composer would then have to pick, and picking is guessing.
+      On an unresolvable reference, from `crates/core/src/fragments.rs`:
+
+      > **Never-guess on failure**: a `prefix_ref` absent from the merged map does NOT fall back to `/`.
+      > The mount is dropped and disclosed, exactly as the controller-prefix composer already does — a
+      > route emitted at the wrong key is worse than a route not emitted, because only the second one
+      > looks like the absence it is.
+
+      `attr_keys` behaves exactly as `Mount`'s (below). The floor is its own constant
+      (`MIN_VERSION_FOR_ROUTER_MOUNT_REF`), pinned to `0.29.0` and not moved by later contract bumps —
+      see "The `overrides` version floor" below for why a floor is per-feature.
     - **Additive, backwards-compatible (`#[serde(default)]`; absent = empty/no-op for both shapes):**
       `Verb` and `Mount` each also accept an `attr_keys: [String]` field, and `RouterMountEntry` gains a
-      third variant, `ScopedAttr: {prefix, key, line}`. All three ride the generic entity-attribute
+      `ScopedAttr: {prefix, key, line}` variant. All three ride the generic entity-attribute
       channel (`attributes`, above) rather than introducing a new one: each key is open vocabulary (the
       kernel never interprets it) and its composed attribute value is implicitly `true` — there is no
       value field to set. Semantics:
@@ -304,13 +345,24 @@ Two DIFFERENT checks close it, and neither substitutes for the other:
   different engines.
 
 The floor is PER-FEATURE, not "the contract version". It is a separate constant
-(`MIN_VERSION_FOR_OVERRIDES` in both `crates/core/src/normalized.rs` and the adapter kit) that happens
-to equal the contract version today and stops equalling it at the next gated field. A field that an
-older engine can safely ignore gets no floor at all.
+(`MIN_VERSION_FOR_OVERRIDES` in both `crates/core/src/normalized.rs` and the adapter kit), and since
+`0.29.0` moved the contract version for `MountRef` the two no longer coincide — `overrides` still
+requires only `"0.27.0"`, because a floor pins to the release that introduced its feature and would
+stop being a floor if a later bump dragged it along. `MountRef` has its own
+(`MIN_VERSION_FOR_ROUTER_MOUNT_REF`, `0.29.0`), and so does `calls` (`MIN_VERSION_FOR_CALLS`,
+`0.29.0` — a silently-droppable field whose silent drop is a RECALL loss, the same class as
+`overrides`). A field that an older engine can safely ignore gets no floor at all.
 - `loop_spans` — OPTIONAL (`#[serde(default)]`; camelCase `loopSpans` also accepted on input). `[[startLine,
   endLine], ...]`, 1-based and inclusive. Each pair is either a loop statement's whole span (`for`/
-  `for-in`/`for-of`/`while`/`do-while`, header line included) or an array-iteration callback argument's
-  span (`.map`/`.forEach`/`.filter`/... — the callback only, never the whole call). Feeds
+  `for-in`/`for-of`/`while`/`do-while`, header line included) or an EAGERLY-evaluated
+  callback/comprehension body's span (e.g. a `.map`/`.forEach` callback argument — the callback only,
+  never the whole call). An adapter must NOT emit a span for a lazy form (generator expression, lazy
+  iterator/stream/LINQ chain): the contract is "a call inside this span provably runs once per
+  iteration", and a lazy body runs zero times unless consumed. An adapter must also NOT emit a
+  callback/comprehension span whose start and end line are EQUAL — line-granular containment cannot
+  separate a one-line callback body from the one-shot calls sharing that line, so single-line
+  eager-callback spans are dropped (intended under-reporting; statement-loop one-liners are kept,
+  a published residual ambiguity). Feeds
   `MethodScan::trigger_in_loop`; absent means no structural loop facts for this file, and that matcher
   silently skips it (graceful degrade, same convention as `symbols`' `body_start`/`body_end`).
 - `function_spans` — OPTIONAL (`#[serde(default)]`; camelCase `functionSpans` also accepted on input).
@@ -362,10 +414,104 @@ older engine can safely ignore gets no floor at all.
   class-body top-level line, e.g. a property initializer, is inside no function span), so it is a real
   line-level state and not an adapter-only edge case.
 
-  **Language coverage today: TypeScript only** among zzop's native parsers — Go produces `loop_spans`
-  but not `function_spans`, and no other native parser produces either. That asymmetry is published
+  **Language coverage today: TypeScript only** among zzop's native parsers — every structural
+  statement-loop parser (TypeScript, Go, Python, Java, C#, Rust) produces `loop_spans`, but only
+  TypeScript produces `function_spans`. That asymmetry is published
   here rather than left implicit; see `crates/cache/src/ir_slice.rs`'s module doc for the full per-fact
   coverage note.
+
+- `test_spans` — OPTIONAL (`#[serde(default)]`; camelCase `testSpans` also accepted on input).
+  `[[startLine, endLine], ...]`, 1-based and inclusive: regions your parser **proved** are compiled out
+  of the shipping build. This is the only SUBTRACTIVE field on `FileProjection` — every other one lets a
+  rule say more; this one stops DSL rules from judging the lines it names. Declare it only for regions you
+  can prove: a span over shipped code silently deletes real findings, and there is no second gate behind it.
+
+  **Exactly what it reaches**, because two of the edges matter to a producer:
+  - The PER-FILE matchers — `line-scan`, `method-scan`, `symbol-scan` — whose findings are dropped after
+    the matcher runs.
+  - **Except** rules that declare `scan_test_regions` (see `docs/rules/dsl-reference.md`). That opt-out
+    exists for credential-at-rest rules, where the COMMIT is the leak: a PEM private key or a
+    `scheme://user:pass@host` URL inside a test region is still in git history and still has to be rotated,
+    so those rules keep judging your spans on purpose.
+  - **NOT `io-scan`**, which queries the assembled whole-tree IO facts — the same facts the cross-layer
+    join, the coverage census and the endpoint verdict read. So a producer declaring a span must also
+    WITHHOLD the `io` provides/consumes it extracted from inside that span. Emitting a test-only route and
+    relying on this field would hide only the rule findings while leaving the route in the join.
+
+  Absent (or empty) means nothing is subtracted, so an envelope that omits it keeps its full judgment.
+  That is the safe direction for a subtractive fact and the reason this field needs no version floor.
+
+  **Path-named test files are not this field's job.** A `foo.test.ts` or a `tests/` directory is already
+  excluded by the rule packs' own `${test-paths-stories}` `file_exclude_pattern`, on the path, before any
+  projection is consulted. This field exists for the case a path cannot express: a test region **inside**
+  a shipping file.
+
+  **Language coverage today: Rust only** among zzop's native parsers (`#[cfg(test)]` and the
+  `#[test]`/`#[tokio::test]`/`#[sqlx::test]` attribute family), because Rust is the only language here
+  whose dominant test convention lives inside the shipping file. A blank for another language is a
+  statement that its path axis suffices, not a gap.
+
+- `calls` — OPTIONAL (`#[serde(default)]`; snake_case only, the field is new so no frozen camelCase
+  alias exists). `[ { "from_symbol", "callee_name", "line", "receiver_type"?, "is_heritage"? } ]` —
+  per-file CALL-GRAPH EDGES, the external-parser counterpart of the `RawCall` sites native parsers
+  project (`crates/core/src/callgraph.rs`, the same serde type verbatim). This is the channel that lets
+  a producer whose language has no native call-graph parser turn on the call-graph-BFS rule family in
+  whole-envelope analysis (Mode A): `mutating-route-no-auth`, `unsafe-read-endpoint`,
+  `non-idempotent-write`. **Requires `version` >= `"0.29.0"`** (`MIN_VERSION_FOR_CALLS` — same
+  per-feature-floor logic as `overrides`; an older engine drops the field silently and its call-graph
+  rules stay quiet, so the engine that understands it rejects the mislabel).
+
+  - `from_symbol` — `"<this file's path>#<symbol>"`, the call site's enclosing top-level symbol.
+    `validate_envelope` REJECTS any other file's prefix (or a missing `#<symbol>` tail): the engine
+    buckets calls by this prefix and resolves them against that file's own `imports`, so a foreign
+    prefix would mint an edge under an attribution the producer never controlled.
+  - `callee_name` — the target identifier exactly as written (empty is rejected). Resolution is the
+    ENGINE's job, per-file extraction is yours: an imported name resolves through this projection's
+    `imports` map (specifiers under the same exact-match/`./`-relative contract as the fragment
+    channels above), a same-file name through the file's own `symbols`, and anything resolving through
+    neither is DROPPED — an external/global call, normal and never an error, never a guessed edge.
+  - `receiver_type` (optional) — for `recv.method()`, the class name of `recv` when it is a
+    typed/imported class receiver; lets the engine emit a `<file>#<Class>.<method>` edge.
+  - `is_heritage` (optional, default `false`) — a class `extends`/`implements` edge; `callee_name` is
+    then the super class/interface name.
+
+  **Degrade direction is RECALL, and absence is disclosed.** An empty/absent channel means those three
+  rules are structurally silent for this envelope — they did not look, they did not report clean. A
+  Mode A run whose envelope carries `http` routes but no `calls` says so in `warnings` (naming the
+  silent rules and this channel); one whose routes sit outside `mutating-route-no-auth`'s
+  `CALL_GRAPH_COVERED_EXTENSIONS` names that residual gate even when calls were supplied. What each
+  rule additionally needs: `unsafe-read-endpoint`/`non-idempotent-write` only fire when the BFS reaches
+  a symbol carrying `writeSites` (emit those on your `symbols`); `mutating-route-no-auth` needs the
+  route's `symbol` handler reference (above) to resolve. Guard knowledge the graph cannot express
+  (route-level middleware) is injected as an `auth-guarded` attribute, exactly as on a native tree.
+  The `// idempotent-ok:` suppress-marker window is inert in Mode A (no source text), failing toward
+  firing — the same posture as the anchor-line channels in the Validation section below.
+
+  **Mode B (adapter overlays) does not consume this channel today.** The native pass re-parses the
+  tree's own dispatched sources for call edges; an overlay carrying `calls` gets one aggregate warning
+  naming the ignored channel rather than a silent no-op.
+
+### Channels deliberately NOT on this wire
+
+Two per-file channels native parsers project have **no envelope counterpart**, and each absence is a
+decision with its own reason, stated here so a producer does not read the gap as an unfinished field:
+
+- **Call SITES** (`zzop_core::CallSite`, `Matcher::CallScan`'s substrate — "this file used API family X
+  at line N"). The `calls` channel above is NOT that: those are call-graph EDGES, a different fact
+  category with a different consumer. Opening a per-file call-site channel on this contract is its own
+  additive, version-gated change. Consequence: a `call-scan` rule is silent on every envelope-projected
+  file — the same recall-side degrade a language with no native producer gets.
+- **Bound string literals** (`zzop_core::BoundStringLiteral`, `Matcher::LiteralScan`'s substrate —
+  binding name + value hash + value entropy, never the value). Here the boundary is PRIVACY, not only
+  additive-change discipline: an envelope is an external submission, and the channel carries an
+  unsalted 64-bit FNV hash of every candidate SECRET in the tree — offline dictionary-crackable for
+  exactly the low-entropy credentials the consuming rule (`security/high-entropy-secret`) exists to
+  catch. The no-plaintext contract (`zzop_core::string_literals`'s module doc) keeps hash + entropy
+  inside the LOCAL analysis cache; putting them on the wire would launder that contract through the
+  submission channel. If this channel is ever opened, that judgment — not a plumbing change — is what
+  has to be revisited, versioned, and disclosed. Consequence: a `literal-scan` rule is silent on every
+  envelope-projected file, same degrade as `call-scan` above.
+
 
 ## Delivery
 
@@ -382,9 +528,10 @@ serde (`CommonIr`/`SourceSymbol`/`ImportBinding`/`ReExport`/`IoFacts` all derive
 
 `zzop_core::validate_envelope(json: &str) -> Result<NormalizedEnvelope, Vec<String>>` is that validator:
 beyond plain deserialization, it rejects an unknown `format` string, a `version` greater than
-`zzop_core::SUPPORTED_NORMALIZED_AST_VERSION`, an empty or duplicate file `path`, and a symbol whose
-`body_end` is less than its `body_start` — collecting every issue found rather than stopping at the
-first. The engine-side receiver, `zzop_engine::analyze_envelope(envelope, config) -> AnalyzeOutput`,
+`zzop_core::SUPPORTED_NORMALIZED_AST_VERSION`, an empty or duplicate file `path`, a symbol whose
+`body_end` is less than its `body_start`, a populated `overrides`/`calls` below its feature's version
+floor, and a `calls` entry whose `from_symbol` is not `"<this file's path>#<symbol>"` (or whose
+`callee_name` is empty) — collecting every issue found rather than stopping at the first. The engine-side receiver, `zzop_engine::analyze_envelope(envelope, config) -> AnalyzeOutput`,
 projects an already-validated envelope into the same per-file artifact shape a native parser produces
 and runs every language-neutral whole-graph analysis over it (see that function's own module doc for
 exactly which per-file DSL rules and analyses run in envelope mode, and why line-scan/method-scan rules
@@ -426,8 +573,9 @@ Casing is not uniform across the envelope, and which part you get wrong changes 
 - **`FileProjection` top-level fields are snake_case** (`re_exports`, `dynamic_imports`,
   `const_map_fragment`, `procedure_router_fragments`, `router_mount_fragments`, `class_shape_fragments`,
   `is_entry`, ...) — this struct carries no `#[serde(rename_all = ...)]` (`crates/core/src/
-  normalized.rs`). The two exceptions are `loop_spans` and `function_spans`, which additionally accept
-  camelCase `loopSpans`/`functionSpans` on input (`#[serde(alias = ...)]`). A camelCase spelling of any
+  normalized.rs`). The exceptions are the three span fields — `loop_spans`, `function_spans` and
+  `test_spans` — which additionally accept camelCase `loopSpans`/`functionSpans`/`testSpans` on input
+  (`#[serde(alias = ...)]`). A camelCase spelling of any
   OTHER `FileProjection` field (e.g. `reExports`) matches no struct field, so serde treats it as an
   unrecognized key.
 - **`SourceSymbol` (the `symbols` array) outputs camelCase, but accepts snake_case input for exactly
@@ -634,7 +782,7 @@ resolution rule documented above for fragment specifiers.
 ```json
 {
   "format": "zzop-normalized-ast",
-  "version": "0.27.0",
+  "version": "0.29.0",
   "parser": "hono-router-overlay/1",
   "source": "api",
   "files": [
@@ -722,7 +870,7 @@ same shape (`AnalyzeRequest::adapter_overlays` in `crates/facade/src/lib.rs`), e
   "root": "/path/to/tree",
   "sourceId": "api",
   "adapterOverlays": [
-    { "format": "zzop-normalized-ast", "version": "0.27.0", "parser": "hono-router-overlay/1", "source": "api", "files": [ ... ] }
+    { "format": "zzop-normalized-ast", "version": "0.29.0", "parser": "hono-router-overlay/1", "source": "api", "files": [ ... ] }
   ]
 }
 ```

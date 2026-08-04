@@ -7,6 +7,10 @@
 //! The census is also `AnalyzeOutput::packs_loaded`'s `files_in_scope` source, so the number a consumer
 //! reads on the wire and the number these warnings reason about can never be two different computations.
 
+mod uncovered_extension;
+
+use uncovered_extension::uncovered_extension_warning;
+
 use crate::EngineConfig;
 
 /// Per-pack DSL applicability census (D16 follow-up): for each loaded pack, how many of this tree's
@@ -42,6 +46,15 @@ pub(crate) struct DslScope {
     /// away from this one. Its consumer is `minified_files_warning`: a minified file that no rule would
     /// have matched anyway lost no DSL coverage, so reporting it as "skipped" would be a false claim.
     pub(crate) in_scope_rels: std::collections::BTreeSet<String>,
+    /// `extension -> (analyzed files with it, of which in scope of >=1 loaded rule)`, over the
+    /// extensions a native frontend claims ([`crate::dispatch::dispatch_by_extension`]) — the LANGUAGE
+    /// axis of the same census, and [`uncovered_extension_warning`]'s only input. Extension-keyed and
+    /// lowercased because the question it answers ("does any loaded rule target this filetype at all")
+    /// is asked per filetype, not per file. The set of extensions considered is DERIVED from the
+    /// dispatch table, never a hand-written language list: a hand-written one is the same
+    /// covered-set-narrower-than-the-real-set defect this report exists to disclose, one level up.
+    /// A `BTreeMap` so the warning's extension order is deterministic with no sort.
+    ext_census: std::collections::BTreeMap<String, (usize, usize)>,
 }
 
 /// Builds the [`DslScope`] census. `packs` is `config.packs` (the LOADED set, before `disabled_rules`
@@ -49,7 +62,7 @@ pub(crate) struct DslScope {
 /// enablement, since applicability is about scope, not disablement) and `analyzed_rels` is every file
 /// this tree's walk actually visited (`analyze::assemble`'s `loc_by_path` keys / envelope's own file
 /// list). Inspects every matcher kind's OWN `file_pattern` (`LineScan`/`MethodScan`/`SymbolScan`/
-/// `IoScan` all carry one) — more precise than `pack_loader::applies_to`'s pack-level pre-filter,
+/// `IoScan`/`CallScan` all carry one) — more precise than `pack_loader::applies_to`'s pack-level pre-filter,
 /// which deliberately treats a `SymbolScan`/`IoScan` rule's `file_pattern` as "always matches". A rule
 /// whose `file_pattern` fails to compile counts as non-matching, mirroring `applies_to`'s treatment.
 ///
@@ -77,6 +90,8 @@ pub(crate) fn compute_dsl_scope(
                 zzop_core::Matcher::MethodScan(m) => &m.file_pattern,
                 zzop_core::Matcher::SymbolScan(m) => &m.file_pattern,
                 zzop_core::Matcher::IoScan(m) => &m.file_pattern,
+                zzop_core::Matcher::CallScan(m) => &m.file_pattern,
+                zzop_core::Matcher::LiteralScan(m) => &m.file_pattern,
             };
             let mask = masks.entry(pattern.as_str()).or_insert_with(|| {
                 regex::Regex::new(pattern)
@@ -102,20 +117,44 @@ pub(crate) fn compute_dsl_scope(
         .filter(|(_, matched)| **matched)
         .map(|(rel, _)| (*rel).to_string())
         .collect();
+    // The language axis, folded out of the SAME per-file union above so it can never disagree with the
+    // per-pack counts. Files no native frontend claims are skipped here on purpose: `unparsed_extension_
+    // warning` already owns them, and "no rule targets .png" is not a coverage gap.
+    let mut ext_census: std::collections::BTreeMap<String, (usize, usize)> =
+        std::collections::BTreeMap::new();
+    for (rel, matched) in analyzed_rels.iter().zip(in_scope_mask.iter()) {
+        if crate::dispatch::dispatch_by_extension(rel).is_none() {
+            continue;
+        }
+        let Some(ext) = std::path::Path::new(rel)
+            .extension()
+            .and_then(|e| e.to_str())
+        else {
+            continue;
+        };
+        let entry = ext_census.entry(ext.to_ascii_lowercase()).or_insert((0, 0));
+        entry.0 += 1;
+        if *matched {
+            entry.1 += 1;
+        }
+    }
     DslScope {
         files_in_scope_by_pack,
         analyzed_files: analyzed_rels.len(),
         any_rule_applies,
         in_scope_rels,
+        ext_census,
     }
 }
 
-/// Both applicability self-reports for one analysis, in fixed order: the tree-wide
-/// [`no_applicable_dsl_rule_warning`] first, then the per-pack [`zero_scope_packs_warning`]. One entry
-/// point because they read the SAME `scope` census over the SAME pack set and every caller wants both —
-/// a caller that took them separately could silently emit one and forget the other, which is exactly how
-/// `analyze_envelope` used to drift from `analyze::assemble`. Either or both may be absent; the returned
-/// `Vec` is empty when neither has anything to say.
+/// Every applicability self-report for one analysis, in fixed order and widest-scope first: the
+/// tree-wide [`no_applicable_dsl_rule_warning`], then the per-pack [`zero_scope_packs_warning`], then
+/// the per-language [`uncovered_extension_warning`]. One entry point because they read the SAME `scope`
+/// census over the SAME pack set and every caller wants all of them — a caller that took them separately
+/// could silently emit one and forget the others, which is exactly how `analyze_envelope` used to drift
+/// from `analyze::assemble`. Any subset may be absent; the returned `Vec` is empty when none has
+/// anything to say. They do not overlap: the first fires only when NOTHING applies anywhere (and
+/// silences the third by construction), the second is keyed on packs, the third on filetypes.
 pub(crate) fn pack_scope_warnings(config: &EngineConfig, scope: &DslScope) -> Vec<String> {
     no_applicable_dsl_rule_warning(&config.packs, scope)
         .into_iter()
@@ -124,6 +163,7 @@ pub(crate) fn pack_scope_warnings(config: &EngineConfig, scope: &DslScope) -> Ve
             scope,
             &config.rule_config,
         ))
+        .chain(uncovered_extension_warning(&config.packs, scope))
         .collect()
 }
 

@@ -69,7 +69,7 @@ pub struct SchemaModel {
 ///
 /// Store-binding and migration-churn signals no longer live here — they're injected via the generic
 /// entity-attribute channel instead (`zzop_core::AttributeStore`, Symbol-keyed `bound-model`/`model-churn`),
-/// which unreferenced-model-name and schema-churn read directly.
+/// which unreferenced-model-name and model-churn read directly.
 #[derive(Debug, Clone, Default)]
 pub struct SchemaUsage {
     /// Identifier name -> total occurrences in BE source (comments/strings stripped). Drives unreferenced-field-name.

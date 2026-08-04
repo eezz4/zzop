@@ -47,19 +47,27 @@ impl Default for IoOptions {
     }
 }
 
-/// Projects one Java file's `IoFacts` — Spring MVC HTTP route provides only (`consumes` is always empty; this engine has no
-/// Java-side HTTP-egress extractor yet). Delegates to `zzop_parser_java_21::extract_http_provides` — see that function's module doc
-/// for the annotation shapes recognized and the `@RestController`/`@Controller` class-gating rule. `None` when the file yields no provides at all. Called only for `.java` files (`Language::Java21`).
-pub(crate) fn extract_java_file_io(rel: &str, text: &str) -> Option<IoFacts> {
-    let provides = zzop_parser_java_21::extract_http_provides(rel, text);
-    if provides.is_empty() {
-        None
+/// Projects one Java file's `IoFacts` — Spring MVC HTTP route provides (`zzop_parser_java_21::extract_http_provides`, see that
+/// module's doc for the annotation shapes and the `@RestController`/`@Controller` class-gating rule), JPA `@Entity`/`@Table`
+/// `db-table` provides (`extract_jpa_db_table_provides` — the Java member of the ORM db-table family), AND
+/// `RestTemplate`/`WebClient` literal HTTP egress consumes (`extract_java_http_consumes` — the arm that closed Java's
+/// consume-side half of the cross-layer join, 2026-08-02). `None` when the file yields nothing. Called for EVERY `.java` file
+/// (`Language::Java21`).
+///
+/// Same degrade split as [`extract_csharp_file_io`] below: PROVIDES project regardless of `degraded` (both extractors return
+/// nothing rather than guess on a malformed file), egress CONSUMES stay gated behind `!degraded`, matching every other
+/// language's consume arm — a degraded parse can't be trusted to have seen the whole call site.
+pub(crate) fn extract_java_file_io(rel: &str, text: &str, degraded: bool) -> Option<IoFacts> {
+    let mut provides = zzop_parser_java_21::extract_http_provides(rel, text);
+    provides.extend(zzop_parser_java_21::extract_jpa_db_table_provides(
+        rel, text,
+    ));
+    let consumes = if degraded {
+        Vec::new()
     } else {
-        Some(IoFacts {
-            provides,
-            consumes: Vec::new(),
-        })
-    }
+        zzop_parser_java_21::extract_java_http_consumes(rel, text)
+    };
+    (!provides.is_empty() || !consumes.is_empty()).then_some(IoFacts { provides, consumes })
 }
 
 /// Projects one C# file's `IoFacts` — ASP.NET Core attribute-controller + minimal-API HTTP route provides AND `HttpClient` literal
@@ -72,7 +80,12 @@ pub(crate) fn extract_java_file_io(rel: &str, text: &str) -> Option<IoFacts> {
 /// matching every other language's consume arm (`Rust`/`Go`/`Python` in `pipeline::fresh`) — a degraded parse can't be trusted to
 /// have seen the whole call site. Before this split, both directions were dropped for any degraded `.cs` file, silently vanishing real endpoints from the cross-layer join.
 pub(crate) fn extract_csharp_file_io(rel: &str, text: &str, degraded: bool) -> Option<IoFacts> {
-    let provides = zzop_parser_csharp::extract_csharp_http_provides(rel, text);
+    let mut provides = zzop_parser_csharp::extract_csharp_http_provides(rel, text);
+    // EF Core `DbSet<T>`/`[Table]` db-table provides — the C# member of the ORM db-table family,
+    // riding the provide side's unconditional (Java-parity) projection like the routes above.
+    provides.extend(zzop_parser_csharp::extract_ef_core_db_table_provides(
+        rel, text,
+    ));
     let consumes = if degraded {
         Vec::new()
     } else {

@@ -8,7 +8,7 @@
 
 use super::hints::envelope_hints;
 use super::{
-    parse_contract_version, NormalizedEnvelope, MIN_VERSION_FOR_OVERRIDES,
+    parse_contract_version, NormalizedEnvelope, MIN_VERSION_FOR_CALLS, MIN_VERSION_FOR_OVERRIDES,
     NORMALIZED_AST_CONTRACT_VERSION, NORMALIZED_AST_FORMAT, SUPPORTED_NORMALIZED_AST_VERSION,
 };
 /// Validates `json` against the Normalized AST contract (`docs/NORMALIZED_AST.md`) beyond what plain
@@ -167,6 +167,62 @@ fn structural_issues(envelope: &NormalizedEnvelope) -> Vec<String> {
                 errors.push(format!(
                     "files[{idx}] ('{}'): `overrides` requires version >= {MIN_VERSION_FOR_OVERRIDES}, but this envelope declares {}. An engine older than that drops the field silently, so the same bytes would displace nothing there — declare the version whose shape you are writing.",
                     file.path, envelope.version
+                ));
+            }
+        }
+        // `calls` — the call-graph-edge channel is an external SUBMISSION, so it carries its own
+        // validation the native producers never need (they construct `RawCall`s in-process). Two
+        // shapes are rejected rather than repaired, because each has no honest repair:
+        //
+        // (1) VERSION FLOOR — same mechanism and rationale as `overrides` above (see
+        // `MIN_VERSION_FOR_CALLS`): an engine predating the field drops it silently and its
+        // call-graph rules stay quiet, a recall loss the producer cannot see. Only the engine that
+        // understands the field can reject the mislabel, so it does.
+        if !file.calls.is_empty() {
+            let floor = parse_contract_version(MIN_VERSION_FOR_CALLS)
+                .expect("MIN_VERSION_FOR_CALLS must be MAJOR.MINOR.PATCH");
+            if declared_version.is_some_and(|declared| declared < floor) {
+                errors.push(format!(
+                    "files[{idx}] ('{}'): `calls` requires version >= {MIN_VERSION_FOR_CALLS}, but this envelope declares {}. An engine older than that drops the field silently, so the same bytes would light no call-graph rule there — declare the version whose shape you are writing.",
+                    file.path, envelope.version
+                ));
+            }
+            // (1b) NO `#` IN A CALLS-CARRYING PATH. The attribution check below verifies
+            // `from_symbol` by whole-path prefix (`strip_prefix`), but the whole-graph resolver
+            // buckets `from_symbol` at its FIRST `#` (`callgraph::build_symbol_graph`) — for a path
+            // containing `#` the two machines disagree, so every call this file emits would resolve
+            // under a truncated path it never declared (against no imports, no symbols). No honest
+            // repair exists at the boundary (rewriting either machine's split is a guess about which
+            // the producer meant), so the shape is rejected — and only for files that actually carry
+            // calls, since a `#` path with no calls meets neither machine.
+            if file.path.contains('#') {
+                errors.push(format!(
+                    "files[{idx}] ('{}'): `calls` are not accepted on a file whose path contains '#' — call attribution is checked against the whole path, but the call-graph resolver buckets `from_symbol` at its FIRST '#', so this file's calls would be resolved under the truncated path '{}' (a file this envelope never declared). Rename the path to carry calls.",
+                    file.path,
+                    file.path.split('#').next().unwrap_or_default()
+                ));
+            }
+        }
+        for (call_idx, call) in file.calls.iter().enumerate() {
+            // (2) ATTRIBUTION — a call must belong to the file that emits it. `from_symbol` is the
+            // grouping key the whole-graph resolver buckets by (`callgraph::build_symbol_graph` splits
+            // it at the first `#`), so a foreign-file prefix would resolve this call against ANOTHER
+            // file's imports — an edge minted under an attribution the emitting producer never
+            // controlled. Guessing which file was meant has no honest form, so the boundary rejects.
+            let well_attributed = call
+                .from_symbol
+                .strip_prefix(file.path.as_str())
+                .is_some_and(|rest| rest.starts_with('#') && rest.len() > 1);
+            if !well_attributed {
+                errors.push(format!(
+                    "files[{idx}] ('{}') calls[{call_idx}]: from_symbol '{}' must be '<this file's path>#<symbol>' — a call is attributed to a symbol of the file that emits it, never another file's.",
+                    file.path, call.from_symbol
+                ));
+            }
+            if call.callee_name.is_empty() {
+                errors.push(format!(
+                    "files[{idx}] ('{}') calls[{call_idx}]: empty callee_name",
+                    file.path
                 ));
             }
         }

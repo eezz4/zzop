@@ -11,6 +11,13 @@ node adapter.mjs --root <treeRoot> --alias tml [--source <treeId>] > overlay.jso
 
 Then attach it via the `overlays` key in `zzop.config.jsonc` (embedders: `adapterOverlays`).
 
+**The representative case is now solved natively** — same disclosure shape as
+[`../java-imports-adapter/`](../java-imports-adapter/): the `tml` self-import this example was built
+against resolves today by declaring the alias in config, `vocabulary.pythonPackageRoots` (e.g. `"tml="`
+maps import name `tml` to the tree root), with no overlay involved. The example stays as the reference
+for the Mode-B overlay recipe itself — the recipe applies unchanged to an alias mechanism the config
+key cannot state.
+
 ## Why this is layer 3, and not a parser bug
 
 `twitter/the-algorithm-ml` imports itself as `tml` in 170 places across 70 files. Nothing in the tree

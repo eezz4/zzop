@@ -128,6 +128,7 @@ mod tests {
             source: "be".to_string(),
             io: IoFacts {
                 provides: vec![IoProvide {
+                    response: None,
                     body: None,
                     kind: "http".to_string(),
                     key: "GET /authen/getUserInfo".to_string(),

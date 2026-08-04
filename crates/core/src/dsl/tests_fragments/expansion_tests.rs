@@ -13,6 +13,7 @@ fn line_scan_rule(id: &str, file_exclude_pattern: Option<&str>) -> RuleDef {
         id: id.to_string(),
         severity: Severity::Info,
         message: "m".to_string(),
+        scan_test_regions: false,
         matcher: Matcher::LineScan(LineScan {
             file_pattern: "(?i)\\.ts$".to_string(),
             line_pattern: Some("TODO".to_string()),
@@ -161,8 +162,11 @@ fn expand_fragments_is_idempotent_on_an_already_expanded_pack() {
 /// Every pattern-bearing field the task names — `file_pattern`, `require_file`, `require_file_all`,
 /// `require_file_absent`, `line_pattern`, `any[].pattern`, `exclude_pattern`, `file_exclude_pattern`
 /// (line-scan); `patterns[].pattern`/`absent[].pattern`/`file_exclude_pattern` (method-scan);
-/// `name_pattern` (symbol-scan); `key_pattern`/`file_exclude_pattern` (io-scan) — resolves a `${NAME}`
-/// ref. One pack exercising
+/// `name_pattern` (symbol-scan); `key_pattern`/`file_exclude_pattern`/`symbol_pattern`/
+/// `anchor_exclude_pattern` (io-scan) — resolves a `${NAME}`
+/// ref. The io-scan pair joined 2026-08-02: both are regex fields, and both were outside
+/// `expand_fragments`'s hand-written match arms (and outside this test) until the walk became a single
+/// derived one (`def::pattern_fields`). One pack exercising
 /// every field at once, each pointed at its own fragment name, so a future field added to a matcher
 /// without wiring it into `expand_fragments` shows up here as an unresolved `${...}` left in place
 /// (caught by the sentinel-collision guard below on ANY pack, not just shipped ones, if this test's own
@@ -183,6 +187,8 @@ fn expand_fragments_covers_every_pattern_bearing_field_on_every_matcher_kind() {
         "absent-pattern",
         "name-pattern",
         "key-pattern",
+        "symbol-pattern",
+        "anchor-exclude-pattern",
     ] {
         fragments.insert(name.to_string(), format!("(?i){name}-resolved"));
     }
@@ -191,6 +197,7 @@ fn expand_fragments_covers_every_pattern_bearing_field_on_every_matcher_kind() {
         id: "ls".to_string(),
         severity: Severity::Info,
         message: "m".to_string(),
+        scan_test_regions: false,
         matcher: Matcher::LineScan(LineScan {
             file_pattern: "${file-pattern}".to_string(),
             require_file: Some("${require-file}".to_string()),
@@ -215,6 +222,7 @@ fn expand_fragments_covers_every_pattern_bearing_field_on_every_matcher_kind() {
         id: "ms".to_string(),
         severity: Severity::Info,
         message: "m".to_string(),
+        scan_test_regions: false,
         matcher: Matcher::MethodScan(MethodScan {
             file_pattern: "${file-pattern}".to_string(),
             require_file: Some("${require-file}".to_string()),
@@ -234,6 +242,7 @@ fn expand_fragments_covers_every_pattern_bearing_field_on_every_matcher_kind() {
                 pattern: "${absent-pattern}".to_string(),
                 label: "a".to_string(),
             }],
+            require_call_kind: None,
             file_exclude_pattern: Some("${file-exclude-pattern}".to_string()),
             snippet_max: 160,
         }),
@@ -242,6 +251,7 @@ fn expand_fragments_covers_every_pattern_bearing_field_on_every_matcher_kind() {
         id: "ss".to_string(),
         severity: Severity::Info,
         message: "m".to_string(),
+        scan_test_regions: false,
         matcher: Matcher::SymbolScan(SymbolScan {
             file_pattern: "${file-pattern}".to_string(),
             kind: None,
@@ -254,6 +264,7 @@ fn expand_fragments_covers_every_pattern_bearing_field_on_every_matcher_kind() {
         id: "is".to_string(),
         severity: Severity::Info,
         message: "m".to_string(),
+        scan_test_regions: false,
         matcher: Matcher::IoScan(IoScan {
             file_pattern: "${file-pattern}".to_string(),
             file_exclude_pattern: Some("${file-exclude-pattern}".to_string()),
@@ -261,10 +272,10 @@ fn expand_fragments_covers_every_pattern_bearing_field_on_every_matcher_kind() {
             kind: None,
             key_pattern: Some("${key-pattern}".to_string()),
             negate: false,
-            symbol_pattern: None,
+            symbol_pattern: Some("${symbol-pattern}".to_string()),
             attr_absent: None,
             attr_present: None,
-            anchor_exclude_pattern: None,
+            anchor_exclude_pattern: Some("${anchor-exclude-pattern}".to_string()),
         }),
     };
 
@@ -333,5 +344,13 @@ fn expand_fragments_covers_every_pattern_bearing_field_on_every_matcher_kind() {
     assert_eq!(
         io.file_exclude_pattern.as_deref(),
         Some("(?i)file-exclude-pattern-resolved")
+    );
+    assert_eq!(
+        io.symbol_pattern.as_deref(),
+        Some("(?i)symbol-pattern-resolved")
+    );
+    assert_eq!(
+        io.anchor_exclude_pattern.as_deref(),
+        Some("(?i)anchor-exclude-pattern-resolved")
     );
 }

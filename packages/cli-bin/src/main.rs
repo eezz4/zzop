@@ -32,13 +32,21 @@
 //! helpers, split by responsibility: `cli/args.rs` (argv shape), `cli/help.rs` (the help elaboration),
 //! `cli/run.rs` (the diverging subcommand runners), `cli/analysis.rs` (the four analysis lanes).
 
+// This binary IS the CLI: writing to stdout, writing usage/errors to stderr, and exiting with a
+// status code are its contract, so the workspace `print_stdout`/`print_stderr`/`exit` lints are
+// exempted here rather than being weakened for everyone. See root Cargo.toml
+// [workspace.lints.clippy]: all three measured zero in every library `src/`, and Cargo's lint table
+// cannot be scoped to a single target. The attribute covers `mod cli` too — a crate-level allow
+// reaches every module in the crate, which is why the sites under `cli/` need nothing of their own.
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::exit)]
+
 mod cli;
 
 /// The one usage line — printed to stdout by `--help` (exit 0) and to stderr by every malformed
 /// invocation (exit 2), so the two surfaces can never drift apart. Stays in THIS file: the `zzop-mcp`
 /// package's `surface_prose` meta-test reads this literal out of `packages/cli-bin/src/main.rs` by
 /// path, to pin that every MCP tool's CLI twin subcommand is named here.
-const USAGE: &str = "usage: zzop <analyze <path> | analyze --config <path> | analyze-envelope <envelope.json> | validate-envelope <envelope.json> | validate-rule-pack <pack.json> | cross <path>... | cross --config <path> | file <path> <tree>... | file <path> --config <path> | endpoint <pattern> <path>... | endpoint <pattern> --config <path> | manifest <path>... | manifest --config <path> | diff <a.json> <b.json> | facts <path>... | facts --config <path> | coverage <path>... | coverage --config <path> | graph <path>... | graph --config <path> [--domain <join|dep|risk|posture>] [--format <mermaid|cosmograph-nodes|cosmograph-links>] [--scope <prefix>] [--top <n>] | init [--force] | contract [<name>] | explain <rule-id> | version [--verbose]> (analyze, analyze-envelope and cross also take [--severity <critical|warning|info>] [--rule <id>] [--limit <n>]; every subcommand takes --help)";
+const USAGE: &str = "usage: zzop <analyze <path> | analyze --config <path> | analyze-envelope <envelope.json> | validate-envelope <envelope.json> | validate-rule-pack <pack.json> | cross <path>... | cross --config <path> | file <path> [--source-id <id>] <tree>... | file <path> [--source-id <id>] --config <path> | endpoint <pattern> <path>... | endpoint <pattern> --config <path> | manifest <path>... | manifest --config <path> | diff <a.json> <b.json> [--allow-tool-drift] | facts <path>... | facts --config <path> | coverage <path>... | coverage --config <path> | graph <path>... | graph --config <path> [--domain <join|dep|risk|posture>] [--format <mermaid|cosmograph-nodes|cosmograph-links>] [--scope <prefix>] [--top <n>] | init [--force] | contract [<name>] | explain <rule-id> | version [--verbose]> (analyze, analyze-envelope and cross also take [--severity <critical|warning|info>] [--rule <id>] [--limit <n>] [--profile-rules]; every subcommand takes --help)";
 
 /// A one-line pointer at the bare-invocation/unknown-subcommand error path (exit 2): a bare `zzop` gives
 /// no hint that `help` exists, or that MCP is the sibling `zzop-mcp` binary (not a `zzop` subcommand).
@@ -174,9 +182,11 @@ fn main() {
         // The version surface, in the two forms the one owner (`zzop_facade::version`) publishes: the
         // BARE version (`zzop_summary::version()` = `CARGO_PKG_VERSION`, the workspace release version
         // shared with the `zzop-mcp` binary and MCP `initialize`, so all three can never disagree), and
-        // — behind `--verbose` — the DIAGNOSTIC form (`version_string()`: the same version plus every
-        // parser's `PARSER_FINGERPRINT`, the cache-key ingredient that says which parser build produced
-        // an analysis). The bare form stays the default on purpose: it is a one-token line that scripts
+        // — behind `--verbose` — the DIAGNOSTIC form (`version_string()`: the same version plus one
+        // `<id>/<hash>` token per parser and a `zzop-engine=<hash>` token — each frontend's
+        // human-readable id joined to the derived source hash that keys the per-file cache, so two
+        // builds whose extraction differs print two different strings). The bare form
+        // stays the default on purpose: it is a one-token line that scripts
         // and this repo's own tests parse, and lengthening it would break them for a diagnostic almost
         // no invocation wants. `zzop-mcp version --verbose` prints the identical string.
         Some("version") | Some("--version") => match args.get(2).map(String::as_str) {

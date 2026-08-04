@@ -157,7 +157,15 @@ zzop-mcp mcp               # serve MCP over stdio for Claude Code/Desktop</code>
     // being evaluated at all. It is a path fact, not a stack fact: add a file
     // that matches and the pack applies again, so keep the ones you may grow
     // into. Nothing is disabled for you.
-    "disabled": ["browser"]
+    "disabled": ["browser"],
+    // The same gate read the other way: an ALLOWLIST. Name the packs you want
+    // and every other bundled pack stays off, so a repo that cares about one
+    // subject writes one line instead of eleven. Absent or [] means no
+    // allowlist at all (every pack runs) -- never "allow nothing". The two
+    // compose: "only" selects, "disabled" still subtracts. Both are about
+    // PACKS -- native analyses (dead-candidates, the score channels) are not
+    // packs and keep running; switch those off by id under "rules".
+    "only": ["security", "sql"]
   },
 
   "rules": {
@@ -193,7 +201,7 @@ zzop-mcp mcp               # serve MCP over stdio for Claude Code/Desktop</code>
     "skipDirs": ["node_modules", "dist", "build", ".next", ".git", "target", ".yarn", ".zzop", "zzop-reports", ".zzop-cache"]
     // ...and authGuardQualifierTokens, authAcquisitionStandalonePattern,
     // authAcquisitionConditionalPattern, authFamilyPathPattern,
-    // javaSourceRoot, workspaceSkipDirs
+    // javaSourceRoot, pythonPackageRoots, workspaceSkipDirs
   },
 
   // Files larger than this many bytes skip structural parsing.
@@ -224,7 +232,7 @@ zzop-mcp mcp               # serve MCP over stdio for Claude Code/Desktop</code>
             <tr><td><code>zzop init [--force]</code></td><td>Write the embedded starter <code>zzop.config.jsonc</code> — the <code>config-template</code> document below — into the current directory. It generates nothing: the bytes are the same ones <code>zzop contract config-template</code> prints and MCP <code>resources/read</code> serves, so the three surfaces cannot disagree. Every key in it is annotated with what it means and set to zzop's own value, which makes writing it a starting point you can then edit. Every analysis lane requires it; the lanes that produce or describe it (<code>init</code>, <code>contract</code>, <code>explain</code>, <code>version</code>, <code>help</code>, <code>validate-envelope</code>, <code>validate-rule-pack</code>) and <code>analyze-envelope</code> (no tree, so nothing to configure) do not. An existing config file is <strong>never</strong> overwritten without <code>--force</code> (the refusal exits <code>1</code>).</td></tr>
             <tr><td><code>zzop contract [&lt;name&gt;]</code></td><td>No name lists the embedded authoring-contract resources (schemas, guides, the rule catalog, <code>config-surface</code>); a name prints that document's exact bytes to stdout.</td></tr>
             <tr><td><code>zzop explain &lt;rule-id&gt;</code></td><td>Print one bundled DSL rule's compiled-in data (id, pack, severity, message, derived suppress marker with the comment leaders that matcher kind honors, matcher kind, and every exclusion field that kind actually carries — <code>exclude_pattern</code>/<code>file_exclude_pattern</code> for line-scan, <code>absent</code>/<code>file_exclude_pattern</code> for method-scan, <code>file_exclude_pattern</code>/<code>anchor_exclude_pattern</code> for io-scan, none for symbol-scan — with its real value) straight from the rule data compiled into this binary — never <code>docs/rules/catalog.md</code> prose. Accepts the full <code>&lt;pack&gt;/&lt;rule&gt;</code> id or a bare <code>&lt;rule&gt;</code> id when unambiguous. Two answers are worth knowing about before you need them. An <strong>io-scan</strong> rule's marker is printed with its run-mode condition attached — native-parse runs only: an envelope carries no source text for the finding's anchor line, so in <code>analyze-envelope</code> mode no marker there suppresses anything and you disable the id or exclude the path instead. (A <code>symbol-scan</code> rule answers <code>none</code> for the same class of reason: its findings have no line to anchor a comment against.) And a <strong>bare namespaced native id</strong> — the tail alone (<code>god-model</code>, <code>route-near-miss</code>) of a <code>schema/</code> or <code>cross-layer/</code> id — is not a rule id this lookup can render, so it comes back as a guided failure (stderr, exit <code>1</code>) that names the full id, because <code>disabledRules</code> and <code>severityOverrides</code> match ids exactly and the bare form would configure nothing.</td></tr>
-            <tr><td><code>zzop version</code> / <code>--version</code> / <code>version --verbose</code></td><td>Print the binary's version (the same value MCP's <code>initialize</code> reports as <code>serverInfo.version</code>). The bare form stays one token so a script can parse it; <code>--verbose</code> adds every parser's fingerprint — which parser build produced an analysis — and prints the identical string <code>zzop-mcp version --verbose</code> does.</td></tr>
+            <tr><td><code>zzop version</code> / <code>--version</code> / <code>version --verbose</code></td><td>Print the binary's version (the same value MCP's <code>initialize</code> reports as <code>serverInfo.version</code>). The bare form stays one token so a script can parse it; <code>--verbose</code> adds every parser's fingerprint — which parser FRONTEND read the files, an ID rather than a per-build hash — and prints the identical string <code>zzop-mcp version --verbose</code> does.</td></tr>
             <tr><td><code>zzop help</code> / <code>--help</code> / <code>-h</code></td><td>Print the usage line plus one elaboration per subcommand, exit 0 (the <code>zzop-mcp</code> server binary has its own <code>help</code>).</td></tr>
             <tr><td><code>zzop &lt;subcommand&gt; --help</code> / <code>-h</code></td><td>Print just that subcommand's own line, to stdout, exit 0. A help request is answered rather than rejected — it used to fall into the dash-shaped-argument guard and leave with exit 2 on stderr.</td></tr>
           </tbody>

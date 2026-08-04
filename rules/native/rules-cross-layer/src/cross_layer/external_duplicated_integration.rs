@@ -177,7 +177,7 @@ mod tests {
             assert_eq!(f.rule_id, "cross-layer/external-host-in-multiple-sources");
             assert_eq!(f.severity, Severity::Warning);
             assert!(f.message.contains("api.vendor.com"), "{}", f.message);
-            assert!(f.message.contains("disabled_rules"), "{}", f.message);
+            assert!(f.message.contains("disabledRules"), "{}", f.message);
             let data = f.data.as_ref().unwrap();
             assert_eq!(data["host"], "api.vendor.com");
             assert_eq!(data["sources"], serde_json::json!(["be", "fe"]));

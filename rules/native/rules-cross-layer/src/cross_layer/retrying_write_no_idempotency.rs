@@ -60,10 +60,12 @@ pub const IDEMPOTENCY_GUARDED_ATTR: &str = "idempotency-guarded";
 /// The MARKUP-FREE claim this rule's finding must publish, pinned against `docs/rules/catalog.md` and
 /// `site/rules.html` by `tests::the_retry_sightline_is_identical_in_the_finding_and_the_docs`.
 ///
-/// Names the PRODUCER, not an extension list: `IoConsume::retry_configured` has exactly one producer
-/// (`zzop_parser_typescript`'s egress collector), so there is no list to keep in step.
+/// Names the PRODUCER, not an extension list: `IoConsume::retry_configured` has exactly one BUILT-IN
+/// producer (`zzop_parser_typescript`'s egress collector), so there is no list to keep in step. An
+/// adapter envelope can supply the tag from any language, so the claim says "built-in", never "only".
 pub(crate) fn retry_sightline_claim() -> &'static str {
-    "an automatic retry is witnessed only by the parser-typescript egress recognizer"
+    "an automatic retry is witnessed by exactly one built-in producer today — the parser-typescript \
+     egress recognizer — though an adapter envelope can supply the tag from any language"
 }
 
 /// The sightline sentence the finding appends.
@@ -77,20 +79,21 @@ pub(crate) fn retry_sightline_claim() -> &'static str {
 /// own doc, which calls that the "increment-2 gap".
 fn retry_sightline() -> String {
     format!(
-        "LANGUAGE SIGHTLINE: {claim} (an `axios-retry`-wired file, or a `pRetry(...)`/`backOff(...)` \
-         wrapper) — no Python (`tenacity`, `urllib3` Retry), Java (Spring Retry, Resilience4j), Go, \
-         Rust or C# retry policy is recognized, and within TypeScript the hono-client, tRPC and \
-         fetch-wrapper consume paths leave the tag unset too. Since that tag is this rule's only \
-         trigger, ZERO findings of this rule means the retry side was NOT ANALYZED there, never \"no \
-         replayed write\".",
+        "LANGUAGE SIGHTLINE: {claim}. The native witness is an `axios-retry`-wired file, or a \
+         `pRetry(...)`/`backOff(...)` wrapper — no Python (`tenacity`, `urllib3` Retry), Java \
+         (Spring Retry, Resilience4j), Go, Rust or C# retry policy is natively recognized, and \
+         within TypeScript the hono-client, tRPC and fetch-wrapper consume paths leave the tag \
+         unset too. Since that tag is this rule's only trigger, ZERO findings of this rule means \
+         the retry side was NOT ANALYZED there, never \"no replayed write\".",
         claim = retry_sightline_claim()
     )
 }
 
-/// Extensions whose files the TypeScript parser — the ONE producer of `IoConsume::retry_configured`
-/// (see [`retry_sightline_claim`]) — is dispatched for. The prose claim deliberately names the
-/// producer instead of a list; the machine-readable declaration below cannot (a coverage consumer
-/// crosses extensions, not producer names), so this is that producer's dispatch arm spelled out once.
+/// Extensions whose files the TypeScript parser — the one BUILT-IN producer of
+/// `IoConsume::retry_configured` (see [`retry_sightline_claim`]) — is dispatched for. The prose
+/// claim deliberately names the producer instead of a list; the machine-readable declaration below
+/// cannot (a coverage consumer crosses extensions, not producer names), so this is that producer's
+/// dispatch arm spelled out once.
 ///
 /// POLICY VALUE, T2: duplicates `zzop_engine`'s TypeScript dispatch arm (this crate depends on
 /// `zzop_core` only, so it cannot import the predicate) — pinned both directions by

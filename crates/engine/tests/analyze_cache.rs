@@ -163,6 +163,25 @@ fn typescript_pack() -> RulePackDef {
         .expect("typescript.json pack present")
 }
 
+/// The real `rules/dsl/security/security.json` pack, loaded exactly as [`typescript_pack`] loads its
+/// own — the no-plaintext cache seal below must run the SHIPPED `high-entropy-secret` rule, not a
+/// hand-built stand-in whose fields could drift from the pack.
+fn security_pack() -> RulePackDef {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rules/dsl");
+    let result = load_dsl_packs(&dir);
+    assert!(
+        result.errors.is_empty(),
+        "pack load errors: {:?}",
+        result.errors
+    );
+    result
+        .packs
+        .into_iter()
+        .map(|(_, pack)| pack)
+        .find(|p| p.id == "security")
+        .expect("security.json pack present")
+}
+
 /// Every `*.json` file directly under `<cache_root>/ir` and `<cache_root>/findings` — the on-disk layout
 /// `zzop_cache::AnalysisCache`'s own module doc documents (this crate has no access to that crate's private
 /// key/path derivation, nor does it need it: the layout itself is documented contract, not an internal
@@ -196,6 +215,52 @@ fn ir_entry_files(cache_root: &Path) -> Vec<PathBuf> {
         .collect();
     out.sort();
     out
+}
+
+/// Fires on any `.ts` string literal bound to a name ending in `key` whose value carries >= 60 total
+/// Shannon bits — a `literal-scan` probe over the `string_literals` DSL channel.
+fn secret_pack() -> RulePackDef {
+    let json = r#"{
+        "id": "test-cache-secret",
+        "framework": "any",
+        "rules": [
+            {
+                "id": "entropy",
+                "severity": "warning",
+                "message": "high-entropy literal.",
+                "matcher": {
+                    "type": "literal-scan",
+                    "file_pattern": "\\.ts$",
+                    "name_pattern": "(?i)key$",
+                    "entropy_min": 60.0
+                }
+            }
+        ]
+    }"#;
+    serde_json::from_str(json).expect("parse inline test-cache-secret pack")
+}
+
+/// Fires on any `console.*` call site in a `.ts` file — a `call-scan` probe over the `call_sites`
+/// DSL channel.
+fn console_pack() -> RulePackDef {
+    let json = r#"{
+        "id": "test-cache-console",
+        "framework": "any",
+        "rules": [
+            {
+                "id": "console",
+                "severity": "info",
+                "message": "console call site.",
+                "matcher": {
+                    "type": "call-scan",
+                    "file_pattern": "\\.ts$",
+                    "kind": "console-write",
+                    "callee_pattern": "^console\\."
+                }
+            }
+        ]
+    }"#;
+    serde_json::from_str(json).expect("parse inline test-cache-console pack")
 }
 
 #[test]
@@ -631,5 +696,134 @@ fn unknown_garbage_id_in_disabled_rules_does_not_crash_and_other_rules_still_run
             .any(|f| f.rule_id == "typescript/no-explicit-any"),
         "got: {:?}",
         out.findings
+    );
+}
+
+/// H1 seal: the end-to-end no-plaintext contract for `literal-scan` findings. A committed secret's
+/// VALUE must appear in NO cache entry — the IR slice carries hash+entropy by design, and the
+/// finding (which lands in `findings/*.json` verbatim) carries `{name, entropy}` with no `snippet`:
+/// the snippet was the one field that used to copy the secret's own source line into plain-text
+/// JSON on disk. Asserted over the cache's BYTES, not the in-memory finding, so any future field
+/// that smuggles the line back turns this red.
+#[test]
+fn a_literal_scan_finding_writes_no_secret_plaintext_into_the_cache() {
+    let secret_value = "trombone-ravine-wallet-ember-silk";
+    let dir = TempDir::new("zzop-engine-cache-literal-fixture");
+    dir.write(
+        "secret.ts",
+        &format!("export const dbPassword = '{secret_value}';\n"),
+    );
+    let cache_dir = TempDir::new("zzop-engine-cache-literal");
+    let cfg = EngineConfig {
+        source_id: "fixture".to_string(),
+        packs: vec![security_pack()],
+        cache_dir: Some(cache_dir.path().to_path_buf()),
+        ..EngineConfig::default()
+    };
+
+    let out = analyze_tree(dir.path(), &cfg);
+    let finding = out
+        .findings
+        .iter()
+        .find(|f| f.rule_id == "security/high-entropy-secret")
+        .expect("the passphrase-shaped secret must fire high-entropy-secret");
+    let data = finding.data.as_ref().expect("finding data");
+    assert!(
+        data.get("snippet").is_none(),
+        "no source-line snippet may ride a literal-scan finding: {data}"
+    );
+
+    let entries = cache_entry_files(cache_dir.path());
+    assert!(!entries.is_empty(), "cold run must write cache entries");
+    for path in entries {
+        let bytes = fs::read_to_string(&path).unwrap();
+        assert!(
+            !bytes.contains(secret_value),
+            "{} carries the secret's plaintext value — the no-plaintext cache contract is broken",
+            path.display()
+        );
+    }
+}
+
+// --- The forget-and-silence arm, pinned per DSL channel (H4). `process_file`'s IR-hit/findings-miss
+// branch re-runs `eval_packs` over the CACHED `FileIrSlice`, threading each channel by hand
+// (`&ir.call_sites`, `&ir.string_literals` — crates/engine/src/pipeline/artifact.rs). A forgotten or
+// stubbed argument there (`&[]`) makes every rule on that channel silent on WARM files while a cold
+// run still finds them — a degrade nothing would disclose. These pins exist so that plant turns a
+// test red instead of shipping: each channel's finding must survive (1) a full warm hit — served
+// from the findings cache — and (2) the ruleset-fingerprint-only move that forces the re-eval arm,
+// where the finding can ONLY come through the cached slice (the IR is reused, never recomputed).
+
+/// The `string_literals` channel through the warm cache: a high-entropy `literal-scan` finding fires
+/// cold, fires on the all-hits warm rerun, and fires again when ONLY the ruleset fingerprint moves
+/// (IR hit, findings miss -> re-evaluated from the cached slice's `string_literals`).
+#[test]
+fn literal_scan_findings_survive_warm_cache_and_ruleset_moved_reevaluation() {
+    let dir = TempDir::new("zzop-engine-cache-literal-warm");
+    dir.write(
+        "secrets.ts",
+        "export const apiKey = \"kJ8xQ2mVn9RtL4wPzY7bC3dF6gH1jS5a\";\n",
+    );
+    let cache_dir = TempDir::new("zzop-engine-cache-store");
+    let has_hit = |out: &zzop_engine::AnalyzeOutput| {
+        out.findings
+            .iter()
+            .any(|f| f.rule_id == "test-cache-secret/entropy" && f.file == "secrets.ts")
+    };
+
+    let cold = analyze_tree(dir.path(), &config(cache_dir.path(), vec![secret_pack()]));
+    assert!(has_hit(&cold), "cold: {:?}", cold.findings);
+    assert_eq!(cold.cache.as_ref().unwrap().misses, cold.file_count);
+
+    // Full warm hit: findings come straight off the findings cache.
+    let warm = analyze_tree(dir.path(), &config(cache_dir.path(), vec![secret_pack()]));
+    assert!(has_hit(&warm), "warm hit: {:?}", warm.findings);
+    assert_eq!(warm.cache.as_ref().unwrap().hits, warm.file_count);
+
+    // Ruleset-fingerprint-only move (an extra active pack; file content untouched): IR hit, findings
+    // miss — the arm that re-runs `eval_packs` over the CACHED slice. The finding can only arrive
+    // through `&ir.string_literals`; a `&[]` planted there goes red exactly here.
+    let reeval = analyze_tree(
+        dir.path(),
+        &config(cache_dir.path(), vec![secret_pack(), fixme_pack()]),
+    );
+    assert!(
+        has_hit(&reeval),
+        "ruleset-moved re-evaluation must keep the literal-scan finding (cached-slice channel): {:?}",
+        reeval.findings
+    );
+    let stats = reeval.cache.expect("cache stats");
+    assert_eq!(stats.misses, reeval.file_count);
+    assert_eq!(stats.hits, 0);
+}
+
+/// The `call_sites` channel through the same two warm shapes — `literal_scan_findings_survive_...`'s
+/// twin one channel over, via a `call-scan` console rule.
+#[test]
+fn call_scan_findings_survive_warm_cache_and_ruleset_moved_reevaluation() {
+    let dir = TempDir::new("zzop-engine-cache-callsite-warm");
+    dir.write("logs.ts", "export function f() { console.log(\"x\"); }\n");
+    let cache_dir = TempDir::new("zzop-engine-cache-store");
+    let has_hit = |out: &zzop_engine::AnalyzeOutput| {
+        out.findings
+            .iter()
+            .any(|f| f.rule_id == "test-cache-console/console" && f.file == "logs.ts")
+    };
+
+    let cold = analyze_tree(dir.path(), &config(cache_dir.path(), vec![console_pack()]));
+    assert!(has_hit(&cold), "cold: {:?}", cold.findings);
+
+    let warm = analyze_tree(dir.path(), &config(cache_dir.path(), vec![console_pack()]));
+    assert!(has_hit(&warm), "warm hit: {:?}", warm.findings);
+    assert_eq!(warm.cache.as_ref().unwrap().hits, warm.file_count);
+
+    let reeval = analyze_tree(
+        dir.path(),
+        &config(cache_dir.path(), vec![console_pack(), fixme_pack()]),
+    );
+    assert!(
+        has_hit(&reeval),
+        "ruleset-moved re-evaluation must keep the call-scan finding (cached-slice channel): {:?}",
+        reeval.findings
     );
 }

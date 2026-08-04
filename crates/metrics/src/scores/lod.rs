@@ -34,6 +34,10 @@ pub fn compute_lod(
     let mut total_violations: u32 = 0;
     let mut summaries: Vec<LodFileSummary> = Vec::new();
 
+    #[allow(
+        clippy::iter_over_hash_type,
+        reason = "iteration order cannot reach the result: `total_violations` is a sum, and `summaries` is sorted by (density desc, path asc) — `path` is this map's key, so that comparator is a total order"
+    )]
     for (path, chains) in lod_by_file {
         if !is_scored(path) {
             continue;

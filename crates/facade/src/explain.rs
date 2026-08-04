@@ -55,8 +55,11 @@
 //! matcher labels are ordinary English words (`read`, `set`, `body`, `timeout`) that would turn `explain`
 //! into a dictionary of vocabulary that does not exist as a rule id anywhere.
 
+#[cfg(test)]
+mod field_coverage_tests;
 mod output_ids;
 mod render;
+mod scope;
 #[cfg(test)]
 mod tests;
 

@@ -15,10 +15,13 @@ fn store_count_inside_for_of_loop_is_flagged() {
 
 #[test]
 fn store_count_inside_map_callback_is_flagged() {
+    // MULTILINE callback on purpose: a single-line `.map(...)` callback gets no loop span (the span
+    // cannot prove containment line-granularly — `SourceFile::loop_spans`'s doc owns that rule), so
+    // the per-iteration count is asserted on a callback with lines of its own.
     let dir = TempDir::new("zzop-sql");
     dir.write(
         "list.ts",
-        "declare const postLikeStore: any;\ndeclare const posts: any[];\nexport async function f() {\n  return Promise.all(posts.map(async (p) => ({ id: p.id, c: await postLikeStore.count((l: any) => l.postId === p.id) })));\n}\n",
+        "declare const postLikeStore: any;\ndeclare const posts: any[];\nexport async function f() {\n  return Promise.all(posts.map(async (p) => ({\n    id: p.id,\n    c: await postLikeStore.count((l: any) => l.postId === p.id),\n  })));\n}\n",
     );
     let out = scan(&dir);
     assert_eq!(hits(&out, "count-in-loop").len(), 1, "{:?}", out.findings);

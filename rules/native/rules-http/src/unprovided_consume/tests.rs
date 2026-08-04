@@ -4,6 +4,7 @@ use super::*;
 
 fn provide(key: &str, file: &str, line: u32) -> zzop_core::IoProvide {
     zzop_core::IoProvide {
+        response: None,
         body: None,
         kind: "http".to_string(),
         key: key.to_string(),
@@ -280,6 +281,7 @@ fn non_http_consume_kind_is_ignored() {
 #[test]
 fn a_non_http_provide_does_not_satisfy_the_zero_provides_gate() {
     let provides = vec![zzop_core::IoProvide {
+        response: None,
         body: None,
         kind: "queue".to_string(),
         key: "topic:x".to_string(),

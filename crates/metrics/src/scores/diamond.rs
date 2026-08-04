@@ -60,6 +60,10 @@ pub fn compute_diamond(
 
 fn build_adj(dep: &DepGraph) -> BTreeMap<String, HashSet<String>> {
     let mut adj = BTreeMap::new();
+    #[allow(
+        clippy::iter_over_hash_type,
+        reason = "iteration order cannot reach the result: `adj` is a BTreeMap and each value set is only membership-tested or re-bucketed into a BTreeMap/BTreeSet"
+    )]
     for (from, imports) in dep {
         let set: HashSet<String> = imports
             .iter()
@@ -80,6 +84,10 @@ fn collect_two_hop_reach(
     adj: &BTreeMap<String, HashSet<String>>,
 ) -> BTreeMap<String, std::collections::BTreeSet<String>> {
     let mut reach: BTreeMap<String, std::collections::BTreeSet<String>> = BTreeMap::new();
+    #[allow(
+        clippy::iter_over_hash_type,
+        reason = "iteration order cannot reach the result: `reach` is a BTreeMap of BTreeSets filled by commutative inserts; the emitted pair order comes from the BTreeMap walk in `compute_diamond`"
+    )]
     for a in first_hops {
         let Some(second) = adj.get(a) else { continue };
         for z in second {

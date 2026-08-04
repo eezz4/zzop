@@ -10,6 +10,8 @@ use super::markers::{
 };
 use super::source::RuleContext;
 
+mod gates;
+
 pub(super) fn eval_method_scan(
     pack_id: &str,
     rule: &RuleDef,
@@ -132,28 +134,8 @@ pub(super) fn eval_method_scan(
         }
         let lines: Vec<&str> = f.text.lines().collect();
         let is_sql = is_sql_file(&f.rel);
-        // Innermost-span priority: when spans overlap (a class symbol's span contains its methods' spans),
-        // drop any symbol whose span strictly contains another candidate span — avoids double-counting.
-        let spans: Vec<(usize, u32, u32)> = f
-            .symbols
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, sym)| {
-                let (Some(s), Some(e)) = (sym.body_start, sym.body_end) else {
-                    return None;
-                };
-                (s != 0 && e >= s).then_some((idx, s, e))
-            })
-            .collect();
-        let mut drop_symbol = vec![false; f.symbols.len()];
-        for &(idx_a, s_a, e_a) in &spans {
-            for &(idx_b, s_b, e_b) in &spans {
-                if idx_a != idx_b && s_a <= s_b && e_a >= e_b && (s_a, e_a) != (s_b, e_b) {
-                    drop_symbol[idx_a] = true;
-                    break;
-                }
-            }
-        }
+        // Innermost-span priority — see `gates::drop_outer_spans`.
+        let drop_symbol = gates::drop_outer_spans(f);
 
         for (sym_idx, sym) in f.symbols.iter().enumerate() {
             if drop_symbol[sym_idx] {
@@ -171,6 +153,13 @@ pub(super) fn eval_method_scan(
             }
             let end_idx = (body_end as usize).min(lines.len()); // exclusive; body_end is 1-based inclusive
             let span = &lines[start_idx..end_idx];
+
+            // Structural presence gate over the call-site channel — see
+            // `MethodScan::require_call_kind` and `gates::call_kind_witnessed` (which owns why an
+            // empty channel SILENCES rather than falling back to lexical co-occurrence).
+            if !gates::call_kind_witnessed(f, m.require_call_kind.as_ref(), body_start, body_end) {
+                continue;
+            }
 
             // LINES (not occurrences) carrying a QUALIFYING trigger match -> `data.triggerLines`: every
             // gate the anchor cleared is re-run per line, so a rejected line never inflates the count.

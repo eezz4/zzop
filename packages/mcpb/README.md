@@ -6,6 +6,12 @@ second native binary, the `zzop` CLI, distributed separately via GitHub Releases
 root [`README.md`](../../README.md).) Neither lane updates itself: Desktop cannot (see below), and the
 Code plugin deliberately reports a newer release rather than applying it. No npm is involved in either.
 
+Because Desktop has no notifier of its own for a privately distributed bundle, **the binary reports its
+own age**: past 90 days from the source it was built from, `initialize` carries an `instructions` string
+(and the stderr banner one extra line) saying how old this build is and pointing at the releases page.
+It performs no network call and never claims a newer release exists — it cannot know that — and it is
+silent on a current build. Details: [`docs/modules/mcp.md`](../../docs/modules/mcp.md#mcp-surface).
+
 ## Claude Desktop — MCPB bundle (`mcpb/manifest.json`)
 
 Claude Desktop installs a native MCP server from a `.mcpb` file (formerly `.dxt`; a zip of the server
@@ -28,7 +34,8 @@ Build per target (in prebuild CI, after `cargo build -p zzop-mcp --release --tar
 mkdir -p out/bin && cp target/<triple>/release/zzop-mcp[.exe] out/bin/
 jq --arg v "$VERSION" '.version=$v' packages/mcpb/manifest.json > out/manifest.json
 npx -y @anthropic-ai/mcpb validate out/manifest.json   # build-time only; not a runtime dep
-(cd out && zip -r ../zzop-mcp-<platform>.mcpb manifest.json bin)
+cp LICENSE THIRD-PARTY-NOTICES.md out/                 # license obligations ride INSIDE the bundle
+(cd out && zip -r ../zzop-mcp-<platform>.mcpb manifest.json bin LICENSE THIRD-PARTY-NOTICES.md)
 ```
 
 Attach the `.mcpb` files to the GitHub release alongside the bare binaries.

@@ -1,7 +1,22 @@
 //! Small pure `syn`-expression helpers for the axum adapter — extracted from `axum.rs` (file-size
 //! limit). No adapter state, just shape predicates over `Expr`/`Pat`.
 
-use syn::{Expr, Lit, Pat};
+use syn::{Expr, ExprMethodCall, Lit, Pat};
+
+/// Decomposes a method-call chain into its root expression and the ordered list of chained calls —
+/// `Router::new().route(a).nest(b)` -> `(Router::new(), [.route(a), .nest(b)])`. Used by BOTH sides of
+/// this adapter (the statement walk in `axum.rs` and the verb-argument walk in `entries.rs`), which is
+/// why it sits here rather than in either.
+pub(super) fn collect_chain(expr: &Expr) -> (&Expr, Vec<&ExprMethodCall>) {
+    match expr {
+        Expr::MethodCall(mc) => {
+            let (root, mut chain) = collect_chain(&mc.receiver);
+            chain.push(mc);
+            (root, chain)
+        }
+        other => (other, Vec::new()),
+    }
+}
 
 /// `Router::new()` / `axum::Router::new()` — a `<...>::Router::new()` call whose last two path segments
 /// are `Router::new`.

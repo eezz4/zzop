@@ -5,9 +5,9 @@ declare const dumpState: unknown;
 declare const guardedDumpState: unknown;
 
 export function bad() {
-  apiRoutes.get('/debug/state', dumpState); // cache: server-render (isolates this from get-route-no-cache-marker)
+  apiRoutes.get('/debug/state', dumpState);
 }
 
 export function good() {
-  apiRoutes.get('/debug/metrics', guardedDumpState); // cache: server-render
+  apiRoutes.get('/debug/metrics', guardedDumpState);
 }

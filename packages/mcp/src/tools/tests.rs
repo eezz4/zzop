@@ -285,6 +285,44 @@ fn cross_repo_rejects_a_non_string_config_path() {
     );
 }
 
+/// `cross_repo`'s SOURCE-MODE errors ("both" / "neither") must be the shared handler's own words,
+/// byte for byte — this arm owns no exclusivity rule of its own.
+///
+/// It used to. `tools.rs` re-implemented "not both" / "pass one" locally while its three sibling arms
+/// passed both optional sources straight through, and the file's own `analyze_repo` comment already
+/// stated the principle the outlier broke: *"the shared handler decides: it owns 'exactly one source',
+/// so the two hosts cannot drift on which combinations are legal"*. `zzop_config::trees` rejects the
+/// same two inputs (pinned from the summary side by `crates/summary/src/cross_test.rs`), so the local
+/// copy bought nothing and could only drift — a second sentence for the same judgment, reachable only
+/// through MCP, while the CLI twin got the first.
+///
+/// Comparing against a live `cross_summary` call rather than against literal strings is the point: a
+/// literal would be a THIRD copy of the message, and this test would then pin the drift instead of
+/// catching it.
+#[test]
+fn cross_repo_source_mode_errors_are_the_shared_handlers_verbatim() {
+    let filters = zzop_summary::FindingFilters::from_args(None).expect("no-args filters");
+    let cases: [(serde_json::Value, Vec<String>, Option<&str>); 2] = [
+        (
+            serde_json::json!({ "paths": ["a", "b"], "configPath": "zzop.config.jsonc" }),
+            vec!["a".to_string(), "b".to_string()],
+            Some("zzop.config.jsonc"),
+        ),
+        (serde_json::json!({}), Vec::new(), None),
+    ];
+    for (arguments, paths, config_path) in cases {
+        let shared = zzop_summary::cross_summary(&paths, config_path, &filters)
+            .expect_err("both sources, and neither source, are each an error");
+        let reply = call_tool("cross_repo", arguments.clone());
+        assert_eq!(
+            error_text(&reply),
+            format!("zzop error: {shared}"),
+            "cross_repo({arguments}) answered with words that are not the shared handler's. \
+             A source-mode rule spelled a second time in this file is drift surface, not a guard."
+        );
+    }
+}
+
 #[test]
 fn check_endpoint_rejects_non_string_pattern_path_and_config_path() {
     let reply = call_tool("check_endpoint", serde_json::json!({ "pattern": 1 }));

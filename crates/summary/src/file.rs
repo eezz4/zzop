@@ -2,10 +2,10 @@
 //!
 //! Exactly the shape `endpoint_summary` established, and deliberately so: resolve trees through the
 //! shared `zzop_config::trees` front end (never re-implemented here), run the SAME `analyzeTrees` engine
-//! path, hand the output to the pure facade core (`zzop_facade::query_file_json`), then stamp the two
-//! host-layer honesty channels on top — `config` (which config file was honored, or null) and
-//! `configWarnings`. The core stays pure and never sees the config front end, so the MCP tool and the
-//! `zzop file` CLI subcommand cannot drift.
+//! path, hand the output to the pure facade core (`zzop_facade::query_file_json`), then stamp the
+//! host-layer honesty channels on top — `config` (which config file was honored, or null), `warnings`
+//! (the engine's own self-reports) and `configWarnings`. The core stays pure and never sees the config
+//! front end, so the MCP tool and the `zzop file` CLI subcommand cannot drift.
 //!
 //! `analyzeTrees` even for a single `path`, for the same reason `endpoint_summary` does it: the reply
 //! names the TREE a file was found in, and a single-tree `analyze` output has no tree identity at all.
@@ -32,21 +32,28 @@ pub fn file_summary(
     }
     let result = zzop_facade::query_file_json(&out, &query.to_string())?;
     let mut v: serde_json::Value = serde_json::from_str(&result).map_err(|e| e.to_string())?;
-    // Same two host-layer channels every sibling tool stamps, in the same order — the loader's own
+    let analysis: serde_json::Value = serde_json::from_str(&out).unwrap_or(serde_json::Value::Null);
+    // The same host-layer channels every sibling tool stamps, in the same order — the loader's own
     // warnings first, then the engine-side config diagnostics, because they are the same kind of honesty.
     v["config"] = loaded
         .config_path
         .as_deref()
         .map(|p| serde_json::Value::String(p.display().to_string()))
         .unwrap_or(serde_json::Value::Null);
-    let mut warnings = loaded.warnings.clone();
-    let engine_side: Vec<String> = serde_json::from_value(serde_json::json!(
-        crate::config_warnings::facade_config_warnings(
-            &serde_json::from_str::<serde_json::Value>(&out).unwrap_or(serde_json::Value::Null)
-        )
-    ))
-    .unwrap_or_default();
-    warnings.extend(engine_side);
+    v["warnings"] = serde_json::Value::Array(crate::warnings::engine_warnings(&analysis));
+    let mut warnings: Vec<serde_json::Value> = loaded
+        .warnings
+        .iter()
+        .cloned()
+        .map(serde_json::Value::String)
+        .collect();
+    // PER TREE, exactly like `cross_summary` and `facts_json`. This used to read the field off the
+    // MULTI-tree document's top level, where `MultiAnalyzeOutputView` has no such field at all — so the
+    // merge silently contributed nothing on every run and the channel carried the config LOADER's
+    // warnings alone. The engine-side half (an unknown `disabledRules`/`severityOverrides` id) rides
+    // each tree's own output. Both loops moved to `crate::warnings` once `coverage` and `check_endpoint`
+    // turned out to be shipping byte-identical copies of the same defect.
+    warnings.extend(crate::warnings::tree_config_warnings(&analysis));
     v["configWarnings"] = serde_json::json!(warnings);
     serde_json::to_string_pretty(&v).map_err(|e| e.to_string())
 }

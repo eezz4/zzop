@@ -2,6 +2,7 @@
 
 use crate::test_support::{cycle_and_git_fixture, cycle_fixture, git_available, TempDir};
 use crate::{analyze_json, analyze_trees_json};
+use zzop_test_support::skip_notice;
 
 /// Deterministic-output contract (same input -> byte-identical output): `ir.dep`, `ir.loc`, and
 /// `nodes[].tagCounts` are `HashMap`-backed (hasher-randomized iteration order per process), so
@@ -12,7 +13,7 @@ use crate::{analyze_json, analyze_trees_json};
 #[test]
 fn analyze_json_is_byte_identical_across_two_runs() {
     if !git_available() {
-        eprintln!("skipping analyze_json_is_byte_identical_across_two_runs: git not on PATH");
+        skip_notice!("git not on PATH");
         return;
     }
     let dir = cycle_and_git_fixture();
@@ -166,6 +167,121 @@ fn analyze_json_top_level_key_set_is_pinned_exactly() {
             "warnings",
         ],
         "single-tree output root keys drifted — pin the new/renamed field here AND in its own test"
+    );
+}
+
+/// The same exact pin for the fields that exist ONLY when git signals ran. The pin above cannot see
+/// them: its fixture declares no `git`, so `scores` is `null` and every field gated on scores being
+/// `Some` is absent from its key list entirely.
+///
+/// That is the identical blind spot `ruleOverridesApplied` sat in until 2026-07-26 — a field riding
+/// every surface with no parity coupling, because the one fixture the completeness contract read could
+/// never produce it. It was found again on 2026-08-04 while adding `scoreMeanings`: the new top-level
+/// field went in and the "exact" key-set pin stayed green. A pin whose fixture cannot reach the field
+/// is not coverage.
+///
+/// `zzop_engine`'s `rule_contracts::surface_parity` unions every pin whose NAME matches the
+/// `analyze_json_top_level_key_set…_is_pinned_exactly` shape, so this one joins that union by existing
+/// — no list to remember to update.
+#[test]
+fn analyze_json_top_level_key_set_with_git_signals_is_pinned_exactly() {
+    if !git_available() {
+        skip_notice!("git not on PATH");
+        return;
+    }
+    let dir = cycle_and_git_fixture();
+    let config = format!(
+        r#"{{"root": {:?}, "sourceId": "t", "git": {{}}}}"#,
+        dir.path().display()
+    );
+    let out = analyze_json(&config).expect("analyze_json should succeed");
+    let value: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
+    let keys: Vec<&str> = value
+        .as_object()
+        .expect("root object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            "cache",
+            "configWarnings",
+            "coverage",
+            "critical",
+            "degraded",
+            "disclosure",
+            "fileCount",
+            "findings",
+            "folders",
+            "gitWindow",
+            "health",
+            "ir",
+            "layerCoChurn",
+            "nodes",
+            "packsLoaded",
+            "recommendations",
+            "ruleTimings",
+            "scoreMeanings",
+            "scores",
+            "seams",
+            "warnings",
+        ],
+        "git-enabled single-tree output root keys drifted — pin the new/renamed field here AND in its \
+         own test"
+    );
+}
+
+/// `scoreMeanings` rides exactly when `scores` does, and says something for every key `scores` carries.
+///
+/// The pairing is the point: a legend for numbers that did not run explains nothing, and a score with
+/// no legend is the bare-acronym state this field exists to end (`sdp`, `sfc`, `lod`, `fsd` had their
+/// expansions only in Rust doc-comments — `docs/` and `site/` carried none).
+#[test]
+fn score_meanings_ride_with_scores_and_cover_every_key() {
+    if !git_available() {
+        skip_notice!("git not on PATH");
+        return;
+    }
+    let dir = cycle_and_git_fixture();
+    let with_git = format!(
+        r#"{{"root": {:?}, "sourceId": "t", "git": {{}}}}"#,
+        dir.path().display()
+    );
+    let value: serde_json::Value =
+        serde_json::from_str(&analyze_json(&with_git).expect("analyze_json should succeed"))
+            .expect("valid JSON");
+    let scores = value["scores"]
+        .as_object()
+        .expect("git ran, so scores is an object");
+    let meanings = value["scoreMeanings"]
+        .as_object()
+        .expect("scoreMeanings must ride with scores");
+    for key in scores.keys() {
+        let sentence = meanings
+            .get(key)
+            .and_then(|v| v.as_str())
+            .unwrap_or_else(|| panic!("score `{key}` shipped with no meaning beside it"));
+        assert!(
+            sentence.len() > 20,
+            "score `{key}`'s meaning is too short to be a definition: {sentence:?}"
+        );
+    }
+    assert_eq!(
+        scores.len(),
+        meanings.len(),
+        "scoreMeanings must explain exactly the keys scores carries — no more, no fewer"
+    );
+
+    // The other half of the contract: no scores, no legend.
+    let no_git = format!(r#"{{"root": {:?}, "sourceId": "t"}}"#, dir.path().display());
+    let bare: serde_json::Value =
+        serde_json::from_str(&analyze_json(&no_git).expect("analyze_json should succeed"))
+            .expect("valid JSON");
+    assert!(bare["scores"].is_null(), "no git means no scores");
+    assert!(
+        bare.get("scoreMeanings").is_none(),
+        "a legend for numbers that did not run must be absent, not null"
     );
 }
 
@@ -349,6 +465,43 @@ fn analyze_json_rule_overrides_applied_lists_only_the_id_that_actually_matched()
         serde_json::json!([]),
         "expected an empty severityRemapped (no severityOverrides requested), got: {value}"
     );
+    assert_eq!(
+        applied["only"],
+        serde_json::json!([]),
+        "expected an empty only (no packsOnly requested), got: {value}"
+    );
+}
+
+#[test]
+fn analyze_json_rule_overrides_applied_opens_on_a_pack_allowlist_alone() {
+    // The v0.29.0 audit finding, pinned at the surface a consumer actually reads: `packsOnly` alone —
+    // no `disabledRules`, no `severityOverrides` — must OPEN `ruleOverridesApplied`. Before this the
+    // knob that suppresses the most was acknowledged by no field in any reply, while its weaker twin
+    // was.
+    //
+    // This fixture loads no DSL packs (see the `packsLoaded: []` every pin in this file sees), so the
+    // allowlist names nothing loaded and `only` is EMPTY — and that is the case worth pinning here
+    // rather than the happy one: an empty `only` beside a present key is precisely how a caller learns
+    // their allowlist matched no pack, the shape in which every DSL finding vanishes at once. The
+    // matched-entry side is pinned against a real pack in `zzop_engine`'s own
+    // `rule_overrides_applied_confirms_an_honored_pack_allowlist`.
+    let dir = cycle_fixture();
+    let config = format!(
+        r#"{{"root": {:?}, "packsOnly": ["security"]}}"#,
+        dir.path().display()
+    );
+    let out = analyze_json(&config).expect("analyze_json should succeed");
+    let value: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
+    let applied = value
+        .get("ruleOverridesApplied")
+        .unwrap_or_else(|| panic!("packsOnly alone must open the field, got: {value}"));
+    assert_eq!(
+        applied["only"],
+        serde_json::json!([]),
+        "no pack is loaded in this fixture, so the allowlist matched nothing: {value}"
+    );
+    assert_eq!(applied["disabled"], serde_json::json!([]));
+    assert_eq!(applied["severityRemapped"], serde_json::json!([]));
 }
 
 #[test]
@@ -648,7 +801,7 @@ fn analyze_json_keeps_the_nonexistent_root_warning_behavior() {
 #[test]
 fn analyze_json_git_window_echoes_the_resolved_default_recent_days() {
     if !git_available() {
-        eprintln!("skipping analyze_json_git_window_echoes_the_resolved_default_recent_days: git not on PATH");
+        skip_notice!("git not on PATH");
         return;
     }
     let dir = cycle_and_git_fixture();
@@ -668,9 +821,7 @@ fn analyze_json_git_window_echoes_the_resolved_default_recent_days() {
 #[test]
 fn analyze_json_git_window_echoes_an_explicit_recent_days() {
     if !git_available() {
-        eprintln!(
-            "skipping analyze_json_git_window_echoes_an_explicit_recent_days: git not on PATH"
-        );
+        skip_notice!("git not on PATH");
         return;
     }
     let dir = cycle_and_git_fixture();
@@ -689,7 +840,7 @@ fn analyze_json_git_window_echoes_an_explicit_recent_days() {
 #[test]
 fn analyze_json_git_window_echoes_since() {
     if !git_available() {
-        eprintln!("skipping analyze_json_git_window_echoes_since: git not on PATH");
+        skip_notice!("git not on PATH");
         return;
     }
     let dir = cycle_and_git_fixture();

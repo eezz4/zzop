@@ -3,80 +3,27 @@
 //! an intended whole-value reference, that the whole tree resolves cleanly, and that the migration left
 //! two non-`sql` packs' loaded `RulePackDef` byte-identical to their pre-migration form.
 
-use super::super::def::{Matcher, RuleDef, RulePackDef};
+use super::super::def::{for_each_pattern_field, RuleDef, RulePackDef};
 use super::super::fragments::fragment_ref_name;
 use super::{raw_packs, real_dsl_dir};
 use crate::{load_dsl_packs, parse_dsl_pack};
 
-/// Every field `expand_fragments` treats as a `${NAME}`-eligible pattern — the EXACT same field set, so
-/// this guard can never drift from what the mechanism actually resolves. Deliberately narrower than "every
-/// string in the JSON file": `message`/`id`/`label` legitimately mention `${...}` as
-/// PROSE (e.g. a message explaining what a template-literal placeholder looks like) — those are not
-/// pattern fields and must not be flagged.
-fn pattern_bearing_field_values(rule: &RuleDef) -> Vec<(&'static str, &str)> {
+/// Every field `expand_fragments` treats as a `${NAME}`-eligible pattern — literally the same walk the
+/// mechanism performs (`def::pattern_fields::for_each_pattern_field`), so this guard can never drift from
+/// it. It used to be a hand-copied twin of `expand_fragments`'s match arms whose doc PROMISED "the EXACT
+/// same field set" with no way to keep the promise, and the promise was already false: neither list
+/// mentioned `IoScan::symbol_pattern` or `IoScan::anchor_exclude_pattern`.
+///
+/// Deliberately narrower than "every string in the JSON file": `message`/`id`/`label` legitimately mention
+/// `${...}` as PROSE (e.g. a message explaining what a template-literal placeholder looks like) — those
+/// are not pattern fields and must not be flagged.
+fn pattern_bearing_field_values(rule: &mut RuleDef) -> Vec<(&'static str, String)> {
     let mut out = Vec::new();
-    match &rule.matcher {
-        Matcher::LineScan(m) => {
-            out.push(("file_pattern", m.file_pattern.as_str()));
-            if let Some(p) = &m.require_file {
-                out.push(("require_file", p.as_str()));
-            }
-            for p in &m.require_file_all {
-                out.push(("require_file_all", p.as_str()));
-            }
-            for p in &m.require_file_absent {
-                out.push(("require_file_absent", p.as_str()));
-            }
-            if let Some(p) = &m.line_pattern {
-                out.push(("line_pattern", p.as_str()));
-            }
-            for lp in m.any.iter().flatten() {
-                out.push(("any[].pattern", lp.pattern.as_str()));
-            }
-            if let Some(p) = &m.exclude_pattern {
-                out.push(("exclude_pattern", p.as_str()));
-            }
-            if let Some(p) = &m.file_exclude_pattern {
-                out.push(("file_exclude_pattern", p.as_str()));
-            }
-        }
-        Matcher::MethodScan(m) => {
-            out.push(("file_pattern", m.file_pattern.as_str()));
-            if let Some(p) = &m.require_file {
-                out.push(("require_file", p.as_str()));
-            }
-            for p in &m.require_file_all {
-                out.push(("require_file_all", p.as_str()));
-            }
-            for p in &m.require_file_absent {
-                out.push(("require_file_absent", p.as_str()));
-            }
-            for lp in &m.patterns {
-                out.push(("patterns[].pattern", lp.pattern.as_str()));
-            }
-            for lp in &m.absent {
-                out.push(("absent[].pattern", lp.pattern.as_str()));
-            }
-            if let Some(p) = &m.file_exclude_pattern {
-                out.push(("file_exclude_pattern", p.as_str()));
-            }
-        }
-        Matcher::SymbolScan(m) => {
-            out.push(("file_pattern", m.file_pattern.as_str()));
-            if let Some(p) = &m.name_pattern {
-                out.push(("name_pattern", p.as_str()));
-            }
-        }
-        Matcher::IoScan(m) => {
-            out.push(("file_pattern", m.file_pattern.as_str()));
-            if let Some(p) = &m.file_exclude_pattern {
-                out.push(("file_exclude_pattern", p.as_str()));
-            }
-            if let Some(p) = &m.key_pattern {
-                out.push(("key_pattern", p.as_str()));
-            }
-        }
-    }
+    for_each_pattern_field::<std::convert::Infallible>(rule, &mut |field, value| {
+        out.push((field, value.clone()));
+        Ok(())
+    })
+    .expect("the collecting callback is infallible");
     out
 }
 
@@ -96,19 +43,19 @@ fn no_shipped_pattern_contains_the_sentinel_except_as_an_intended_whole_value_re
     let mut total_refs = 0usize;
     let mut offenders = Vec::new();
 
-    for (json_path, pack) in raw_packs() {
-        for rule in &pack.rules {
+    for (json_path, mut pack) in raw_packs() {
+        for rule in &mut pack.rules {
+            let rule_id = rule.id.clone();
             for (field, value) in pattern_bearing_field_values(rule) {
                 if !value.contains("${") {
                     continue;
                 }
-                if fragment_ref_name(value).is_some() {
+                if fragment_ref_name(&value).is_some() {
                     total_refs += 1;
                 } else {
                     offenders.push(format!(
-                        "{}: rule \"{}\" `{field}`: {value:?}",
+                        "{}: rule \"{rule_id}\" `{field}`: {value:?}",
                         json_path.display(),
-                        rule.id
                     ));
                 }
             }

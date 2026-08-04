@@ -45,6 +45,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use zzop_core::{GlobalExclude, RuleConfig};
 use zzop_engine::{analyze_tree, AnalyzeOutput, EngineConfig, GitOptions};
 use zzop_metrics::Scores;
+use zzop_test_support::skip_notice;
 
 struct TempDir(PathBuf);
 
@@ -215,7 +216,7 @@ fn scores_paths(s: &Scores) -> Vec<String> {
 #[test]
 fn global_excludes_drop_critical_for_excluded_paths() {
     if !git_available() {
-        eprintln!("skipping global_excludes_drop_critical_for_excluded_paths: git not on PATH");
+        skip_notice!("git not on PATH");
         return;
     }
     let dir = fixture_repo();
@@ -254,9 +255,7 @@ fn global_excludes_drop_critical_for_excluded_paths() {
 #[test]
 fn global_excludes_drop_scores_violation_lists_for_excluded_paths() {
     if !git_available() {
-        eprintln!(
-            "skipping global_excludes_drop_scores_violation_lists_for_excluded_paths: git not on PATH"
-        );
+        skip_notice!("git not on PATH");
         return;
     }
     let dir = fixture_repo();
@@ -329,7 +328,7 @@ fn global_excludes_drop_scores_violation_lists_for_excluded_paths() {
 #[test]
 fn global_excludes_shrink_both_the_violation_list_and_its_denominator() {
     if !git_available() {
-        eprintln!("skipping global_excludes_shrink_both_the_violation_list_and_its_denominator: git not on PATH");
+        skip_notice!("git not on PATH");
         return;
     }
     let dir = fixture_repo();
@@ -369,7 +368,7 @@ fn global_excludes_shrink_both_the_violation_list_and_its_denominator() {
 #[test]
 fn excluding_a_worse_than_average_file_lowers_pain() {
     if !git_available() {
-        eprintln!("skipping excluding_a_worse_than_average_file_lowers_pain: git not on PATH");
+        skip_notice!("git not on PATH");
         return;
     }
     let dir = fixture_repo();
@@ -404,7 +403,7 @@ fn excluding_a_worse_than_average_file_lowers_pain() {
 #[test]
 fn an_excluded_file_stays_a_real_import_target_for_the_files_that_import_it() {
     if !git_available() {
-        eprintln!("skipping an_excluded_file_stays_a_real_import_target_for_the_files_that_import_it: git not on PATH");
+        skip_notice!("git not on PATH");
         return;
     }
     let dir = fixture_repo();
@@ -431,7 +430,7 @@ fn an_excluded_file_stays_a_real_import_target_for_the_files_that_import_it() {
 #[test]
 fn global_excludes_do_not_reach_warnings() {
     if !git_available() {
-        eprintln!("skipping global_excludes_do_not_reach_warnings: git not on PATH");
+        skip_notice!("git not on PATH");
         return;
     }
     let dir = fixture_repo();

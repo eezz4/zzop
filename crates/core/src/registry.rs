@@ -32,8 +32,8 @@ mod redact;
 mod tests;
 
 pub use config::{
-    apply_severity_override, global_exclude_matches_path, is_enabled, is_suppressed,
-    suppression_matches_path, GlobalExclude, RuleConfig, Suppression,
+    apply_severity_override, global_exclude_matches_path, is_enabled, is_pack_enabled,
+    is_suppressed, suppression_matches_path, GlobalExclude, RuleConfig, Suppression,
 };
 pub use merge::merge_findings;
 pub use native_stub::register_native_analysis_stub;

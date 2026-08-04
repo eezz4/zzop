@@ -2,10 +2,17 @@
 //! appear without a human triage moment against the policy-value inventory — the same moment
 //! `scripts/check-policy-census.sh` forces for a new policy-shaped Rust `const`. A fragment is the
 //! structural TWIN of such a const: it has a stable name, it is referenced BY that name from other
-//! sites, and one edit therefore moves several rules at once. Anonymous single-site pattern fields
-//! (`line_pattern`, `exclude_pattern`, `patterns[].pattern`, …) stay out for the same reason a string
-//! literal spelled inline in an expression is out of the Rust half — see the census script's header for
-//! that boundary, which this module does not restate.
+//! sites, and one edit therefore moves several rules at once.
+//!
+//! ANONYMOUS inline pattern values (`line_pattern`, `exclude_pattern`, `patterns[].pattern`, …) are not
+//! this module's subject, and since 2026-08-02 they are no longer nobody's: `crate::dsl::inline_census_tests`
+//! censuses them into `scripts/dsl-inline-census.txt`. Until then this header said they "stay out for
+//! the same reason a string literal spelled inline in an expression is out of the Rust half", and that
+//! analogy was doing load-bearing work it could not do — `sql/nplus1` shipped a root-anchored
+//! `file_pattern` that made a flagship rule silent under `src/api/`, with no triage record in any
+//! census, because no census had a row for a value with no name. The two now partition the surface: a
+//! value that IS a `${NAME}` reference is triaged here, once, and the inline census records it as axis
+//! `named` at each use site rather than copying its content.
 //!
 //! ## Why this axis lives here and not in the census shell guard (moved 2026-07-25)
 //! It was added to `scripts/check-policy-census.sh` first, as a line-oriented `awk` extractor over
@@ -65,12 +72,12 @@ const SHARED_BUNDLE: &str = "crates/core/src/dsl/shared_fragments.json";
 /// somewhere.
 const CENSUSED_FRAGMENTS: &[&str] = &[
     "crates/core/src/dsl/shared_fragments.json:test-paths",
+    "crates/core/src/dsl/shared_fragments.json:test-paths-migrations",
     "crates/core/src/dsl/shared_fragments.json:test-paths-stories",
     "rules/dsl/browser/browser.json:html-sink-sanitized",
     "rules/dsl/redis/redis.json:string-denylist-literal",
     "rules/dsl/sql/sql.json:sql-bootstrap-drop-create",
     "rules/dsl/sql/sql.json:sql-where-veto",
-    "rules/dsl/sql/sql.json:test-paths-migrations",
 ];
 
 /// Every fragment name the SHIPPED tree actually defines, read through `serde_json` — the shared bundle

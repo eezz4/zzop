@@ -23,7 +23,16 @@ fn test_patterns() -> &'static [Regex] {
             r"_test\.py$",
             r"Tests?\.java$",
             r"(^|/)Test[A-Z][^/]*\.java$",
-            r"(^|/)(__tests__|__test__|tests?|spec)/",
+            // C# conventions: `FooTests.cs`/`FooTest.cs` files (case-sensitive on purpose — the
+            // convention is PascalCase, and a lowercase tail like `contests.cs` must not match) and
+            // `MyApp.Tests/` project directories.
+            r"Tests?\.cs$",
+            r"(?i)\.tests?/",
+            // `(?i)` (added with the C# arm, 2026-08-03) also admits spellings the old case-sensitive
+            // arm rejected — `Tests/`, `TESTS/`, `Spec/` — which .NET solutions actually use for the
+            // directory itself. The runner-directory arm below stays case-sensitive: those are JS
+            // ecosystem tool names, always lowercase.
+            r"(?i)(^|/)(__tests__|__test__|tests?|spec)/",
             // Directories named for a test runner (or literally `testing`) are test surface by the same
             // "not deployed" reasoning as `__tests__`.
             r"(^|/)(e2e|cypress|playwright|testing)/",
@@ -46,6 +55,36 @@ mod tests {
         assert!(is_test_file("app/e2e/flows/login.ts"));
         assert!(is_test_file("cypress/scripts/setup.js"));
         // Whole-segment match only — names merely containing "testing" are not test paths.
+        assert!(!is_test_file("src/app-testing-utils/service.ts"));
+    }
+
+    #[test]
+    fn csharp_test_conventions() {
+        // File arm: `*Tests.cs` / `*Test.cs`.
+        assert!(is_test_file("Api.Tests/UserServiceTests.cs"));
+        assert!(is_test_file("src/UserServiceTest.cs"));
+        // Directory arm: a `.Tests`/`.Test` project segment classifies everything under it.
+        assert!(is_test_file("MyApp.Tests/Fixtures/SeedData.cs"));
+        assert!(is_test_file("myapp.tests/Helper.cs"));
+        // Case-sensitivity of the file arm: PascalCase only — a word merely ending in "tests" is
+        // not the convention.
+        assert!(!is_test_file("src/Contests.cs"));
+        assert!(!is_test_file("src/UserService.cs"));
+        // A `Test` PREFIX is the Java convention, deliberately not extended to `.cs`.
+        assert!(!is_test_file("src/TestData.cs"));
+    }
+
+    #[test]
+    fn case_insensitive_dir_arm_widening_is_pinned() {
+        // NEW matches admitted by the `(?i)` added for C# (previously non-matching):
+        assert!(is_test_file("Tests/Fixture.cs"));
+        assert!(is_test_file("src/TESTS/helper.ts"));
+        assert!(is_test_file("Spec/models/user.rb"));
+        // Unchanged: the runner-directory arm stays case-sensitive.
+        assert!(!is_test_file("Testing/service.cs"));
+        assert!(!is_test_file("E2E/flows/login.ts"));
+        // Unchanged: whole-segment discipline survives the flag.
+        assert!(!is_test_file("src/latest/service.ts"));
         assert!(!is_test_file("src/app-testing-utils/service.ts"));
     }
 

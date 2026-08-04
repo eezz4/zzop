@@ -174,6 +174,38 @@ jobs:
         # invocation.
         shell: bash
         run: cargo build -p zzop-cli-bin -p zzop-mcp --release --target ${{ matrix.target }}
+      - name: Verify zzop-mcp carries its source-age stamp (the staleness self-report can speak)
+        # The `.mcpb` lane's ONLY update-notification channel is the binary's own staleness
+        # self-report (packages/mcp/src/staleness.rs), and `SOURCE_COMMIT_EPOCH = None` silences it
+        # PERMANENTLY — indistinguishable at run time from a healthy young build, because every
+        # runtime surface (the serve-time stderr banner, MCP initialize's `instructions`) is silent
+        # for both. Today the stamp exists only because this job checks out with `.git` present and
+        # `git` on PATH — a property of the RUNNER, not of the build script; a move to a container,
+        # source tarball, or checkout shape that loses either would mute every release's self-report
+        # and stay green. So this asserts the stamp EXISTS (not what it says: the value is the
+        # commit's own date, which the smoke test cannot know better than build.rs did) in the
+        # build_stamp.rs that packages/mcp/build.rs generated for this target — the exact bytes
+        # `include!`d into the binary just built. Red means the release would ship a permanently
+        # mute self-report; fix the build environment, never skip this.
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          found=0
+          for stamp in target/${{ matrix.target }}/release/build/zzop-mcp-*/out/build_stamp.rs; do
+            found=$((found + 1))
+            echo "$stamp -> $(grep 'SOURCE_COMMIT_EPOCH' "$stamp")"
+            if ! grep -q 'SOURCE_COMMIT_EPOCH.*Some(' "$stamp"; then
+              echo "::error::$stamp says SOURCE_COMMIT_EPOCH = None — this zzop-mcp can never report its own age, so the .mcpb lane's only update notice is permanently silent. The build lost .git, git on PATH, or SOURCE_DATE_EPOCH; fix the environment rather than shipping a mute binary."
+              exit 1
+            fi
+          done
+          # Needle floor: zero matches means build.rs moved its output (or did not run), i.e. this
+          # gate went blind — that must be red, not vacuously green.
+          if [ "$found" -eq 0 ]; then
+            echo "::error::no build_stamp.rs under target/${{ matrix.target }}/release/build/zzop-mcp-*/out/ — packages/mcp/build.rs no longer writes where this gate looks; re-point the gate, do not delete it."
+            exit 1
+          fi
       - name: Collect the zzop + zzop-mcp binaries
         shell: bash
         run: |
@@ -324,22 +356,44 @@ jobs:
       - name: Build per-platform MCPB bundles
         # One `.mcpb` per platform (all on ubuntu, where jq/zip/npx are available — avoids the
         # cross-platform zip problem): stage that platform's binary at bin/zzop-mcp[.exe], stamp the
-        # manifest version from meta's release version, validate against the MCPB schema, and zip. See
+        # manifest version from meta's release version AND that platform's OS into
+        # `compatibility.platforms`, validate against the MCPB schema, and zip. See
         # packages/mcpb/README.md.
+        #
+        # ## Why the OS stamp is here and not in the committed manifest
+        # The 5 bundles used to carry a byte-identical manifest under 5 filenames, so Claude Desktop
+        # had no grounds to refuse a bundle installed on the wrong OS. `manifest_version 0.3` has an
+        # optional `compatibility.platforms: ["darwin"|"win32"|"linux"]` (verified offline 2026-08-02
+        # against @anthropic-ai/mcpb@2.1.2's own schema). Stamping it in the committed
+        # packages/mcpb/manifest.json would declare all three OSes and say nothing — only the
+        # per-bundle stamp, derived here from the same platform name that names the bundle, can differ
+        # per bundle. The OS is the platform name's first segment (win32-x64-msvc -> win32,
+        # darwin-arm64 -> darwin, linux-x64-gnu -> linux), so a new build-matrix lane is stamped
+        # automatically, and the per-bundle `validate` below rejects any first segment outside the
+        # schema's enum rather than shipping it.
+        #
+        # ## Measured limit (2026-08-02): this blocks OS mis-installs ONLY, not arch mis-installs.
+        # The schema's vocabulary is the OS enum above and nothing else — darwin-arm64/darwin-x64 both
+        # collapse to "darwin", the two linux lanes to "linux". A darwin-x64 bundle installed on an
+        # arm64 Mac is not refusable through this schema; the arch axis is simply not expressible.
         env:
           VERSION: ${{ needs.meta.outputs.version }}
         run: |
           jq --arg v "$VERSION" '.version=$v' packages/mcpb/manifest.json > manifest.stamped.json
-          npx -y @anthropic-ai/mcpb@latest validate manifest.stamped.json
           for f in mcp-artifacts/zzop-mcp-*; do
             base=$(basename "$f")                       # zzop-mcp-<platform>[.exe]
             plat=${base#zzop-mcp-}; plat=${plat%.exe}   # <platform>
+            os=${plat%%-*}                              # <platform>'s OS: win32 | darwin | linux
             rm -rf out && mkdir -p out/bin
             case "$base" in
               *.exe) cp "$f" out/bin/zzop-mcp.exe ;;
               *)     cp "$f" out/bin/zzop-mcp && chmod +x out/bin/zzop-mcp ;;
             esac
-            cp manifest.stamped.json out/manifest.json
+            jq --arg os "$os" '.compatibility.platforms=[$os]' manifest.stamped.json > out/manifest.json
+            # Validates each SHIPPED manifest (they now differ per bundle), which doubles as the enum
+            # gate on $os — a platform name whose first segment is not an OS the schema knows fails
+            # here instead of shipping.
+            npx -y @anthropic-ai/mcpb@latest validate out/manifest.json
             # A `.mcpb` is installed and then run offline, so the license texts have to travel INSIDE
             # the bundle — a link back to the repo is not a copy of the license, and the third-party
             # notices cover statically-linked crates whose licenses require the notice to accompany
@@ -513,55 +567,62 @@ jobs:
         #
         # ## The platform list is DERIVED from the `build` matrix (2026-07-29)
         # It used to be a literal `platforms=(...)` array hand-copied from that matrix, and the loop
-        # writes `.packages[$i]` BY POSITION. scripts/check-server-json-hashes.sh already guards the
-        # array against server.json (packages[] must name the same platforms in the same order) — but
-        # both of those lists are downstream of the matrix, and neither of them can see it change.
+        # writes `.packages[$i]` BY POSITION.
         #
         # Measured 2026-07-29 on a scratch copy of this file: add a sixth matrix entry
         # (`aarch64-pc-windows-msvc` / `win32-arm64-msvc`), change nothing else, and
-        # `check-server-json-hashes.sh` prints "clean (5 packages, ... packages[] matches the stamping
-        # loop)" and exits 0. Every equality check passes because they only ever compared the two
-        # copies to each other. The release would upload six `.mcpb` bundles and list five, and the
-        # missing one is invisible to every check in the chain — the same "a hand list inside the
-        # guard's own file cannot see the shipped set grow" defect the guards themselves are made of.
+        # `check-server-json-hashes.sh` printed "clean (5 packages, ... packages[] matches the stamping
+        # loop)" and exited 0. Every equality check passed because they only ever compared two COPIES
+        # to each other; neither could see the matrix change. The release would upload six `.mcpb`
+        # bundles and list five, and the missing one was invisible to every check in the chain — the
+        # same "a hand list inside the guard's own file cannot see the shipped set grow" defect the
+        # guards themselves are made of.
         #
-        # So the loop now walks the matrix's own `platform:` values, and `platforms=(...)` survives
-        # only as a MIRROR — it is the spelling check-server-json-hashes.sh sed-extracts out of this
-        # file, so it has to stay a literal — asserted equal to the matrix before anything is written.
-        # That closes the chain end to end: matrix == mirror (here) == packages[] == one hash each
-        # (the blocker step below). A sixth platform now fails loudly at exactly the moment it appears.
+        # So the loop walks the matrix's own `platform:` values, and `platforms=(...)` survives only as
+        # a MIRROR — asserted equal to the matrix before anything is written.
+        #
+        # ## Where the matrix is parsed, and why not here (2026-08-01)
+        # The extraction used to be a `sed` in this very step. It is now
+        # `scripts/check-server-json-hashes.sh --print-matrix-platforms`, and that move is the point,
+        # not tidiness: that script asserts matrix == mirror == `server.json`'s `packages[]` at COMMIT
+        # time (pre-commit and ci.yml's `guards` job, which `meta`/`release`/`publish` all reach through
+        # `needs: [gate]`). If this step kept a second parser of the same matrix, the two could read
+        # different sets — the guard green on set A at commit time, this job stamping set B at release
+        # time — which is the hole that check was written to close, reopened one layer down. One parser,
+        # one owner. It aborts rather than emit an empty list if the matrix anchor is gone.
+        #
+        # The equality re-asserted below is therefore a BELT, not the gate: the gate is upstream of the
+        # tag now. It costs nothing and still covers a hand-edited workflow_dispatch run.
         env:
           VERSION: ${{ needs.meta.outputs.version }}
         run: |
           set -euo pipefail
           jq --arg v "$VERSION" '.version = $v' server.json > server.tmp && mv server.tmp server.json
 
-          # The build matrix's own `platform:` values, in matrix order. A line whose first token is
-          # `platform:` occurs ONLY in that matrix — every other mention in this file is a
-          # `matrix.platform` expression inside a larger line — so this reads the authority rather
-          # than a copy of it. (Deliberately no `$`-brace-brace expression in this comment: the whole
-          # `run:` block is one YAML scalar and GitHub substitutes expressions inside it before bash
-          # ever sees it, so an example written literally would be evaluated, not quoted.)
+          # The build matrix's own `platform:` values, in matrix order, read by the ONE parser this
+          # repo has for that block (see the comment above for why it is not spelled again here).
           matrix_platforms=()
           matrix_count=0
           while IFS= read -r p; do
             matrix_platforms+=("$p")
             matrix_count=$((matrix_count + 1))
-          done < <(sed -n 's/^[[:space:]]*platform:[[:space:]]*\([A-Za-z0-9._-][A-Za-z0-9._-]*\)[[:space:]]*$/\1/p' .github/workflows/prebuild.yml)
+          done < <(bash scripts/check-server-json-hashes.sh --print-matrix-platforms)
 
           # Empty-enumeration floor, and it is not decorative: with an empty list this loop would stamp
-          # NOTHING and `set -euo pipefail` would see a clean run, publishing a server.json whose five
-          # entries still carry the committed (absent) hash. The blocker step below would catch that
-          # one — but a guard chain whose first link can silently produce nothing is a chain that gets
-          # diagnosed from the wrong end. Plain counter, not `${#arr[@]}`, per this repo's convention.
+          # NOTHING and `set -euo pipefail` would see a clean run, publishing a server.json whose
+          # entries still carry the committed (absent) hash. The script above aborts before it can emit
+          # an empty list — this is the belt for that, because a guard chain whose first link can
+          # silently produce nothing is a chain that gets diagnosed from the wrong end. Plain counter,
+          # not `${#arr[@]}`, per this repo's convention.
           if [ "$matrix_count" -eq 0 ]; then
-            echo "::error::could not read a single 'platform:' value out of the build matrix in .github/workflows/prebuild.yml."
-            echo "::error::The matrix was renamed or reshaped, so this step can no longer derive what to stamp. Re-point the extraction; do not hardcode the list back."
+            echo "::error::read zero platforms out of the build matrix in .github/workflows/prebuild.yml."
+            echo "::error::The matrix was renamed or reshaped, so this step can no longer derive what to stamp. Fix scripts/check-server-json-hashes.sh's extraction; do not hardcode the list back."
             exit 1
           fi
 
-          # The mirror scripts/check-server-json-hashes.sh reads out of this file. NOT the authority —
-          # asserted equal to the matrix above, and to server.json's packages[] by that script.
+          # The mirror scripts/check-server-json-hashes.sh sed-extracts out of this file, which is why it
+          # has to stay a literal. NOT the authority — that script holds it equal to the matrix AND to
+          # server.json's packages[] on every commit; the comparison below is the belt for this run.
           platforms=(win32-x64-msvc darwin-x64 darwin-arm64 linux-x64-gnu linux-arm64-gnu)
           if [ "${platforms[*]}" != "${matrix_platforms[*]}" ]; then
             echo "::error::the build matrix and the platforms=(...) mirror in this file disagree."
@@ -586,10 +647,11 @@ jobs:
         # `.packages[$i]` by POSITION; jq assigning past the end of an array is not an error, so a
         # sixth package entry or a reordered packages[] would ship unstamped or mis-stamped with
         # `set -euo pipefail` none the wiser. This asserts one well-formed, non-all-zeros fileSha256
-        # per package and that packages[] still lines up with `platforms=(...)` — see the script's
-        # header for what it does and does not prove. Since 2026-07-29 that array is itself asserted
-        # equal to the `build` matrix in the step above, so this link now reaches all the way back to
-        # the list of platforms actually built, rather than to a copy of it.
+        # per package, and re-asserts the same three-way platform equality (build matrix ==
+        # `platforms=(...)` == packages[]) it enforces at commit time — see the script's header for what
+        # it does and does not prove. That equality reaching the `build` matrix rather than a copy of it
+        # is what makes this link cover the platforms actually built; asking it HERE is now the last of
+        # three asks, after pre-commit and ci.yml's guards job.
         run: bash scripts/check-server-json-hashes.sh --stamped
       - name: Authenticate to the MCP Registry (GitHub OIDC, io.github.eezz4 namespace)
         run: ./mcp-publisher login github-oidc

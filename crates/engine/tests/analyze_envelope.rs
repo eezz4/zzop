@@ -77,6 +77,8 @@ fn projection(path: &str, loc: u32) -> FileProjection {
         attributes: Vec::new(),
         loop_spans: Vec::new(),
         function_spans: Vec::new(),
+        test_spans: Vec::new(),
+        calls: Vec::new(),
     }
 }
 
@@ -104,6 +106,7 @@ fn envelope_produces_ir_dep_and_native_analyses_deterministically() {
     });
     controller.io.provides.push(IoProvide {
         body: None,
+        response: None,
         kind: "http".to_string(),
         key: "GET /legacy/user.jsp".to_string(),
         file: "legacy/UserController.jsp".to_string(),
@@ -179,6 +182,7 @@ fn envelope_be_joins_cross_layer_with_a_ts_parsed_fe() {
     let mut controller = projection("legacy/UserController.jsp", 40);
     controller.io.provides.push(IoProvide {
         body: None,
+        response: None,
         kind: "http".to_string(),
         key: "GET /legacy/user.jsp".to_string(),
         file: "legacy/UserController.jsp".to_string(),
@@ -401,5 +405,508 @@ fn envelope_composes_router_mount_fragments_split_across_two_files() {
             && p.file == "be/widgets.jsp"),
         "{:?}",
         provides
+    );
+}
+
+// --- The `calls` channel: envelope-supplied call-graph edges light the call-graph-BFS rules ---
+//
+// Both sides are pinned in one place, red first: the SAME envelope minus its `calls` channel keeps
+// `mutating-route-no-auth` silent (the pre-channel Mode A behavior — now DISCLOSED via the
+// "Envelope call-graph gap" warning), and with the channel the rule fires / clears on real resolved
+// edges. This is the feature's existence proof: a fact producers could never activate in Mode A
+// before.
+
+/// A Java-flavored envelope BE: one controller with a mutating route, one sibling file declaring the
+/// guard symbol. `with_calls` controls the channel; `callee` is what the handler calls.
+fn callgraph_envelope(with_calls: bool, callee: &str) -> NormalizedEnvelope {
+    let controller_path = "src/main/java/OrderController.java";
+    let guard_path = "src/main/java/AuthCheck.java";
+
+    let mut controller = projection(controller_path, 40);
+    controller.symbols.push(SourceSymbol {
+        id: format!("{controller_path}#createOrder"),
+        file: controller_path.to_string(),
+        name: "createOrder".to_string(),
+        kind: SourceSymbolKind::Function,
+        line: 5,
+        exported: true,
+        is_default: false,
+        body_start: Some(5),
+        body_end: Some(20),
+        write_sites: Vec::new(),
+    });
+    controller.symbols.push(SourceSymbol {
+        id: format!("{controller_path}#saveOrder"),
+        file: controller_path.to_string(),
+        name: "saveOrder".to_string(),
+        kind: SourceSymbolKind::Function,
+        line: 25,
+        exported: false,
+        is_default: false,
+        body_start: Some(25),
+        body_end: Some(30),
+        write_sites: Vec::new(),
+    });
+    controller.io.provides.push(IoProvide {
+        body: None,
+        response: None,
+        kind: "http".to_string(),
+        key: "POST /orders".to_string(),
+        file: controller_path.to_string(),
+        line: 5,
+        symbol: Some("createOrder".to_string()),
+    });
+    controller.imports.insert(
+        "verifyToken".to_string(),
+        ImportBinding {
+            specifier: guard_path.to_string(),
+            original: "verifyToken".to_string(),
+            deferred: false,
+            type_only: false,
+        },
+    );
+    if with_calls {
+        controller.calls.push(zzop_core::callgraph::RawCall {
+            from_symbol: format!("{controller_path}#createOrder"),
+            callee_name: callee.to_string(),
+            line: 7,
+            receiver_type: None,
+            is_heritage: false,
+        });
+    }
+
+    let mut guard = projection(guard_path, 12);
+    guard.symbols.push(SourceSymbol {
+        id: format!("{guard_path}#verifyToken"),
+        file: guard_path.to_string(),
+        name: "verifyToken".to_string(),
+        kind: SourceSymbolKind::Function,
+        line: 3,
+        exported: true,
+        is_default: false,
+        body_start: Some(3),
+        body_end: Some(8),
+        write_sites: Vec::new(),
+    });
+
+    NormalizedEnvelope {
+        format: NORMALIZED_AST_FORMAT.to_string(),
+        version: zzop_core::NORMALIZED_AST_CONTRACT_VERSION.to_string(),
+        parser: "java-lexical/1".to_string(),
+        source: "legacy-java".to_string(),
+        files: vec![controller, guard],
+    }
+}
+
+fn config_for(source: &str) -> EngineConfig {
+    EngineConfig {
+        source_id: source.to_string(),
+        ..EngineConfig::default()
+    }
+}
+
+/// RED side: without the channel, the rule is structurally silent — and that silence is DISCLOSED,
+/// never mute ("Envelope call-graph gap" names the silent rules and the channel that opens them).
+#[test]
+fn envelope_without_calls_keeps_callgraph_rules_silent_and_discloses_it() {
+    let out = analyze_envelope(&callgraph_envelope(false, ""), &config_for("legacy-java"));
+    assert!(
+        !out.findings
+            .iter()
+            .any(|f| f.rule_id == "mutating-route-no-auth"),
+        "no edges -> the BFS rule must not fire: {:?}",
+        out.findings
+    );
+    let gap = out
+        .warnings
+        .iter()
+        .find(|w| w.contains("Envelope call-graph gap"))
+        .expect("absence must be disclosed");
+    assert!(gap.contains("mutating-route-no-auth"), "{gap}");
+    assert!(gap.contains("files[].calls"), "{gap}");
+}
+
+/// GREEN side: the same envelope WITH calls fires the rule (unguarded handler) — the end-to-end pin
+/// that the channel reaches the BFS. The absence disclosure must be gone.
+#[test]
+fn envelope_calls_light_mutating_route_no_auth_on_an_unguarded_handler() {
+    let out = analyze_envelope(
+        &callgraph_envelope(true, "saveOrder"),
+        &config_for("legacy-java"),
+    );
+    let finding = out
+        .findings
+        .iter()
+        .find(|f| f.rule_id == "mutating-route-no-auth")
+        .unwrap_or_else(|| panic!("expected the rule to fire: {:?}", out.findings));
+    assert_eq!(finding.file, "src/main/java/OrderController.java");
+    assert_eq!(finding.line, 5);
+    assert!(
+        !out.warnings
+            .iter()
+            .any(|w| w.contains("Envelope call-graph gap")),
+        "channel present -> no absence disclosure: {:?}",
+        out.warnings
+    );
+}
+
+/// The clearing half of GREEN: a handler whose supplied edge reaches an imported guard-named symbol
+/// (`verifyToken`, resolved CROSS-FILE through the envelope's own imports + the guard file's symbol
+/// set) is exempt — proof the edges are actually RESOLVED, not merely counted. And a fully-resolved
+/// channel must carry NO drop disclosure (the zero side of `dropped_calls_warning`'s pin).
+#[test]
+fn envelope_calls_reaching_an_imported_guard_clear_the_route() {
+    let out = analyze_envelope(
+        &callgraph_envelope(true, "verifyToken"),
+        &config_for("legacy-java"),
+    );
+    assert!(
+        !out.findings
+            .iter()
+            .any(|f| f.rule_id == "mutating-route-no-auth"),
+        "a guard-reaching handler must be cleared: {:?}",
+        out.findings
+    );
+    assert!(
+        !out.warnings
+            .iter()
+            .any(|w| w.contains("Envelope call-graph drop")),
+        "every edge resolved -> no drop disclosure: {:?}",
+        out.warnings
+    );
+}
+
+/// B3 red->green: a supplied `calls` channel whose EVERY edge fails resolution (callee `save` is
+/// declared nowhere and imported nowhere) must be DISCLOSED — before this fix the rule fired over an
+/// empty graph with zero warnings, so "analyzed the graph" and "the whole graph evaporated" were
+/// indistinguishable in the output. The drop itself is the resolver's contract (never guess); the
+/// defect was the silence.
+#[test]
+fn envelope_fully_unresolved_calls_are_disclosed_as_a_total_drop() {
+    let path = "app/users.py";
+    let mut file = projection(path, 30);
+    file.symbols.push(SourceSymbol {
+        id: format!("{path}#create_user"),
+        file: path.to_string(),
+        name: "create_user".to_string(),
+        kind: SourceSymbolKind::Function,
+        line: 3,
+        exported: true,
+        is_default: false,
+        body_start: Some(3),
+        body_end: Some(10),
+        write_sites: Vec::new(),
+    });
+    file.io.provides.push(IoProvide {
+        body: None,
+        response: None,
+        kind: "http".to_string(),
+        key: "POST /users".to_string(),
+        file: path.to_string(),
+        line: 3,
+        symbol: Some("create_user".to_string()),
+    });
+    file.calls.push(zzop_core::callgraph::RawCall {
+        from_symbol: format!("{path}#create_user"),
+        callee_name: "save".to_string(), // declared nowhere -> the edge drops in resolution
+        line: 5,
+        receiver_type: None,
+        is_heritage: false,
+    });
+    let envelope = NormalizedEnvelope {
+        format: NORMALIZED_AST_FORMAT.to_string(),
+        version: zzop_core::NORMALIZED_AST_CONTRACT_VERSION.to_string(),
+        parser: "py-lexical/1".to_string(),
+        source: "py".to_string(),
+        files: vec![file],
+    };
+    let out = analyze_envelope(&envelope, &config_for("py"));
+
+    // The drop is the contract — the rule still runs over the (empty) graph and fires.
+    assert!(
+        out.findings
+            .iter()
+            .any(|f| f.rule_id == "mutating-route-no-auth"),
+        "{:?}",
+        out.findings
+    );
+    let w = out
+        .warnings
+        .iter()
+        .find(|w| w.contains("Envelope call-graph drop"))
+        .unwrap_or_else(|| panic!("total evaporation must be disclosed: {:?}", out.warnings));
+    assert!(w.contains("1 of 1"), "{w}");
+    assert!(w.contains("app/users.py (1 of 1)"), "{w}");
+    assert!(w.contains("never guessed"), "{w}");
+    // Total evaporation gets the gap-grade phrasing: the rules walked an EMPTY graph.
+    assert!(w.contains("EMPTY graph"), "{w}");
+    assert!(w.contains("recall, not cleanliness"), "{w}");
+    // No double-disclosure: the channel was supplied, so the absence warning must not also fire.
+    assert!(
+        !out.warnings
+            .iter()
+            .any(|w| w.contains("Envelope call-graph gap")),
+        "{:?}",
+        out.warnings
+    );
+}
+
+/// The partial side of the same pin: one edge resolves, one drops — the disclosure names the dropped
+/// count without the empty-graph phrasing (the rules DID walk the surviving edges).
+#[test]
+fn envelope_partially_unresolved_calls_name_the_dropped_count_only() {
+    let mut envelope = callgraph_envelope(true, "verifyToken"); // resolves cross-file
+    envelope.files[0].calls.push(zzop_core::callgraph::RawCall {
+        from_symbol: "src/main/java/OrderController.java#createOrder".to_string(),
+        callee_name: "ghostHelper".to_string(), // declared nowhere -> drops
+        line: 9,
+        receiver_type: None,
+        is_heritage: false,
+    });
+    let out = analyze_envelope(&envelope, &config_for("legacy-java"));
+    let w = out
+        .warnings
+        .iter()
+        .find(|w| w.contains("Envelope call-graph drop"))
+        .unwrap_or_else(|| panic!("a partial drop must be disclosed: {:?}", out.warnings));
+    assert!(w.contains("1 of 2"), "{w}");
+    assert!(
+        w.contains("src/main/java/OrderController.java (1 of 2)"),
+        "{w}"
+    );
+    assert!(
+        !w.contains("EMPTY graph"),
+        "partial drop must not claim total evaporation: {w}"
+    );
+}
+
+// --- B5: `body`/`response` dtoRef resolution in Mode A (the same assemble-time resolution the
+// native path runs — `resolve_provide_body_refs`/`resolve_provide_response_refs`, reused, never
+// copied). Three pins: a dtoRef resolves against the envelope's own `class_shape_fragments` (envE),
+// the no-return-type sentinel is stripped + disclosed instead of leaking into `ir` (envG), and an
+// adapter-resolved direct-`fields` shape passes through untouched (envF).
+
+#[test]
+fn envelope_response_and_body_dto_refs_resolve_against_class_shape_fragments() {
+    let controller_path = "legacy/UserController.jsp";
+    let dto_path = "legacy/dto.jsp";
+    let mut controller = projection(controller_path, 40);
+    controller.io.provides.push(IoProvide {
+        body: Some(zzop_core::ProvideBodyShape {
+            sub_key: None,
+            dto_ref: Some("CreateUserDto".to_string()),
+            fields: Vec::new(),
+            complete: false,
+        }),
+        response: Some(zzop_core::ProvideResponseShape {
+            dto_ref: Some("UserDto".to_string()),
+            fields: Vec::new(),
+            complete: false,
+        }),
+        kind: "http".to_string(),
+        key: "POST /users".to_string(),
+        file: controller_path.to_string(),
+        line: 5,
+        symbol: Some("createUser".to_string()),
+    });
+    let mut dto = projection(dto_path, 12);
+    dto.class_shape_fragments = vec![
+        zzop_core::ClassShapeFragment {
+            name: "UserDto".to_string(),
+            fields: vec![zzop_core::ProvideBodyField {
+                name: "passwordHash".to_string(),
+                optional: false,
+            }],
+            complete: true,
+        },
+        zzop_core::ClassShapeFragment {
+            name: "CreateUserDto".to_string(),
+            fields: vec![zzop_core::ProvideBodyField {
+                name: "email".to_string(),
+                optional: false,
+            }],
+            complete: true,
+        },
+    ];
+    let envelope = NormalizedEnvelope {
+        format: NORMALIZED_AST_FORMAT.to_string(),
+        version: zzop_core::NORMALIZED_AST_CONTRACT_VERSION.to_string(),
+        parser: "jsp-lexical/1".to_string(),
+        source: "legacy-jsp".to_string(),
+        files: vec![controller, dto],
+    };
+    let out = analyze_envelope(&envelope, &config());
+    let provides = out.ir.ir.io.expect("io facts").provides;
+    let p = provides
+        .iter()
+        .find(|p| p.key == "POST /users")
+        .expect("provide");
+    let resp = p.response.as_ref().expect("resolved response survives");
+    assert_eq!(resp.dto_ref, None, "resolved ref must be cleared: {resp:?}");
+    assert_eq!(resp.fields.len(), 1, "{resp:?}");
+    assert_eq!(resp.fields[0].name, "passwordHash");
+    assert!(resp.complete);
+    let body = p.body.as_ref().expect("resolved body survives");
+    assert_eq!(body.dto_ref, None, "resolved ref must be cleared: {body:?}");
+    assert_eq!(body.fields.len(), 1, "{body:?}");
+    assert_eq!(body.fields[0].name, "email");
+}
+
+#[test]
+fn envelope_no_return_type_sentinel_is_stripped_and_disclosed() {
+    let path = "legacy/UserController.jsp";
+    let mut controller = projection(path, 40);
+    controller.io.provides.push(IoProvide {
+        body: None,
+        // The zero-information sentinel (`dtoRef: None` + empty fields) an adapter should not emit —
+        // the engine must strip it in Mode A exactly as native assemble does, never let it reach `ir`.
+        response: Some(zzop_core::ProvideResponseShape {
+            dto_ref: None,
+            fields: Vec::new(),
+            complete: false,
+        }),
+        kind: "http".to_string(),
+        key: "GET /users".to_string(),
+        file: path.to_string(),
+        line: 5,
+        symbol: Some("listUsers".to_string()),
+    });
+    let envelope = NormalizedEnvelope {
+        format: NORMALIZED_AST_FORMAT.to_string(),
+        version: zzop_core::NORMALIZED_AST_CONTRACT_VERSION.to_string(),
+        parser: "jsp-lexical/1".to_string(),
+        source: "legacy-jsp".to_string(),
+        files: vec![controller],
+    };
+    let out = analyze_envelope(&envelope, &config());
+    let provides = out.ir.ir.io.expect("io facts").provides;
+    assert_eq!(
+        provides[0].response, None,
+        "the sentinel must never survive into ir: {:?}",
+        provides[0]
+    );
+    assert!(
+        out.warnings
+            .iter()
+            .any(|w| w.contains("declare no return type")),
+        "the strip must be disclosed, not silent: {:?}",
+        out.warnings
+    );
+}
+
+#[test]
+fn envelope_adapter_resolved_response_fields_pass_through_untouched() {
+    let path = "legacy/UserController.jsp";
+    let shape = zzop_core::ProvideResponseShape {
+        dto_ref: None,
+        fields: vec![zzop_core::ProvideBodyField {
+            name: "id".to_string(),
+            optional: false,
+        }],
+        complete: true,
+    };
+    let mut controller = projection(path, 40);
+    controller.io.provides.push(IoProvide {
+        body: None,
+        response: Some(shape.clone()),
+        kind: "http".to_string(),
+        key: "GET /users".to_string(),
+        file: path.to_string(),
+        line: 5,
+        symbol: Some("listUsers".to_string()),
+    });
+    let envelope = NormalizedEnvelope {
+        format: NORMALIZED_AST_FORMAT.to_string(),
+        version: zzop_core::NORMALIZED_AST_CONTRACT_VERSION.to_string(),
+        parser: "jsp-lexical/1".to_string(),
+        source: "legacy-jsp".to_string(),
+        files: vec![controller],
+    };
+    let out = analyze_envelope(&envelope, &config());
+    let provides = out.ir.ir.io.expect("io facts").provides;
+    assert_eq!(
+        provides[0].response.as_ref(),
+        Some(&shape),
+        "a direct-fields shape is already resolved and must pass through unchanged"
+    );
+}
+
+/// The write-site scanners consume the channel too, and are NOT extension-gated: a Ruby envelope
+/// (no native parser, no covered extension) whose GET handler reaches a `writeSites`-carrying symbol
+/// fires `unsafe-read-endpoint` — plus the residual disclosure that `mutating-route-no-auth`'s
+/// covered-extension gate still exempts `.rb` routes even with supplied edges.
+#[test]
+fn envelope_calls_and_write_sites_light_unsafe_read_endpoint_for_an_uncovered_language() {
+    let path = "app/orders.rb";
+    let mut file = projection(path, 30);
+    file.symbols.push(SourceSymbol {
+        id: format!("{path}#index"),
+        file: path.to_string(),
+        name: "index".to_string(),
+        kind: SourceSymbolKind::Function,
+        line: 3,
+        exported: true,
+        is_default: false,
+        body_start: Some(3),
+        body_end: Some(10),
+        write_sites: Vec::new(),
+    });
+    file.symbols.push(SourceSymbol {
+        id: format!("{path}#write_audit"),
+        file: path.to_string(),
+        name: "write_audit".to_string(),
+        kind: SourceSymbolKind::Function,
+        line: 12,
+        exported: false,
+        is_default: false,
+        body_start: Some(12),
+        body_end: Some(18),
+        write_sites: vec![zzop_core::WriteSite {
+            file: path.to_string(),
+            line: 14,
+            sink: "INSERT INTO audits".to_string(),
+            kind: None,
+        }],
+    });
+    file.io.provides.push(IoProvide {
+        body: None,
+        response: None,
+        kind: "http".to_string(),
+        key: "GET /orders".to_string(),
+        file: path.to_string(),
+        line: 3,
+        symbol: Some("index".to_string()),
+    });
+    file.calls.push(zzop_core::callgraph::RawCall {
+        from_symbol: format!("{path}#index"),
+        callee_name: "write_audit".to_string(),
+        line: 5,
+        receiver_type: None,
+        is_heritage: false,
+    });
+
+    let envelope = NormalizedEnvelope {
+        format: NORMALIZED_AST_FORMAT.to_string(),
+        version: zzop_core::NORMALIZED_AST_CONTRACT_VERSION.to_string(),
+        parser: "ruby-lexical/1".to_string(),
+        source: "rb".to_string(),
+        files: vec![file],
+    };
+    let out = analyze_envelope(&envelope, &config_for("rb"));
+
+    let finding = out
+        .findings
+        .iter()
+        .find(|f| f.rule_id == "unsafe-read-endpoint")
+        .unwrap_or_else(|| panic!("expected unsafe-read-endpoint: {:?}", out.findings));
+    assert_eq!(finding.file, path);
+    assert_eq!(finding.line, 14, "anchors on the write site");
+    // The residual gate on mutating-route-no-auth for uncovered extensions is named, not silent.
+    assert!(
+        out.warnings
+            .iter()
+            .any(|w| w.contains("Envelope call-graph residual")),
+        "{:?}",
+        out.warnings
     );
 }

@@ -39,6 +39,10 @@ pub fn compute_fix_ratio(
     let mut fix_file_touches: u32 = 0;
     let mut tagged_file_touches: u32 = 0;
     for n in nodes.iter().filter(|n| is_scored(&n.id)) {
+        #[allow(
+            clippy::iter_over_hash_type,
+            reason = "iteration order cannot reach the result: both accumulators are integer sums"
+        )]
         for (tag, count) in &n.tag_counts {
             tagged_file_touches += count;
             if tag == "FIX" {

@@ -66,6 +66,7 @@ pub fn extract_sqlalchemy_db_table_provides(rel: &str, text: &str) -> Vec<IoProv
         if let Stmt::ClassDef(cls) = stmt {
             if let Some(table) = model_table_name(cls) {
                 out.push(IoProvide {
+                    response: None,
                     kind: "db-table".to_string(),
                     key: format!("table:{}", zzop_core::db_table_channel_casing(&table)),
                     file: rel.to_string(),

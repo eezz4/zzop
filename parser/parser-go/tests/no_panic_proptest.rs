@@ -26,6 +26,8 @@ fn hammer(rel: &str, text: &str) {
     let _ = go::parse_imports(text);
     let _ = go::parse_local_identifier_refs(text);
     let _ = go::extract_loop_spans(rel, text);
+    let _ = go::extract_call_sites(rel, text);
+    let _ = go::extract_string_literals(rel, text);
     let _ = go::extract_go_router_fragments(rel, text);
     let _ = go::extract_go_http_consumes(rel, text);
     let _ = go::extract_gorm_db_table_provides(rel, text);

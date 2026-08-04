@@ -15,6 +15,15 @@
 # too — but by `zzop_core::dsl::tests_fragments::name_census`, which reads them through `serde_json`,
 # NOT by this script.
 #
+# That closure was NAME-DEEP ONLY, and this block claimed more than it held until 2026-08-02: a policy
+# value written INLINE in a matcher field has no name, so it was invisible to both censuses and moving
+# vocabulary into one was still a free bypass. Measured: `sql/nplus1`'s root anchor
+# (`^(?:domains/[^/]+/routes/.+|api/.+)`) shipped with no triage record anywhere and made a flagship rule
+# structurally silent under `src/api/`. A THIRD census now owns that axis —
+# `zzop_core::dsl::inline_census_tests` -> `scripts/dsl-inline-census.txt`, one row per
+# `(pack/rule, field, value)` triple, walking whatever `RulePackDef::expand_fragments` walks so a new
+# matcher field cannot enter the packs outside it. Also Rust, also for the JSON reason above.
+#
 # That axis lived here for one day (2026-07-25) as a line-oriented `awk` extractor over
 # `rules/dsl/**/*.json`, and this header asserted the line orientation "fails LOUD, never silent".
 # Measured false, on inputs that are all VALID JSON, with no JSON formatter guard anywhere in this
@@ -174,7 +183,9 @@ census_file="scripts/policy-census.txt"
 #   &[u8]   — a byte-string literal (`b"..."`) is a string vocabulary written in bytes. Reading it is
 #            the fail-closed direction the header's doubt rule asks for; the one present instance is a
 #            test fixture and censuses as `test`.
-type_alternation='&str|&\[&str\]|&\[u8\]|&\[\(&str,[[:space:]]*&str\)\]|\[&str;[[:space:]]*[0-9]+\]|\[\(&str,[[:space:]]*&str\);[[:space:]]*[0-9]+\]|&\[\(&str,[[:space:]]*&\[&str\]\)\]|&\[\(&str,[[:space:]]*&\[&str\],[[:space:]]*&str\)\]|&\[\(&str,[[:space:]]*SeverityValue\)\]|&\[BlindnessClass\]|&\[FrameworkRecognizer\]|RiskWeights|usize|u32|u64|i32|i64|f64'
+# f32 joined 2026-08-03 (A17): `HIGH_ENTROPY_SECRET_MIN_BITS` — an entropy threshold is exactly the
+# "shape family as the usize/…/f64 already read, and consequential" case the note above describes.
+type_alternation='&str|&\[&str\]|&\[u8\]|&\[\(&str,[[:space:]]*&str\)\]|\[&str;[[:space:]]*[0-9]+\]|\[\(&str,[[:space:]]*&str\);[[:space:]]*[0-9]+\]|&\[\(&str,[[:space:]]*&\[&str\]\)\]|&\[\(&str,[[:space:]]*&\[&str\],[[:space:]]*&str\)\]|&\[\(&str,[[:space:]]*SeverityValue\)\]|&\[BlindnessClass\]|&\[FrameworkRecognizer\]|RiskWeights|usize|u32|u64|i32|i64|f64|f32'
 pattern="^[[:space:]]*(pub(\\((crate|super|in [^)]+)\\))? )?const [A-Z_][A-Z0-9_]*: ($type_alternation)"
 
 # Const types the census DELIBERATELY does not read, one line per type with its reason. Nothing is

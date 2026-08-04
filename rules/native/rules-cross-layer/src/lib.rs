@@ -40,6 +40,7 @@ pub fn register_native_analyses(registry: &mut RuleRegistry) {
         "cross-layer/untraced-client-import-no-visible-consume",
         "cross-layer/unconsumed-procedure",
         "cross-layer/body-field-drift",
+        "cross-layer/sensitive-response-field",
         "cross-layer/retrying-write-no-idempotency",
         "cross-layer/unknown-verb-route",
     ] {
@@ -47,17 +48,24 @@ pub fn register_native_analyses(registry: &mut RuleRegistry) {
     }
 }
 
-/// This crate's machine-readable sightline declarations (`zzop_core::RuleSightline`) — currently the
-/// one rule whose trigger has a single-producer fact, `cross_layer::retrying_write_no_idempotency`
-/// (the declaration lives there, WITH the rule); composed with the other crates' own by
-/// `zzop_engine::rule_sightlines`, the same aggregator shape as [`register_native_analyses`].
+/// This crate's machine-readable sightline declarations (`zzop_core::RuleSightline`) — the rules
+/// whose trigger is a single-producer fact: `cross_layer::retrying_write_no_idempotency`
+/// (`IoConsume::retry_configured`) and `cross_layer::sensitive_response_field`
+/// (`IoProvide::response`); each declaration lives WITH its rule, composed with the other crates'
+/// own by `zzop_engine::rule_sightlines`, the same aggregator shape as [`register_native_analyses`].
 pub fn rule_sightlines() -> Vec<zzop_core::RuleSightline> {
-    cross_layer::retrying_write_no_idempotency::sightlines()
+    let mut out = cross_layer::retrying_write_no_idempotency::sightlines();
+    out.extend(cross_layer::sensitive_response_field::sightlines());
+    out
 }
 
 pub use cross_layer::external_secret_in_url::SECRET_PARAM_NAMES;
 pub use cross_layer::retrying_write_no_idempotency::{
     IDEMPOTENCY_GUARDED_ATTR, RETRY_WITNESS_EXTENSIONS,
+};
+pub use cross_layer::sensitive_response_field::{
+    RESPONSE_WITNESS_EXTENSIONS, SENSITIVE_RESPONSE_FIELD_EXACT,
+    SENSITIVE_RESPONSE_FIELD_SUBSTRINGS, SENSITIVE_RESPONSE_FIELD_SUFFIXES,
 };
 pub use cross_layer::unconsumed_endpoint::EXTERNALLY_FETCHED_PATHS;
 pub use cross_layer::CROSS_LAYER_WRITE_METHODS;
@@ -71,10 +79,10 @@ pub use cross_layer::{
     is_trpc_mount_route_path, majority_unresolved_http_sources, method_mismatch_findings,
     path_near_miss_findings, prefix_drift_findings, retain_non_subsumed,
     retain_non_subsumed_sources, retrying_write_no_idempotency_findings, route_near_miss_findings,
-    sdk_import_no_visible_consume_findings, shared_db_table_findings,
-    trpc_mount_route_suppression_notes, unconsumed_endpoint_findings,
+    sdk_import_no_visible_consume_findings, sensitive_response_field_findings,
+    shared_db_table_findings, trpc_mount_route_suppression_notes, unconsumed_endpoint_findings,
     unconsumed_mutation_endpoint_findings, unconsumed_procedure_findings,
     unknown_verb_route_findings, unprovided_mutation_call_findings,
     unresolved_consume_ratio_findings, version_skew_findings, HttpProvideSite, PackageImportSite,
-    RetrySite, UnknownVerbRouteSite,
+    ResponseProvideSite, RetrySite, SensitiveResponseVocab, UnknownVerbRouteSite,
 };

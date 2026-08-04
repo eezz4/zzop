@@ -146,15 +146,38 @@ fn captures_hono_client_consume_through_the_fused_seam() {
 
 #[test]
 fn no_java_io_in_a_plain_class_is_none() {
-    assert!(extract_java_file_io("C.java", "class C {}\n").is_none());
+    assert!(extract_java_file_io("C.java", "class C {}\n", false).is_none());
 }
 
 #[test]
 fn captures_spring_get_mapping_provide_with_no_consumes() {
     let src = "@RestController\nclass CtrlAuthen {\n  @GetMapping(\"/getUserInfo\")\n  UserInfo getUserInfo() { return null; }\n}\n";
-    let io = extract_java_file_io("CtrlAuthen.java", src).expect("expected io facts");
+    let io = extract_java_file_io("CtrlAuthen.java", src, false).expect("expected io facts");
     assert!(io.consumes.is_empty());
     assert_eq!(io.provides.len(), 1);
     assert_eq!(io.provides[0].key, "GET /getUserInfo");
     assert_eq!(io.provides[0].symbol.as_deref(), Some("getUserInfo"));
+}
+
+#[test]
+fn java_provides_survive_degraded_but_consumes_are_gated() {
+    // Same split extract_csharp_file_io pins above: PROVIDES (Spring routes + JPA entities) project
+    // regardless of `degraded`; egress CONSUMES only on a trusted parse.
+    let src = concat!(
+        "import org.springframework.web.client.RestTemplate;\n",
+        "import jakarta.persistence.Entity;\n",
+        "@Entity\nclass OrderItem { long id; }\n",
+        "class Gw { String m(RestTemplate rt) { return rt.getForObject(\"/api/users\", String.class); } }\n",
+    );
+    let degraded = extract_java_file_io("Gw.java", src, true).expect("provides even when degraded");
+    assert!(degraded
+        .provides
+        .iter()
+        .any(|p| p.key == "table:order_item"));
+    assert!(degraded.consumes.is_empty(), "degraded gates the consumes");
+    let fresh = extract_java_file_io("Gw.java", src, false).expect("both when not degraded");
+    assert!(fresh
+        .consumes
+        .iter()
+        .any(|c| c.key.as_deref() == Some("GET /api/users")));
 }

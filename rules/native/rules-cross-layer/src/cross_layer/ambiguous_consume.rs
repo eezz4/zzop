@@ -94,6 +94,7 @@ mod tests {
         TaggedProvide {
             source: source.to_string(),
             provide: IoProvide {
+                response: None,
                 body: None,
                 kind: "http".to_string(),
                 key: "GET /health".to_string(),
@@ -150,7 +151,7 @@ mod tests {
         assert_eq!(out[0].line, 1);
         assert!(out[0].message.contains("GET /health"));
         assert!(out[0].message.contains("2 distinct"));
-        assert!(out[0].message.contains("disabled_rules"));
+        assert!(out[0].message.contains("disabledRules"));
         let data = out[0].data.as_ref().unwrap();
         assert_eq!(data["candidateSourceCount"], 2);
         assert_eq!(data["candidateCount"], 2);

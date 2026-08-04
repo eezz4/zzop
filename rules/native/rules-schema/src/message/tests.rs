@@ -31,8 +31,8 @@ fn god_model_message_ends_with_the_exact_own_id_and_family_disable_hint() {
     assert!(
         msg.ends_with(
             " Disable this one rule via config `rules: { \"schema/god-model\": \"off\" }` (embedders: \
-             `disabled_rules`), or its whole family via config `rules: { \"schema-structural\": \
-             \"off\" }` (embedders: `disabled_rules`); to drop a single finding, use config `exclude` \
+             `disabledRules`), or its whole family via config `rules: { \"schema-structural\": \
+             \"off\" }` (embedders: `disabledRules`); to drop a single finding, use config `exclude` \
              (or a per-rule `exclude`) on its file path instead."
         ),
         "unexpected message tail: {msg:?}"
@@ -47,8 +47,8 @@ fn unreferenced_model_name_message_ends_with_the_exact_own_id_and_family_disable
     assert!(
         msg.ends_with(
             " Disable this one rule via config `rules: { \"schema/unreferenced-model-name\": \"off\" \
-             }` (embedders: `disabled_rules`), or its whole family via config `rules: { \
-             \"schema-usage\": \"off\" }` (embedders: `disabled_rules`); to drop a single finding, use \
+             }` (embedders: `disabledRules`), or its whole family via config `rules: { \
+             \"schema-usage\": \"off\" }` (embedders: `disabledRules`); to drop a single finding, use \
              config `exclude` (or a per-rule `exclude`) on its file path instead."
         ),
         "unexpected message tail: {msg:?}"
@@ -158,7 +158,7 @@ fn soft_delete_bypass_message_ends_with_the_exact_disable_hint() {
     assert!(
         msg.ends_with(
             "disable it via config `rules: { \"soft-delete-bypass\": \"off\" }` (embedders: \
-             `disabled_rules`) (this rule has no inline suppression marker)."
+             `disabledRules`) (this rule has no inline suppression marker)."
         ),
         "unexpected message tail: {msg:?}"
     );
@@ -171,7 +171,7 @@ fn orderby_unindexed_message_ends_with_the_exact_disable_hint() {
     assert!(
         msg.ends_with(
             "disable this finding via config `rules: { \"orderby-unindexed\": \"off\" }` (embedders: \
-             `disabled_rules`) (this rule has no inline suppression marker)."
+             `disabledRules`) (this rule has no inline suppression marker)."
         ),
         "unexpected message tail: {msg:?}"
     );
@@ -188,7 +188,7 @@ fn enum_string_drift_message_ends_with_the_exact_disable_hint() {
     assert!(
         msg.ends_with(
             "disable this finding via config `rules: { \"enum-string-drift\": \"off\" }` (embedders: \
-             `disabled_rules`) (this rule has no inline suppression marker)."
+             `disabledRules`) (this rule has no inline suppression marker)."
         ),
         "unexpected message tail: {msg:?}"
     );

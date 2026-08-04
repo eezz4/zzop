@@ -159,7 +159,7 @@ fn the_rule_pack_schema_parses_and_names_every_severity() {
 // order-asserting rule out of plain co-occurrence instead. Silent, and exactly the failure the
 // audit found (`after` / `after_in_same_function` shipped in the Rust type and in
 // docs/rules/dsl-reference.md, but never reached the schema). Before this pin, the only test over
-// the schema checked the four matcher-kind strings and three severity strings — the FIELD axis was
+// the schema checked the matcher-kind strings and three severity strings — the FIELD axis was
 // unguarded, which is why the miss passed a green build.
 //
 // WHY THE MIRROR IS NOT SIMPLY GENERATED. Generating the schema from the Rust types (schemars or
@@ -176,28 +176,60 @@ fn the_rule_pack_schema_parses_and_names_every_severity() {
 // matcher structs derive `Deserialize` only (no `Serialize`), so the envelope-schema parity trick
 // of serializing a fully-populated sample and diffing its keys (see
 // `crates/core/tests/envelope_schema_parity/`) is unavailable here. Instead the field axis is read
-// straight out of `def/matcher.rs`'s SOURCE TEXT, embedded at compile time — the same technique
-// `packages/mcp/tests/surface_prose.rs` uses on the CLI's `USAGE` const. That keeps the field list
-// in exactly ONE place (the struct definitions themselves); this file never restates it.
+// straight out of the matcher structs' SOURCE TEXT, read from the filesystem at test time —
+// `def/matcher.rs` plus the WHOLE `def/matcher/` directory, swept, never file-listed (see
+// `matcher_source`'s doc for why the file set itself must be derived: a hand-kept file list is the
+// same silent-drift class one level up, and it bit). That keeps the field list in exactly ONE
+// place (the struct definitions themselves); this file never restates it.
 //
 // Serialization names, not Rust names, are the contract: a field-level `#[serde(rename = "...")]`
 // is honoured, and `alias`/`flatten`/struct-level `rename_all` — none present today — fail loudly
 // rather than being silently mis-mapped.
 
-/// `zzop_core::dsl::def`'s matcher shapes, as TEXT. Embedded at compile time by relative path
-/// (crates are plain workspace siblings), so editing the structs re-runs this pin.
+/// `zzop_core::dsl::def`'s matcher shapes, as TEXT — read at TEST TIME from the filesystem
+/// (`CARGO_MANIFEST_DIR`-relative; crates are plain workspace siblings): `def/matcher.rs` first,
+/// then EVERY `.rs` file under `def/matcher/`, in filename order.
 ///
-/// TWO files, concatenated: `MethodScan` lives in the `def/matcher/method_scan.rs` submodule (the parent
-/// file hit the repo's per-file line cap and that struct's field docs were four fifths of it). Every
-/// file holding a matcher struct MUST be listed here — a struct in an unlisted file makes this pin fail
-/// loud (`parse_struct_fields` panics on a missing header, and the struct-coverage pin below sees a short
-/// list), never silently unguarded, which is the failure mode this whole section exists to prevent.
-const MATCHER_SOURCE: &str = concat!(
-    include_str!("../../core/src/dsl/def/matcher.rs"),
-    include_str!("../../core/src/dsl/def/matcher/method_scan.rs"),
-);
+/// DERIVED, never hand-listed. This used to be a `concat!` of three `include_str!`s, each file
+/// named by hand — and that hand-list was itself the unguarded axis: when `LiteralScan` landed in a
+/// NEW file (`def/matcher/literal_scan.rs`), nothing here failed. The doc claimed "a struct in an
+/// unlisted file makes this pin fail loud … never silently unguarded", but every mechanism it named
+/// fires only for structs the list already knows about (`parse_struct_fields` panics on a missing
+/// header only when someone ASKS for that struct; the coverage pin below can only see structs in
+/// the text it was given) — a whole file outside the list is invisible to both, so the guard stayed
+/// green while the schema shipped without the new matcher. Deriving the input set from the
+/// directory closes that class structurally: a new matcher FILE is swept in with no edit here, its
+/// structs surface in the coverage pin's derived list, and the only remaining hand-step is the one
+/// that cannot be derived (naming the schema definition each struct mirrors, in
+/// `matcher_field_axis_matches_the_schema`).
+///
+/// Reads panic loudly (a moved/renamed directory must break this pin, not soften it), and the file
+/// order is sorted so the coverage pin's expected list is deterministic.
+fn matcher_source() -> &'static str {
+    static SRC: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    SRC.get_or_init(|| {
+        let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../core/src/dsl/def");
+        let root = base.join("matcher.rs");
+        let mut source = std::fs::read_to_string(&root)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", root.display()));
+        let dir = base.join("matcher");
+        let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()))
+            .map(|entry| entry.expect("readable dir entry").path())
+            .filter(|p| p.extension().is_some_and(|ext| ext == "rs"))
+            .collect();
+        files.sort();
+        for file in files {
+            source.push_str(
+                &std::fs::read_to_string(&file)
+                    .unwrap_or_else(|e| panic!("cannot read {}: {e}", file.display())),
+            );
+        }
+        source
+    })
+}
 
-/// One `pub` field of a matcher struct, as declared in [`MATCHER_SOURCE`].
+/// One `pub` field of a matcher struct, as declared in [`matcher_source`]'s text.
 struct RustField {
     /// The name this field carries in JSON — `#[serde(rename = "...")]` when present, else the
     /// Rust identifier.
@@ -217,23 +249,26 @@ fn serde_rename(attr: &str) -> Option<String> {
     Some(after.split_once('"')?.0.to_string())
 }
 
-/// Reads one `pub struct <name> { ... }` block out of [`MATCHER_SOURCE`] and returns its `pub`
-/// fields. Deliberately a narrow line parser, not a Rust grammar: `def/matcher.rs` is one flat file
-/// of plain struct declarations, and any shape this cannot read panics with the offending line
-/// instead of silently returning a short field list (which would weaken the pin to nothing).
+/// Reads one `pub struct <name> { ... }` block out of [`matcher_source`]'s text and returns its
+/// `pub` fields. Deliberately a narrow line parser, not a Rust grammar: the matcher sources are
+/// flat files of plain struct declarations, and any shape this cannot read panics with the
+/// offending line instead of silently returning a short field list (which would weaken the pin to
+/// nothing).
 fn parse_struct_fields(struct_name: &str) -> Vec<RustField> {
+    let source = matcher_source();
     let header = format!("pub struct {struct_name} {{");
-    let start = MATCHER_SOURCE.find(&header).unwrap_or_else(|| {
+    let start = source.find(&header).unwrap_or_else(|| {
         panic!(
-            "`{header}` not found in crates/core/src/dsl/def/matcher.rs — was the struct renamed \
-             or moved? This parity pin must be updated with it."
+            "`{header}` not found in crates/core/src/dsl/def/matcher.rs or any file under \
+             def/matcher/ — was the struct renamed or moved outside that directory? This parity \
+             pin must be updated with it."
         )
     });
 
     // Struct-level serde attributes sit in the contiguous attribute/doc block just above the
     // header. `rename_all` there would rewrite EVERY field's JSON name, which this parser does not
     // model — refuse rather than compare the wrong names.
-    let attrs_above: String = MATCHER_SOURCE[..start]
+    let attrs_above: String = source[..start]
         .lines()
         .rev()
         .take_while(|l| {
@@ -248,7 +283,7 @@ fn parse_struct_fields(struct_name: &str) -> Vec<RustField> {
          casing rule before re-enabling."
     );
 
-    let body = &MATCHER_SOURCE[start + header.len()..];
+    let body = &source[start + header.len()..];
     let end = body.find("\n}").unwrap_or_else(|| {
         panic!("`{header}`'s body is not terminated by a `}}` at column 0 — cannot parse")
     });
@@ -316,7 +351,7 @@ fn schema_property_is_nullable(prop: &serde_json::Value) -> bool {
 /// axes the schema's own header promises ("field names, required-ness, and defaults below mirror
 /// the Rust serde types field-for-field"): key NAMES both directions, REQUIRED-ness, NULLABILITY.
 ///
-/// `tag` is the `#[serde(tag = "type")]` discriminator value for the four matcher kinds — a JSON
+/// `tag` is the `#[serde(tag = "type")]` discriminator value for the matcher kinds — a JSON
 /// key with no Rust struct field behind it, so it is excluded from the field diff and instead
 /// checked as a required `const` property. `None` for `LabeledPattern`, which is untagged.
 fn assert_field_axis_parity(struct_name: &str, def_name: &str, tag: Option<&str>) {
@@ -420,23 +455,27 @@ fn matcher_field_axis_matches_the_schema() {
     assert_field_axis_parity("MethodScan", "methodScan", Some("method-scan"));
     assert_field_axis_parity("SymbolScan", "symbolScan", Some("symbol-scan"));
     assert_field_axis_parity("IoScan", "ioScan", Some("io-scan"));
+    assert_field_axis_parity("CallScan", "callScan", Some("call-scan"));
+    assert_field_axis_parity("LiteralScan", "literalScan", Some("literal-scan"));
     assert_field_axis_parity("LabeledPattern", "labeledPattern", None);
 }
 
-/// Guards the pin itself: a FIFTH struct added to the matcher sources must be added to
+/// Guards the pin itself: a NEW struct in the matcher sources must be added to
 /// [`matcher_field_axis_matches_the_schema`] above, or its fields go unguarded exactly the way
-/// `after`/`after_in_same_function` did. Derived from the same source text, so it cannot go stale
-/// silently.
+/// `after`/`after_in_same_function` did. Derived from the same directory-swept source text as the
+/// field parser ([`matcher_source`]), so a struct in a brand-new `def/matcher/*.rs` file surfaces
+/// here with NO edit anywhere — the property the old three-file hand-list did not have, which is
+/// how `LiteralScan` shipped unguarded (see [`matcher_source`]'s doc for that incident).
 ///
-/// The expected list is in [`MATCHER_SOURCE`] concatenation order, so it is file order first and
-/// in-file order second — `MethodScan` sits last because it is the one struct that lives in the
-/// submodule, not because anything about it changed.
+/// The expected list is in [`matcher_source`] concatenation order: `def/matcher.rs`'s structs
+/// first (in-file order), then each `def/matcher/*.rs` file's structs in filename order.
 #[test]
 fn every_struct_in_the_matcher_source_is_covered_by_the_parity_pin() {
-    let declared: Vec<&str> = MATCHER_SOURCE
+    let source = matcher_source();
+    let declared: Vec<&str> = source
         .match_indices("pub struct ")
         .map(|(i, m)| {
-            let rest = &MATCHER_SOURCE[i + m.len()..];
+            let rest = &source[i + m.len()..];
             &rest[..rest
                 .find(|c: char| !c.is_alphanumeric() && c != '_')
                 .expect("a struct name must be followed by a delimiter")]
@@ -449,11 +488,13 @@ fn every_struct_in_the_matcher_source_is_covered_by_the_parity_pin() {
             "LabeledPattern",
             "SymbolScan",
             "IoScan",
+            "CallScan",
+            "LiteralScan",
             "MethodScan"
         ],
-        "a matcher source file gained, lost, or reordered a struct — or a struct moved into a file \
-         `MATCHER_SOURCE` does not include. Add the new one to \
-         `matcher_field_axis_matches_the_schema` (with its schema definition), and any new file to \
-         `MATCHER_SOURCE`, before updating this list."
+        "the matcher sources gained, lost, or reordered a struct. Add a new one to \
+         `matcher_field_axis_matches_the_schema` (with its schema definition in \
+         docs/contracts/rule-pack.schema.json) before updating this list — the list exists so that \
+         step cannot be skipped silently."
     );
 }

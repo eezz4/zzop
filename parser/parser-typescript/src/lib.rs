@@ -12,6 +12,9 @@
 
 pub mod adapters;
 mod asset_refs;
+mod call_sites;
+#[cfg(test)]
+mod call_sites_tests;
 mod cjs_exports;
 mod cjs_require;
 mod dead_export_facts;
@@ -27,6 +30,7 @@ mod project;
 mod re_exports;
 mod sfc_imports;
 mod signature_refs;
+mod string_literals;
 mod symbol_shapes;
 mod symbols;
 #[cfg(test)]
@@ -76,6 +80,11 @@ pub use lang::write_site::{
 };
 
 pub use asset_refs::parse_asset_refs;
+// `CONSOLE_WRITE_METHODS` is policy vocabulary and would sit beside `ARRAY_ITERATION_METHODS` below by
+// this crate's convention; it lives in its own module instead because that convention lost to the
+// 300-line cap on this file. Re-exported here so the crate-level spelling a policy pin cites is the
+// same one either way.
+pub use call_sites::{extract_call_sites, CONSOLE_WRITE_METHODS};
 pub use dead_export_facts::{parse_dead_export_facts, DeadExportFacts};
 pub use function_spans::extract_function_spans;
 pub use ident_refs::parse_local_identifier_refs;
@@ -87,19 +96,23 @@ pub use project::{build_common_ir, count_loc};
 pub use re_exports::{parse_dynamic_imports, parse_re_exports};
 pub use sfc_imports::extract_sfc_script_imports;
 pub use signature_refs::parse_exported_signature_names;
+pub use string_literals::extract_string_literals;
 pub use symbols::{parse_symbols, parse_symbols_with_vocab};
 
-/// Cache-bust token for `zzop-cache`: `parser-id/pinned-toolchain/last-change-version`. The
-/// `swc_core-71.0.5` segment must match this crate's `Cargo.toml` pin exactly (an swc upgrade changes
-/// extraction → must restamp). The trailing `CARGO_PKG_VERSION` is restamped whenever this crate's
-/// projected IR shape changes; an unchanged release keeps the old value so warm TS caches survive the
-/// upgrade (2026-07-22 version reform — the "what changed" narrative lives in git, not this string).
+/// Cache-bust token for `zzop-cache`: `parser-id/toolchain/last-change-version`.
 ///
 /// **This string is an ID, not a version — it no longer has to be bumped.** `crates/engine/build.rs`
 /// hashes this crate's whole dependency closure into the cache key beside it, so a change to any
 /// source here invalidates on its own. What is left is the part a person reads in a cache path or a
 /// bug report: which frontend parsed the file. Change it when the FRONTEND changes; correctness no
 /// longer depends on remembering.
+///
+/// ⚠ The `swc_core-71.0.5` segment is a HUMAN LABEL, not a pin, and this doc used to claim it "must
+/// match this crate's `Cargo.toml` pin exactly". There is no such pin: the manifest declares
+/// `swc_core = "71.0.5"`, a CARET range, so `cargo update` can resolve 71.9.x while this label still
+/// reads 71.0.5. What actually invalidates on that upgrade is `FP_ENGINE`, which hashes `Cargo.lock`
+/// — the resolved version — as part of the suffix on every arm of `cache::parser_fingerprint`.
+/// (Contrast `zzop-engine`'s `ignore = "=0.4.27"`, which IS an exact pin and says so with `=`.)
 pub const PARSER_FINGERPRINT: &str =
     "typescript/swc_core-71.0.5/0.22.0+resource-query-v1+trpc-leaf-procedure-v1+dispatch-branch-symbol-v1+exported-signature-names-v1+function-spans-v1+same-file-const-prepend-v1+raw-sql-db-table-v1+same-file-url-binding-v1+same-file-fn-url-v1+retry-wrapper-binding-v1+generated-verb-member-v1+dispatch-verb-order-v1";
 
@@ -153,9 +166,11 @@ use zzop_core::recognizer::{channel, FrameworkRecognizer};
 /// (`parser-expansion.md` §0), and the populations differ.
 ///
 /// Several adapter MODULES are deliberately absent here because they are mechanisms rather than
-/// frameworks — `class_shapes`, `wrapper_calls`, `pathname_dispatch`, `global_prefix` and the
-/// `client_base` pair refine or resolve what the framework rows above already found, and declaring
-/// them would answer "does zzop know my stack" with our own module names.
+/// frameworks — `class_shapes`, `wrapper_calls`, `global_prefix` and the `client_base` pair refine or
+/// resolve what the framework rows above already found, and declaring them would answer "does zzop
+/// know my stack" with our own module names. `pathname_dispatch` used to be listed in that sentence
+/// and was moved OUT of it on 2026-08-01: it recognizes framework-less servers on its own evidence and
+/// emits its own provides, so calling it a mechanism was simply wrong (see its row below).
 pub const FRAMEWORK_RECOGNIZERS: &[FrameworkRecognizer] = &[
     FrameworkRecognizer {
         framework: "express",
@@ -167,8 +182,42 @@ pub const FRAMEWORK_RECOGNIZERS: &[FrameworkRecognizer] = &[
         extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
         emits: &[channel::PROVIDES],
     },
+    // Nest fills the auth-evidence channel twice over: `controller_decorators`' `@UseGuards` lines and
+    // `nest_middleware`'s `forRoutes` patterns both feed the decorator-guard side channel that exempts
+    // routes from `mutating-route-no-auth` — guard evidence, not io. Express/hono deliberately do NOT
+    // carry this row: their guard words ride INSIDE the mount fragments and surface as `auth-guarded`
+    // attributes on their own `io.provides` at compose time, not as a separate side channel.
+    FrameworkRecognizer {
+        framework: "nestjs",
+        extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
+        emits: &[channel::AUTH_EVIDENCE],
+    },
     FrameworkRecognizer {
         framework: "next.js",
+        extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
+        emits: &[channel::PROVIDES],
+    },
+    // Framework-LESS servers that route by comparing `url.pathname` against string literals — raw
+    // Cloudflare Workers, Node `http.createServer`, Deno/Bun `serve` (`pathname_dispatch`). The row is
+    // spelled after the SHAPE rather than after a package because there is no package to name: the
+    // honest claim is "a server that dispatches on `url.pathname` is recognized". Until 2026-08-01 this
+    // module was carried as a `NOT_A_FRAMEWORK` exemption reading "route-shape heuristic shared by
+    // several framework rows", which was false in both halves — no other row consumes it, and it mints
+    // its own `io.provides` from its own per-function evidence gates.
+    FrameworkRecognizer {
+        framework: "pathname dispatch",
+        extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
+        emits: &[channel::PROVIDES],
+    },
+    // Hono fills BOTH sides of the join, and until 2026-08-01 this list said it filled one. The
+    // provide side is `router_mounts`' `new Hono()` / `: Hono` receiver vocabulary, whose verb and
+    // mount fragments the engine composes into `http` provides (`compose_router_mount_provides`); the
+    // consume side is `hono_client`'s typed RPC calls. Worth naming what this was: `emits` exists
+    // precisely so a parser cannot look whole while filling half a join, and this was the FIRST wrong
+    // answer the field itself produced — the mechanism that catches an under-claiming PARSER does not
+    // catch an under-claiming ROW, because nothing binds a row's channel set to the modules behind it.
+    FrameworkRecognizer {
+        framework: "hono",
         extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
         emits: &[channel::PROVIDES],
     },
@@ -225,6 +274,25 @@ pub const FRAMEWORK_RECOGNIZERS: &[FrameworkRecognizer] = &[
     },
     FrameworkRecognizer {
         framework: "$fetch",
+        extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
+        emits: &[channel::CONSUMES],
+    },
+    // The rest of that same residual, paid down 2026-08-01: `egress/angular.rs` and
+    // `egress/generated_client.rs` are two more client recognizers living inside the declared `egress`
+    // module, and neither had a row. `angular` is the dependency-injected `HttpClient` idiom, hard-gated
+    // on the file importing `@angular/common/http`; the generated row covers the three openapi codegen
+    // families whose call sites carry the URL as a request-descriptor PROPERTY rather than an argument
+    // (swagger-typescript-api's `.request({ path, method })`, openapi-typescript-codegen's
+    // `__request(OpenAPI, { url, method })`, `@hey-api/openapi-ts`'s `.get({ url })`). Both tag their
+    // consumes with their own `IoConsume::client` value (`"angular"`, `"generated"`), which is the same
+    // vocabulary a reader of this list is asking about.
+    FrameworkRecognizer {
+        framework: "angular",
+        extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
+        emits: &[channel::CONSUMES],
+    },
+    FrameworkRecognizer {
+        framework: "openapi generated client",
         extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
         emits: &[channel::CONSUMES],
     },

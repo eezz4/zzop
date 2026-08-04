@@ -43,6 +43,10 @@ pub fn compute_modularity(dep: &DepGraph, cfg: &ScoresConfig) -> ModularityScore
 
 fn collect_edges(dep: &DepGraph, cfg: &ScoresConfig) -> Vec<(String, String)> {
     let mut edges = Vec::new();
+    #[allow(
+        clippy::iter_over_hash_type,
+        reason = "iteration order cannot reach the result: `edges` only feeds `accumulate` (BTreeMap counters) and `edges.len()`; the floating-point Q sum runs over the BTreeMap `deg`, never over this Vec"
+    )]
     for (from, imports) in dep {
         let Some(fm) = module_of(cfg, from) else {
             continue;

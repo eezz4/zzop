@@ -91,6 +91,7 @@ mod global_prefix_tests {
 
     fn http_provide(key: &str, file: &str) -> IoProvide {
         IoProvide {
+            response: None,
             body: None,
             kind: "http".to_string(),
             key: key.to_string(),
@@ -102,6 +103,7 @@ mod global_prefix_tests {
 
     fn prefix_marker(key: &str) -> IoProvide {
         IoProvide {
+            response: None,
             body: None,
             kind: zzop_parser_typescript::NEST_GLOBAL_PREFIX_KIND.to_string(),
             key: key.to_string(),
@@ -179,6 +181,7 @@ mod global_prefix_tests {
         // A non-"http" provide (e.g. "trpc") must not be touched by the rewrite.
         let mut provides = vec![
             IoProvide {
+                response: None,
                 body: None,
                 kind: "trpc".to_string(),
                 key: "GET /articles".to_string(),

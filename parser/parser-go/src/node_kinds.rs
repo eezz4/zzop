@@ -46,6 +46,8 @@ pub(crate) const PINNED_NODE_KINDS: &[&str] = &[
     "statement_list",
     // Identifiers/literals (`lang::used_names`, `util::string_literal_text`)
     "identifier",
+    // Selector halves read by `lang::call_sites::package_selector` (`fmt.Println` / `os.Getenv`)
+    "field_identifier",
     "type_identifier",
     "selector_expression",
     "interpreted_string_literal",

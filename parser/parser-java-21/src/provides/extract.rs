@@ -109,6 +109,7 @@ fn walk_member(
     for (verb, path) in routes {
         let full_path = format!("{prefix}/{path}");
         out.push(IoProvide {
+            response: None,
             body: None,
             kind: "http".to_string(),
             key: http_interface_key(&verb, &full_path),

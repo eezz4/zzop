@@ -17,15 +17,29 @@ crates/config/src/mapper/severity.rs:SEVERITY_ALIASES internal # zzop's own acce
 crates/config/src/mapper/warnings.rs:RETIRED_KEYS internal # config keys zzop itself retired
 crates/config/src/template.rs:CONFIG_TEMPLATE_JSONC internal
 crates/config/src/workspaces.rs:MAX_GLOB_DEPTH cap
+crates/core/src/call_sites.rs:CALL_KIND_CONSOLE_WRITE internal # zzop's own wire spelling for a call-site family, same shape as the sentinel-kind consts below — a project cannot rename it into meaning something else, and no external spec fixes it. What the family CONTAINS per language (which console/logger call counts) is the producer's judgment, and that judgment is where the convention-shaped vocabulary will live if any of it ever becomes declarable
+crates/core/src/call_sites.rs:CALL_KIND_ENV_READ internal # sibling of CALL_KIND_CONSOLE_WRITE, same reasoning
+crates/core/src/call_sites.rs:CALL_KIND_HASH_CALL internal # sibling of the other CALL_KIND_* wire spellings, same reasoning — zzop own name for a call-site family; which spellings each language folds into it is each producer judgment
+crates/core/src/call_sites.rs:CALL_KIND_PROCESS_EXEC internal # sibling of CALL_KIND_CONSOLE_WRITE/ENV_READ, same reasoning — zzop own wire spelling for a call-site family; what the family CONTAINS per language is each producer judgment
+crates/core/src/call_sites.rs:RULE_READ_CALL_KINDS internal # the call kinds this build's RULES read — the call-side twin of RULE_READ_IO_KINDS below, same axis for the same reason (a description of OUR wiring, not a name a project picks). Filled in W1 with console-write and env-read as the three consuming rules landed, and bound to them by crates/engine/tests/rule_contracts/call_kind_readers.rs, which reads the loaded packs' CallScan::kind rather than grepping source because a call kind is named declaratively where an io kind is compared in Rust
 crates/core/src/dsl/fragments.rs:SHARED_FRAGMENTS_JSON internal # embedded DSL bundle; fragment NAMES are censused separately in Rust
+crates/core/src/dsl/inline_census_tests.rs:AXES test # the inline-value census axis vocabulary + its legend; a guard vocabulary, not shipped policy
+crates/core/src/dsl/inline_census_tests.rs:CENSUS_FILE test # path of the committed inline-value census snapshot
+crates/core/src/dsl/inline_census_tests.rs:CONVENTION_CEILING test # ratchet on the inline-value census convention axis (lower only) — each row is a config key that does not exist yet or one the pack is not wired to read
+crates/core/src/dsl/inline_census_tests.rs:SUBJECT_FLOOR test # vacuous-green floor on the inline-value census subject set
+crates/core/src/dsl/inline_census_tests.rs:UNREVIEWED_CEILING test # ratchet on the inline-value census unreviewed axis (lower only)
+crates/core/src/dsl/inline_census_tests.rs:UPDATE_CMD test # the regeneration command, spelled once so every failure message can print it
+crates/core/src/dsl/inline_census_tests.rs:UPDATE_ENV test # env var that switches the inline-value census from check to regenerate
 crates/core/src/dsl/markers.rs:MARKER_LOOKBACK_LINES cap
 crates/core/src/dsl/markers.rs:NEAR_MISS_MARKER_TOKEN_PATTERN internal # grammar of zzop's own <id>-ok suppression marker
 crates/core/src/dsl/source.rs:BLOB_LINE cap
 crates/core/src/dsl/source.rs:LONG_LINE cap
+crates/core/src/dsl/tests_call_scan.rs:SRC test # the fixture source text the call-scan interpreter tests hand-place sites against
 crates/core/src/dsl/tests_fragments/name_census.rs:CENSUSED_FRAGMENTS test
 crates/core/src/dsl/tests_fragments/name_census.rs:SHARED_BUNDLE test
 crates/core/src/dsl/tests_fragments/superset.rs:BASE test
 crates/core/src/dsl/tests_http_conventions.rs:HTTP_CONVENTIONS_JSON test
+crates/core/src/dsl/tests_literal_scan.rs:SRC test
 crates/core/src/dsl/tests_markers/near_miss_tests.rs:BASE_MESSAGE test
 crates/core/src/dsl/tests_method_scan_same_fn.rs:SIBLING_CLOSURES test
 crates/core/src/file_nodes.rs:HOTSPOT_MIN_CHANGES cap
@@ -38,17 +52,23 @@ crates/core/src/node.rs:DEFAULT_RECENT_THRESHOLD_DAYS cap
 crates/core/src/node.rs:DEFAULT_WEIGHTS cap # numeric risk-score weights, not a name
 crates/core/src/node.rs:MS_PER_DAY internal # unit arithmetic, not a name at all
 crates/core/src/node.rs:NOW test
-crates/core/src/normalized.rs:MIN_VERSION_FOR_OVERRIDES internal # contract version gate, not a tunable: it must equal the version in which `overrides` shipped, or an older engine ignores the declaration silently
-crates/core/src/normalized.rs:NORMALIZED_AST_CONTRACT_VERSION internal # the release in which the envelope shape last changed, not a tunable: it is a fact about this repo's own history and a wrong value makes conforming envelopes unreadable
-crates/core/src/normalized.rs:NORMALIZED_AST_FORMAT internal
-crates/core/src/normalized.rs:SUPPORTED_NORMALIZED_AST_VERSION internal
 crates/core/src/normalized/tests.rs:BINDS_UTIL test # fixture JSON body for the overrides contract tests
+crates/core/src/normalized/version.rs:MIN_VERSION_FOR_CALLS internal # contract version gate, not a tunable: it must equal the version in which the `calls` channel shipped, or a mislabeled envelope would smuggle the channel past the floor silently
+crates/core/src/normalized/version.rs:MIN_VERSION_FOR_OVERRIDES internal # contract version gate, not a tunable: it must equal the version in which `overrides` shipped, or an older engine ignores the declaration silently
+crates/core/src/normalized/version.rs:MIN_VERSION_FOR_ROUTER_MOUNT_REF internal # contract version gate, not a tunable: it must equal the version in which the RouterMountEntry::MountRef variant shipped, and a later contract bump must not carry it along
+crates/core/src/normalized/version.rs:NORMALIZED_AST_CONTRACT_VERSION internal # the release in which the envelope shape last changed, not a tunable: it is a fact about this repo's own history and a wrong value makes conforming envelopes unreadable
+crates/core/src/normalized/version.rs:NORMALIZED_AST_FORMAT internal
+crates/core/src/normalized/version.rs:SUPPORTED_NORMALIZED_AST_VERSION internal
 crates/core/src/pack_loader.rs:SUPPORTED_DSL_SCHEMA_VERSION internal
 crates/core/src/pack_loader/retired_fields.rs:RETIRED_RULE_FIELDS internal # fields zzop ITSELF once accepted on a rule and retired, each with its remedy. Not `convention` (a pack author cannot rename them into existence) and not `fact` (no external framework fixed them) — it is our own retired surface, and the list only ever grows when WE retire something
+crates/core/src/recognizer.rs:AUTH_EVIDENCE internal # spelling of the one non-io recognizer channel (auth-guard evidence, the decorator-guard side channel that exempts routes from mutating-route-no-auth). Same closed FrameworkRecognizer vocabulary as its three io siblings and NOT `convention` for the same reason: fixed by our own producer/consumer seam, no user may rename it
 crates/core/src/recognizer.rs:CONSUMES internal # wire spelling of one cross-layer channel, the closed vocabulary a FrameworkRecognizer declaration may name. NOT `convention`: a convention is a name the PROJECT picks and declares in config, while this one is fixed by our own producer/consumer channel and no user may rename it
 crates/core/src/recognizer.rs:DB internal # wire spelling of one cross-layer channel, the closed vocabulary a FrameworkRecognizer declaration may name. NOT `convention`: a convention is a name the PROJECT picks and declares in config, while this one is fixed by our own producer/consumer channel and no user may rename it
 crates/core/src/recognizer.rs:PROVIDES internal # wire spelling of one cross-layer channel, the closed vocabulary a FrameworkRecognizer declaration may name. NOT `convention`: a convention is a name the PROJECT picks and declares in config, while this one is fixed by our own producer/consumer channel and no user may rename it
 crates/core/src/registry/redact.rs:REDACTED internal # the marker an excluded evidence path is replaced with; zzop's own output vocabulary, not a tunable
+crates/core/src/string_literals.rs:FNV_OFFSET internal # FNV-1a 64 basis for BoundStringLiteral::value_hash; changing it invalidates every cached value_hash and the rule-side value==name comparison, never a tunable
+crates/core/src/string_literals.rs:FNV_PRIME internal # FNV-1a 64 prime, same contract as FNV_OFFSET directly above
+crates/core/src/string_literals.rs:HIGH_ENTROPY_SECRET_MIN_BITS cap # measured entropy floor (T2, 2026-08-03) for security/high-entropy-secret; the pack ships the evaluated copy and rule_contracts/literal_scan_threshold.rs pins the two equal
 crates/engine/build.rs:FNV_OFFSET internal # FNV-1a basis; changing it re-addresses every derived fingerprint (= one cache wipe)
 crates/engine/build.rs:FNV_PRIME internal # FNV-1a prime; same consequence as the basis above
 crates/engine/src/analyze/assemble/helpers/csharp.rs:CSHARP_STD_IMPORT_HEADS fact # .NET BCL namespace roots
@@ -58,6 +78,7 @@ crates/engine/src/analyze/compose/client_base.rs:SENTINEL_KIND internal # alias 
 crates/engine/src/analyze/compose/global_prefix.rs:SENTINEL_KIND internal # alias of zzop's own sentinel kind
 crates/engine/src/analyze/diagnostics.rs:SAMPLE cap
 crates/engine/src/analyze/diagnostics/capability.rs:ON_RAMP_EXT_SAMPLE cap
+crates/engine/src/analyze/diagnostics/pack_scope/uncovered_extension.rs:MIN_UNCOVERED_EXTENSION_SHARE_PCT cap # percent-of-tree floor above which an extension counts as a PRINCIPAL filetype for the "no loaded DSL rule targets it" self-report. A number, not a name — nothing about a project's own vocabulary is spellable here, and a project that wants the report on a smaller slice wants a different threshold, not a different word
 crates/engine/src/cache.rs:CACHE_SCHEMA_VERSION internal
 crates/engine/src/cache.rs:DSL_INTERPRETER_FINGERPRINT internal
 crates/engine/src/cache.rs:LEXICAL_FALLBACK_ID internal # names which projector produced an entry; the version half is a source hash (build.rs)
@@ -72,6 +93,8 @@ crates/engine/src/disclosure/tests.rs:EXPECTED test
 crates/engine/src/dispatch.rs:DEFAULT_SKIP_DIRS convention -> vocabulary.skipDirs # dist/build/.next/target are build-output names a project picks; decides what is never analyzed at all
 crates/engine/src/dispatch.rs:NON_SOURCE_EXTENSIONS fact # extensions fixed by the file formats
 crates/engine/src/dispatch/tests.rs:EXPECTED test
+crates/engine/src/envelope/callgraph/disclosure.rs:CALL_GRAPH_RULE_IDS internal # zzop's own rule ids, named in the envelope call-graph absence warning and pinned against the shipped registry — not a name any project chooses
+crates/engine/src/envelope/callgraph/disclosure.rs:MAX_DROP_EXAMPLES cap # per-warning example-file cap in the dropped-calls disclosure, not a name
 crates/engine/src/envelope/resolve.rs:EXTENSIONLESS_CANDIDATE_EXTENSIONS fact # extensions a resolver may append to an extensionless specifier — fixed by TS/bundler classic resolution, not by any project
 crates/engine/src/file_routes/mod.rs:HTTP_VERB_EXPORTS fact # Next.js App Router requires these exact export names
 crates/engine/src/file_routes/mod.rs:ROUTE_EXTENSIONS fact # the frameworks fixed these: Next pageExtensions default tsx|ts|jsx|js, Remix js|jsx|ts|tsx, Medusa route.ts|route.js. AMBIGUOUS - pageExtensions is overridable per project, but the override renames nothing; it narrows/widens which language-fixed extensions Next serves, and zzop tracks the default
@@ -125,6 +148,7 @@ crates/metrics/src/scores/config/fsd.rs:DEFAULT_FSD_ENTRY convention -> vocabula
 crates/metrics/src/scores/config/fsd.rs:DEFAULT_FSD_SHARED convention -> vocabulary.fsd.shared # FSD shared-layer dir names
 crates/metrics/src/scores/config/fsd.rs:DEFAULT_FSD_SLICE_CONTAINERS convention -> vocabulary.fsd.sliceContainers # modules is as common as features and would score as cross-slice
 crates/metrics/src/scores/config/fsd.rs:NEVER internal # unsatisfiable regex used when an FSD layer list is empty; parsing mechanics, not a name
+crates/metrics/src/scores/meanings.rs:SCORE_MEANINGS internal # zzop's own disclosure prose — one sentence per score key, shipped as `scoreMeanings` (same axis as `output/timings.rs:MEANING` for the same reason: warning/legend prose is not a name any project picks, and no external spec fixes it). NOT `convention`: the KEYS are zzop's own wire spellings, so nothing here is declarable. The values are the one owner of what each score means — a documentation table would be the second owner, which is exactly why this is a const and not a doc
 crates/summary/src/analyze/tests.rs:CONDITIONAL_UNDER_ITS_OWN_NAME test # which surface-parity carry-conditional rows ride under their own reply key; fail-closed whitelist for a derived pin
 crates/summary/src/analyze/tests.rs:EXAMPLE_ENVELOPE test
 crates/summary/src/analyze/tests.rs:SHAPER_INVENTED_KEYS test # reply keys the shaper invents (no AnalyzeOutputView row); fail-closed whitelist for a derived pin
@@ -149,14 +173,28 @@ crates/summary/src/output/mod.rs:DEFAULT_DEGRADED_LIMIT cap
 crates/summary/src/output/mod.rs:DEFAULT_EDGES_LIMIT cap
 crates/summary/src/output/mod.rs:DEFAULT_FINDINGS_LIMIT cap
 crates/summary/src/output/mod.rs:MAX_LIMIT cap
+crates/summary/src/output/timings.rs:MEANING internal # the rule-timing report's own disclosure prose (warning prose, per the axis legend) — not a name any project picks; it states that cache hits contribute no timing, which is the whole reason a short warm-run report cannot be misread as a fast one
 crates/summary/src/siblings.rs:MAX_NAMED_SIBLINGS cap
 crates/summary/src/suggest.rs:BUCKETS internal # zzop's own suggestion bucket names
 crates/summary/src/suggest.rs:SUGGESTIONS_LIMIT cap
+crates/test-support/src/lib.rs:SITE_MARKER_SUFFIX test # the marker identifier skip_notice! plants in a test body so the enclosing test can be named; no user-visible policy
+parser/parser-csharp/src/adapters/ef_core.rs:EF_CORE_SPECIFIERS fact # Microsoft.EntityFrameworkCore - the published EF Core namespace the DbSet gate anchors on
+parser/parser-csharp/src/adapters/ef_core.rs:TABLE_ATTRIBUTE_SPECIFIERS fact # System.ComponentModel.DataAnnotations.Schema - the published namespace [Table] lives in
+parser/parser-csharp/src/adapters/ef_core/tests.rs:EF_USING test
+parser/parser-csharp/src/adapters/ef_core/tests.rs:SCHEMA_USING test
 parser/parser-csharp/src/adapters/http_clients.rs:HTTP_CLIENT_SPECIFIERS fact # .NET namespaces
 parser/parser-csharp/src/adapters/http_clients.rs:VERB_METHODS fact # read the decl - GetAsync/PostAsJsonAsync are System.Net.Http.HttpClient's own method names
 parser/parser-csharp/src/adapters/http_clients/tests.rs:IMPORT test
 parser/parser-csharp/src/adapters/provides/attribute_controller.rs:METHOD_ATTRIBUTES fact # ASP.NET Core attribute names
 parser/parser-csharp/src/adapters/provides/minimal_api.rs:MAP_METHODS fact # ASP.NET Minimal API MapGet/MapPost builder methods
+parser/parser-csharp/src/lang/call_sites.rs:CONSOLE_WRITER_PROPERTIES fact # System.Console's own Error/Out writer-property names — platform-fixed; the property rides in the callee verbatim rather than in a folded stream field (the channel's false-fold rule)
+parser/parser-csharp/src/lang/call_sites.rs:CONSOLE_WRITE_METHODS fact # System.Console's own Write/WriteLine method names — platform-fixed, not a project's. The scope choice (the two that WRITE a message, not ReadLine/Clear) is the producer's judgment and is argued at the declaration
+parser/parser-csharp/src/lang/call_sites.rs:HASH_ALGORITHM_TYPES fact # System.Security.Cryptography digest class names (MD5/SHA1/SHA256/...) — .NET own type names, where the TYPE is the algorithm; HMAC and cipher types deliberately absent, argued at the declaration
+parser/parser-csharp/src/lang/call_sites.rs:HASH_FACTORY_METHOD fact # the Create static factory every .NET digest type exposes — platform-fixed
+parser/parser-csharp/src/lang/call_sites.rs:HASH_GENERIC_FACTORY_TYPES fact # HashAlgorithm/CryptoConfig — the .NET factories whose algorithm is a string ARGUMENT rather than the type name, i.e. the one C# spelling with a never-guess case
+parser/parser-csharp/src/lang/call_sites.rs:PROCESS_START fact # System.Diagnostics.Process own static launcher name — .NET platform API, matched as the chain tail so the optional namespace prefix is not a different fact
+parser/parser-csharp/src/lang/call_sites.rs:PROCESS_START_INFO_TYPE fact # System.Diagnostics.ProcessStartInfo — the .NET type whose construction configures a launch; recognized in its new form only, judgment argued at the declaration
+parser/parser-csharp/src/lang/loop_spans.rs:LOOP_STATEMENT_KINDS fact # tree-sitter node kinds
 parser/parser-csharp/src/lang/used_names.rs:DECLARES_NAME_FIELD fact # tree-sitter node kinds
 parser/parser-csharp/src/lib.rs:FRAMEWORK_RECOGNIZERS fact # which frameworks this parser recognizes, named as their OWN ecosystems spell them and keyed by the extensions those ecosystems use — fixed externally, not a knob. The row set is bound to the adapter modules on disk by rule_contracts::recognizer_drift, so it cannot drift into a claim about a recognizer that does not ship
 parser/parser-csharp/src/lib.rs:PARSER_FINGERPRINT internal
@@ -169,12 +207,31 @@ parser/parser-go/src/adapters/gorm.rs:QUERY_METHODS fact # read the decl - Model
 parser/parser-go/src/adapters/gorm/tests.rs:IMPORT test
 parser/parser-go/src/adapters/http_clients.rs:VERB_METHODS fact # net/http client method names
 parser/parser-go/src/adapters/net_http.rs:VERB_METHODS fact # HandleFunc/Handle are net/http's own registration functions
+parser/parser-go/src/lang/call_sites.rs:ENV_READ_CALLEES fact # Go stdlib API spellings (os.Getenv / os.LookupEnv) — the language's own names, same axis as the Python producer's ENV_READ_CALLEES
+parser/parser-go/src/lang/call_sites.rs:FMT_FPRINT_METHODS fact # fmt's own Fprint/Fprintln/Fprintf names — console-write only when the writer is spelled os.Stdout/os.Stderr at the site (STD_STREAM_SPELLINGS)
+parser/parser-go/src/lang/call_sites.rs:FMT_PRINT_METHODS fact # fmt's own Print/Println/Printf names — the stdout-writing trio; Sprint*/Errorf build strings and are deliberately out (the decl's module doc)
+parser/parser-go/src/lang/call_sites.rs:HASH_CONSTRUCTORS fact # crypto/* package entry points that construct or compute a digest (New/Sum...) — Go stdlib own names
+parser/parser-go/src/lang/call_sites.rs:HASH_PACKAGES fact # crypto/* stdlib digest package names — the PACKAGE is the algorithm in Go, so this list is both the family gate and the algorithm vocabulary; scope argued at the declaration
+parser/parser-go/src/lang/call_sites.rs:PROCESS_EXEC_CALLEES fact # os/exec own two constructors (exec.Command / exec.CommandContext) — Go stdlib names; the Cmd builder methods are deliberately absent (one construction is one process)
+parser/parser-go/src/lang/call_sites.rs:STD_STREAM_SPELLINGS fact # os.Stdout / os.Stderr — the two first-argument spellings that make an Fprint* call a console write; a spelling test, never a data-flow proof
 parser/parser-go/src/lang/resolve/tests.rs:MODULE test
 parser/parser-go/src/lang/used_names.rs:DECLARES_NAME_FIELD fact # tree-sitter node kinds
 parser/parser-go/src/lib.rs:FRAMEWORK_RECOGNIZERS fact # which frameworks this parser recognizes, named as their OWN ecosystems spell them and keyed by the extensions those ecosystems use — fixed externally, not a knob. The row set is bound to the adapter modules on disk by rule_contracts::recognizer_drift, so it cannot drift into a claim about a recognizer that does not ship
 parser/parser-go/src/lib.rs:PARSER_FINGERPRINT internal
 parser/parser-go/src/lib.rs:TOP_LEVEL_DECLARATION_KINDS fact # tree-sitter node kinds
 parser/parser-go/src/node_kinds.rs:PINNED_NODE_KINDS fact # tree-sitter node kinds
+parser/parser-java-21/src/http_clients.rs:RESTTEMPLATE_SPECIFIERS fact # Spring's own RestTemplate FQN + its package glob - the import gate
+parser/parser-java-21/src/http_clients.rs:RESTTEMPLATE_VERB_METHODS fact # read the decl - getForObject/postForEntity are RestTemplate's own client-specific method names (put/delete deliberately absent; the decl doc reasons why)
+parser/parser-java-21/src/http_clients.rs:WEBCLIENT_SPECIFIERS fact # Spring's own WebClient FQN + its package glob - the import gate
+parser/parser-java-21/src/http_clients/tests.rs:RT_IMPORT test
+parser/parser-java-21/src/http_clients/tests.rs:WC_IMPORT test
+parser/parser-java-21/src/jpa.rs:JPA_PACKAGE_PREFIXES fact # jakarta.persistence/javax.persistence - the JPA spec's own annotation packages
+parser/parser-java-21/src/jpa/tests.rs:IMPORTS test
+parser/parser-java-21/src/lang/call_sites.rs:PRINT_STREAM_WRITE_METHODS fact # java.io.PrintStream's own print/println/printf/format names — platform-fixed; the scope choice (the four that WRITE a message, not append/write/flush) is the producer's judgment and is argued at the declaration
+parser/parser-java-21/src/lang/call_sites.rs:PROCESS_BUILDER_TYPE fact # java.lang.ProcessBuilder — the JDK type whose construction launches a process; recognized in its new form only, constructor judgment argued at the module doc
+parser/parser-java-21/src/lang/call_sites.rs:SYSTEM_STREAM_FIELDS fact # java.lang.System's own out/err stream-field names — the field rides in the callee verbatim rather than in a folded stream field (the channel's false-fold rule)
+parser/parser-java-21/src/lang/call_sites/hash_call.rs:MESSAGE_DIGEST_TYPE fact # java.security.MessageDigest's own type name, fixed by the JDK
+parser/parser-java-21/src/lang/loop_spans.rs:LOOP_STATEMENT_KINDS fact # tree-sitter node kinds
 parser/parser-java-21/src/lang/used_names.rs:DECLARES_NAME_FIELD fact # tree-sitter node kinds
 parser/parser-java-21/src/lib.rs:FRAMEWORK_RECOGNIZERS fact # which frameworks this parser recognizes, named as their OWN ecosystems spell them and keyed by the extensions those ecosystems use — fixed externally, not a knob. The row set is bound to the adapter modules on disk by rule_contracts::recognizer_drift, so it cannot drift into a claim about a recognizer that does not ship
 parser/parser-java-21/src/lib.rs:PARSER_FINGERPRINT internal
@@ -206,10 +263,28 @@ parser/parser-python-3/src/adapters/http_clients/instances.rs:CLIENT_CTORS fact 
 parser/parser-python-3/src/adapters/sqlalchemy.rs:FIRST_ARG_VERBS fact # SQLAlchemy API function names
 parser/parser-python-3/src/adapters/sqlalchemy.rs:MULTI_MODEL_VERBS fact # SQLAlchemy API function names
 parser/parser-python-3/src/adapters/sqlalchemy/tests.rs:IMPORT test
+parser/parser-python-3/src/lang/call_sites.rs:BUILTIN_PRINT fact # the name of a Python BUILT-IN — fixed by the language, not a project convention. A project that shadows it makes the file silent rather than making this name declarable (see the module's rebinding note)
+parser/parser-python-3/src/lang/call_sites.rs:ENV_READ_CALLEES fact # Python stdlib API spellings (os.getenv / os.environ.get) — the language's own names, same axis as VERB_METHODS and FIRST_ARG_VERBS above
+parser/parser-python-3/src/lang/call_sites.rs:ENV_READ_MAPPING fact # the stdlib mapping os.environ, read through a subscript — same axis as ENV_READ_CALLEES, split out because the node shape differs
+parser/parser-python-3/src/lang/call_sites.rs:PROCESS_EXEC_CALLEES fact # Python stdlib process API spellings (subprocess run/call/check_call/check_output/Popen, os.system, os.popen) — the language own names, same axis as ENV_READ_CALLEES above
+parser/parser-python-3/src/lang/call_sites/hash_call.rs:HASHLIB_CONSTRUCTORS fact # hashlib's own constructor names, fixed by the Python stdlib
+parser/parser-python-3/src/lang/call_sites/hash_call.rs:HASHLIB_NEW fact # hashlib.new's own spelling, fixed by the Python stdlib
 parser/parser-python-3/src/lib.rs:FRAMEWORK_RECOGNIZERS fact # which frameworks this parser recognizes, named as their OWN ecosystems spell them and keyed by the extensions those ecosystems use — fixed externally, not a knob. The row set is bound to the adapter modules on disk by rule_contracts::recognizer_drift, so it cannot drift into a claim about a recognizer that does not ship
 parser/parser-python-3/src/lib.rs:PARSER_FINGERPRINT internal
 parser/parser-rust/src/adapters/axum.rs:VERB_METHODS fact # axum::routing's own get/post handler constructors
+parser/parser-rust/src/adapters/axum/tests.rs:OUT_OF_REACH_ROUTERS test # router shapes this adapter never reaches (impl/trait/nested mod), pinned so the doc's claim that it needs only the Item axis stays measured
+parser/parser-rust/src/adapters/axum/tests.rs:SHIPPED_REL test # the one shipped path the attribute-gate fixtures sit at, so none of them can pass via the path gate instead
+parser/parser-rust/src/adapters/axum/tests.rs:TEST_GATED_ROUTERS test # the test-gated source shapes whose axum routes must not be minted as deployed provides
 parser/parser-rust/src/adapters/http_clients.rs:VERB_METHODS fact # reqwest Client's own verb methods
+parser/parser-rust/src/adapters/http_clients/tests.rs:SHIPPED_REL test # the one shipped path the attribute-gate fixtures sit at, so none of them can pass via the path gate instead
+parser/parser-rust/src/adapters/http_clients/tests.rs:TEST_GATED_EGRESS test # the test-gated source shapes whose reqwest egress must not be minted as deployed
+parser/parser-rust/src/adapters/raw_sql.rs:MAX_PLACEHOLDER_BODY cap # longest format-spec body treated as a placeholder rather than prose; a bound on zzop's own masking pass, not a project knob
+parser/parser-rust/src/adapters/raw_sql.rs:PLACEHOLDER internal # zzop's own template-hole token — the same spelling parser-typescript/src/adapters/raw_sql.rs uses
+parser/parser-rust/src/adapters/raw_sql/tests.rs:FIXTURE test # a `#[cfg(test)] mod` fixture query inside this adapter's own test source
+parser/parser-rust/src/adapters/raw_sql/tests.rs:TEST_GATED_SQL_FIXTURES test # the test-gated source shapes whose SQL must not be minted as deployed db coupling
+parser/parser-rust/src/lang/call_sites.rs:ENV_READ_CALLEES fact # Rust stdlib path spellings (std::env::var / var_os, both the fully qualified and the use-qualified form) — the language's own names; vars/vars_os (whole-environment iteration) deliberately absent, and console-write is deliberately not produced at all (the println! judgment, argued in the decl's module doc)
+parser/parser-rust/src/lang/call_sites.rs:HASH_CALLEES fact # the (spelling, algorithm) pairs of the digest crates Rust actually hashes with — the ONE place a sibling third-party surface is claimed, because Rust std ships no digest and the platform-API rule would leave the family empty; argued at the declaration and in the module doc
+parser/parser-rust/src/lang/call_sites.rs:PROCESS_EXEC_CALLEES fact # std::process::Command::new in each of its three spellings — the platform own path, kept per spelling for the same original-spelling reason ENV_READ_CALLEES is
 parser/parser-rust/src/lang/extractor_guards.rs:RUST_OPTIONAL_EXTRACTOR_PREFIXES convention -> vocabulary.rustOptionalExtractorPrefixes # how a project spells its own OPTIONAL request extractor (MaybeAuthUser, OptionalUser) - the Rust twin of pythonGuardAnonymousVetoSubstrings
 parser/parser-rust/src/lib.rs:FRAMEWORK_RECOGNIZERS fact # which frameworks this parser recognizes, named as their OWN ecosystems spell them and keyed by the extensions those ecosystems use — fixed externally, not a knob. The row set is bound to the adapter modules on disk by rule_contracts::recognizer_drift, so it cannot drift into a claim about a recognizer that does not ship
 parser/parser-rust/src/lib.rs:PARSER_FINGERPRINT internal
@@ -238,6 +313,11 @@ parser/parser-typescript/src/adapters/router_mounts/guard.rs:ROUTER_NAME_VETO_SU
 parser/parser-typescript/src/adapters/router_mounts/guard.rs:WRAPPER_GUARD_PREFIXES convention -> vocabulary.wrapperGuardPrefixes # require/ensure/protect/restrict are prefixes of project-authored wrapper functions
 parser/parser-typescript/src/adapters/router_mounts/idempotency.rs:IDEMPOTENCY_GUARDED_ATTR_KEY internal # zzop producer/consumer attribute key
 parser/parser-typescript/src/adapters/router_mounts/idempotency.rs:IDEMPOTENCY_HEADER_NAMES convention -> vocabulary.idempotencyHeaderNames # AMBIGUOUS - Idempotency-Key is an IETF draft header, but the x- variant and any house header name are the project's choice
+parser/parser-typescript/src/call_sites.rs:CONSOLE_WRITE_METHODS fact # WHATWG console method names — the platform's, not a project's. The scope choice (the six that WRITE, not table/dir/group/time) is the producer's judgment and is argued at the declaration
+parser/parser-typescript/src/call_sites/hash_call.rs:CRYPTO_HASH_METHODS fact # Node crypto digest constructor names (createHash/createHmac) — the platform API; createCipheriv and WebCrypto subtle deliberately absent
+parser/parser-typescript/src/call_sites/hash_call.rs:CRYPTO_SPECIFIERS fact # the two module specifiers that ARE Node crypto (bare and node:-prefixed) — Node own resolution rules fix this equivalence
+parser/parser-typescript/src/call_sites/process_exec.rs:CHILD_PROCESS_EXEC_METHODS fact # Node child_process own function names (exec/execSync/spawn/spawnSync/execFile/execFileSync) — the platform API, not a project vocabulary; fork deliberately absent (different failure mode)
+parser/parser-typescript/src/call_sites/process_exec.rs:CHILD_PROCESS_SPECIFIERS fact # the two module specifiers that ARE Node child-process module (bare and node:-prefixed) — Node own resolution rules fix this equivalence
 parser/parser-typescript/src/lang/resolve/specifier.rs:EXTENSION_FALLBACKS fact # NodeNext .js -> .ts mapping fixed by TypeScript/Node resolution
 parser/parser-typescript/src/lang/resolve/specifier.rs:RESOLVE_EXTS fact # TS/JS extensions fixed by the language and its resolver
 parser/parser-typescript/src/lang/write_site.rs:ATOMIC_OP_KEYS fact # Prisma atomic-update operation keys
@@ -266,6 +346,10 @@ rules/native/rules-cross-layer/src/cross_layer/sdk_import_no_visible_consume.rs:
 rules/native/rules-cross-layer/src/cross_layer/sdk_import_no_visible_consume.rs:MIN_SDK_IMPORTING_FILES cap
 rules/native/rules-cross-layer/src/cross_layer/sdk_import_no_visible_consume.rs:OPAQUE_HTTP_CLIENT_PATTERN fact # published npm package names
 rules/native/rules-cross-layer/src/cross_layer/sdk_import_no_visible_consume.rs:SDK_SPECIFIER_PATTERN fact # published npm package names plus their segment shapes
+rules/native/rules-cross-layer/src/cross_layer/sensitive_response_field.rs:RESPONSE_WITNESS_EXTENSIONS fact # file extensions fixed by the languages - the TS dispatch arm spelled in the rule crate for the sightline declaration, pinned both directions by zzop_engine::sightlines' ts_witness_extension_lists_match_the_dispatch_table
+rules/native/rules-cross-layer/src/cross_layer/sensitive_response_field.rs:SENSITIVE_RESPONSE_FIELD_EXACT convention -> vocabulary.sensitiveResponseFieldExactNames # what a project names its sensitive response fields is its choice - same class as SECRET_PARAM_NAMES
+rules/native/rules-cross-layer/src/cross_layer/sensitive_response_field.rs:SENSITIVE_RESPONSE_FIELD_SUBSTRINGS convention -> vocabulary.sensitiveResponseFieldSubstrings # same class/rationale as SENSITIVE_RESPONSE_FIELD_EXACT (one vocabulary, three match axes)
+rules/native/rules-cross-layer/src/cross_layer/sensitive_response_field.rs:SENSITIVE_RESPONSE_FIELD_SUFFIXES convention -> vocabulary.sensitiveResponseFieldSuffixes # same class/rationale as SENSITIVE_RESPONSE_FIELD_EXACT (one vocabulary, three match axes)
 rules/native/rules-cross-layer/src/cross_layer/unconsumed_endpoint.rs:EXTERNALLY_FETCHED_PATHS convention -> vocabulary.externallyFetchedPaths # AMBIGUOUS - /robots.txt and /favicon.ico are standards, but /health, /healthz, /livez are ops conventions each project names itself
 rules/native/rules-cross-layer/src/cross_layer/unconsumed_endpoint.rs:MAX_LISTED_PER_SOURCE cap
 rules/native/rules-cross-layer/src/cross_layer/unconsumed_endpoint.rs:WELL_KNOWN_PREFIX fact # /.well-known/ is fixed by RFC 8615

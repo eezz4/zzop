@@ -1,23 +1,29 @@
-//! Matcher shapes — the `Matcher` enum and its four variant structs (`LineScan`/`MethodScan`/
-//! `SymbolScan`/`IoScan`) plus the shared `LabeledPattern`. Split out of `def/mod.rs` (which keeps the
+//! Matcher shapes — the `Matcher` enum with one struct per variant (the enum below is the list; this
+//! header does not keep a second copy) plus the shared `LabeledPattern`. Split out of `def/mod.rs` (which keeps the
 //! pack/rule envelope types and the fragment-expansion logic) purely to stay under the repo's per-file
 //! line cap; `def/mod.rs` re-exports every type here so external paths (`zzop_core::dsl::def::Matcher`,
 //! `…::LineScan`, …) are unchanged.
 //!
-//! `MethodScan` lives one level down ([`method_scan`]) for that same line-cap reason and is re-exported
-//! here, so nothing outside this file can tell the difference — see that module's own header for why it
-//! was the one picked to move.
+//! `MethodScan` and `CallScan` live one level down ([`method_scan`], [`call_scan`]) for that same
+//! line-cap reason and are re-exported here, so nothing outside this file can tell the difference — see
+//! those modules' own headers.
 
 use serde::Deserialize;
 
 use crate::{io::IoKind, ir::SourceSymbolKind};
 
+mod call_scan;
+mod literal_scan;
 mod method_scan;
 
+pub use call_scan::CallScan;
+pub use literal_scan::LiteralScan;
 pub use method_scan::MethodScan;
 
 /// Matcher — dispatched on the `type` tag. v0 was lexical line-scan + method-scan; symbol-scan and io-scan
 /// (below) are the first IR-query matchers. Whole-graph queries (cross-file/cross-layer) still stay native.
+///
+/// The wire tag is the variant name in kebab-case, so a pack writes `"type": "call-scan"`.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum Matcher {
@@ -25,6 +31,11 @@ pub enum Matcher {
     MethodScan(MethodScan),
     SymbolScan(SymbolScan),
     IoScan(IoScan),
+    /// Query over a file's projected `call_sites` — see [`CallScan`].
+    CallScan(CallScan),
+    /// Query over a file's projected `string_literals` (name + value hash + value entropy, never the
+    /// value) — see [`LiteralScan`].
+    LiteralScan(LiteralScan),
 }
 
 /// Per-line regex scan.
@@ -67,6 +78,21 @@ pub struct LineScan {
     /// import-alias `as` from a type-safety `as`-cast counter.
     #[serde(default)]
     pub exclude_pattern: Option<String>,
+    /// Structural LINE gate over the projected call-site channel: when set, a line that matched
+    /// `line_pattern`/`any` only fires if a `SourceFile::call_sites` entry of exactly this `kind` sits
+    /// on that SAME line. The line-scan twin of `MethodScan::require_call_kind`, at line rather than
+    /// span granularity — W3's "structure only the exec witness": the `any` arms keep carrying the
+    /// lexical co-occurrence evidence (an interpolation shape, a concatenation), and this gate adds the
+    /// parser's word that the line really calls the process API (so the same spelling inside a string
+    /// literal, a comment, or on a non-platform receiver no longer fires).
+    ///
+    /// Degrade direction: SILENCE — a file with no projected call sites (degraded parse, lexical
+    /// fallback, unresolvable spelling) can never fire a gated rule, where the ungated regex used to.
+    /// A rule setting this trades that recall for the string/comment/receiver false-positive class and
+    /// must disclose the trade in its message. Kind spellings are bound by `RULE_READ_CALL_KINDS` via
+    /// `call_kind_readers.rs`, the same contract `CallScan::kind` is under.
+    #[serde(default)]
+    pub line_call_kind: Option<String>,
     /// Optional path regex — a file whose `rel` path matches this is skipped entirely. `file_pattern` is
     /// positive-only and `regex` has no lookaround, so this is the escape hatch for "this extension but
     /// NOT under `scripts/`".
@@ -153,6 +179,7 @@ impl Default for LineScan {
             line_pattern: None,
             any: None,
             exclude_pattern: None,
+            line_call_kind: None,
             file_exclude_pattern: None,
             attr_present: None,
             attr_absent: None,

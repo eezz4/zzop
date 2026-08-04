@@ -62,6 +62,7 @@ fn http_conventions_pack() -> RulePackDef {
 #[test]
 fn http_conventions_flags_unversioned_provided_endpoint() {
     let provides = vec![IoProvide {
+        response: None,
         kind: "http".into(),
         key: "GET /authen/getUserInfo".into(),
         file: "routes/authRoutes.ts".into(),
@@ -78,6 +79,7 @@ fn http_conventions_flags_unversioned_provided_endpoint() {
 #[test]
 fn http_conventions_does_not_flag_versioned_endpoint() {
     let provides = vec![IoProvide {
+        response: None,
         kind: "http".into(),
         key: "GET /api/v1/authen/getUserInfo".into(),
         file: "routes/authRoutes.ts".into(),
@@ -143,6 +145,9 @@ fn http_conventions_flags_exported_handler_with_bad_naming() {
     let files = vec![SourceFile {
         loop_spans: Vec::new(),
         function_spans: Vec::new(),
+        test_spans: Vec::new(),
+        call_sites: Vec::new(),
+        string_literals: Vec::new(),
         rel: "routes/authRoutes.ts".into(),
         text: String::new(),
         symbols: vec![

@@ -3,9 +3,8 @@
   "framework": "any",
   "schema_version": 1,
   "fragments": {
-    "sql-where-veto": "(?i)\\bWHERE\\b|\\$\\{|\\+\\s*[\"'`]|[\"'`]\\s*\\+",
-    "sql-bootstrap-drop-create": "(?is)\\bDROP\\s+TABLE\\s+IF\\s+EXISTS\\b[^;]*;\\s*(?:--[^\\n]*\\n\\s*)*CREATE\\s+TABLE\\b",
-    "test-paths-migrations": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.|(^|/)(migrations?|migrate|db/migrations?)/)"
+    "sql-where-veto": "(?i)\\bWHERE\\b|\\$\\{|\\+\\s*[\"'`]|[\"'`]\\s*(?:\\.to_(?:string|owned)\\(\\)\\s*)?\\+",
+    "sql-bootstrap-drop-create": "(?is)\\bDROP\\s+TABLE\\s+IF\\s+EXISTS\\b[^;]*;\\s*(?:--[^\\n]*\\n\\s*)*CREATE\\s+TABLE\\b"
   },
   "rules": [
     {
@@ -28,10 +27,10 @@
     {
       "id": "nplus1",
       "severity": "warning",
-      "message": "await on a store/ORM call (`Repository`/`Store`/`prisma`/`db`/`orm`/`tx`/`trx`) verified structurally inside a for/for-of/for-in/while/do-while statement or an array-iteration callback — checked against the parser's projected loop spans, not merely co-occurring with loop syntax somewhere in the same function — N+1 query pattern. HOUSE-CONVENTION PATH SCOPE, disclosed because nothing else announces it: this rule's `file_pattern` is `^(?:domains/[^/]+/routes/.+|api/.+)\\.ts$`, so it only ever scans `.ts` files under a `domains/<name>/routes/` or `api/` prefix — an awaited store call inside a loop ANYWHERE else in the tree (services, repositories, jobs, a differently-laid-out repo) is silently not checked, and zero findings from this rule means \"not scanned there\", never \"no N+1 there\". Batch the fetch (e.g. `findMany` with an `in` filter) instead of one call per item. Suppress a vetted case with `// zzop-nplus1-ok`.",
+      "message": "await on a store/ORM call (`Repository`/`Store`/`prisma`/`db`/`orm`/`tx`/`trx`) verified structurally inside a for/for-of/for-in/while/do-while statement or an array-iteration callback — checked against the parser's projected loop spans, not merely co-occurring with loop syntax somewhere in the same function — N+1 query pattern. HOUSE-CONVENTION PATH SCOPE, disclosed because nothing else announces it: this rule only ever scans `.ts` files under a `domains/<name>/routes/` or `api/` path SEGMENT, at ANY depth — `src/api/orders.ts` and `packages/svc/domains/billing/routes/list.ts` both count, and so do the same directories at the tree root. An awaited store call inside a loop ANYWHERE else in the tree (services, repositories, jobs, a differently-laid-out repo) is silently not checked, and zero findings from this rule means \"not scanned there\", never \"no N+1 there\". Batch the fetch (e.g. `findMany` with an `in` filter) instead of one call per item. Suppress a vetted case with `// zzop-nplus1-ok`.",
       "matcher": {
         "type": "method-scan",
-        "file_pattern": "^(?:domains/[^/]+/routes/.+|api/.+)\\.ts$",
+        "file_pattern": "(?:^|/)(?:domains/[^/]+/routes/.+|api/.+)\\.ts$",
         "file_exclude_pattern": "${test-paths-stories}",
         "require_file": "\\bawait\\b",
         "skip_comment_lines": true,
@@ -122,10 +121,10 @@
     {
       "id": "race-condition-toctou",
       "severity": "warning",
-      "message": "A `create`/`upsert`/`insert` write appears LEXICALLY AFTER an awaited `findOne`/`findById`/`findUnique` read in the NEAREST enclosing function — the reported line is the WRITE (the racing action), specifically the first one that actually follows a read. A trigger line that sits inside NO parser-projected function span (a class-property initializer, a top-level statement) is read as ungated, and the pairing there widens back to the whole scanned symbol span. The order is TEXTUAL, not dataflow: it does not prove the read feeds a branch that reaches the write, nor that the two touch the same row (a read of one table followed by an insert into another still fires). SAME-LINE NESTING RESIDUAL (a disclosed false negative shared by every rule that uses this order gate): on a single line \"after\" is decided by MATCH START OFFSET, so a read nested INSIDE the write call's own argument list reads as coming AFTER it and does not pair — an inline `await prisma.member.create({ data: { orgId: (await prisma.org.findUnique({ where: { slug } })).id } });` is silently NOT reported; only the multi-line spelling, or a same-line one whose read starts first, fires. HOUSE-CONVENTION PATH SCOPE, disclosed because nothing else announces it: this rule's `file_pattern` is `(?i)(?:(?:^|/)api/.*\\.tsx?$|.*/routes/.*\\.tsx?$|.*/controllers/.*\\.tsx?$|.*handler\\.tsx?$|.*controller\\.tsx?$)`, so it only ever scans `.ts`/`.tsx` files that sit under an `api/`, `/routes/` or `/controllers/` path segment or whose name ends in `handler.ts(x)`/`controller.ts(x)` (note the anchoring asymmetry: the `api/` arm carries `(?:^|/)` so a TOP-LEVEL `api/` directory counts, while the `routes/`/`controllers/` arms require a literal leading `/`, so a top-level `routes/` directory does not) — the identical read-then-write race in a service, repository, use-case or job module is silently not scanned, and zero findings from this rule means \"not scanned there\", never \"no TOCTOU there\". SILENT VETO, equally undisclosed until now: the `absent` list kills the finding when ANY `try {` appears anywhere in the SAME scanned span — not a `try` shown to guard this write, just one in the same function. Since try/catch is near-universal in handler code, that veto is a large false-negative surface; it is deliberate (a caught unique-constraint violation is the common intentional spelling of check-then-act), but it means a handler wrapping unrelated work in try/catch reports nothing here. The other two vetoes are narrow by comparison: `FOR UPDATE`/`serializable`, and `ON CONFLICT`/`ON DUPLICATE KEY`. When it is the get-or-create/toggle shape it names, concurrent requests can both pass the check and both write (duplicate row / unique-constraint violation) — a TOCTOU race. Add a unique constraint and replace the check-then-act with an upsert; wrapping it in a `$transaction` alone does NOT close this race at the database's default READ COMMITTED isolation level — two concurrent transactions can both read empty and both insert. If you must keep the read+write shape, use `SELECT ... FOR UPDATE` or serializable isolation instead. Suppress a vetted case with `// zzop-race-condition-toctou-ok`.",
+      "message": "A `create`/`upsert`/`insert` write appears LEXICALLY AFTER an awaited `findOne`/`findById`/`findUnique` read in the NEAREST enclosing function — the reported line is the WRITE (the racing action), specifically the first one that actually follows a read. A trigger line that sits inside NO parser-projected function span (a class-property initializer, a top-level statement) is read as ungated, and the pairing there widens back to the whole scanned symbol span. The order is TEXTUAL, not dataflow: it does not prove the read feeds a branch that reaches the write, nor that the two touch the same row (a read of one table followed by an insert into another still fires). SAME-LINE NESTING RESIDUAL (a disclosed false negative shared by every rule that uses this order gate): on a single line \"after\" is decided by MATCH START OFFSET, so a read nested INSIDE the write call's own argument list reads as coming AFTER it and does not pair — an inline `await prisma.member.create({ data: { orgId: (await prisma.org.findUnique({ where: { slug } })).id } });` is silently NOT reported; only the multi-line spelling, or a same-line one whose read starts first, fires. HOUSE-CONVENTION PATH SCOPE, disclosed because nothing else announces it: this rule only ever scans `.ts`/`.tsx` files that sit under an `api/`, `routes/` or `controllers/` path segment or whose name ends in `handler.ts(x)`/`controller.ts(x)` (all three directory arms match at ANY depth, the tree ROOT included — the former anchoring asymmetry, under which a top-level `routes/` directory did not count, was judged and aligned to the `(?:^|/)` idiom, the same verdict `sql/nplus1`'s root anchor received) — the identical read-then-write race in a service, repository, use-case or job module is silently not scanned, and zero findings from this rule means \"not scanned there\", never \"no TOCTOU there\". SILENT VETO, equally undisclosed until now: the `absent` list kills the finding when ANY `try {` appears anywhere in the SAME scanned span — not a `try` shown to guard this write, just one in the same function. Since try/catch is near-universal in handler code, that veto is a large false-negative surface; it is deliberate (a caught unique-constraint violation is the common intentional spelling of check-then-act), but it means a handler wrapping unrelated work in try/catch reports nothing here. The other two vetoes are narrow by comparison: `FOR UPDATE`/`serializable`, and `ON CONFLICT`/`ON DUPLICATE KEY`. When it is the get-or-create/toggle shape it names, concurrent requests can both pass the check and both write (duplicate row / unique-constraint violation) — a TOCTOU race. Add a unique constraint and replace the check-then-act with an upsert; wrapping it in a `$transaction` alone does NOT close this race at the database's default READ COMMITTED isolation level — two concurrent transactions can both read empty and both insert. If you must keep the read+write shape, use `SELECT ... FOR UPDATE` or serializable isolation instead. Suppress a vetted case with `// zzop-race-condition-toctou-ok`.",
       "matcher": {
         "type": "method-scan",
-        "file_pattern": "(?i)(?:(?:^|/)api/.*\\.tsx?$|.*/routes/.*\\.tsx?$|.*/controllers/.*\\.tsx?$|.*handler\\.tsx?$|.*controller\\.tsx?$)",
+        "file_pattern": "(?i)(?:(?:^|/)api/.*\\.tsx?$|(?:^|/)routes/.*\\.tsx?$|(?:^|/)controllers/.*\\.tsx?$|.*handler\\.tsx?$|.*controller\\.tsx?$)",
         "file_exclude_pattern": "${test-paths-stories}",
         "require_file": "\\.(?:findOne|findById|findUnique)\\s*\\(",
         "skip_comment_lines": true,
@@ -201,7 +200,7 @@
       "message": "A CLOSED string literal contains `DELETE FROM <table>` with nothing else before the closing quote — the entire SQL statement is one complete literal with no interpolation, so there is provably no WHERE clause arriving from anywhere else, and this deletes every row in the table. Any sign the statement isn't fully closed right here — a `${...}` placeholder, a `'`/`\"` string-concatenation `+`, or a trailing `?` bound-parameter tail — means we can't prove a WHERE is missing, so the rule stays silent rather than guess (never-guess). Migration paths are out of this rule's scope: a whole-table write in a committed migration is a deliberate one-time backfill, covered at disclosure severity by `sql/destructive-migration` instead. Add a WHERE clause, or if a full-table delete is genuinely intended, make it explicit (e.g. a dedicated `truncateTable()`/`deleteAll()` helper) and suppress with `// zzop-delete-no-where-ok`.",
       "matcher": {
         "type": "line-scan",
-        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs|rs)$",
         "file_exclude_pattern": "${test-paths-migrations}",
         "require_file": "(?i)DELETE\\s+FROM",
         "skip_comment_lines": true,
@@ -213,14 +212,14 @@
     {
       "id": "update-no-where",
       "severity": "critical",
-      "message": "A CLOSED string literal contains `UPDATE <table> SET <assignments>` with nothing else before the closing quote — same discipline as `sql/delete-no-where`: the entire statement is one complete literal with no interpolation, so there is provably no WHERE clause arriving from anywhere else, and this updates every row in the table. Any sign the statement isn't fully closed right here — a `${...}` placeholder, a `'`/`\"` string-concatenation `+` — means we can't prove a WHERE is missing, so the rule stays silent rather than guess (never-guess). Migration paths are out of this rule's scope: a whole-table write in a committed migration is a deliberate one-time backfill, covered at disclosure severity by `sql/destructive-migration` instead. Add a WHERE clause, or if a full-table update is genuinely intended, make it explicit and suppress with `// zzop-update-no-where-ok`.",
+      "message": "A CLOSED string literal contains `UPDATE <table> SET <assignments>` with nothing else before the closing quote — same discipline as `sql/delete-no-where`: no interpolation and no adjacent concatenation is visible anywhere in the statement, so no WHERE clause is arriving from anywhere this line-scan can see, and as written this updates every row in the table. Any sign the statement isn't fully closed right here — a `${...}` template placeholder, a Rust `format!` placeholder (`{}`, `{name}`, `{0}`) ANYWHERE between the `SET` and the closing quote, or a `'`/`\"`/backtick string-concatenation `+` (including Rust's `\"...\".to_string() + expr` form) — means we can't tell whether a WHERE is missing, so the rule stays silent rather than guess (never-guess). What the hit does NOT prove, stated honestly rather than as the word `provably` this message used to carry: a line-scan reads ONE line, so a WHERE appended on a later line, or a `String::from(\"...\") + expr` concatenation (whose `)` sits between the quote and the `+`, out of reach of the concat veto), would not be seen. Read a hit as \"a complete whole-table UPDATE with no WHERE is visible on this line\", and confirm the surrounding statement before acting. The Rust interpolating counterpart is `security/sql-format-interpolation` (warning): a `format!` that splices a value into an UPDATE lands there, not here — the placeholder exclusion above is what keeps the two from both firing on one line and telling the reader two different stories about it. The closing quote is matched BY KIND — only the same quote character that OPENED the literal terminates it, so a quote of a DIFFERENT kind inside the statement (`\"UPDATE users SET name = 'anon'\"`) is statement text, not a terminator. That is what makes the placeholder exclusion real rather than nominal: `format!(\"UPDATE users SET name = '{}'\", name)` used to co-fire here at CRITICAL because the inner `'` was read as the closing quote, hiding the `{}` from the exclusion and breaking the partition this paragraph promises — that line is `security/sql-format-interpolation`'s alone. Migration paths are out of this rule's scope: a whole-table write in a committed migration is a deliberate one-time backfill, covered at disclosure severity by `sql/destructive-migration` instead. Add a WHERE clause, or if a full-table update is genuinely intended, make it explicit and suppress with `// zzop-update-no-where-ok`.",
       "matcher": {
         "type": "line-scan",
-        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs|rs)$",
         "file_exclude_pattern": "${test-paths-migrations}",
         "require_file": "(?i)UPDATE\\s+[\\w\"`.]+\\s+SET",
         "skip_comment_lines": true,
-        "line_pattern": "(?i)[\"'`]\\s*UPDATE\\s+[\\w\"`.]+\\s+SET\\s+[^\"'`]*[\"'`]",
+        "line_pattern": "(?i)(?:\"\\s*UPDATE\\s+[\\w`.]+\\s+SET\\s+[^\"{}]*\"|'\\s*UPDATE\\s+[\\w\"`.]+\\s+SET\\s+[^'{}]*'|`\\s*UPDATE\\s+[\\w\".]+\\s+SET\\s+[^`{}]*`)",
         "exclude_pattern": "${sql-where-veto}",
         "snippet_max": 160
       }
@@ -231,7 +230,7 @@
       "message": "A syntax-anchored `TRUNCATE [TABLE] <table>` string literal appears in application code (not a migration) — the SQL analog of `redis/flushall-in-code`: TRUNCATE wipes every row in the table and, on most engines, cannot be rolled back once committed. Move destructive schema/data operations into a migration script outside the served codebase, or if this is a genuinely intentional runtime reset (e.g. a dedicated cache-reset job), suppress with `// zzop-truncate-in-app-code-ok`.",
       "matcher": {
         "type": "line-scan",
-        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs|rs)$",
         "file_exclude_pattern": "${test-paths-migrations}",
         "require_file": "(?i)TRUNCATE",
         "skip_comment_lines": true,
@@ -259,7 +258,7 @@
             "label": "delete-no-where"
           },
           {
-            "pattern": "(?i)[\"'`]\\s*UPDATE\\s+[\\w\"`.]+\\s+SET\\s+[^\"'`]*[\"'`]",
+            "pattern": "(?i)(?:\"\\s*UPDATE\\s+[\\w`.]+\\s+SET\\s+[^\"{}]*\"|'\\s*UPDATE\\s+[\\w\"`.]+\\s+SET\\s+[^'{}]*'|`\\s*UPDATE\\s+[\\w\".]+\\s+SET\\s+[^`{}]*`)",
             "label": "update-no-where"
           }
         ],
@@ -273,7 +272,7 @@
       "message": "`SELECT * FROM` inside a string literal — over-fetching every column couples the caller to the table's exact shape (a later `ALTER TABLE ADD COLUMN` silently changes what this query returns) and pulls columns nobody reads across the wire. List the columns you actually use instead. Suppress a vetted case with `// zzop-select-star-ok`.",
       "matcher": {
         "type": "line-scan",
-        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs|rs)$",
         "file_exclude_pattern": "${test-paths}",
         "require_file": "(?i)SELECT\\s+\\*\\s+FROM",
         "skip_comment_lines": true,
@@ -287,7 +286,7 @@
       "message": "A `LIKE` pattern with a leading `%` wildcard (e.g. `LIKE '%term'`) can't use a standard B-tree index prefix — the engine falls back to a full table/index scan on every call. If this needs to stay a substring/suffix search, reach for full-text search or a reversed-column index; a trailing-only wildcard (`LIKE 'term%'`) stays index-friendly. Suppress a vetted case (small table, offline query) with `// zzop-like-leading-wildcard-ok`.",
       "matcher": {
         "type": "line-scan",
-        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs|rs)$",
         "file_exclude_pattern": "${test-paths}",
         "require_file": "(?i)LIKE\\s+['\"`]%",
         "skip_comment_lines": true,

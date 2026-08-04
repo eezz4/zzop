@@ -15,7 +15,7 @@ use std::collections::BTreeSet;
 use proptest::prelude::*;
 use zzop_parser_python_3 as py;
 
-/// 512 cases, measured at 0.72 s — ruff re-parses per entry point and there are 20 of them. How the
+/// 512 cases, measured at 0.72 s — ruff re-parses per entry point and there are 22 of them. How the
 /// per-crate budget is set: `input_strategy`'s "Case budget" section.
 const CASES: u32 = 512;
 
@@ -29,8 +29,13 @@ fn hammer(rel: &str, text: &str) {
     let _ = py::parse_imports(text);
     let _ = py::parse_calls(rel, text);
     let _ = py::parse_local_identifier_refs(text);
-    let _ = py::python_import_candidates(text, None, rel);
-    let _ = py::python_import_candidates(text, Some(text), rel);
+    let _ = py::extract_loop_spans(rel, text);
+    let _ = py::extract_call_sites(rel, text);
+    let _ = py::extract_string_literals(rel, text);
+    // `package_roots` gets the arbitrary text too — a declared entry is untrusted config input and the
+    // `=`-split/normalize path must hold up to the same hammering as the specifier itself.
+    let _ = py::python_import_candidates(text, None, rel, &[]);
+    let _ = py::python_import_candidates(text, Some(text), rel, &[text, "tml=", "backend/"]);
 
     let _ = py::extract_django_db_table_provides(rel, text);
     let _ = py::extract_django_db_table_consumes(rel, text);

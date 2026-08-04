@@ -246,7 +246,12 @@ cross-findings-empty|cross.json has no `crossLayerFindings.shown` array
 expected-missing|no ground truth at
 expected-corrupt|EXPECTED.jsonc could not be parsed|against an unparsed answer key is not a score
 expected-empty|has no expectations
+benign-ghost|benign control(s) in the ground truth name files that DO NOT EXIST|alpha/src/ghost.ts
 legacy-keys|does not use the "<sourceId>/<path>:<line>" key format
+registry-missing|no tree registry at
+registry-corrupt|tree registry|could not be parsed
+registry-no-trees|is not a usable trees[] list
+registry-tree-removed|MISSING beta|never scored at all
 baseline-missing|expectation ratchet: missing
 baseline-badrow|unreadable row "alpha 2"
 ratchet-shrank|claims LESS than the committed floor|SHRANK alpha.expectations: 2 -> 1
@@ -255,7 +260,7 @@ gap-fired|`gap` entries FIRED (1 of 1)|PROMOTE each line above by hand
 gap-fired-write|refusing to regenerate: `gap` entries FIRED|promoted by no one
 gap-ratchet-shrank|claims LESS than the committed floor|SHRANK alpha.gap: 1 -> 0
 write-over-corrupt|refusing to regenerate
-write-derives-zero|derived ZERO trees
+write-derives-zero|derived ZERO claims
 update-lowers|refusing to LOWER the floor
 TBL
 )"

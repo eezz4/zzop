@@ -2,8 +2,10 @@
 
 use std::collections::BTreeMap;
 
+mod git;
 mod parsers;
 
+pub use git::{CommitSubjectPatternRequest, CommitTypePatternRequest, GitOptionsRequest};
 pub use parsers::ParsersRequest;
 
 use serde::Deserialize;
@@ -62,6 +64,10 @@ pub struct AnalyzeRequest {
     pub git: Option<GitOptionsRequest>,
     pub size_cap: Option<usize>,
     pub disabled_rules: Vec<String>,
+    /// DSL pack ALLOWLIST (`packsOnly`) — the opt-in twin of `disabled_rules`, which can only say
+    /// "everything except". Semantics both dialects share (empty = no allowlist, packs only, composes
+    /// with `disabled_rules`): `zzop_core::RuleConfig::only_packs`. Config-file dialect: `packs.only`.
+    pub packs_only: Vec<String>,
     /// Per-rule severity remap (rule id -> `"critical"`/`"warning"`/`"info"`). Reuses `zzop_core::Severity`
     /// (lowercase serde) and `RuleConfig::severity_overrides` directly. Default: empty (no remaps).
     pub severity_overrides: BTreeMap<String, Severity>,
@@ -131,6 +137,20 @@ pub struct AnalyzeRequest {
     /// `vocabulary` to avoid — same "user-declared table" feel, different subject matter.
     #[serde(default)]
     pub parsers: ParsersRequest,
+    /// Rule TIMING instrumentation — the wire exposure of `zzop_engine::EngineConfig::profile_rules`
+    /// (the ESLint `TIMING=1` / oxlint rule-timing equivalent). `false` (the default) leaves
+    /// `AnalyzeOutput::rule_timings` at `None` with zero added cost; `true` times each DSL rule and each
+    /// whole-graph native analysis that actually runs.
+    ///
+    /// Deliberately NOT a `zzop.config.jsonc` key, and the one request field here that is not: every
+    /// other knob on this struct is a DECLARATION ABOUT THE PROJECT (what it calls its guards, where it
+    /// is mounted, which rules it disables) and belongs in a file the project commits. A timing report
+    /// is a QUESTION ABOUT THIS RUN — wall-clock, machine-specific, and jittery run to run — so it rides
+    /// a per-invocation switch (`zzop analyze --profile-rules`) instead. See `crates/config/
+    /// config-surface.json`'s `cliFlags`, which vouches for that flag and has no `configKeys` twin.
+    ///
+    /// Profiling NEVER changes `findings`/`ir` — only which optional output field is populated.
+    pub profile_rules: bool,
 }
 
 /// Deserializes `T | null` into `Some(Some(T)) | Some(None)` so a struct-level `#[serde(default)]`
@@ -193,51 +213,6 @@ pub enum RouteRole {
     Consume,
 }
 
-/// `AnalyzeRequest::git`'s payload — mirrors `zzop_engine::GitOptions` field-for-field, as JSON input.
-#[derive(Debug, Deserialize, Default)]
-#[serde(rename_all = "camelCase", default)]
-pub struct GitOptionsRequest {
-    pub since: Option<String>,
-    pub recent_days: Option<u32>,
-    /// Custom commit-type classifier table — the wire exposure of config `git.commitTypePatterns`.
-    /// REPLACES `zzop_metrics::default_commit_type_patterns()` entirely when present and non-empty (match
-    /// order = array order); absent or an empty array falls back to the default table. See
-    /// `zzop_engine::GitOptions::commit_type_patterns`'s doc for the full contract, including how an
-    /// invalid regex is handled (skipped, surfaced as a `warnings` entry, never a panic).
-    pub commit_type_patterns: Option<Vec<CommitTypePatternRequest>>,
-    /// DECLARED subject-pattern table — the wire exposure of config `git.commitSubjectPatterns`.
-    /// Absent or empty means NO commit gets a label: this axis has no default table to fall back to,
-    /// deliberately (see `zzop_engine::GitOptions::commit_subject_patterns`). Independent of
-    /// `commit_type_patterns` in every way — different output field (`labels`, not `tags`), all
-    /// matches kept rather than first-match-wins, and the pattern is compiled exactly as written with
-    /// no `(?i)` injected.
-    pub commit_subject_patterns: Option<Vec<CommitSubjectPatternRequest>>,
-}
-
-/// One `git.commitTypePatterns` config-file entry: `{ pattern: <regex>, tag: <TAG> }`. A dedicated struct
-/// (rather than accepting a raw 2-element JSON array over the wire) keeps the shape self-describing for a
-/// config-file author; `build_engine_config` flattens the list into the `(String, String)` tuple pairs
-/// `zzop_engine::GitOptions::commit_type_patterns` / `zzop_git::CollectOptions::commit_type_patterns` use
-/// internally.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CommitTypePatternRequest {
-    pub pattern: String,
-    pub tag: String,
-}
-
-/// One `git.commitSubjectPatterns` config-file entry: `{ pattern: <regex>, label: <string> }`. Same
-/// self-describing-struct rationale as `CommitTypePatternRequest` above; the field is `label` rather
-/// than `tag` because the two axes must stay tellable apart at the config surface — a `tag` feeds the
-/// commit-TYPE vocabulary (and per-file `tagCounts`), a `label` is whatever the author declared it to
-/// mean and rides on `CommitFileSet::labels` alone.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CommitSubjectPatternRequest {
-    pub pattern: String,
-    pub label: String,
-}
-
 /// `analyzeTrees`'s request shape: `{trees: AnalyzeRequest[]}` — one `EngineConfig` per tree, joined by
 /// `zzop_engine::analyze_trees` (multi-tree/cross-layer).
 #[derive(Debug, Deserialize, Default)]
@@ -273,6 +248,9 @@ pub struct EnvelopeAnalyzeRequest {
     /// id WINS the collision whole. See `AnalyzeRequest::pack_defs` for the full contract.
     pub pack_defs: Vec<zzop_core::RulePackDef>,
     pub disabled_rules: Vec<String>,
+    /// DSL pack allowlist (`packsOnly`) — same contract as `AnalyzeRequest::packs_only`; Mode A gates
+    /// packs through the same seam, so the knob means the same thing on this lane.
+    pub packs_only: Vec<String>,
     /// Per-rule severity remap (rule id -> `"critical"`/`"warning"`/`"info"`). See `AnalyzeRequest`.
     pub severity_overrides: BTreeMap<String, Severity>,
     /// Finding-level accept-list — `{rule, path?}` entries. See `AnalyzeRequest`.
@@ -296,4 +274,26 @@ pub struct EnvelopeAnalyzeRequest {
     /// through Mode A must not freeze un-prefixed consume keys while the native path prefixes the same
     /// config. Mode A runs no code-extracted base pass, so this is the only base an envelope can carry.
     pub client_base: Option<String>,
+    /// Rule TIMING instrumentation — the envelope-path twin of `AnalyzeRequest::profile_rules`,
+    /// identical semantics (per-invocation switch, never a `zzop.config.jsonc` key, never changes
+    /// `findings`/`ir`). This field deliberately did NOT exist until Mode A's pack evaluation was
+    /// wired through the engine's timing accumulator (`envelope::file_pass`/`ingest`) — accepting it
+    /// while `analyze_envelope` set `rule_timings: None` unconditionally would have been a knob
+    /// nothing reads, the wire-level unwired-capability defect. Added in the same change that made
+    /// Mode A timeable, per that standing note.
+    pub profile_rules: bool,
+    /// Declared convention vocabulary — the envelope-path twin of `AnalyzeRequest::vocabulary`,
+    /// reusing the same engine type for the same no-drift reason. `Option`, unlike the tree twin,
+    /// because the two lanes' undeclared defaults differ and this lane must tell them apart: a tree
+    /// request always comes through a config front-end (a config file is mandatory there, and
+    /// `zzop init` writes the built-in vocabulary into it), so its field arrives populated with
+    /// whatever the author declared; the envelope lane has NO config front-end, so `None` (key
+    /// absent) means `analyze_envelope_json` assigns the PRODUCT default
+    /// (`VocabularyConfig::built_in()`) explicitly at the same facade chokepoint that seeds the
+    /// bundled packs — never by accidentally inheriting an engine-side default. `Some(declared)` is
+    /// applied WHOLE, per key, exactly like the tree lane (`config::declared::apply_declared`'s
+    /// contract): a declared key replaces, an undeclared key inside the object makes no judgment.
+    /// This field did not exist until Mode A's call-graph pass gave the lane a vocabulary consumer —
+    /// before that, a declared `vocabulary` was silently discarded on this wire.
+    pub vocabulary: Option<zzop_engine::VocabularyConfig>,
 }

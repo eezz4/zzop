@@ -53,6 +53,31 @@ pub fn extract_finding_filters(
     }
 }
 
+/// Lifts the boolean `--profile-rules` out of argv, the same "pull the flag, hand the rest to the
+/// positional parser" shape [`extract_finding_filters`] uses. Returns `(argv with the flag removed,
+/// knobs)`.
+///
+/// A VALUELESS flag, unlike the three findings knobs: `--profile-rules` turns instrumentation on for
+/// this run and has nothing to parametrize, so `--profile-rules true` would be a path in the next
+/// position and is rejected there by the positional parser rather than silently consumed here.
+///
+/// Deliberately NOT a `zzop.config.jsonc` key (see `zzop_facade::AnalyzeRequest::profile_rules`): a
+/// config file declares what is true about the PROJECT and gets committed, while a timing report is a
+/// question about THIS invocation on THIS machine — a committed `profileRules: true` would make every
+/// CI run pay for and emit a report nobody asked for.
+pub fn extract_run_knobs(args: &[String]) -> (Vec<String>, zzop_summary::RunKnobs) {
+    let mut knobs = zzop_summary::RunKnobs::default();
+    let mut rest: Vec<String> = args[..2.min(args.len())].to_vec();
+    for arg in args.iter().skip(2) {
+        if arg == "--profile-rules" {
+            knobs.profile_rules = true;
+            continue;
+        }
+        rest.push(arg.clone());
+    }
+    (rest, knobs)
+}
+
 /// A dash-leading argument in a path/pattern position is NEVER swallowed as a path or pattern —
 /// `zzop analyze --nope` must be a usage error, not "path does not exist: --nope". Anything
 /// dash-shaped here exits 2 with the subcommand's usage line.

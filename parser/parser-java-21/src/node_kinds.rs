@@ -24,6 +24,11 @@ pub(crate) const PINNED_NODE_KINDS: &[&str] = &[
     "module_declaration",
     // Imports (`lang::imports`)
     "asterisk",
+    // Loop spans (`lang::loop_spans`)
+    "for_statement",
+    "enhanced_for_statement",
+    "while_statement",
+    "do_statement",
     // Symbols (`lang::symbols`)
     "enum_body_declarations",
     "method_declaration",
@@ -40,6 +45,8 @@ pub(crate) const PINNED_NODE_KINDS: &[&str] = &[
     "generic_type",
     // Calls (`lang::calls`)
     "method_invocation",
+    // Process-exec constructor shape (`lang::call_sites` — `new ProcessBuilder(...)`)
+    "object_creation_expression",
     "local_variable_declaration",
     "formal_parameter",
     // Declarator/receiver shapes (`lang::used_names`, `spring_security`)

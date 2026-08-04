@@ -14,6 +14,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use zzop_core::{RuleConfig, RulePackDef};
 use zzop_engine::{analyze_tree, AnalyzeOutput, EngineConfig, GitOptions};
 use zzop_metrics::RecId;
+use zzop_test_support::skip_notice;
 
 struct TempDir(PathBuf);
 
@@ -109,7 +110,7 @@ fn config_with_git() -> EngineConfig {
 #[test]
 fn git_enabled_nodes_carry_real_change_counts() {
     if !git_available() {
-        eprintln!("skipping git_enabled_nodes_carry_real_change_counts: git not on PATH");
+        skip_notice!("git not on PATH");
         return;
     }
     let dir = git_fixture_repo();
@@ -142,9 +143,7 @@ fn git_enabled_nodes_carry_real_change_counts() {
 #[test]
 fn git_enabled_populates_scores_health_recommendations_critical_and_seams() {
     if !git_available() {
-        eprintln!(
-            "skipping git_enabled_populates_scores_health_recommendations_critical_and_seams: git not on PATH"
-        );
+        skip_notice!("git not on PATH");
         return;
     }
     let dir = git_fixture_repo();
@@ -172,7 +171,7 @@ fn git_enabled_populates_scores_health_recommendations_critical_and_seams() {
 #[test]
 fn two_runs_over_the_same_git_repo_are_deterministic() {
     if !git_available() {
-        eprintln!("skipping two_runs_over_the_same_git_repo_are_deterministic: git not on PATH");
+        skip_notice!("git not on PATH");
         return;
     }
     let dir = git_fixture_repo();
@@ -283,7 +282,7 @@ fn ran(out: &AnalyzeOutput, id: &str) -> bool {
 #[test]
 fn all_five_metrics_ids_run_when_nothing_is_disabled() {
     if !git_available() {
-        eprintln!("skipping all_five_metrics_ids_run_when_nothing_is_disabled: git not on PATH");
+        skip_notice!("git not on PATH");
         return;
     }
     let dir = git_fixture_repo();
@@ -299,7 +298,7 @@ fn all_five_metrics_ids_run_when_nothing_is_disabled() {
 #[test]
 fn disabling_all_five_metrics_ids_actually_stops_them() {
     if !git_available() {
-        eprintln!("skipping disabling_all_five_metrics_ids_actually_stops_them: git not on PATH");
+        skip_notice!("git not on PATH");
         return;
     }
     let dir = git_fixture_repo();
@@ -329,9 +328,7 @@ fn disabling_all_five_metrics_ids_actually_stops_them() {
 #[test]
 fn disabling_scores_alone_suppresses_the_field_but_keeps_health() {
     if !git_available() {
-        eprintln!(
-            "skipping disabling_scores_alone_suppresses_the_field_but_keeps_health: git not on PATH"
-        );
+        skip_notice!("git not on PATH");
         return;
     }
     let dir = git_fixture_repo();
@@ -352,7 +349,7 @@ fn disabling_scores_alone_suppresses_the_field_but_keeps_health() {
 #[test]
 fn disabling_health_alone_leaves_scores_intact() {
     if !git_available() {
-        eprintln!("skipping disabling_health_alone_leaves_scores_intact: git not on PATH");
+        skip_notice!("git not on PATH");
         return;
     }
     let dir = git_fixture_repo();
@@ -433,9 +430,7 @@ fn git_fixture_repo_with_critical_bug_prone_file() -> TempDir {
 #[test]
 fn urgent_bug_risk_escalation_shows_up_first_with_evidence_in_a_single_tree_analyze() {
     if !git_available() {
-        eprintln!(
-            "skipping urgent_bug_risk_escalation_shows_up_first_with_evidence_in_a_single_tree_analyze: git not on PATH"
-        );
+        skip_notice!("git not on PATH");
         return;
     }
     let dir = git_fixture_repo_with_critical_bug_prone_file();
@@ -536,9 +531,7 @@ fn rec_paths(out: &AnalyzeOutput) -> Vec<String> {
 #[test]
 fn global_excludes_drop_recommendations_for_excluded_paths() {
     if !git_available() {
-        eprintln!(
-            "skipping global_excludes_drop_recommendations_for_excluded_paths: git not on PATH"
-        );
+        skip_notice!("git not on PATH");
         return;
     }
     let dir = git_fixture_repo_with_a_bug_prone_file_under_legacy();
@@ -575,9 +568,7 @@ fn global_excludes_drop_recommendations_for_excluded_paths() {
 #[test]
 fn global_excludes_substring_form_also_drops_recommendations() {
     if !git_available() {
-        eprintln!(
-            "skipping global_excludes_substring_form_also_drops_recommendations: git not on PATH"
-        );
+        skip_notice!("git not on PATH");
         return;
     }
     let dir = git_fixture_repo_with_a_bug_prone_file_under_legacy();
@@ -633,7 +624,7 @@ fn minimal_config_reports_both_capability_notes() {
 #[test]
 fn git_and_packs_both_set_produces_no_capability_notes() {
     if !git_available() {
-        eprintln!("skipping git_and_packs_both_set_produces_no_capability_notes: git not on PATH");
+        skip_notice!("git not on PATH");
         return;
     }
     let dir = git_fixture_repo();
@@ -685,7 +676,7 @@ fn git_fixture_repo_with_a_french_fix_commit() -> TempDir {
 #[test]
 fn custom_commit_type_patterns_replace_the_default_table_end_to_end() {
     if !git_available() {
-        eprintln!("skipping custom_commit_type_patterns_replace_the_default_table_end_to_end: git not on PATH");
+        skip_notice!("git not on PATH");
         return;
     }
     let dir = git_fixture_repo_with_a_french_fix_commit();
@@ -732,7 +723,7 @@ fn custom_commit_type_patterns_replace_the_default_table_end_to_end() {
 #[test]
 fn empty_custom_commit_type_patterns_falls_back_to_the_default_table() {
     if !git_available() {
-        eprintln!("skipping empty_custom_commit_type_patterns_falls_back_to_the_default_table: git not on PATH");
+        skip_notice!("git not on PATH");
         return;
     }
     // A conventional-commits subject with NO bracket tag: only the default keyword table can classify
@@ -778,7 +769,7 @@ fn empty_custom_commit_type_patterns_falls_back_to_the_default_table() {
 #[test]
 fn invalid_custom_commit_type_pattern_is_skipped_with_a_warning_not_a_panic() {
     if !git_available() {
-        eprintln!("skipping invalid_custom_commit_type_pattern_is_skipped_with_a_warning_not_a_panic: git not on PATH");
+        skip_notice!("git not on PATH");
         return;
     }
     let dir = git_fixture_repo();
@@ -830,9 +821,7 @@ fn git_enabled_on_a_non_git_root_degrades_to_a_warning_without_panicking() {
 #[test]
 fn no_declared_subject_patterns_means_no_labels_and_no_warning() {
     if !git_available() {
-        eprintln!(
-            "skipping no_declared_subject_patterns_means_no_labels_and_no_warning: git not on PATH"
-        );
+        skip_notice!("git not on PATH");
         return;
     }
     let dir = git_fixture_repo();
@@ -851,9 +840,7 @@ fn no_declared_subject_patterns_means_no_labels_and_no_warning() {
 #[test]
 fn a_declared_subject_pattern_that_matches_produces_no_inert_warning() {
     if !git_available() {
-        eprintln!(
-            "skipping a_declared_subject_pattern_that_matches_produces_no_inert_warning: git not on PATH"
-        );
+        skip_notice!("git not on PATH");
         return;
     }
     let dir = git_fixture_repo();
@@ -881,9 +868,7 @@ fn a_declared_subject_pattern_that_matches_produces_no_inert_warning() {
 #[test]
 fn a_declared_subject_pattern_that_never_matches_self_reports() {
     if !git_available() {
-        eprintln!(
-            "skipping a_declared_subject_pattern_that_never_matches_self_reports: git not on PATH"
-        );
+        skip_notice!("git not on PATH");
         return;
     }
     let dir = git_fixture_repo();
@@ -910,7 +895,7 @@ fn a_declared_subject_pattern_that_never_matches_self_reports() {
 #[test]
 fn invalid_declared_subject_pattern_is_skipped_with_a_warning_not_a_panic() {
     if !git_available() {
-        eprintln!("skipping invalid_declared_subject_pattern_is_skipped_with_a_warning_not_a_panic: git not on PATH");
+        skip_notice!("git not on PATH");
         return;
     }
     let dir = git_fixture_repo();

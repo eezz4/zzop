@@ -14,14 +14,15 @@
 //! two single-tree-tolerant entry points cannot drift on which config methods they accept.
 
 /// Runs the analysis for the resolved trees and returns the facade query core's JSON with the
-/// host-layer honesty channels stamped on top: `config` (which config file was honored, or null)
-/// and `configWarnings` (the config front-end's own disclosures — e.g. paths mode's "loaded each tree's
-/// own zzop.config.jsonc", which is why `config` reads null there without meaning "no config was
-/// read"). The query core stays pure (it never sees the
-/// config front-end); the two fields ride the reply exactly like every sibling tool's, so
-/// `check_endpoint` cannot silently pretend a dropped config was honored. Pretty-printed for parity
-/// with the other tools — query-core keys untouched. Shared by the MCP tool and the
-/// `zzop endpoint` CLI subcommand.
+/// host-layer honesty channels stamped on top: `config` (which config file was honored, or null),
+/// `warnings` (the engine's own self-reports, run-level then per tree — see
+/// `crate::warnings::engine_warnings`) and `configWarnings` (the config front-end's own disclosures —
+/// e.g. paths mode's "loaded each tree's own zzop.config.jsonc", which is why `config` reads null there
+/// without meaning "no config was read" — followed by every tree's engine-side config diagnostics). The
+/// query core stays pure (it never sees the config front-end); the three fields ride the reply exactly
+/// like every sibling tool's, so `check_endpoint` cannot silently pretend a dropped config was honored
+/// or a blind tree was searched. Pretty-printed for parity with the other tools — query-core keys
+/// untouched. Shared by the MCP tool and the `zzop endpoint` CLI subcommand.
 pub fn endpoint_summary(
     pattern: &str,
     path: Option<&str>,
@@ -36,22 +37,21 @@ pub fn endpoint_summary(
     let query = serde_json::json!({ "pattern": pattern });
     let result = zzop_facade::query_io_json(&out, &query.to_string())?;
     let mut v: serde_json::Value = serde_json::from_str(&result).map_err(|e| e.to_string())?;
+    let analysis: serde_json::Value = serde_json::from_str(&out).unwrap_or(serde_json::Value::Null);
     // The facade's own `suggestions` is substring-driven and comes back empty on a realistic typo
     // (`atricles` for `articles`) even though a near-miss key exists — fall back to a deterministic
     // nearest-key ranking (see `crate::suggest`) ONLY when the substring pass found nothing, so a
     // genuinely nonexistent pattern still gets an empty list rather than a forced guess.
     if v["verdict"] == "not-found" && v["suggestions"].as_array().is_some_and(Vec::is_empty) {
-        if let Ok(analysis) = serde_json::from_str::<serde_json::Value>(&out) {
-            let (fallback, total) = crate::suggest::nearest_keys(&analysis["crossLayer"], pattern);
-            if !fallback.is_empty() {
-                // Same disclosure the facade's own substring pass makes, and under the same key: this
-                // list REPLACES the facade's (empty) one, so its cap has to replace the facade's
-                // (absent) truncation count too, or the reply ships a silently shortened list.
-                if total > fallback.len() {
-                    v["suggestionsTruncated"] = serde_json::json!(total - fallback.len());
-                }
-                v["suggestions"] = serde_json::json!(fallback);
+        let (fallback, total) = crate::suggest::nearest_keys(&analysis["crossLayer"], pattern);
+        if !fallback.is_empty() {
+            // Same disclosure the facade's own substring pass makes, and under the same key: this
+            // list REPLACES the facade's (empty) one, so its cap has to replace the facade's
+            // (absent) truncation count too, or the reply ships a silently shortened list.
+            if total > fallback.len() {
+                v["suggestionsTruncated"] = serde_json::json!(total - fallback.len());
             }
+            v["suggestions"] = serde_json::json!(fallback);
         }
     }
     // The query core forwards the analysis's run-global blindness registry verbatim; fold it to counts
@@ -64,6 +64,26 @@ pub fn endpoint_summary(
         .as_deref()
         .map(|p| serde_json::Value::String(p.display().to_string()))
         .unwrap_or(serde_json::Value::Null);
-    v["configWarnings"] = serde_json::json!(loaded.warnings);
+    // The engine's own self-reports, same shape and same shared helper `check_file` uses. This reply
+    // used to carry NONE of them, and `docs/recipes/verify-before-fetch.md` wrote that absence up as a
+    // design ("run `cross` first, then read the verdict"). That was the wrong side of the argument: this
+    // lane runs the identical `analyzeTrees` call over the identical trees, so the framework-silence,
+    // unparsed-extension and empty-tree reports were already computed and thrown away — and the verdict
+    // they explain best is `not-found`, the one a caller most needs calibrated. The reply already folds
+    // the run-global blindness registry into `disclosure`; carrying half the blindness signals and
+    // dropping the other half was incoherent. Per-tree `coverage` genuinely does stay out (a census, not
+    // a self-report — `cross_repo` owns it), and the recipe now says exactly that.
+    v["warnings"] = serde_json::Value::Array(crate::warnings::engine_warnings(&analysis));
+    // Config-loader warnings first, then EVERY tree's engine-side config diagnostics — the same defect
+    // `check_file` and `coverage` carried: reading the field off the multi-tree root (which has none)
+    // published `[]` and swallowed a typo'd `disabledRules` id.
+    let mut config_warnings: Vec<serde_json::Value> = loaded
+        .warnings
+        .iter()
+        .cloned()
+        .map(serde_json::Value::String)
+        .collect();
+    config_warnings.extend(crate::warnings::tree_config_warnings(&analysis));
+    v["configWarnings"] = serde_json::json!(config_warnings);
     serde_json::to_string_pretty(&v).map_err(|e| e.to_string())
 }

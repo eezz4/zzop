@@ -8,9 +8,13 @@
 # The detection-benchmark coverage floor is the same shape again: benchmark.mjs rewrites it whole with
 # `\n` on every --update-baseline, so without the pin a Windows working tree turns every line into a
 # spurious CRLF diff the first time the floor is raised.
+# The DSL inline-value census is the same shape a third time: `zzop_core::dsl::inline_census_tests`
+# rewrites it WHOLE from the packs on every regeneration, writing `\n`. Without the pin, the first
+# regeneration on the other platform turns all ~650 lines into a spurious diff.
 scripts/policy-census.txt text eol=lf
 scripts/convention-vocab-baseline.txt text eol=lf
 scripts/detection-expected-baseline.txt text eol=lf
+scripts/dsl-inline-census.txt text eol=lf
 docs/adapters/*.fixture.json text eol=lf
 
 # The plugin's SessionStart hook, pinned for the same reason in a nastier place: Claude Code clones

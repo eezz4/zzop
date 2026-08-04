@@ -10,3 +10,9 @@ zzop-core = { path = "../core" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 regex = { workspace = true }
+
+# Inherit the workspace lint policy (root Cargo.toml [workspace.lints.clippy]) — every member does,
+# with no exceptions. Where a single target legitimately violates one, the exemption is a crate-level
+# #![allow] at that target's entry point, never a hole in this table.
+[lints]
+workspace = true

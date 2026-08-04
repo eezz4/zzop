@@ -6,13 +6,17 @@
 //! ## Layout
 //! - `lang` — syn AST -> Common-IR LANGUAGE projection: `SourceSymbol` extraction (`symbols`),
 //!   `ImportMap` extraction (`imports`), identifier-reference collection (`used_names`), the pure
-//!   import-specifier -> candidate-file-path resolver (`resolve`), call-site extraction (`calls`), and
-//!   handler-signature extractor evidence (`extractor_guards`). The last two are the pair that lifts
-//!   `.rs` into the shared call graph — see `extractor_guards`' own doc for why a Rust guard is a TYPE
-//!   and not a call, and why shipping one without the other would have been dishonest.
+//!   import-specifier -> candidate-file-path resolver (`resolve`), call-site extraction (`calls`),
+//!   handler-signature extractor evidence (`extractor_guards`), and TEST-ONLY line spans
+//!   (`test_spans`). The middle two are the pair that lifts `.rs` into the shared call graph — see
+//!   `extractor_guards`' own doc for why a Rust guard is a TYPE and not a call, and why shipping one
+//!   without the other would have been dishonest. `test_spans` is the axis that lets a rule pack tell
+//!   Rust's INLINE `#[cfg(test)] mod tests` apart from shipped code, which no path pattern can do.
 //! - `adapters` — framework-vocabulary producers emitting cross-layer IO facts: axum router PROVIDES as
-//!   router-mount fragments (`adapters::axum`) and `reqwest` literal egress CONSUMES
-//!   (`adapters::http_clients`).
+//!   router-mount fragments (`adapters::axum`), `reqwest` literal egress CONSUMES
+//!   (`adapters::http_clients`), and raw-SQL `db-table` CONSUMES (`adapters::raw_sql`) — the third of
+//!   the three cross-layer channels, and the one this crate had no producer for at all until
+//!   2026-08-02 (see that module's doc for what the silence cost).
 //!
 //! ## Line numbers
 //! Unlike `zzop-parser-python-3` (which builds its own byte-offset `LineIndex` because ruff only hands
@@ -36,13 +40,18 @@ pub mod lang;
 
 pub use adapters::axum::extract_axum_router_fragments;
 pub use adapters::http_clients::extract_rust_http_consumes;
+pub use adapters::raw_sql::extract_rust_raw_sql_db_table_consumes;
+pub use lang::call_sites::extract_call_sites;
 pub use lang::calls::parse_calls;
 pub use lang::extractor_guards::{
     parse_extractor_guards, RustGuardVocab, RUST_OPTIONAL_EXTRACTOR_PREFIXES,
 };
 pub use lang::imports::parse_imports;
+pub use lang::loop_spans::extract_loop_spans;
 pub use lang::resolve::rust_import_candidates;
+pub use lang::string_literals::extract_string_literals;
 pub use lang::symbols::parse_symbols;
+pub use lang::test_spans::extract_test_spans;
 pub use lang::used_names::parse_local_identifier_refs;
 
 /// Cache key ingredient for `zzop-cache`, mirroring `zzop_parser_python_3::PARSER_FINGERPRINT`'s scheme:
@@ -50,7 +59,7 @@ pub use lang::used_names::parse_local_identifier_refs;
 /// - `v1`: initial release — symbols (top-level fn/struct/enum/trait/type-alias/const/static/union, plus
 ///   `impl` block methods/assoc consts emitted dotted as `Type.member`), imports (`use` trees including
 ///   groups/globs/renames/`pub use`, plus `mod x;` declarations), `used_names`, axum router-mount
-///   fragments, and `reqwest` literal HTTP egress consumes.
+///   fragments, `reqwest` literal HTTP egress consumes, and raw-SQL `db-table` consumes.
 ///
 /// `parse_calls`/`parse_extractor_guards` deliberately do NOT bump this: neither fact enters the cached
 /// per-file `FileArtifact` projection this fingerprint keys (the engine's call-graph pass re-parses off
@@ -72,8 +81,9 @@ pub(crate) fn parse_file(text: &str) -> Option<syn::File> {
 }
 
 /// 1-based line of any `syn`/`proc-macro2`-spanned node — see this module's "Line numbers" doc section.
-/// Shared by `lang::symbols`, `adapters::axum`, and `adapters::http_clients` so the same one-line
-/// span-to-line conversion is never reimplemented per module.
+/// Shared by `lang::symbols`, `lang::call_sites`, `lang::string_literals`, `adapters::axum`, and
+/// `adapters::http_clients` so the same one-line span-to-line conversion is never reimplemented per
+/// module.
 pub(crate) fn line_of<T: syn::spanned::Spanned>(node: &T) -> u32 {
     node.span().start().line as u32
 }
@@ -123,6 +133,19 @@ pub const FRAMEWORK_RECOGNIZERS: &[FrameworkRecognizer] = &[
         framework: "reqwest",
         extensions: &["rs"],
         emits: &[channel::CONSUMES],
+    },
+    // Spelled after the SHAPE, not after a crate — the same call `parser-typescript` made for its own
+    // `raw sql` row and for `pathname dispatch`, and for the same reason: there is no single package to
+    // name. `adapters::raw_sql` recognizes a SQL statement string wherever it sits, which is how one row
+    // covers sqlx, tokio-postgres, rusqlite, `diesel::sql_query` and `sea_orm::Statement` at once. What
+    // it does NOT cover is the schema-DSL tier — `diesel::table!` and sea-orm's `DeriveEntityModel`
+    // declare tables without ever writing SQL, and this build has no recognizer for either; that is the
+    // residual a reader of this list should assume, because a row named after a crate would have implied
+    // otherwise.
+    FrameworkRecognizer {
+        framework: "raw sql",
+        extensions: &["rs"],
+        emits: &[channel::DB],
     },
 ];
 

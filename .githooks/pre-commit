@@ -37,7 +37,7 @@ GUARDS=(
   check-retired-config-vocabulary
   check-ci-local-mirrors-ci
   check-convention-vocab-declarable
-  check-example-config-vocabulary
+  check-committed-config-vocabulary
   check-shell-pipe-sigpipe
   check-version-lists-parsers
   check-asset-name-prose
