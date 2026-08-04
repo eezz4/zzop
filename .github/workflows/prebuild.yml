@@ -655,5 +655,28 @@ jobs:
         run: bash scripts/check-server-json-hashes.sh --stamped
       - name: Authenticate to the MCP Registry (GitHub OIDC, io.github.eezz4 namespace)
         run: ./mcp-publisher login github-oidc
-      - name: Publish server.json to the MCP Registry
-        run: ./mcp-publisher publish
+      - name: Publish server.json to the MCP Registry (resumable)
+        # Resumable for the same reason the npm job above is, and it was NOT until 2026-08-05: the
+        # registry answers a re-published version with a 400 `cannot publish duplicate version`, so a
+        # release that had already reached this step once could never be re-run. That is not
+        # hypothetical — v0.29.0 was re-tagged after its history was rewritten, every published byte
+        # was correct and identical, and this job alone turned the tag red on a version it had itself
+        # already published. The repo's own re-run rule ("Re-run failed jobs" only) assumes each job
+        # is re-enterable; one of the two publish jobs was and one was not.
+        #
+        # ## Why this reads output instead of an exit code
+        # This repo's rule is that a verdict comes from an exit code, never from grepping output —
+        # grep's exit is grep's. The exception is deliberate and narrow: `mcp-publisher` exits 1 for
+        # BOTH "already published" and "genuinely broken", so the exit code cannot discriminate and
+        # there is nothing else to read. The match is the registry's own words for the one condition
+        # being forgiven; every other failure keeps its exit code and stays red.
+        run: |
+          set -uo pipefail
+          out=$(./mcp-publisher publish 2>&1) && rc=0 || rc=$?
+          printf '%s\n' "$out"
+          [ "$rc" -eq 0 ] && exit 0
+          if printf '%s' "$out" | grep -q 'cannot publish duplicate version'; then
+            echo "::notice::$(jq -r .version server.json) is already on the MCP registry — nothing to do, treating as published."
+            exit 0
+          fi
+          exit "$rc"

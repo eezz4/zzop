@@ -3,7 +3,7 @@
   "name": "io.github.eezz4/zzop",
   "title": "zzop",
   "description": "Deterministic cross-repo contract analysis for AI agents: frontend calls vs backend endpoints.",
-  "version": "0.29.0",
+  "version": "0.29.1",
   "websiteUrl": "https://eezz4.github.io/zzop/",
   "repository": {
     "url": "https://github.com/eezz4/zzop",
@@ -12,32 +12,32 @@
   "packages": [
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/eezz4/zzop/releases/download/v0.29.0/zzop-mcp-win32-x64-msvc.mcpb",
-      "version": "0.29.0",
+      "identifier": "https://github.com/eezz4/zzop/releases/download/v0.29.1/zzop-mcp-win32-x64-msvc.mcpb",
+      "version": "0.29.1",
       "transport": { "type": "stdio" }
     },
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/eezz4/zzop/releases/download/v0.29.0/zzop-mcp-darwin-x64.mcpb",
-      "version": "0.29.0",
+      "identifier": "https://github.com/eezz4/zzop/releases/download/v0.29.1/zzop-mcp-darwin-x64.mcpb",
+      "version": "0.29.1",
       "transport": { "type": "stdio" }
     },
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/eezz4/zzop/releases/download/v0.29.0/zzop-mcp-darwin-arm64.mcpb",
-      "version": "0.29.0",
+      "identifier": "https://github.com/eezz4/zzop/releases/download/v0.29.1/zzop-mcp-darwin-arm64.mcpb",
+      "version": "0.29.1",
       "transport": { "type": "stdio" }
     },
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/eezz4/zzop/releases/download/v0.29.0/zzop-mcp-linux-x64-gnu.mcpb",
-      "version": "0.29.0",
+      "identifier": "https://github.com/eezz4/zzop/releases/download/v0.29.1/zzop-mcp-linux-x64-gnu.mcpb",
+      "version": "0.29.1",
       "transport": { "type": "stdio" }
     },
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/eezz4/zzop/releases/download/v0.29.0/zzop-mcp-linux-arm64-gnu.mcpb",
-      "version": "0.29.0",
+      "identifier": "https://github.com/eezz4/zzop/releases/download/v0.29.1/zzop-mcp-linux-arm64-gnu.mcpb",
+      "version": "0.29.1",
       "transport": { "type": "stdio" }
     }
   ]
