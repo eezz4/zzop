@@ -7,11 +7,13 @@
 // width/height it keeps its INTRINSIC size), and data, regeneration, link and prose guards were all
 // green. The finder was the user.
 //
-// Two checks, chosen to target exactly that accident class and nothing speculative
+// Three checks, each targeting exactly that accident class and nothing speculative
 // (2026-07-30 user ruling — pixel-ratio and golden-image lanes were considered and not built:
 // a threshold becomes a policy value, a golden image breaks on font rendering):
-//   1. zero console errors / page errors on every page, and
-//   2. on graph.html, #depgraph's getBoundingClientRect matches its .graph-stage container.
+//   1. zero console errors / page errors on every page,
+//   2. on graph.html, #depgraph's getBoundingClientRect matches its .graph-stage container, and
+//   3. every page with tables carries its runtime-built row filter, and the long prose cells inside
+//      those tables carry their clamp.
 //
 // Run: node scripts/site-render-check/check.mjs [siteDir]   (default: site)
 // Requires: npm ci && npx playwright install chromium   (CI does this; the browser download is why
@@ -104,6 +106,49 @@ for (const name of pages) {
       );
     }
   }
+
+  // The filter box and the cell clamps are BUILT AT RUNTIME by docs.js — nothing in the generated
+  // markup mentions them. That puts them in the same accident class as the canvas above: the page
+  // draws, the data/link/prose guards all stay green, and the feature is simply not there (a thrown
+  // script, a generator that stops emitting .table-scroll, a renamed class). This asserts
+  // EXISTENCE AND PAIRING only — never how many cells clamp, or how tall a clamped one is — so
+  // unlike the lanes declined on 2026-07-30 it carries no policy value that could drift.
+  const controls = await page.evaluate(() => {
+    // A row-less table is skipped by design (there is nothing to filter), so it is not counted here
+    // either — otherwise this check would forbid a table the feature deliberately ignores.
+    const withRows = Array.prototype.filter.call(
+      document.querySelectorAll('.docs-content table'),
+      (t) => t.tBodies[0] && t.tBodies[0].rows.length > 0
+    );
+    const cells = Array.prototype.slice.call(document.querySelectorAll('.docs-content table tbody td'));
+    return {
+      tables: withRows.length,
+      searchBoxes: document.querySelectorAll('.table-search__input').length,
+      // 300 characters is a PROBE, not the product's rule — the product clamps whatever actually
+      // overflows two lines, measured in the page. A cell this long overflows under any plausible
+      // column width, so it is a safe canary for "the clamp pass did not run at all".
+      longCells: cells.filter((c) => c.textContent.length > 300).length,
+      clamped: document.querySelectorAll('td.cell-clamp').length,
+      unpaired:
+        document.querySelectorAll('td.cell-clamp:not(:has(.cell-clamp__more))').length +
+        document.querySelectorAll('.cell-clamp__more:not(td.cell-clamp > .cell-clamp__more)').length,
+    };
+  });
+  if (controls.tables > 0) {
+    if (controls.searchBoxes !== 1) {
+      failures.push(
+        `${name}: ${controls.tables} table(s) but ${controls.searchBoxes} row filter(s) — expected exactly 1`
+      );
+    }
+    if (controls.longCells > 0 && controls.clamped === 0) {
+      failures.push(
+        `${name}: ${controls.longCells} cell(s) over 300 chars and not one clamped — the clamp pass did not run`
+      );
+    }
+    if (controls.unpaired > 0) {
+      failures.push(`${name}: ${controls.unpaired} clamp(s) missing their control, or a control outside a clamp`);
+    }
+  }
   await page.close();
 }
 
@@ -115,4 +160,7 @@ if (failures.length > 0) {
   for (const f of failures) console.error(`  ${f}`);
   process.exit(1);
 }
-console.log(`site-render-check: ${pages.length} page(s) render clean (0 console/page errors; graph canvas fills its stage)`);
+console.log(
+  `site-render-check: ${pages.length} page(s) render clean ` +
+    `(0 console/page errors; graph canvas fills its stage; every table filters and clamps)`
+);

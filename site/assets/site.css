@@ -1061,3 +1061,151 @@ h3 code {
     margin-right: 24px;
   }
 }
+
+/* --------------------------------------------------------------------------
+   Searchable tables, and a clamp on the cells inside them
+   --------------------------------------------------------------------------
+   The catalog outgrew the page: 23 tables and 332 rows across four documents.
+   The length was a symptom — the `Detects` cells run past 700 characters, so
+   the rows themselves were the wall. Cells clamp to a two-line lead (below) and
+   one search box spans the whole page.
+
+   FOLDING THE WHOLE TABLE was built first and removed on 2026-08-11: it made the
+   page shorter by hiding the tables rather than by making a row readable, and
+   once the cells clamped it earned nothing. Do not re-add it without a reason
+   that the clamp does not already cover.
+
+   PROGRESSIVE ENHANCEMENT, and that is load-bearing rather than tidy. docs.js
+   builds every control below at runtime, so a reader with no JS gets exactly
+   what shipped before this existed: every table open, nothing hidden, nothing
+   to click. A reference document that needs a script to be READABLE is not a
+   reference document.
+
+   Sorting already lives on these tables (`setupSortableTables`). Filtering
+   therefore hides rows with a CLASS, never by removing them — a sort reorders
+   the same row objects and the class rides along, so the two features cannot
+   fight over the DOM.
+   -------------------------------------------------------------------------- */
+
+tr.is-filtered-out { display: none; }
+
+/* A table the query excludes entirely leaves the page rather than sitting there
+   as a bare header row the reader has to rule out by hand. Its HEADING stays,
+   so the section still reads as "nothing here" instead of vanishing. */
+.table-scroll.is-empty { display: none; }
+
+/* ── the search box ─────────────────────────────────────────────────────── */
+
+.table-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 18px 0 4px;
+}
+
+.table-search__input {
+  flex: 1 1 260px;
+  min-width: 0;
+  padding: 9px 12px;
+  background: var(--bg-deep);
+  border: 1px solid var(--input-border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.92rem;
+}
+
+.table-search__input::placeholder { color: var(--text-muted); }
+
+.table-search__input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-color: var(--accent-soft-border);
+}
+
+.table-search__status {
+  flex: none;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.table-search__status.is-zero { color: var(--accent-hover); }
+
+/* ── long prose cells ──────────────────────────────────────────────────────
+   The complaint that started this work: the `Detects` column carries
+   multi-sentence paragraphs — over 700 characters on some rules — so a 20-row
+   table was a wall of text with no scannable left edge. Folding whole tables
+   HID the wall; it never made it readable. So the cell itself carries a
+   two-line lead and opens on its own.
+
+   WHICH cells clamp is measured at runtime (docs.js), never listed here: a
+   column list would be a fourth place that has to know what three generators
+   emit, and it would be wrong the first time a table gained a column.
+   -------------------------------------------------------------------------- */
+
+.cell-clamp { cursor: pointer; }
+
+.cell-clamp__text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+.cell-clamp.is-expanded .cell-clamp__text { display: block; }
+
+/* Carries no text node ON PURPOSE — its name lives in `aria-label`. The row
+   filter matches on textContent, so a visible "more" would turn every clamped
+   row into a hit for the query "more". The chevron is drawn from borders and
+   the rule is a flex spacer, so the whole affordance is two pseudo-elements. */
+.cell-clamp__more {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 5px;
+  padding: 2px 0;
+  background: none;
+  border: 0;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.cell-clamp__more:hover { color: var(--accent); }
+
+.cell-clamp__more:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.cell-clamp__more::before {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-top: -3px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform 120ms ease;
+}
+
+.cell-clamp.is-expanded .cell-clamp__more::before {
+  margin-top: 3px;
+  transform: rotate(-135deg);
+}
+
+.cell-clamp__more::after {
+  content: "";
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--border-subtle);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cell-clamp__more::before { transition: none; }
+}
