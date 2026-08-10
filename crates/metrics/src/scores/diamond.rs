@@ -24,12 +24,17 @@ pub fn compute_diamond(
     // BTreeMap iteration order keeps root processing deterministic; ties are broken later by the final
     // sort — only leaf order matters, and that is deterministic per-root via `collect_two_hop_reach`'s
     // BTreeMap.
+    // POPULATION: roots this metric actually got to examine. Incremented past the `is_scored` gate so it
+    // counts SUBJECTS JUDGED, not graph nodes — the same "excluded leaves the denominator too" contract
+    // `ScoresInput::is_scored` states for every other metric.
+    let mut roots_examined: u32 = 0;
     for (root, first_hops) in &adj {
         // The subject of a diamond is its ROOT. Intermediates and leaves stay in the walk even when
         // excluded — they are real hops on a scored root's path (see `ScoresInput::is_scored`).
         if !is_scored(root) {
             continue;
         }
+        roots_examined += 1;
         let reach = collect_two_hop_reach(root, first_hops, &adj);
         for (leaf, through) in reach {
             if through.len() < MIN_THROUGH {
@@ -53,6 +58,7 @@ pub fn compute_diamond(
     let pairs_truncated = cap_and_count_dropped(&mut pairs, MAX_FILE_ROWS_LISTED);
     DiamondScore {
         score: score.round(),
+        roots_examined,
         pairs,
         pairs_truncated,
     }

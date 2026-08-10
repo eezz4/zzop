@@ -43,6 +43,30 @@
   },
   {
     "side": "provide",
+    "method": "POST",
+    "path": "/v1/users/{id}:activate",
+    "key": "POST /v1/users/{}:activate"
+  },
+  {
+    "side": "provide",
+    "method": "POST",
+    "path": "/v1/users/{id}:deactivate",
+    "key": "POST /v1/users/{}:deactivate"
+  },
+  {
+    "side": "provide",
+    "method": "POST",
+    "path": "/v1/users:batchGet",
+    "key": "POST /v1/users:batchGet"
+  },
+  {
+    "side": "provide",
+    "method": "GET",
+    "path": "/flights/:from-:to",
+    "key": "GET /flights/{}-{}"
+  },
+  {
+    "side": "provide",
     "method": "get",
     "path": "/users",
     "key": "GET /users"
@@ -154,6 +178,12 @@
     "method": "get",
     "path": "/users/:id",
     "key": "GET /users/{}"
+  },
+  {
+    "side": "consume",
+    "method": "post",
+    "path": "/v1/users/{}:activate?force=1",
+    "key": "POST /v1/users/{}:activate"
   },
   {
     "side": "consume",

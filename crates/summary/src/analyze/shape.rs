@@ -138,7 +138,21 @@ pub(super) fn shape_analyze_output(
 /// ride this summary (see analyze_repo's own description: they are the direct `zzop-facade`
 /// embedding lane's job).
 fn architecture_summary(output_view: &serde_json::Value) -> Option<serde_json::Value> {
-    let pain = output_view.get("health")?.as_object()?.get("pain")?.clone();
+    let health = output_view.get("health")?.as_object()?;
+    let pain = health.get("pain")?.clone();
+    // `pain`'s DENOMINATOR travels with it, always (2026-08-08). This summary is the only place the CLI
+    // and MCP surfaces publish any score at all — the full `scores` object rides the direct
+    // `zzop-facade` embedding lane and never reaches here — so before this, `pain` was a single folded
+    // scalar with no way to tell how much of the structure it actually described. That is precisely the
+    // shape `zzop_facade::query_coverage` forbids ("there is deliberately NO single score field, and one
+    // must never be added"), and `pain` was sitting one crate away from the prohibition.
+    //
+    // `measuredWeight / totalWeight` is the fraction of the weighted metric table that had a population
+    // to score over; `pain: null` with `measuredWeight: 0` is the honest "nothing was measurable" state,
+    // which used to serialize as a confident `pain: 0`. Forwarded by name and `.get()`-defensive, the
+    // same degradation contract every other field in this shaper uses.
+    let measured_weight = health.get("measuredWeight").cloned();
+    let total_weight = health.get("totalWeight").cloned();
     let top_recommendation = output_view["recommendations"]
         .as_array()
         .and_then(|recs| recs.first())
@@ -159,9 +173,29 @@ fn architecture_summary(output_view: &serde_json::Value) -> Option<serde_json::V
                 .collect()
         })
         .unwrap_or_default();
-    Some(serde_json::json!({
-        "pain": pain,
-        "topRecommendation": top_recommendation,
-        "criticalTop": critical_top,
-    }))
+    let mut architecture = serde_json::Map::new();
+    architecture.insert("pain".to_string(), pain);
+    if let Some(measured_weight) = measured_weight {
+        architecture.insert("painMeasuredWeight".to_string(), measured_weight);
+    }
+    if let Some(total_weight) = total_weight {
+        architecture.insert("painTotalWeight".to_string(), total_weight);
+    }
+    architecture.insert(
+        "painMeaning".to_string(),
+        serde_json::json!(
+            "Composite structural debt over the metrics that HAD something to measure, renormalized \
+             onto the full weight table (0 = clean, higher = worse, ~186 = every weighted metric at \
+             its worst). `painMeasuredWeight` / `painTotalWeight` is how much of that table was \
+             actually measurable on this tree: read a low ratio as \"this number describes a minority \
+             of the structure\", not as a better score. `pain: null` means NO metric had a population \
+             — absence of data, never 0. Renormalizing is what stops an unmeasurable axis (a metric \
+             defined over a convention this tree never adopted) from making the repo look healthier by \
+             silently scoring 100. The per-metric populations behind it ride `scores.*` in the direct \
+             zzop-facade output."
+        ),
+    );
+    architecture.insert("topRecommendation".to_string(), top_recommendation.into());
+    architecture.insert("criticalTop".to_string(), critical_top.into());
+    Some(serde_json::Value::Object(architecture))
 }

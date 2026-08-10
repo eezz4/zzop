@@ -47,13 +47,19 @@
 //! config that never declares `trees`), so a monorepo never degrades to a single tree — and thus no
 //! cross-layer join — in silence.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 pub mod jsonc;
 #[cfg(test)]
 mod lib_tests;
+mod load;
 pub mod mapper;
 pub mod paths;
+
+pub use load::{
+    load_config_file, load_for_root, load_for_root_vocabulary_only, missing_config_error,
+    MISSING_CONFIG_MARKER,
+};
 pub mod template;
 #[cfg(test)]
 mod template_tests;
@@ -135,165 +141,4 @@ pub struct LoadedRequest {
     /// The config file actually loaded, if any — `None` means no single file governs this request
     /// (paths mode loads one per root; an envelope has no filesystem location at all).
     pub config_path: Option<PathBuf>,
-}
-
-/// Loads the config for a single analyzed root: reads `<root>/zzop.config.jsonc`, or REFUSES.
-///
-/// Errors only on caller-fixable config problems (`ConfigError`), never on overlay/pack content issues
-/// (those become warnings). When the result is a single tree over a root whose workspace manifest names
-/// 2+ packages, the leading disclosure warning from [`disclose_single_tree_over_workspace`] is prepended —
-/// the request stays byte-identical either way, the run just stops being silent about the join it could
-/// not attempt.
-///
-/// # There is no zero-config run (2026-07-27, reversing the founding default)
-///
-/// This used to synthesize the request an empty `{}` config would produce. That became unsafe the day
-/// convention vocabulary stopped falling back to built-ins (`zzop_engine::vocabulary`): no config means
-/// no declaration, and no declaration means those judgments are not made — the run would analyze less
-/// while reporting itself complete. Total refusal rather than "warn and continue", because a warning
-/// beside a shorter findings list is exactly the disclosure readers skip. [`missing_config_error`] owns
-/// the message; both hosts hit this same function, so the entry axis has no parity exception.
-pub fn load_for_root(root: &Path) -> Result<LoadedRequest, ConfigError> {
-    let candidate = root.join(DEFAULT_CONFIG_FILENAME);
-    if candidate.is_file() {
-        return load_config_file(&candidate);
-    }
-    Err(missing_config_error(&candidate))
-}
-
-/// The one refusal message for "this analysis has no config", shared by every lane and both hosts.
-///
-/// Names the ARTIFACT and never a command. A message saying `zzop init` is unactionable for an MCP client
-/// (it has no shell), and one saying `resources/read` is unactionable in a terminal; the `config-template`
-/// contract document is the single thing both hosts can serve, and it is the same bytes `init` writes.
-/// Machine-pinned by `crates/engine/tests/rule_contracts/host_vocabulary.rs` (contracts 15 & 16), which
-/// scans this crate for either host's vocabulary.
-pub fn missing_config_error(candidate: &Path) -> ConfigError {
-    ConfigError(format!(
-        "No config file at {}.\nzzop analyzes what a config DECLARES: the convention vocabulary a \
-         project picks — what it calls its auth guards, which banners mark its generated files, how it \
-         names its data-access receivers — has no built-in default, so a run without a config would \
-         judge less while reporting itself complete. Start from the `config-template` contract document \
-         (every zzop surface can serve it) and save it as {}.",
-        candidate.display(),
-        candidate.display()
-    ))
-}
-
-/// Loads an explicit config file (or a directory containing `zzop.config.jsonc`) and maps it with
-/// the config file's directory as the resolution base. This is the multi-tree/cross-repo entry: the
-/// config's `trees` (including `trees: "auto"`) defines the join.
-///
-/// Unlike the JS CLI's `loadConfig` (which only ever reads the exact path it is given), `path` here
-/// may also name a DIRECTORY containing `zzop.config.jsonc` — a Rust-host convenience with no JS
-/// counterpart (the JS CLI never receives a bare directory; `bin/zzop.js` always resolves `--config`
-/// or the default filename before calling `loadConfig`).
-///
-/// A config that never declares `trees` still resolves to ONE tree, so it gets the same leading
-/// [`disclose_single_tree_over_workspace`] disclosure the config-less path gets (worded for the
-/// "add it to your existing config" remedy) — having a config file is not evidence that the tree
-/// set was chosen.
-pub fn load_config_file(path: &Path) -> Result<LoadedRequest, ConfigError> {
-    let candidate = if path.is_dir() {
-        path.join(DEFAULT_CONFIG_FILENAME)
-    } else {
-        path.to_path_buf()
-    };
-
-    // Same condition, same message as the discovery path — one owner, so the two entries can never
-    // teach a user two different remedies for the identical missing file.
-    if !candidate.is_file() {
-        return Err(missing_config_error(&candidate));
-    }
-
-    let raw = std::fs::read_to_string(&candidate).map_err(|err| {
-        ConfigError(format!(
-            "Could not read config at {}: {}",
-            candidate.display(),
-            io_error_label(&err)
-        ))
-    })?;
-
-    let stripped = jsonc::strip_json_comments(&raw);
-    let parsed: serde_json::Value = serde_json::from_str(&stripped)
-        .map_err(|err| ConfigError(format!("Invalid JSONC in {}: {err}", candidate.display())))?;
-
-    if !parsed.is_object() {
-        return Err(ConfigError(format!(
-            "Config in {} must be a JSON object.",
-            candidate.display()
-        )));
-    }
-
-    let base_dir = candidate
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."));
-
-    let (config, mut warnings) = maybe_expand_auto_trees(parsed, &base_dir)?;
-    let mapped = mapper::config_to_request(&config, &base_dir)?;
-    warnings.extend(mapped.warnings);
-    disclose_single_tree_over_workspace(
-        mapped.method,
-        &base_dir,
-        &candidate,
-        &config,
-        &mut warnings,
-    );
-    Ok(LoadedRequest {
-        method: mapped.method,
-        request: mapped.request,
-        warnings,
-        config_path: Some(candidate),
-    })
-}
-
-/// Prepends `workspaces::single_tree_workspace_warning` (when it fires) to `warnings` — the ONE
-/// place a load discloses "this run is a single tree over a monorepo, so the cross-layer join never
-/// ran". Only [`load_config_file`] reaches it now: since 2026-07-27 there is no config-less load, so
-/// the config path and the config itself are always in hand rather than optional.
-///
-/// Gated on `Method::Analyze`, which is exactly the structural fact worth warning about: by this
-/// enum's own contract it means one tree resulted AND `trees` was never declared. Keying on that
-/// (rather than on "no config file was found") is what makes a config carrying only
-/// `{"rules": {...}}` — a real monorepo trap, since no `trees` means no expansion and therefore no
-/// expansion report to speak in its place — disclose exactly like the config-less case, while an
-/// author who DID declare `trees` (any explicit array, or `"auto"`) is never second-guessed: those
-/// take the `AnalyzeTrees` branch and never reach here. See that function's doc for the rest of the
-/// silence contract.
-///
-/// Position: `insert(0, ..)`, never `push` — this is a leading disclosure, and pinning the index
-/// keeps the warning list byte- AND order-deterministic no matter how many mapping notes precede it.
-/// Purely additive: the request, method and tree set are untouched.
-fn disclose_single_tree_over_workspace(
-    method: Method,
-    base_dir: &Path,
-    config_path: &Path,
-    config: &serde_json::Value,
-    warnings: &mut Vec<String>,
-) {
-    if method != Method::Analyze {
-        return;
-    }
-    if let Some(warning) = workspaces::single_tree_workspace_warning(base_dir, config_path, config)
-    {
-        warnings.insert(0, warning);
-    }
-}
-
-/// Thin `workspaces::expand_auto_trees` gate: that function is a documented no-op for any config
-/// whose `trees` is not EXACTLY the string `"auto"` (see its own module doc), so this short-circuits
-/// the common case without calling into it at all. Purely an implementation courtesy — the observable
-/// result is identical to an unconditional call once `workspaces.rs` is implemented; it just means
-/// `zzop-config`'s own build/tests for every other config shape don't take a hard dependency on that
-/// (separately owned) module being finished first.
-fn maybe_expand_auto_trees(
-    config: serde_json::Value,
-    base_dir: &Path,
-) -> Result<(serde_json::Value, Vec<String>), ConfigError> {
-    if config.get("trees").and_then(serde_json::Value::as_str) == Some("auto") {
-        workspaces::expand_auto_trees(config, base_dir)
-    } else {
-        Ok((config, Vec::new()))
-    }
 }

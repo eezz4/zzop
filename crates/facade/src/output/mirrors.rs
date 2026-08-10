@@ -43,6 +43,20 @@ pub(super) struct PackLoadedView<'a> {
     /// a loaded pack = "no analyzed file is in any of this pack's rules' scope" — zero findings from
     /// it means "out of scope", not "clean".
     files_in_scope: usize,
+    /// The rule-granularity half of the same census (`zzop_engine::PackLoaded::zero_admission_rules`'s
+    /// doc): ids of this pack's rules whose own path gates admitted zero analyzed files — their zero
+    /// findings are scope, never a clean bill. Serialized ONLY when non-empty (the `testPaths`
+    /// additive-disclosure precedent: present exactly when it has something to say), so the common
+    /// every-rule-admits-files entry — and the `filesInScope: 0` pack, where the pack-level zero
+    /// already says "all of them" — stays byte-identical for existing consumers.
+    #[serde(skip_serializing_if = "slice_is_empty")]
+    zero_admission_rules: &'a [String],
+}
+
+/// `skip_serializing_if` helper for a borrowed-slice field (serde hands the serializer `&&[String]`,
+/// which `<[_]>::is_empty` cannot take directly).
+fn slice_is_empty(s: &&[String]) -> bool {
+    s.is_empty()
 }
 
 impl<'a> From<&'a zzop_engine::PackLoaded> for PackLoadedView<'a> {
@@ -52,6 +66,7 @@ impl<'a> From<&'a zzop_engine::PackLoaded> for PackLoadedView<'a> {
             rules: p.rules,
             source: &p.source,
             files_in_scope: p.files_in_scope,
+            zero_admission_rules: &p.zero_admission_rules,
         }
     }
 }

@@ -50,6 +50,32 @@ fn cookie_set_with_httponly_false_is_flagged() {
 }
 
 #[test]
+fn cookies_set_is_not_a_trigger_because_its_framework_default_is_httponly_true() {
+    // The rule's trigger is a claim about a FRAMEWORK DEFAULT, not about the token `cookie`. On
+    // SvelteKit, `cookies.set(name, value, { path })` defaults to `httpOnly: true` — so the option
+    // being absent is the CORRECT code, and flagging it is over-claiming. Measured 2026-08-08: this
+    // spelling was the only one the whole dogfood corpus reached, and all 3 of its hits were false
+    // (`corpus/oss/fe-svelte/src/routes/{login,register,settings}/+page.server.js`), while
+    // `res.cookie`/`setCookie` — whose defaults really are httpOnly=false — appeared zero times.
+    //
+    // Losing a genuine hit on some OTHER framework that spells it `cookies.set` and defaults to
+    // false is under-reporting, which this repo permits; the 3 above were over-claiming, which it
+    // does not. Re-widen only together with a recognizer that can tell the frameworks apart — a
+    // lexical trigger cannot, because the two spellings are identical.
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "routes/login/+page.server.js",
+        "export const actions = {\n  default: async ({ cookies }) => {\n    cookies.set(\"jwt\", \"v\", { path: \"/\" });\n  }\n};\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "insecure-cookie").is_empty(),
+        "SvelteKit `cookies.set` defaults to httpOnly and must not fire: {:?}",
+        out.findings
+    );
+}
+
+#[test]
 fn cookie_ok_marker_above_the_cookie_call_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-sec");
     dir.write(

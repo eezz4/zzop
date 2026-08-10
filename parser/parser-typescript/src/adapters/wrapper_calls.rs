@@ -32,11 +32,25 @@
 //! with precision carried by the param-signature gate above.
 //!
 //! ## Call recognizer (`WrapperCallFragment`)
-//! Every call whose callee is a PLAIN identifier (member-expression callees are out of scope) is a
-//! candidate when one of its first 6 args is an uppercase HTTP verb literal or a string/template
-//! starting with `/` (volume guard, else every `helper(a, b)` call would qualify). The call side does
-//! NOT resolve whether `callee` names a known def — defs often live in a different file; the
-//! assemble-time join filters candidates down to real invocations.
+//! Two callee shapes are candidates: a PLAIN identifier, and a member call whose receiver is a
+//! NAMESPACE import of this file (`import * as api from './client'; api.get('/x')` — the member name
+//! is the wrapper name, the receiver supplies the specifier). The second joined on 2026-08-08: it is
+//! the dominant shape in the wild — 19 of 19 call sites on `corpus/oss/fe-svelte`, zero named imports
+//! — so that whole file read as callless. A member call on anything else stays out, including a plain
+//! local object (`svc.get('/a')`): treating any `x.get(...)` as a wrapper call would sweep in every
+//! helper that happens to expose a `get`.
+//!
+//! A candidate qualifies when one of its first 6 args is an uppercase HTTP verb literal or a
+//! string/template starting with `/` (volume guard, else every `helper(a, b)` call would qualify).
+//! ⚠ That `/`-leading requirement means a BASE-RELATIVE argument (`api.get('articles')`) is not a
+//! candidate, and relaxing it here would not help: `compose::wrapper_consumes` independently requires
+//! a `/`-leading path, and the consumes it emits carry `client: None`, so `compose::client_base`'s
+//! base prefix — which applies per client tag — can never reach them. Making base-relative wrapper
+//! args resolve is therefore a DESIGN change across three layers, not a lexical widening here, and
+//! doing it as one would mint `/articles` for a call whose real path is `/api/articles`.
+//!
+//! The call side does NOT resolve whether `callee` names a known def — defs often live in a different
+//! file; the assemble-time join filters candidates down to real invocations.
 //!
 //! Each of the first 6 args is captured positionally: string literal verbatim, template literal with
 //! `${...}` replaced by `{}` (same transform as `egress.rs`'s `resolve_url`), anything else `None` —
@@ -56,7 +70,7 @@ mod defs;
 mod tests;
 
 use calls::CallCollector;
-use defs::{classify_def, collect_top_level_functions};
+use defs::{classify_def, collect_absolute_url_consts, collect_top_level_functions};
 
 /// Extract one file's wrapper-def and wrapper-call fragments — see module doc for the recognizer spec.
 pub fn extract_wrapper_fragments(
@@ -68,6 +82,7 @@ pub fn extract_wrapper_fragments(
     };
     let imports = crate::parse_imports(rel, text);
     let local_fns = collect_top_level_functions(&module, &cm);
+    let url_consts = collect_absolute_url_consts(&module, &cm);
 
     let mut defs = Vec::new();
     for item in &module.body {
@@ -84,7 +99,9 @@ pub fn extract_wrapper_fragments(
             Decl::Fn(f) => {
                 let pats: Vec<&Pat> = f.function.params.iter().map(|p| &p.pat).collect();
                 let body_span = f.function.body.as_ref().map(|b| b.span);
-                if let Some(d) = classify_def(&f.ident.sym, &pats, body_span, &cm, &local_fns) {
+                if let Some(d) =
+                    classify_def(&f.ident.sym, &pats, body_span, &cm, &local_fns, &url_consts)
+                {
                     defs.push(d);
                 }
             }
@@ -99,7 +116,8 @@ pub fn extract_wrapper_fragments(
                         BlockStmtOrExpr::BlockStmt(b) => b.span,
                         BlockStmtOrExpr::Expr(e) => e.span(),
                     });
-                    if let Some(frag) = classify_def(&bi.id.sym, &pats, body_span, &cm, &local_fns)
+                    if let Some(frag) =
+                        classify_def(&bi.id.sym, &pats, body_span, &cm, &local_fns, &url_consts)
                     {
                         defs.push(frag);
                     }

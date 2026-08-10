@@ -7,8 +7,10 @@
 # (2026-07 site rework) and nothing mechanical caught it before this guard.
 #
 # SSOT (parsed at run time, never hardcoded): .github/workflows/prebuild.yml's `build` job matrix.
-# Each `include:` entry pairs a `platform:` value with an `os:` value; this script extracts both,
-# derives the platform whose `os:` mentions "windows" (today `win32-x64-msvc`, from
+# Each `include:` entry pairs a `platform:` value with an `os:` value; the SHARED reader
+# scripts/lib/release-matrix.sh extracts both (ONE parser for the three guards that read that block —
+# see its header for why), and this script derives the platform whose `os:` mentions "windows"
+# (today `win32-x64-msvc`, from
 # `os: windows-latest`), and reconstructs the valid asset-name set exactly the way the matrix's own
 # "Collect the zzop + zzop-mcp binaries" step (bash `case "${{ matrix.target }}" in *windows*) ...`)
 # and the `release` job's "Build per-platform MCPB bundles" step (`zzop-mcp-$plat.mcpb`, no
@@ -70,69 +72,71 @@ cd "$(dirname "$0")/.."
 
 # shellcheck source=scripts/lib/tracked-grep.sh
 . ./scripts/lib/tracked-grep.sh
+# shellcheck source=scripts/lib/release-matrix.sh
+. ./scripts/lib/release-matrix.sh
 
 PREBUILD=.github/workflows/prebuild.yml
-[ -f "$PREBUILD" ] || { echo "check-asset-name-prose: missing $PREBUILD" >&2; exit 1; }
 
 # --- Derive the valid platform set + which platform is Windows, from prebuild.yml's build-job matrix ---
-# Scoped tightly to the `matrix:` block (from the `matrix:` key through the line before `runs-on:`)
-# so step bodies (which also mention `platform`/`target` as `${{ matrix.* }}` interpolations) are
-# never accidentally parsed as matrix entries.
-matrix_block="$(awk '
-  /^  build:/ { inbuild = 1 }
-  inbuild && /^      matrix:/ { active = 1; next }
-  active && /^    runs-on:/ { exit }
-  active { print }
-' "$PREBUILD")"
-
-[ -n "$matrix_block" ] || {
-  echo "check-asset-name-prose: could not locate the build job's matrix block in $PREBUILD -- parse is broken" >&2
-  exit 1
-}
+# The READ is shared (2026-08-08): release_matrix_entries() does the structural walk down
+# jobs: -> build: -> strategy: -> matrix: -> include:, and owns the missing-file, broken-walk,
+# entry-without-a-platform and empty-set floors — which is why none of them is spelled again here.
+# What stays LOCAL to this guard is the INTERPRETATION of the `os:` field: "windows means `.exe`" is
+# an asset-naming rule, true nowhere else in the fleet, so it is injected at this call site instead of
+# being pushed down into the shared layer.
+matrix_records="$(release_matrix_entries check-asset-name-prose "$PREBUILD")" || exit 1
 
 platforms=()
-windows_platform=""
-current_os=""
-while IFS= read -r line; do
-  case "$line" in
-    *'- target:'*)
-      current_os=""
-      ;;
-    *'os:'*)
-      current_os="$(printf '%s' "$line" | sed -E 's/^[[:space:]]*os:[[:space:]]*//')"
-      ;;
-    *'platform:'*)
-      plat="$(printf '%s' "$line" | sed -E 's/^[[:space:]]*platform:[[:space:]]*//')"
-      platforms+=("$plat")
-      case "$current_os" in
-        *windows*) windows_platform="$plat" ;;
-      esac
-      ;;
+windows_platforms=""
+while IFS=$'\t' read -r plat os; do
+  [ -n "$plat" ] || continue
+  platforms+=("$plat")
+  case "$os" in
+    *windows*) windows_platforms="$windows_platforms $plat" ;;
   esac
-done <<< "$matrix_block"
+done <<< "$matrix_records"
 
+# Belt for the layer's own floor: the shared reader already refuses to return an empty record list, and
+# prebuild.yml's stamping loop keeps exactly this belt for exactly this reason — a chain whose first
+# link can silently produce nothing is a chain that gets diagnosed from the wrong end.
 [ "${#platforms[@]}" -gt 0 ] || {
   echo "check-asset-name-prose: extracted 0 platforms from $PREBUILD's matrix -- parse is broken" >&2
   exit 1
 }
-[ -n "$windows_platform" ] || {
+[ -n "$windows_platforms" ] || {
   echo "check-asset-name-prose: no matrix entry's os: mentions 'windows' -- cannot tell which platform gets .exe" >&2
   exit 1
 }
 
 valid_ids=()
 for plat in "${platforms[@]}"; do
-  if [ "$plat" = "$windows_platform" ]; then
-    valid_ids+=("zzop-cli-$plat.exe" "zzop-mcp-$plat.exe")
-  else
-    valid_ids+=("zzop-cli-$plat" "zzop-mcp-$plat")
-  fi
+  # A SET, not a single value: nothing in the matrix says there can be only one windows entry, and a
+  # second one (a win32-arm64 lane, say) would silently lose its `.exe` under a last-one-wins scalar.
+  case " $windows_platforms " in
+    *" $plat "*) valid_ids+=("zzop-cli-$plat.exe" "zzop-mcp-$plat.exe") ;;
+    *)           valid_ids+=("zzop-cli-$plat" "zzop-mcp-$plat") ;;
+  esac
   valid_ids+=("zzop-mcp-$plat.mcpb")
 done
 valid_ids_joined="$(printf '%s\n' "${valid_ids[@]}")"
 
 # The one real non-asset token the raw rule regex also matches — see header comment.
 extra_allowlist="zzop-cli-bin"
+
+# Liveness assert for that one exemption (2026-08-08). It is a CARGO PACKAGE NAME, so it has a source
+# of truth in the tree and does not need to be believed. Without this, renaming the package would
+# leave the allowlist alive and it would go on absolving whatever token happened to take that spelling
+# next — a real mis-spelled asset name could then ride in under the retired crate's name. Every
+# sibling guard that carries a hand exemption (overclaim, rule-desc, tree-sitter, committed-config,
+# english) makes a dead one RED; this was the fleet's one exemption with nothing behind it.
+extra_allowlist_source="packages/cli-bin/Cargo.toml"
+if ! grep -qxF "name = \"$extra_allowlist\"" "$extra_allowlist_source"; then
+  echo "check-asset-name-prose: FAILED -- the allowlisted token '$extra_allowlist' is no longer the" >&2
+  echo "  package name declared in $extra_allowlist_source. The exemption exists ONLY because that" >&2
+  echo "  crate name collides with the asset-name shape; with the crate renamed the exemption now" >&2
+  echo "  absolves an arbitrary string. Update both, or delete the exemption." >&2
+  exit 1
+fi
 
 is_valid_asset() { # $1 = candidate token (no trailing '*')
   grep -qxF "$1" <<< "$valid_ids_joined"
@@ -192,7 +196,7 @@ if [ -n "$candidate_files" ]; then
 
       echo "check-asset-name-prose: $file:$lineno: token \"$token\" is not a release asset $PREBUILD builds" >&2
       echo "  (valid asset names: zzop-cli-<platform>[.exe] / zzop-mcp-<platform>[.exe] / zzop-mcp-<platform>.mcpb," >&2
-      echo "   platforms: ${platforms[*]}, windows platform: $windows_platform)" >&2
+      echo "   platforms: ${platforms[*]}, windows platform(s):$windows_platforms)" >&2
       fail=1
     done <<< "$matches"
   done <<< "$candidate_files"

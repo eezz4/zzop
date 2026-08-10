@@ -21,6 +21,17 @@
 //!    pattern would be a regex matching EVERY name, so "declare nothing" is normalized to "match
 //!    nothing" rather than taken at face value. Turning a whole rule off is still `rules: { "<id>": "off" }`.
 //!
+//! **[`VocabularyConfig::extra_test_path_patterns`] is the one documented exception to BOTH** (2026-08-10),
+//! and the exception is principled rather than grandfathered — read its field doc before adding a second
+//! one. Both contracts above are calibrated for a vocabulary whose absence costs an UNDER-report: no name
+//! is a guard, so more routes report; no banner marks a file generated, so more exports report. Saying
+//! less than we could is a cost the caller chose. Test paths run the other way. With no default, code the
+//! language itself compiles only under `go test` is judged as shipping code, and every finding on it is a
+//! WRONG CLAIM — not silence. A different failure direction earns a different policy, so that key carries
+//! a built-in default nobody has to declare and a declaration can only ADD to it. The measurement that
+//! forced this: a tree of nothing but `handler_test.go` / `test_login.py` / `UserTests.cs` produced 14
+//! findings and 1 for the identical bytes under `tests/`.
+//!
 //! [`VocabularyConfig::built_in`] is where zzop's own suggested values live, and every entry in it names
 //! the constant the consuming rule/pass already owned — no second copy. Those values reach a run by being
 //! WRITTEN INTO THE USER'S FILE by `zzop init`, never by being assumed here: that is the whole difference
@@ -38,11 +49,15 @@
 //! the serialization, not over a hand-listed tuple), and every field must serialize unconditionally —
 //! a `#[serde(skip_serializing_if)]` would make two different vocabularies hash the same.
 
+mod normalizers;
 mod resolved;
+mod test_paths;
 
 use serde::{Deserialize, Serialize};
 
+pub use normalizers::{normalizer_for, NormalizedKey, NORMALIZED_VOCABULARY_KEYS};
 pub(crate) use resolved::ResolvedVocabulary;
+pub(crate) use test_paths::extra_test_path_tail;
 
 /// One run's declared convention vocabulary — the wire shape of the config file's `vocabulary` object
 /// (camelCase) and the engine-side field on [`crate::EngineConfig`]. Every field is optional; see the
@@ -85,6 +100,35 @@ pub struct VocabularyConfig {
     /// Directory names never walked while analyzing a tree — build output and tool state, both of which a
     /// project names itself. Carried into `DispatchConfig::skip_dirs` by the facade.
     pub skip_dirs: Vec<String>,
+    /// EXTRA path regexes this project's test code lives at, ADDED to the language conventions zzop
+    /// already knows (`zzop_core::dsl::test_path_re` — `_test.go`, `test_*.py`, `*Tests.cs`,
+    /// `FooTest.java`, `tests/`, `*.spec.ts`, …). The ONE key in this struct that is additive rather
+    /// than replacing, and the one whose built-in default applies even when the author declares nothing.
+    /// Both exceptions are argued at
+    /// [`RulePackDef::extend_test_path_exclusions`](zzop_core::RulePackDef::extend_test_path_exclusions)
+    /// — the short form is that a test convention is fixed by the LANGUAGE rather than chosen by the
+    /// project, so a missing default makes zzop judge test code as production, which is a wrong claim
+    /// and not the polite under-report every other key here degrades to.
+    ///
+    /// Declare a project's own spellings: `["(^|/)it/", "(^|/)acceptance/"]`. Each entry is a regex over
+    /// the tree-relative, forward-slash path; one that does not compile is dropped with a `warnings`
+    /// entry naming it, never a panic and never a silently inert exclusion (the same contract
+    /// `GitOptions::commit_type_patterns` states). `built_in()` ships it EMPTY, which is byte-for-byte
+    /// the undeclared behavior: the built-ins live in the shared fragment, not here, so an empty list
+    /// is not "no test paths" — it is "nothing beyond the ones every Go/Python/C#/Java/TS project
+    /// already has".
+    ///
+    /// Reaches the rules through `pipeline::gate_pack_rules`, which rewrites the
+    /// `file_exclude_pattern` of every rule that declined `${test-paths…}`. Per TREE by construction:
+    /// each tree carries its own `EngineConfig` and its own packs, so one root's declaration can never
+    /// reach another's.
+    ///
+    /// ONE bundled rule is out of its reach — `reliability/sync-fs-in-handler`, which excludes through a
+    /// pack-LOCAL extension of the shared vocabulary rather than the shared vocabulary itself. It still
+    /// carries every built-in language convention; it just will not learn a project's extra arm. The
+    /// mechanism and why it cannot be closed cheaply are at
+    /// `zzop_core::dsl::fragments::is_shared_test_path_vocabulary`.
+    pub extra_test_path_patterns: Vec<String>,
     /// The zero-argument accessor this project calls to reach its ORM client — the anchor of the
     /// `getPrisma().<model>.<method>()` shape the `db-table` consume recognizer keys off
     /// (`zzop_parser_typescript::PRISMA_CLIENT_GETTER`). CACHED IR lane.
@@ -184,7 +228,7 @@ pub struct VocabularyConfig {
     pub router_names: Vec<String>,
     /// Directory names this project treats as shared/cross-cutting infrastructure rather than a layer, so
     /// they are exempt from upward-import and sibling-cross violations
-    /// (`zzop_metrics::DEFAULT_HIERARCHY_SHARED_DIRS`). A DIFFERENT axis from [`FsdVocab::shared`] despite
+    /// (`zzop_metrics::DEFAULT_HIERARCHY_SHARED_DIRS`). A DIFFERENT axis from [`FeatureSlicedDesignVocab::shared`] despite
     /// the overlapping words — see that field.
     pub hierarchy_shared_dirs: Vec<String>,
     /// This project's Feature-Sliced Design layout. Nested rather than flattened into four sibling keys
@@ -195,14 +239,14 @@ pub struct VocabularyConfig {
     ///
     /// Nesting changes no contract: replacement granularity is the LEAF, exactly as `packs.disabled` does
     /// not clear `packs.extraDirs` and `git.since` does not clear `git.recentDays`.
-    pub fsd: FsdVocab,
+    pub feature_sliced_design: FeatureSlicedDesignVocab,
 }
 
 /// The Feature-Sliced Design layer names a project picks — the nested half of
-/// [`VocabularyConfig::fsd`]. Every field follows the same declared-or-not-judged rule as its parent.
+/// [`VocabularyConfig::feature_sliced_design`]. Every field follows the same declared-or-not-judged rule as its parent.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
-pub struct FsdVocab {
+pub struct FeatureSlicedDesignVocab {
     /// Directories whose children are slices (`zzop_metrics::DEFAULT_FSD_SLICE_CONTAINERS`). A project
     /// spelling this `modules` scores every cross-module import as cross-slice until it says so.
     pub slice_containers: Vec<String>,
@@ -226,4 +270,5 @@ pub struct FsdVocab {
 /// takes the resolved value as an argument) because a declarable vocabulary has exactly one default and
 /// this module is where every one of them is assembled.
 pub(crate) const DEFAULT_JAVA_SOURCE_ROOT: &str = "src/main/java/";
+
 mod built_in;

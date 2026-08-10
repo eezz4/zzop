@@ -1,24 +1,23 @@
 //! `zzop-parser-java-21` — a `tree-sitter-java`-based Java parser frontend -> Common IR projection,
 //! mirroring `zzop-parser-go`'s tree-sitter discipline exactly (grammar AST types stay inside this
 //! crate; only `zzop_core` types cross the crate boundary — enforced by
-//! `scripts/check-tree-sitter-isolation.sh`'s allowlist). At full parity with the retired lexical Java
-//! extractor's public duties, plus AST precision gains where the task brief calls for them (M2 Spring
-//! provides, in particular).
+//! `scripts/check-tree-sitter-isolation.sh`'s allowlist).
 //!
-//! ## Layout
+//! ## 2-layer layout
 //! - `lang` — CST -> Common-IR LANGUAGE projection: `SourceSymbol` extraction (`symbols`, including
-//!   method/constructor BODY SPANS — the lexical extractor's method-scan parity surface), `ImportMap`
-//!   extraction (`imports`), identifier-reference collection (`used_names`), and same-file call-site
-//!   extraction (`calls`, `RawCall`s feeding the whole-repo call-graph `SymbolGraph`).
-//! - `provides` — Spring MVC HTTP route PROVIDES, AST-grade reimplementation of the retired lexical
-//!   Java `provides` extractor (parity-first: same annotation vocabulary, same keying, same never-guess
-//!   rules; ported as this module's own test fixtures).
-//! - `project` — the whole-corpus Spring provides pass (the retired lexical extractor's project-pass
-//!   equivalent): cross-file class-level `@RequestMapping` constant resolution and CE-split
-//!   `extends`-chain gating.
-//! - `http_clients` — Spring `RestTemplate`/`WebClient` literal HTTP egress CONSUMES, the consume-side
-//!   counterpart of `provides` (closed the "half a join" gap disclosed on [`FRAMEWORK_RECOGNIZERS`]).
-//! - `jpa` — JPA `@Entity`/`@Table` `db-table` PROVIDES, the Java member of the ORM db-table family.
+//!   method/constructor BODY SPANS), `ImportMap` extraction (`imports`), identifier-reference
+//!   collection (`used_names`), and same-file call-site extraction (`calls`, `RawCall`s feeding the
+//!   whole-repo call-graph `SymbolGraph`).
+//! - the crate-root sibling modules — framework-vocabulary producers emitting cross-layer IO facts
+//!   (route PROVIDES both per-file and over the whole corpus, literal HTTP egress CONSUMES, ORM
+//!   `db-table` facts, and AUTH-GUARD evidence feeding the framework-neutral `auth-guarded` channel).
+//!   WHICH frameworks and WHICH channels is deliberately not restated here: [`FRAMEWORK_RECOGNIZERS`]
+//!   below is the machine-verified answer (aggregated by `zzop_engine::framework_recognizers`, checked by the
+//!   engine's `rule_contracts::recognizer_channels` test). A prose copy is a second count that nothing
+//!   verifies, and this one had already drifted — it named four producers and went silent on a whole
+//!   channel whose two modules sit in the `pub mod` block below. WHICH channel is recorded once, in
+//!   `scripts/check-framework-prose-enumeration.sh`; naming it here would put the name back in the
+//!   paragraph that must not carry names.
 //!
 //! ## Tree-sitter discipline (mirrors `zzop_parser_go`'s crate-root doc verbatim — see that crate for
 //! the fuller rationale; summarized here)
@@ -104,9 +103,10 @@ pub use spring_security::{
 };
 
 /// Cache-bust token for `zzop-cache`: `parser-id/pinned-toolchain/last-change-version`. The
-/// `tree-sitter-java` segment must match this crate's `Cargo.toml` pin (a grammar upgrade changes
-/// extraction → restamp); the trailing `CARGO_PKG_VERSION` is restamped when this crate's projected IR
-/// shape changes, else kept so warm Java caches survive the upgrade (2026-07-22 version reform).
+/// `tree-sitter-java` segment names this crate's REAL exact pin (`tree-sitter-java = "=0.23.5"` in
+/// `Cargo.toml`), so it stays accurate for whoever reads it — unlike
+/// `zzop_parser_typescript`'s caret-range label. Keeping the two in step is a courtesy to that
+/// reader, not a correctness duty.
 ///
 /// **This string is an ID, not a version — it no longer has to be bumped.** `crates/engine/build.rs`
 /// hashes this crate's whole dependency closure into the cache key beside it, so a change to any
@@ -175,7 +175,9 @@ pub fn count_loc(text: &str) -> u32 {
 
 /// Language projection: source -> `(symbols, imports, loc, used_names)`, the tuple mirroring
 /// `zzop_parser_go::parse_go`'s pipeline slot shape. Returns `None` when `parse_tree` fails on `text` —
-/// the caller degrades to the lexical `zzop-parser-java` fallback (wiring batch's job, not this crate's).
+/// what the caller does with that is the caller's business (today
+/// `zzop_engine::pipeline::parsers::parse_java21` flags the file `degraded` and contributes no symbols
+/// or imports for it; there is no second Java frontend to fall back to).
 pub fn parse_java(
     rel: &str,
     text: &str,
@@ -197,9 +199,9 @@ pub fn parse_java(
 
 /// This file's `package a.b.c;` declaration, dotted, verbatim — `None` when absent (the default
 /// package, or a parse failure). The engine builds a `(package, type)` -> file index from this and
-/// [`java_type_names`] for cross-file import resolution (the `project.rs`-equivalent building block the
-/// wiring batch needs; the old lexical crate had no such fn, since its own whole-corpus pass resolved
-/// classes by SIMPLE NAME only — see `project`'s module doc).
+/// [`java_type_names`] for cross-file import resolution (`zzop_engine::pipeline::java_index`). Note
+/// this is a SHARPER key than `project`'s own resolution uses — that pass matches classes by SIMPLE
+/// NAME only and counts the ambiguity instead (`ProjectProvidesReport::skipped_ambiguous_class_name`).
 pub fn java_package_of(text: &str) -> Option<String> {
     let tree = parse_tree(text)?;
     for child in util::valid_named_children(tree.root_node()) {

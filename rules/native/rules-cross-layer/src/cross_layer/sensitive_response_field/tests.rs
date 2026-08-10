@@ -92,6 +92,61 @@ fn fp_adversarial_benign_names_stay_silent() {
     );
 }
 
+/// The built-in vocabulary's KNOWN BOUNDARY, pinned in both directions. Every name here was measured
+/// against this repo's own corpus (513 response fields) and the values were then deliberately left
+/// alone — moving them trades one error class for another (`session` as a substring opens
+/// `sessionCount`), and a project that disagrees declares its own list, which replaces the built-in
+/// whole. So the boundary is DISCLOSED rather than fixed, in `docs/rules/catalog.md`.
+///
+/// This test is what makes the disclosure honest. It is a documentation pin, not a correctness pin:
+/// it asserts the CURRENT behaviour of names the catalog names out loud, so that a future edit which
+/// quietly makes the heuristic smarter turns this red and forces the published sentence to move with
+/// it. Without it the catalog's boundary paragraph would be prose nothing checks.
+///
+/// It also closes the one axis the FP-adversarial negative above cannot reach. That test's names
+/// (`tokenCount`, `contentHash`, `publicKey`) are all exact/suffix look-alikes, so they pass
+/// STRUCTURALLY — none of them can fail a substring rule. These do: `passwordChangedAt` and
+/// `hasPassword` are credential METADATA (a timestamp, a boolean) that the `password` substring
+/// cannot tell apart from a credential, and `credentialsRequired` is a route-policy flag.
+#[test]
+fn the_built_in_vocabularys_measured_boundary_is_pinned_in_both_directions() {
+    let fires = |field: &str| {
+        !sensitive_response_field_findings(
+            &[site("be", "GET /a", "a.ts", 1, &[field])],
+            &[],
+            SensitiveResponseVocab::built_in(),
+        )
+        .is_empty()
+    };
+
+    // FALSE POSITIVES the built-in accepts. Credential metadata caught by the `password`/`credential`
+    // SUBSTRINGS, and pagination cursors caught by the `token` SUFFIX — a cursor is opaque state, not
+    // a secret, but it is spelled exactly like one.
+    for name in [
+        "passwordChangedAt",
+        "hasPassword",
+        "credentialsRequired",
+        "nextPageToken",
+        "continuationToken",
+    ] {
+        assert!(
+            fires(name),
+            "{name} is a DISCLOSED false positive of the built-in vocabulary — if it stopped firing, \
+             the known-boundary section of docs/rules/catalog.md has to stop saying it does"
+        );
+    }
+
+    // FALSE NEGATIVES the built-in accepts. Real credential-bearing names that no axis reaches:
+    // `session`/`auth`/`cookie` are not substrings, none is an exact token, and none ends in `token`.
+    for name in ["sessionId", "authorization", "cookie"] {
+        assert!(
+            !fires(name),
+            "{name} is a DISCLOSED false negative of the built-in vocabulary — if it started firing, \
+             the known-boundary section of docs/rules/catalog.md has to stop saying it does not"
+        );
+    }
+}
+
 #[test]
 fn consumed_route_escalates_to_critical_with_consumer_count() {
     let sites = vec![site("be", "GET /me", "c.ts", 7, &["passwordHash"])];

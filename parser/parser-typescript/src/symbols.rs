@@ -81,7 +81,16 @@ pub fn parse_symbols_with_vocab(
                         .ident
                         .as_ref()
                         .map_or_else(|| "default".into(), |i| i.sym.to_string());
-                    emit_class(&cm, file, name, &ce.class, true, true, &mut out);
+                    emit_class(
+                        &cm,
+                        file,
+                        name,
+                        &ce.class,
+                        true,
+                        true,
+                        &object_lits_by_name,
+                        &mut out,
+                    );
                 }
                 DefaultDecl::TsInterfaceDecl(_) => {}
             },
@@ -179,6 +188,7 @@ fn emit_decl(
             &c.class,
             exported,
             is_default,
+            object_lits_by_name,
             out,
         ),
         Decl::TsInterface(i) => out.push(simple_symbol(
@@ -227,10 +237,12 @@ fn emit_var_declarator(
                 Some(Expr::Fn(f)) => Some(f.function.span),
                 _ => None,
             };
+            // `body_start` is the DECLARATOR's own line (`zzop_core::SourceSymbol`'s "Body span
+            // contract"); the function value supplies only the END.
             let (kind, body_start, body_end) = match fn_span {
                 Some(sp) => (
                     SourceSymbolKind::Function,
-                    Some(line_of(cm, sp.lo)),
+                    Some(line),
                     Some(line_of(cm, sp.hi)),
                 ),
                 None => (SourceSymbolKind::Const, None, None),

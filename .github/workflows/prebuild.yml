@@ -5,18 +5,21 @@
 # `@zzop/cli` is a zero-logic shim that spawns the native `zzop` binary shipped in its own platform
 # sub-packages. Runs on `workflow_dispatch`, a `v*` tag push, and every push to `main`.
 #
-# The `meta` job (first, needs nothing) decides whether a run releases and what version it releases:
-# on a tag push it reads the tag and always releases; on a `main` push it reads the version SSOT —
-# Cargo.toml's `[workspace.package] version` — and, unless `v<version>` already exists on the remote,
-# creates and pushes that tag itself (autotagging). A `GITHUB_TOKEN` tag push does NOT retrigger
-# workflows, so this SAME run continues on as the release — there is no second, competing run. If the
-# tag already exists, the push is an ordinary build-only run (release=false). `workflow_dispatch` never
-# releases. Every gate that used to read `startsWith(github.ref, 'refs/tags/v')` (verify-plugin-version,
-# the MCPB per-platform version stamp, `release`, `publish`) now reads `needs.meta.outputs.release`, and
-# every version that used to come from `GITHUB_REF_NAME` now comes from `needs.meta.outputs.version`.
-# `meta` also checks `.claude-plugin/plugin.json`'s version against Cargo.toml BEFORE autotagging, so a
-# forgotten plugin-version bump blocks the tag itself on the main-push path (the standalone
-# verify-plugin-version job still re-checks it as a belt, covering the manual-tag path too).
+# The `meta` job decides whether a run releases and what version it releases. The AUTOTAG path is the
+# ONLY release path (2026-08-09): on a `main` push it reads the version SSOT — Cargo.toml's
+# `[workspace.package] version` — and, unless `v<version>` already exists on the remote, creates and
+# pushes that tag itself, AFTER the full CI gate (`needs: [gate]`) and the version-propagation checks
+# below have passed. A `GITHUB_TOKEN` tag push does NOT retrigger workflows, so this SAME run
+# continues on as the release — there is no second, competing run. If the tag already exists, the
+# push is an ordinary build-only run (release=false). `workflow_dispatch` never releases. A MANUAL
+# `v*` tag push is forbidden — meta's own tag-push branch fails loud, and that branch is the ONLY
+# defense today: a repo ruleset blocking v* tags at the remote is desired but platform-blocked on
+# this personal repo (see that branch's comment for the measurement, and for the five incidents
+# that bought the ban). Every
+# gate reads `needs.meta.outputs.release`, and every version comes from `needs.meta.outputs.version`.
+# `meta` checks `.claude-plugin/plugin.json`'s version against Cargo.toml BEFORE autotagging, so a
+# forgotten plugin-version bump blocks the tag itself (the standalone verify-plugin-version job still
+# re-checks it as a belt).
 #
 # A release attaches the 5 platform `zzop`/`zzop-mcp` binaries PLUS per-platform MCPB (`.mcpb`) Desktop
 # bundles to the GitHub release (job `release`) and separately publishes the npm packages (job
@@ -68,15 +71,28 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$GITHUB_EVENT_NAME" = "push" ] && [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            # Manual tag push: the tag itself is this run's version SSOT (current behavior).
-            VERSION="${GITHUB_REF_NAME#v}"
-            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-            echo "release=true" >> "$GITHUB_OUTPUT"
-            echo "Tag push: releasing $VERSION (from $GITHUB_REF_NAME)."
+            # Manual tag push: FORBIDDEN since 2026-08-09. Five releases' worth of shipped incidents
+            # (v0.24.0 push-protection cut, v0.25.0 untested tag ref, v0.26.0 stale server.json,
+            # v0.28.0 permanently-red tag CI, v0.29.0 registry duplicate rejection) shared exactly one
+            # edge — a hand-pushed tag exists before any gate can run, and a pushed tag can never be
+            # moved. The autotag path below is now the ONLY way a release tag is minted: gate-green
+            # first (`needs: [gate]`), version SSOT checked first, tag last. This exit-1 branch is
+            # the ONLY defense against a hand-pushed tag today — there is NO repo ruleset behind it,
+            # and that is the intended state, not an oversight (measured 2026-08-10: the repo's
+            # rulesets list is []). A ruleset on refs/tags/v* would need a bypass for the GitHub
+            # Actions app so the autotag's own push still passes, and a personal repo cannot grant
+            # one (the REST API answers 422 for an app bypass actor; the UI's bypass modal offers no
+            # Apps entry) — while a bypass-LESS ruleset would block the autotag itself. So zero
+            # rulesets it is; revisit if the repo ever moves to an org, or if GitHub adds app-bypass
+            # support on personal repos. Until then this branch fails LOUD so the old lane cannot
+            # silently revive. Nothing ships either way: every release/publish job keys off
+            # needs.meta.outputs.release.
+            echo "::error::Manual v* tags are forbidden (2026-08-09) — push the version bump to main and let the gate-checked autotag mint the tag (see this file's header). This run releases nothing."
+            exit 1
           elif [ "$GITHUB_EVENT_NAME" = "push" ] && [ "$GITHUB_REF" = "refs/heads/main" ]; then
             # main push: Cargo.toml [workspace.package] version is the SSOT. A forgotten
             # .claude-plugin/plugin.json bump blocks the autotag here, before any tag is created —
-            # the standalone verify-plugin-version job re-checks this too (belt, covers manual tags).
+            # the standalone verify-plugin-version job re-checks this too (belt).
             VERSION=$(grep -m1 '^version = "' Cargo.toml | sed -E 's/^version = "(.*)"/\1/')
             PLUGIN_VERSION=$(jq -r '.version' .claude-plugin/plugin.json)
             if [ "$PLUGIN_VERSION" != "$VERSION" ]; then
@@ -301,9 +317,10 @@ jobs:
             echo ".claude-plugin/marketplace.json version ($MARKETPLACE_VERSION) matches release version $VERSION."
           fi
       - name: Verify server.json's committed versions match the release version
-        # Belt for the `meta` autotag gate above (covers the manual-tag path). `publish-mcp-registry`
-        # overwrites these before publishing, so this protects READERS of the repo, not the registry
-        # payload — see that gate's comment for why a stale placeholder is worth failing a run over.
+        # Belt for the `meta` autotag gate above (defense in depth — the manual-tag path it once
+        # covered is forbidden since 2026-08-09). `publish-mcp-registry` overwrites these before
+        # publishing, so this protects READERS of the repo, not the registry payload — see that
+        # gate's comment for why a stale placeholder is worth failing a run over.
         env:
           VERSION: ${{ needs.meta.outputs.version }}
         run: |
@@ -327,13 +344,64 @@ jobs:
   # and `pull_request`, NEITHER of which a tag push matches, while prebuild fires on `tags: [v*]`.
   # Its `build` job is `cargo build` with no test step. So `git push origin v0.25.0` published npm, MCPB
   # and the MCP registry from a ref on which nothing had ever run. Not a hypothetical: it is how every
-  # release to date shipped, and it made all 23 guards optional at the only moment they matter.
+  # release to date shipped, and it made the ENTIRE guard fleet optional at the only moment they matter.
+  # (No count here on purpose: this comment said "all 23 guards" while the fleet stood at 27, and
+  # nothing reads workflow comments. `ls scripts/check-*.sh | wc -l` answers it, always correctly.)
   #
   # It is a NEEDS edge rather than a copy of the steps — see ci.yml's own `workflow_call` comment.
   gate:
     uses: ./.github/workflows/ci.yml
+  # Sigstore provenance for the built binaries — PUBLISH-ONLY, by decision (2026-08-09, U82).
+  #
+  # What this closes: the one axis SHA256SUMS cannot — a compromised release origin. The sums file
+  # lives beside the assets, so whoever can swap an asset can swap the sums; an attestation's trust
+  # root is the workflow's OIDC identity, which a release-page attacker does not hold. Anyone can
+  # verify manually: `gh attestation verify <file> --repo eezz4/zzop`.
+  #
+  # What this deliberately does NOT do: the plugin bootstrap hook is UNCHANGED. Its contract is
+  # bash+curl only (hook header §PLATFORMS), `gh` is common but not guaranteed there, and a
+  # "verify if the verifier happens to be installed" branch is the conditional-skip shape this
+  # repo's guards forbid — an environment without `gh` would silently skip and read as verified.
+  # Requiring it would break plugin install for every gh-less machine. So: publish now (cost: this
+  # one job), let humans verify by hand, and if the hook ever adopts it the attestations are
+  # already there for every release since this one.
+  #
+  # A SEPARATE job on purpose: attesting needs `id-token: write`, and the `release` job holds
+  # `contents: write` — combining them would hand one job both "rewrite the assets" and "mint
+  # provenance", so a single compromised step there could ship forged bytes AND attest them. This
+  # job gets the attest permissions and nothing else, and it attests the BUILD artifacts (the same
+  # bytes `release` downloads), not the release page — so a later asset swap fails verification,
+  # which is the point. The 5 .mcpb bundles are NOT attested: they are assembled inside `release`
+  # after this fork, and attesting re-downloaded release assets would launder exactly the swap this
+  # exists to catch. Their integrity rides SHA256SUMS + the MCP registry's cross-origin hash.
+  attest:
+    needs: [build, meta]
+    if: needs.meta.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      attestations: write
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: zzop-mcp-*
+          path: artifacts
+          merge-multiple: true
+      - uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: artifacts/*
+
   release:
-    needs: [build, verify-plugin-version, meta, gate]
+    # `attest` is in needs so a FAILED attestation blocks the release instead of shipping an
+    # unattested one silently (until 2026-08-10 attest was a needs-less sibling: its failure changed
+    # nothing downstream, so "every release is attested" held only while attest happened to be
+    # green). Semantics chosen, spelled out: on a build-only run attest is SKIPPED (its `if:` is
+    # false) and a skipped need skips the dependent — but release already carried a need with that
+    # exact `if:` (verify-plugin-version), so build-only runs skipped release before this edge and
+    # still do, identically. On a release run, release now additionally waits for a SUCCESSFUL
+    # attest; that wait is the entire point of the edge.
+    needs: [build, verify-plugin-version, meta, gate, attest]
     if: needs.meta.outputs.release == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -385,15 +453,41 @@ jobs:
             plat=${base#zzop-mcp-}; plat=${plat%.exe}   # <platform>
             os=${plat%%-*}                              # <platform>'s OS: win32 | darwin | linux
             rm -rf out && mkdir -p out/bin
+            # `exe` is derived from the SAME case arm that stages the binary, so the manifest's
+            # entry_point/command below always name exactly the file that sits next to them in the
+            # bundle. The committed manifest says `bin/zzop-mcp` and the win32 bundles stage
+            # `bin/zzop-mcp.exe`; Desktop reportedly auto-appends `.exe` on Windows, but that
+            # behavior is undocumented and this lane has never been live-validated, so the win32
+            # manifests spell the `.exe` explicitly rather than lean on it.
             case "$base" in
-              *.exe) cp "$f" out/bin/zzop-mcp.exe ;;
-              *)     cp "$f" out/bin/zzop-mcp && chmod +x out/bin/zzop-mcp ;;
+              *.exe) exe=".exe"; cp "$f" out/bin/zzop-mcp.exe ;;
+              *)     exe="";     cp "$f" out/bin/zzop-mcp && chmod +x out/bin/zzop-mcp ;;
             esac
-            jq --arg os "$os" '.compatibility.platforms=[$os]' manifest.stamped.json > out/manifest.json
+            # The null-guard is load-bearing, not defensive tic: jq's `+=` on a MISSING key does not
+            # error — `null + ".exe"` fabricates the string ".exe" (and `null + ""` fabricates ""),
+            # so a manifest that lost `entry_point` or `mcp_config.command` would ship bundles whose
+            # entry point IS the literal ".exe", and the `validate` below would pass them (the mcpb
+            # schema types both fields as a plain string; verified against @anthropic-ai/mcpb@2's own
+            # validator, which accepts the fabricated value). Fail loudly here instead.
+            jq --arg os "$os" --arg exe "$exe" \
+              'if .server.entry_point == null or .server.mcp_config.command == null then
+                 error("manifest.stamped.json (from packages/mcpb/manifest.json) is missing .server.entry_point or .server.mcp_config.command -- refusing to stamp: += on a missing key would fabricate \".exe\" from nothing and the mcpb schema (a plain string check) would validate it")
+               else
+                 .compatibility.platforms=[$os]
+                 | .server.entry_point+=$exe
+                 | .server.mcp_config.command+=$exe
+               end' \
+              manifest.stamped.json > out/manifest.json
             # Validates each SHIPPED manifest (they now differ per bundle), which doubles as the enum
             # gate on $os — a platform name whose first segment is not an OS the schema knows fails
             # here instead of shipping.
-            npx -y @anthropic-ai/mcpb@latest validate out/manifest.json
+            # MAJOR-PINNED, for the reason spelled out at `npm@12` below: this job holds
+            # `permissions: contents: write`, so whatever `npx` fetches here can rewrite the very
+            # release assets SHA256SUMS was computed over. `@latest` in that position means an
+            # unreviewed MAJOR can arrive between our releases, into a lane that has no rehearsal —
+            # which is exactly how the v0.7.0 publish died. `@2` keeps every 2.x patch and minor and
+            # moves the decision to adopt 3 to a human. Latest at pin time: 2.1.2 (2026-08-09).
+            npx -y @anthropic-ai/mcpb@2 validate out/manifest.json
             # A `.mcpb` is installed and then run offline, so the license texts have to travel INSIDE
             # the bundle — a link back to the repo is not a copy of the license, and the third-party
             # notices cover statically-linked crates whose licenses require the notice to accompany
@@ -413,7 +507,29 @@ jobs:
           VERSION: ${{ needs.meta.outputs.version }}
         run: |
           TAG="v$VERSION"
-          gh release upload "$TAG" mcp-artifacts/* ./*.mcpb LICENSE THIRD-PARTY-NOTICES.md --clobber
+          # SHA256SUMS over the BARE binaries. Until 2026-08-08 the only digest this repo computed was
+          # over the `.mcpb` bundles (for `server.json`), while the asset the plugin's SessionStart
+          # hook actually downloads and chmod +x's is the bare binary — nothing anywhere hashed it.
+          #
+          # WHAT THIS DOES AND DOES NOT BUY, stated here because the honest scope is narrow: it detects
+          # a truncated or corrupted download, and it gives anyone who obtained the digest through a
+          # DIFFERENT channel something to compare against. It does NOT defend against a compromised
+          # release origin — an attacker who can replace an asset can replace this file beside it —
+          # and it adds nothing against MITM, which TLS already refuses. Closing the origin-compromise
+          # axis needs a signature whose trust root is not this same release page (artifact
+          # attestation), which is a separate decision because the consumer is a bash+curl hook.
+          # Do not describe this file as supply-chain integrity.
+          (cd mcp-artifacts && sha256sum ./* > ../SHA256SUMS)
+          # The `.mcpb` bundles too, appended from the workspace root where the loop above built them.
+          # They were missing until 2026-08-09, which meant SHA256SUMS covered 10 of the 15 payload
+          # assets while being named as though it covered all of them — and the five it skipped are
+          # exactly the ones the docs tell a human to drag-and-drop off this page by hand. The bare
+          # binaries at least have the plugin hook verifying them; a `.mcpb` had no digest anywhere a
+          # Desktop user could reach. `sha256sum ./*.mcpb` keeps the same `./name` spelling as the
+          # block above, which is what bootstrap.sh's `sub(/^\.\//, "", n)` lookup expects.
+          sha256sum ./*.mcpb >> SHA256SUMS
+          cat SHA256SUMS
+          gh release upload "$TAG" mcp-artifacts/* ./*.mcpb SHA256SUMS LICENSE THIRD-PARTY-NOTICES.md --clobber
 
   # Only runs when `meta` says this run releases. The release version is the single source of truth
   # for the published version: this job overwrites every package.json's committed version with it, so
@@ -456,7 +572,9 @@ jobs:
         # WHY THE MAJOR STAYS PINNED even though 12.0.1 is fixed. Re-read the incident: the break arrived
         # ONE DAY AFTER `@latest` floated onto a new major. The thing that hurt was not npm 12 — it was an
         # unreviewed MAJOR arriving between our releases, into a lane that has no rehearsal. `release` and
-        # `publish` are SIBLINGS (same `needs:`), so they run in parallel: a broken npm 13 would let the
+        # `publish` run in parallel (both start once `gate`/`meta` clear; `release` additionally waits on
+        # `attest`, which `publish` deliberately does not — `npm publish --provenance` mints its own
+        # sigstore attestation): a broken npm 13 would let the
         # GitHub release and all five .mcpb bundles ship while `npm publish` dies here, leaving a
         # half-shipped release. `npm@12` costs nothing, keeps every 12.x patch and minor, and moves the
         # decision to adopt 13 to a human. Re-evaluate when there is a reason to want 13, not on a date.
@@ -548,8 +666,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install mcp-publisher
+        env:
+          # TAG-PINNED, not `releases/latest`. This step used to curl `releases/latest` straight into
+          # `tar xz` with no version and no checksum, and the binary it produces is then run as
+          # `./mcp-publisher login github-oidc` in a job holding `id-token: write` for the
+          # `io.github.eezz4` namespace — i.e. an unreviewed upstream major could publish a
+          # `server.json` pointing every registry client at somebody else's `.mcpb`. Same argument as
+          # `npm@12` in the `publish` job, with a larger blast radius. Bump this deliberately, after
+          # reading the upstream release notes; do not float it.
+          MCP_PUBLISHER_TAG: v1.8.1
         run: |
-          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+          set -euo pipefail
+          ver="${MCP_PUBLISHER_TAG#v}"
+          asset="mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz"
+          base="https://github.com/modelcontextprotocol/registry/releases/download/$MCP_PUBLISHER_TAG"
+          # `-f` so a 404 (a retagged or withdrawn release) fails here instead of writing GitHub's
+          # error page to disk and dying later inside `tar` with an unrelated message.
+          curl -fsSL -o "$asset" "$base/$asset"
+          curl -fsSL -o mcp-publisher-checksums.txt "$base/registry_${ver}_checksums.txt"
+          # SCOPE, stated as narrowly as this repo states its own: the checksums file lives on the
+          # SAME release page as the asset, so this catches a corrupted or truncated download and
+          # nothing more — anyone who can replace the asset can replace this file beside it. It is
+          # the TAG PIN above that does the real work. Non-vacuous: `--ignore-missing` skips the
+          # entries for other platforms, but GNU sha256sum still exits 1 with "no file was verified"
+          # if our asset is absent from the list, so a renamed upstream asset fails loudly.
+          sha256sum -c --ignore-missing mcp-publisher-checksums.txt
+          tar xzf "$asset" mcp-publisher
       - name: Download the release's .mcpb bundles (to hash for server.json)
         env:
           GH_TOKEN: ${{ github.token }}
@@ -675,7 +817,12 @@ jobs:
           out=$(./mcp-publisher publish 2>&1) && rc=0 || rc=$?
           printf '%s\n' "$out"
           [ "$rc" -eq 0 ] && exit 0
-          if printf '%s' "$out" | grep -q 'cannot publish duplicate version'; then
+          # Herestring, NOT `printf ... | grep -q`: under the `pipefail` above, grep -q exits on the
+          # first match and a producer with more than a pipe buffer left to write dies with SIGPIPE,
+          # so the pipeline reports FAILURE on a real match — this branch would stop forgiving the
+          # duplicate exactly when the publisher is chatty. That is the sealed class in
+          # `scripts/check-shell-pipe-sigpipe.sh`; this line predated that guard's reach.
+          if grep -q 'cannot publish duplicate version' <<< "$out"; then
             echo "::notice::$(jq -r .version server.json) is already on the MCP registry — nothing to do, treating as published."
             exit 0
           fi

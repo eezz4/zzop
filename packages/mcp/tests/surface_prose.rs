@@ -16,19 +16,35 @@
 
 const BIN_SOURCE: &str = include_str!("../../cli-bin/src/main.rs");
 
-/// Pulls the literal contents of `const USAGE: &str = "...";` out of the CLI's main.rs source. A plain
-/// substring search over `BIN_SOURCE` (below) would also match the module doc comment's own
-/// worked-example lines (5-14), so tests that care about the USAGE string specifically (as opposed
-/// to "does this drift class matter anywhere in the file") isolate it first.
+/// Pulls the usage string literal out of the CLI's main.rs source. A plain substring search over
+/// `BIN_SOURCE` (below) would also match the module doc comment's own worked-example lines (5-14), so
+/// tests that care about the usage string specifically (as opposed to "does this drift class matter
+/// anywhere in the file") isolate it first.
+///
+/// # Why the anchor is the string's own first bytes
+/// This used to key on `const USAGE: &str = "`, which is the DECLARATION rather than the prose, and it
+/// broke on 2026-08-06 when the usage line stopped being a const: the graph domain list had to be
+/// derived from `GraphDomain::WIRE_NAMES` instead of spelled by hand, which makes it a `format!` inside
+/// a function. Nothing about the contract this test pins had changed. Anchoring on `"usage: zzop <` —
+/// the literal's own opening bytes — survives any spelling of the item that holds it, and still fails
+/// loudly if the prose itself is renamed, which is the only rename this test should care about.
+///
+/// The extracted text may contain `{}` placeholders. That is harmless here and deliberately not
+/// interpolated: every subject below is a substring check for a subcommand phrase or a mode word, none
+/// of which live inside a placeholder. A test that needs the RENDERED line must spawn the binary — this
+/// one is about the prose a maintainer edits.
 fn usage_line() -> &'static str {
-    const MARKER: &str = "const USAGE: &str = \"";
-    let start = BIN_SOURCE
-        .find(MARKER)
-        .expect("USAGE const not found in packages/cli-bin/src/main.rs — did it get renamed?");
-    let after = &BIN_SOURCE[start + MARKER.len()..];
+    const MARKER: &str = "\"usage: zzop <";
+    let start = BIN_SOURCE.find(MARKER).expect(
+        "the usage string literal (`\"usage: zzop <...`) was not found in \
+         packages/cli-bin/src/main.rs — did the prose get renamed, or did it leave this file?",
+    );
+    // Past the opening quote, up to the closing one. The literal contains no escaped quotes (it is a
+    // flat one-line argument grammar), so the next `"` ends it.
+    let after = &BIN_SOURCE[start + 1..];
     let end = after
-        .find("\";")
-        .expect("USAGE const literal not terminated with `\";` in packages/cli-bin/src/main.rs");
+        .find('"')
+        .expect("the usage string literal is not terminated in packages/cli-bin/src/main.rs");
     &after[..end]
 }
 

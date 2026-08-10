@@ -21,6 +21,7 @@ mod diagnostics;
 mod native_rules;
 
 pub(crate) use assemble::assemble;
+pub(crate) use diagnostics::GitCache;
 // `apply_config_mounts` and `apply_config_client_base` are re-exported here (not just privately `use`d
 // below) for the same reason as the trio above: `envelope::analyze_envelope` (Mode A) reaches them by
 // this path too, at the structurally equivalent seam its own call site documents — an origin-agnostic
@@ -40,9 +41,9 @@ pub(crate) use compose::{resolve_provide_body_refs, resolve_provide_response_ref
 // diagnostics parity with `assemble` — a `disabled_rules` typo / dead exclude filter self-reports on
 // both entry points).
 pub(crate) use diagnostics::{
-    compute_dsl_scope, pack_scope_warnings, rule_overrides_applied, run_diagnostics,
+    compute_dsl_scope_filtered, pack_scope_warnings, rule_overrides_applied, run_diagnostics,
     uncompilable_rule_warnings, unmatched_global_exclude_warnings, unmatched_suppression_warnings,
-    zero_packs_warning,
+    zero_packs_warning, DslScope,
 };
 // `envelope::analyze_envelope` also imports these four native-analysis delegates by this path (same
 // convention `circular_findings`'s own doc describes) — re-exported, not merely imported, so they stay

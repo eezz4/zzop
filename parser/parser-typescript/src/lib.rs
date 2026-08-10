@@ -6,9 +6,9 @@
 //! - `lang` — swc -> Common-IR LANGUAGE projection: call-graph construction (`calls`) and dependency-path
 //!   resolution (`resolve`). Symbol/import extraction lives in sibling crate-root modules since both `lang` and `adapters`
 //!   depend on it.
-//! - `adapters` — framework-vocabulary producers emitting `IoConsume`/`IoProvide`/fragment IR (controller
-//!   decorators, FE HTTP-call egress, tRPC routers/proxy clients, Next.js `pages/api` handlers,
-//!   Hono-style router mounts).
+//! - `adapters` — framework-vocabulary producers emitting `IoConsume`/`IoProvide`/fragment IR. WHICH
+//!   frameworks is not restated here — [`FRAMEWORK_RECOGNIZERS`] below is the machine-verified list
+//!   (engine test `rule_contracts::recognizer_channels`); the prose copy had drifted to 5 against 18.
 
 pub mod adapters;
 mod asset_refs;
@@ -70,8 +70,8 @@ pub use adapters::typeorm_repository::extract_typeorm_repository_consumes;
 pub use adapters::wrapper_calls::extract_wrapper_fragments;
 pub use lang::calls::parse_calls;
 pub use lang::resolve::{
-    build_dep, build_dep_with_workspace, resolve_file, resolve_file_with_workspace, try_ext,
-    TsconfigPaths, WorkspacePkg, RESOLVE_EXTS,
+    build_dep, build_dep_with_workspace, match_workspace_pkg, resolve_file,
+    resolve_file_with_workspace, try_ext, TsconfigPaths, WorkspacePkg, RESOLVE_EXTS,
 };
 pub use lang::write_site::write_sites_for_symbol_with_vocab;
 pub use lang::write_site::{

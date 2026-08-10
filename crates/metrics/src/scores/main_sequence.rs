@@ -77,9 +77,19 @@ pub fn compute_main_sequence(
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
+    // POPULATION (see `MainSequenceScore::classified_files`): files this run actually KNEW the
+    // abstract/concrete kind of. Counted over the modules' own file sets rather than over `kinds`, so a
+    // classifier that one day emits kinds for files outside the dep graph cannot inflate the denominator
+    // behind a distance those files never entered.
+    let classified_files = dep
+        .keys()
+        .filter(|f| module_of(cfg, f).is_some() && kinds.contains_key(*f))
+        .count() as u32;
+
     if modules.is_empty() {
         return MainSequenceScore {
             score: 100.0,
+            classified_files,
             avg_distance: 0.0,
             modules: vec![],
         };
@@ -92,6 +102,7 @@ pub fn compute_main_sequence(
         / total_files as f64;
     MainSequenceScore {
         score: ((1.0 - weighted_d) * 100.0).round(),
+        classified_files,
         avg_distance: (weighted_d * 100.0).round() / 100.0,
         modules,
     }

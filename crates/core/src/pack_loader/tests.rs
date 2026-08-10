@@ -295,6 +295,7 @@ fn applies_to_is_false_for_a_pack_with_no_rules() {
         schema_version: 1,
         fragments: Default::default(),
         rules: vec![],
+        regex_cache: Default::default(),
     };
     assert!(!applies_to(&pack, "anything.java"));
 }

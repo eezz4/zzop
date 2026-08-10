@@ -4,18 +4,18 @@
 //! call-graph-BFS native analysis (plus its own whole-tree `Matcher::IoScan` DSL sub-phase), [`warnings`]
 //! framework-silence self-report, [`metrics`] git-dependent scores. Glue only — no analysis logic here.
 
-use zzop_core::{merge_findings, CommonIr, IoFacts, MinimalIr};
+use zzop_core::{merge_findings, CommonIr, MinimalIr};
 
-use crate::analyze::diagnostics::{
-    compute_dsl_scope, global_exclude_diagnostics, minified_files_warning, pack_scope_warnings,
-    rule_overrides_applied, run_diagnostics, uncompilable_rule_warnings,
-    unmatched_suppression_warnings, unparsed_extension_warning,
-};
+use crate::analyze::diagnostics::{rule_overrides_applied, run_diagnostics};
 use crate::{pipeline::FileArtifact, AnalyzeOutput, CoverageCensus, EngineConfig};
 
 mod collect;
+// The one degraded-file record, re-surfaced for `analyze::diagnostics`' cause self-report — the census
+// that produces it and the report that reads it must not each hold their own idea of what a degrade is.
+pub(in crate::analyze) use collect::DegradedFile;
 mod declared;
 mod dep_graph;
+mod diagnose;
 // `pub(in crate::analyze)`: `native_rules::callgraph`'s python/rust arms share these predicates and resolvers, reached as `assemble::helpers::*`. (`rules` below is the other cross-mod export.)
 pub(in crate::analyze) mod helpers;
 mod metrics;
@@ -35,6 +35,7 @@ pub(crate) fn assemble(
     artifacts: Vec<FileArtifact>,
     config: &EngineConfig,
     overlay_applied: &crate::envelope::OverlayApplication,
+    git_cache: &crate::analyze::GitCache,
 ) -> AnalyzeOutput {
     let collect::Collected {
         file_count,
@@ -129,6 +130,7 @@ pub(crate) fn assemble(
         &csharp_index,
         &sfc_import_pairs,
         &ts_asset_ref_pairs,
+        git_cache,
     );
 
     let global_findings = rules::run(
@@ -167,41 +169,30 @@ pub(crate) fn assemble(
         &config.rule_config,
     );
 
-    degraded.sort();
+    degraded.sort_by(|a, b| a.rel.cmp(&b.rel));
     minified.sort();
-    let rels: Vec<&str> = loc_by_path.keys().map(String::as_str).collect();
-    // One census, three consumers: both warnings below and `packs_loaded`'s `files_in_scope` count.
-    let dsl_scope = compute_dsl_scope(&config.packs, &rels);
-    if let Some(w) = minified_files_warning(&minified, &dsl_scope.in_scope_rels) {
-        warnings.push(w);
-    }
-    warnings.extend(unparsed_extension_warning(&unparsed_extensions));
-    warnings.extend(unmatched_suppression_warnings(config, &rels));
-    warnings.extend(global_exclude_diagnostics(config, &rels));
-    warnings.extend(pack_scope_warnings(config, &dsl_scope));
-    warnings.extend(uncompilable_rule_warnings(&config.packs)); // dead rule != quiet rule
     helpers::sort_io_provides(&mut io_provides);
     helpers::sort_io_consumes(&mut io_consumes);
-
-    warnings.extend(warnings::framework_silence_warnings(
-        root,
+    let rels: Vec<&str> = loc_by_path.keys().map(String::as_str).collect();
+    let dsl_scope = diagnose::sweep(
+        &diagnose::DiagnoseInput {
+            root,
+            config,
+            rels: &rels,
+            minified: &minified,
+            degraded: &degraded,
+            unparsed_extensions: &unparsed_extensions,
+            ts_paths: &ts_paths,
+            java_rels: &java_rels,
+            csharp_rels: &csharp_rels,
+            package_import_files: &package_import_files,
+            loc_by_path: &loc_by_path,
+        },
         &io_provides,
         &io_consumes,
-        &ts_paths,
-        &java_rels,
-        &csharp_rels,
-        &package_import_files,
-        &loc_by_path,
-        &config.vocabulary.resolve().fetch_wrapper_export_names,
-    ));
-    let io = if io_provides.is_empty() && io_consumes.is_empty() {
-        None
-    } else {
-        Some(IoFacts {
-            provides: io_provides,
-            consumes: io_consumes,
-        })
-    };
+        &mut warnings,
+    );
+    let io = diagnose::fold_io(io_provides, io_consumes);
 
     let metrics::MetricsResult {
         scores,
@@ -210,6 +201,7 @@ pub(crate) fn assemble(
         critical,
         seams,
         layer_co_churn,
+        co_change,
     } = metrics::compute(
         config,
         &nodes,
@@ -275,7 +267,10 @@ pub(crate) fn assemble(
     AnalyzeOutput {
         ir,
         findings,
-        degraded,
+        // The wire field is the PATH list and stays exactly that: the cause rides the `warnings` channel
+        // (`diagnostics::degraded_files`), which is where every other "what did this run fail to see"
+        // sentence already lives, rather than widening a published array's element shape.
+        degraded: degraded.into_iter().map(|d| d.rel).collect(),
         file_count,
         coverage,
         package_imports,
@@ -288,7 +283,8 @@ pub(crate) fn assemble(
         seams,
         folders,
         layer_co_churn,
-        packs_loaded: crate::PackLoaded::from_config(config, &dsl_scope.files_in_scope_by_pack),
+        co_change,
+        packs_loaded: crate::PackLoaded::from_config(config, &dsl_scope),
         warnings,
         config_warnings,
         // Set by `analyze_tree` after this returns (needs `pipeline::run_file_pass`'s private counters).

@@ -22,11 +22,21 @@
 //! IMPLICITLY `public`), else `false`. See `symbol_exported`.
 //!
 //! ## `body_start`/`body_end`
-//! For a Class/Interface-kind symbol: `body_start` = the declaration's own START line (== `line`,
-//! including any leading annotations — mirrors the OLD lexical crate's `scan.rs` convention exactly,
-//! METHOD-SCAN PARITY), `body_end` = the type's `body` node's END line (closing `}`). For a method/
-//! constructor: `body_start`/`body_end` = the `body` block's own start/end line, `None`/`None` when no
-//! body exists at all (an abstract/interface method declared with `;`).
+//! `zzop_core::SourceSymbol`'s "Body span contract" owns the rule and this crate does not restate it:
+//! `body_start` = the declaration's own START line (annotations included, == `line`), `body_end` = the
+//! last line of what that declaration encloses (the type's / method's closing `}`). `None`/`None` when
+//! there is no body at all — an abstract or interface method declared with `;`, a compact `record
+//! Point(int x, int y);`, and every field/constant.
+//!
+//! What this crate owes ON TOP of the rule is the contract's LEAF-COMPLETENESS half, because a type
+//! here does carry a span: every scannable region of a type body must project its own leaf, or
+//! `drop_outer_spans` discards the type span in favour of some sibling's leaf and that region becomes
+//! unreachable to every method-scan rule. Initializer blocks (`static { … }` and the bare `{ … }`
+//! instance form) are that region and are emitted by `member::emit_init_block`. A field INITIALIZER
+//! expression deliberately is not: it is a single statement that cannot host the guard patterns these
+//! rules veto on, so giving it a span of its own would report every factory whose hardening lives in a
+//! `static` block or a constructor — the same call `zzop_parser_typescript` makes for a non-function
+//! `ClassProp`.
 //!
 //! ## Fields
 //! `field_declaration` (only valid inside a `class`/`record`/`enum` body) -> `Const` ONLY when BOTH
@@ -66,8 +76,7 @@ pub fn parse_symbols(rel: &str, text: &str) -> Vec<SourceSymbol> {
 
 /// `true` for a node kind this crate treats as a Java type declaration — shared with `provides`/
 /// `project` (which walk the same class/interface/enum/record/annotation-type NESTING structure this
-/// module does, for AST-native enclosing-type recognition instead of the old lexical crate's
-/// span-overlap `enclosing_class` search).
+/// module does — enclosing-type recognition is structural there, never a span-overlap search).
 pub(crate) fn is_type_decl_kind(kind: &str) -> bool {
     matches!(
         kind,
@@ -151,13 +160,16 @@ fn emit_body(
     implicit_public: bool,
     out: &mut Vec<SourceSymbol>,
 ) {
+    // One counter set per TYPE — an initializer block has no name of its own, so its ordinal must
+    // restart in each type rather than run across the file (`member::BlockOrdinals`).
+    let mut ordinals = member::BlockOrdinals::default();
     for child in valid_named_children(body) {
         if child.kind() == "enum_body_declarations" {
             for member in valid_named_children(child) {
-                member::emit_member(rel, member, src, path, implicit_public, out);
+                member::emit_member(rel, member, src, path, implicit_public, &mut ordinals, out);
             }
         } else {
-            member::emit_member(rel, child, src, path, implicit_public, out);
+            member::emit_member(rel, child, src, path, implicit_public, &mut ordinals, out);
         }
     }
 }

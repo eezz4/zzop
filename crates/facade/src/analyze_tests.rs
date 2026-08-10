@@ -146,6 +146,7 @@ fn analyze_json_top_level_key_set_is_pinned_exactly() {
         keys,
         [
             "cache",
+            "coChange",
             "configWarnings",
             "coverage",
             "critical",
@@ -206,6 +207,7 @@ fn analyze_json_top_level_key_set_with_git_signals_is_pinned_exactly() {
         keys,
         [
             "cache",
+            "coChange",
             "configWarnings",
             "coverage",
             "critical",
@@ -235,7 +237,7 @@ fn analyze_json_top_level_key_set_with_git_signals_is_pinned_exactly() {
 /// `scoreMeanings` rides exactly when `scores` does, and says something for every key `scores` carries.
 ///
 /// The pairing is the point: a legend for numbers that did not run explains nothing, and a score with
-/// no legend is the bare-acronym state this field exists to end (`sdp`, `sfc`, `lod`, `fsd` had their
+/// no legend is the bare-acronym state this field exists to end (`sdp`, `file_size_compliance`, `lod`, `feature_sliced_design` had their
 /// expansions only in Rust doc-comments — `docs/` and `site/` carried none).
 #[test]
 fn score_meanings_ride_with_scores_and_cover_every_key() {
@@ -312,6 +314,7 @@ fn analyze_json_top_level_key_set_with_rule_overrides_is_pinned_exactly() {
         keys,
         [
             "cache",
+            "coChange",
             "configWarnings",
             "coverage",
             "critical",

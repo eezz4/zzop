@@ -66,7 +66,11 @@ pub(super) fn match_http_call(call: &CallExpr) -> Option<HttpCall<'_>> {
         Expr::Ident(id) => {
             let n = id.sym.to_string();
             if n == "fetch" || n == "$fetch" {
-                let method = method_from_options(call.args.get(1)).unwrap_or_else(|| "GET".into());
+                let method = match method_from_options(call.args.get(1)) {
+                    OptionsMethod::SpecDefault => "GET".to_string(),
+                    OptionsMethod::Literal(m) => m,
+                    OptionsMethod::Unknowable => return None,
+                };
                 Some(HttpCall {
                     methods: vec![method],
                     arg,
@@ -74,10 +78,24 @@ pub(super) fn match_http_call(call: &CallExpr) -> Option<HttpCall<'_>> {
                     client: if n == "fetch" { "fetch" } else { "$fetch" },
                 })
             } else if n == "axios" {
+                // Bare `axios(url, config)` reads its verb from `config.method` — the SAME
+                // options-object position the `fetch` arm above reads, so it gets the same
+                // three-way answer (axios's own default is GET when no config states a verb).
+                // This arm used to hardcode GET and never look at `args[1]`, which mis-keyed
+                // `axios(url, { method: 'POST' })` in BOTH directions: it invented a GET consume
+                // no route provides and erased the POST consume the mutating-route rules read.
+                let method = match method_from_options(call.args.get(1)) {
+                    OptionsMethod::SpecDefault => "GET".to_string(),
+                    OptionsMethod::Literal(m) => m,
+                    OptionsMethod::Unknowable => return None,
+                };
                 Some(HttpCall {
-                    methods: vec!["GET".into()],
+                    methods: vec![method],
                     arg,
-                    body_style: BodyStyle::DirectArg,
+                    // NOT `DirectArg`: `args[1]` at this shape is the CONFIG object, never the body
+                    // itself — now that the verb can resolve to a body-position one, `DirectArg`
+                    // would witness the whole config as a request body. See `BodyStyle::NoWitness`.
+                    body_style: BodyStyle::NoWitness,
                     client: "axios",
                 })
             } else {
@@ -129,136 +147,70 @@ fn methods_from_computed_prop(expr: &Expr) -> Option<Vec<String>> {
     }
 }
 
-/// Read `{ method: "post" }` from a fetch/axios options object. Only a literal `method: "..."` key is
-/// read; `...opts` spreads are silently skipped.
-fn method_from_options(opts: Option<&ExprOrSpread>) -> Option<String> {
-    let expr = &*opts?.expr;
-    let Expr::Object(obj) = expr else {
-        return None;
+/// What a `fetch(url, …)` second argument says about the verb. Three answers, not two — collapsing
+/// [`OptionsMethod::Unknowable`] into the spec default was a measured defect: `fetch(url, opts)` and
+/// `fetch(url, { method: verb })` were keyed as `GET`, which mis-keys the call in BOTH directions —
+/// it invents a GET consume no route provides (false `unprovidedConsumes`) and erases the real verb's
+/// consume, so the mutating-route rules stop seeing it. The sibling `wrapper_calls` channel already
+/// refuses these two shapes by name (`fetch_has_opaque_options`, `mentions_method_key`); this type is
+/// the same judgment on the egress side.
+enum OptionsMethod {
+    /// No options argument, or an inline object stating no `method` — `fetch` IS a GET here, by spec.
+    SpecDefault,
+    /// A visible string literal verb.
+    Literal(String),
+    /// The source says a verb may exist and does not show its value. Never guessed; the call site is
+    /// dropped instead. Under-report, not mis-key.
+    Unknowable,
+}
+
+fn method_from_options(opts: Option<&ExprOrSpread>) -> OptionsMethod {
+    let Some(opts) = opts else {
+        return OptionsMethod::SpecDefault;
+    };
+    // A spread argument hides everything it carries.
+    if opts.spread.is_some() {
+        return OptionsMethod::Unknowable;
+    }
+    let Expr::Object(obj) = &*opts.expr else {
+        // An identifier, call, conditional — anything not written out here. The verb may be inside.
+        return OptionsMethod::Unknowable;
     };
     for prop in &obj.props {
-        if let PropOrSpread::Prop(p) = prop {
-            if let Prop::KeyValue(kv) = &**p {
-                if let (PropName::Ident(name), Expr::Lit(Lit::Str(s))) = (&kv.key, &*kv.value) {
-                    if name.sym == "method" {
-                        return Some(s.value.as_str().unwrap_or_default().to_uppercase());
+        match prop {
+            // `{ ...cfg }` can carry `method` too.
+            PropOrSpread::Spread(_) => return OptionsMethod::Unknowable,
+            PropOrSpread::Prop(p) => {
+                let Prop::KeyValue(kv) = &**p else {
+                    // Shorthand `{ method }` names the key while hiding the value.
+                    if let Prop::Shorthand(id) = &**p {
+                        if id.sym == "method" {
+                            return OptionsMethod::Unknowable;
+                        }
                     }
+                    continue;
+                };
+                let names_method = match &kv.key {
+                    PropName::Ident(name) => name.sym == "method",
+                    PropName::Str(s) => s.value.as_str().unwrap_or_default() == "method",
+                    // A computed key can spell `method` (`{ ["method"]: verb }` does so literally,
+                    // and `{ [k]: verb }` can at runtime) — whether it does is not decidable here,
+                    // so the whole site is unknowable, never consumed as a spec-default GET.
+                    PropName::Computed(_) => return OptionsMethod::Unknowable,
+                    _ => false,
+                };
+                if !names_method {
+                    continue;
                 }
+                return match &*kv.value {
+                    Expr::Lit(Lit::Str(s)) => {
+                        OptionsMethod::Literal(s.value.as_str().unwrap_or_default().to_uppercase())
+                    }
+                    // `method: verb` — stated to exist, value not visible.
+                    _ => OptionsMethod::Unknowable,
+                };
             }
         }
     }
-    None
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::adapters::egress::{clients, extract_http_egress, files, keys};
-
-    #[test]
-    fn computed_member_ternary_callee_fans_out_the_method() {
-        let out = extract_http_egress(&files(&[(
-            "conduit.ts",
-            "axios[favorited ? 'delete' : 'post'](`/articles/${slug}/favorite`);",
-        )]));
-        assert_eq!(
-            keys(&out),
-            vec![
-                Some("DELETE /articles/{}/favorite".to_string()),
-                Some("POST /articles/{}/favorite".to_string()),
-            ]
-        );
-    }
-
-    #[test]
-    fn computed_member_string_literal_callee_is_a_single_method() {
-        let out = extract_http_egress(&files(&[("a.ts", "axios['post']('/a');")]));
-        assert_eq!(keys(&out), vec![Some("POST /a".to_string())]);
-    }
-
-    #[test]
-    fn computed_member_identifier_callee_is_not_recognized() {
-        let out = extract_http_egress(&files(&[("a.ts", "axios[verb]('/a');")]));
-        assert!(out.is_empty());
-    }
-
-    #[test]
-    fn computed_member_ternary_with_an_arm_outside_the_verb_set_rejects_the_whole_site() {
-        // `head` is not a recognized verb — one bad arm rejects the site entirely rather than silently
-        // narrowing to just the `get` arm (never guess).
-        let out = extract_http_egress(&files(&[("a.ts", "axios[cond ? 'get' : 'head']('/a');")]));
-        assert!(out.is_empty());
-    }
-
-    #[test]
-    fn computed_member_ternary_callee_with_unresolved_url_carries_both_methods() {
-        let out = extract_http_egress(&files(&[(
-            "a.ts",
-            "axios[cond ? 'delete' : 'post'](buildUrl(x));",
-        )]));
-        assert_eq!(out.len(), 2);
-        assert!(out.iter().all(|c| c.key.is_none()));
-        assert!(out.iter().all(|c| c.raw.as_deref() == Some("buildUrl(x)")));
-        assert_eq!(
-            out.iter().map(|c| c.method.clone()).collect::<Vec<_>>(),
-            vec![Some("DELETE".to_string()), Some("POST".to_string())]
-        );
-    }
-
-    // --- client provenance tag (`axios-defaults-base-v1`) ---
-
-    #[test]
-    fn axios_member_call_is_tagged_axios() {
-        let out = extract_http_egress(&files(&[("a.ts", r#"axios.get("/a");"#)]));
-        assert_eq!(clients(&out), vec![Some("axios".to_string())]);
-    }
-
-    #[test]
-    fn bare_axios_call_is_tagged_axios() {
-        let out = extract_http_egress(&files(&[("a.ts", r#"axios("/a");"#)]));
-        assert_eq!(clients(&out), vec![Some("axios".to_string())]);
-    }
-
-    #[test]
-    fn axios_computed_member_call_is_tagged_axios() {
-        let out = extract_http_egress(&files(&[("a.ts", "axios['post']('/a');")]));
-        assert_eq!(clients(&out), vec![Some("axios".to_string())]);
-    }
-
-    #[test]
-    fn axios_computed_member_fanout_is_tagged_axios_for_every_variant() {
-        let out = extract_http_egress(&files(&[(
-            "a.ts",
-            "axios[favorited ? 'delete' : 'post'](`/articles/${slug}/favorite`);",
-        )]));
-        assert_eq!(out.len(), 2);
-        assert!(out.iter().all(|c| c.client.as_deref() == Some("axios")));
-    }
-
-    #[test]
-    fn ky_member_call_is_tagged_ky() {
-        let out = extract_http_egress(&files(&[("a.ts", r#"ky.get("/a");"#)]));
-        assert_eq!(clients(&out), vec![Some("ky".to_string())]);
-    }
-
-    #[test]
-    fn bare_fetch_call_is_tagged_fetch() {
-        let out = extract_http_egress(&files(&[("a.ts", r#"fetch("/a");"#)]));
-        assert_eq!(clients(&out), vec![Some("fetch".to_string())]);
-    }
-
-    #[test]
-    fn dollar_fetch_call_is_tagged_dollar_fetch() {
-        let out = extract_http_egress(&files(&[("a.ts", r#"$fetch("/a");"#)]));
-        assert_eq!(clients(&out), vec![Some("$fetch".to_string())]);
-    }
-
-    #[test]
-    fn unresolved_consume_still_carries_its_client_tag() {
-        // Dynamic URL (unresolved) — `client` is still set from the matcher, independent of whether the
-        // URL itself resolved to a key.
-        let out = extract_http_egress(&files(&[("a.ts", "axios.get(buildUrl(x));")]));
-        assert_eq!(out.len(), 1);
-        assert!(out[0].key.is_none());
-        assert_eq!(out[0].client.as_deref(), Some("axios"));
-    }
+    OptionsMethod::SpecDefault
 }

@@ -11,7 +11,10 @@
 # reality. The catalog lists DSL rule ids BARE, one table per pack under a `### `<pack>`` heading (e.g.
 # `no-explicit-any` under `### `typescript``), so this script reconstructs each rule's config-facing id
 # as `<pack>/<id>` from heading + row. Native analysis ids (the "## Native analyses" section) are
-# config-facing as-is, including the 25 `cross-layer/*` ids that carry a "/" of their own — those are
+# config-facing as-is, including the `cross-layer/*` ids that carry a "/" of their own — those are
+# (how many: grep -o '^| `cross-layer/[a-z-]*`' docs/rules/catalog.md | sort -u | wc -l. The number is
+# not written here. It said 25 while the catalog held 27, because a bare count in a guard's own header
+# fails nothing and so nobody recounts it.)
 # NOT DSL packs and are never re-prefixed. The valid id universe additionally includes bare DSL PACK ids
 # (`sql`, `typescript`, ...): crates/core/src/registry.rs's `is_enabled` doc states all three id shapes
 # are honored end to end ("a bare native-analysis/JS-quick-rule id, a whole DSL pack id, or a full

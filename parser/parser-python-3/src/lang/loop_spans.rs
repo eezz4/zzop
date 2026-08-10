@@ -26,9 +26,10 @@
 //!   the TS callback arm makes the same call.
 //! - **Generator expressions** — `(f(x) for x in xs)`: NEVER a span. A genexp is LAZY: evaluating the
 //!   expression only builds a generator object; if it is never consumed, the element code runs ZERO
-//!   times — "proven to run once per iteration" cannot be honored, so this module stays silent, the
-//!   same call Rust's `.iter().map(...)` / Java Streams / C# LINQ sides make for their lazy adapters.
-//!   The walk still DESCENDS into a genexp (an eager comprehension nested inside one is recorded on
+//!   times — "proven to run once per iteration" cannot be honored, so this module stays silent.
+//!   (Which forms every OTHER language treats as lazy is not restated here —
+//!   `zzop_core::dsl::SourceFile::loop_spans`'s doc owns that boundary and its full per-language
+//!   list.) The walk still DESCENDS into a genexp (an eager comprehension nested inside one is recorded on
 //!   its own conditional terms, exactly like a loop inside a function body that may never be called).
 
 use ruff_python_ast::visitor::{walk_expr, walk_stmt, Visitor};

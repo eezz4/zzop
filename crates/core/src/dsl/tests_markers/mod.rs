@@ -4,6 +4,8 @@
 //! named in the finding's message instead. Split purely to stay under the repo's per-file line cap
 //! (`scripts/check-max-file-lines.sh`); one logical suite across the two files.
 
+mod channel_tests;
+mod hash_leader_tests;
 mod near_miss_tests;
 
 use super::test_support::{method, rule_pack, scan_pack};

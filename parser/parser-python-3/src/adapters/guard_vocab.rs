@@ -133,11 +133,12 @@ impl PythonGuardVocab<'static> {
 /// TypeScript sibling's does: a name this producer cannot read as a DECISION must never suppress a
 /// finding, whatever guard word it happens to contain.
 pub(crate) fn is_guard_name(name: &str, vocab: &PythonGuardVocab<'_>) -> bool {
-    let n: String = name
-        .chars()
-        .filter(|c| *c != '_')
-        .flat_map(char::to_lowercase)
-        .collect();
+    // The SHARED transform, not a local twin: `zzop_engine::NORMALIZED_VOCABULARY_KEYS` registers the four
+    // `pythonGuard*` keys against this same function so the config front end can warn about a declared
+    // entry that could never match here. A private copy would make that agreement a convention again.
+    // It also drops `-`, which the local copy did not — no behaviour change, because every caller passes a
+    // Python `Identifier` and `-` cannot occur in one.
+    let n = zzop_core::vocab_norm::unicode_lowercase_without_separators(name);
     if is_vetoed(&n, vocab) {
         return false;
     }

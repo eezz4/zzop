@@ -16,7 +16,7 @@
 //!
 //! Every rule's `// <marker>-ok:` suppression case is covered below, using the fixed "finding's own line
 //! OR the single line directly above" window (`MARKER_LOOKBACK_LINES`). `destructive-migration` also
-//! recognizes a `--`-comment marker in `.sql` files specifically (`dsl.rs::is_sql_file`), since real
+//! recognizes a `--`-comment marker in `.sql` files specifically (`dsl.rs::leaders_for_path`), since real
 //! migrations of this pack's target class are commonly raw `.sql`, not `.ts`/`.js`.
 
 use std::fs;
@@ -28,6 +28,7 @@ use zzop_engine::{analyze_tree, AnalyzeOutput, DispatchConfig, EngineConfig, DEF
 
 mod aggregation;
 mod destructive_migration;
+mod language_scope;
 mod no_where;
 mod nplus1;
 mod query_logic_density;
@@ -78,7 +79,16 @@ impl Drop for TempDir {
 /// exactly like they do at real load time — a raw struct deserialize would leave the literal
 /// `"${sql-where-veto}"` string in place, which is not a valid regex and would silently no-op every
 /// affected rule.
+/// The pack this file's tests scan with. The disk load below reads and parses ALL 12 pack JSONs and
+/// throws away 11, so doing it per test cost this binary that work once per test; the `OnceLock` makes
+/// it once per binary. The clone is cheap and — importantly — SHARES the pack's compiled-regex memo
+/// (`zzop_core::dsl::RegexCache`), so the second test onward also skips recompiling every pattern.
 fn sql_pack() -> RulePackDef {
+    static PACK: std::sync::OnceLock<RulePackDef> = std::sync::OnceLock::new();
+    PACK.get_or_init(sql_pack_uncached).clone()
+}
+
+fn sql_pack_uncached() -> RulePackDef {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("dsl/sql/sql.json");
     let text = fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));

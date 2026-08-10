@@ -5,6 +5,7 @@
 //! half — what the rule scans rather than what it skips — is the sibling [`super::scope`], split off
 //! for that same line cap and carrying the reasoning for which field lands in which block.
 
+use zzop_core::dsl::{marker_channel, MarkerChannel};
 use zzop_core::{Matcher, RuleDef, RulePackDef, Severity};
 
 use super::scope::{presentation_lines, scope_lines};
@@ -74,8 +75,17 @@ fn matcher_kind(matcher: &Matcher) -> &'static str {
     }
 }
 
-/// The derived marker plus the comment leaders that matcher kind actually HONORS — the leader set is
-/// per-pass, not universal (`zzop_core::dsl::markers::Leaders`): the whole-tree io-scan pass compiles its
+/// The derived marker plus the comment leaders that matcher kind actually HONORS.
+///
+/// WHICH kind honors what is not decided here — `zzop_core::dsl::marker_channel` owns that judgment, and
+/// this function only turns its four answers into prose. It used to own the judgment too, as a `match`
+/// on `rule.matcher` inside this formatter, until the engine's finding-construction append
+/// (`pipeline::findings::append_hints`) became a second consumer that has to reach the SAME conclusion —
+/// and a second copy of "which comment leaders can suppress this kind of finding" is exactly the defect
+/// class the repo has now paid for twice (four comment-leader tables folded into `markers.rs`, then 106
+/// hand-copied suppress sentences folded into the append).
+///
+/// The leader set is per-pass, not universal (`zzop_core::dsl::markers::Leaders`): the whole-tree io-scan pass compiles its
 /// marker with `compile_marker_line_comment` (`//` or `#`, since an `http` provide's anchor line can be
 /// Python), while the per-file line/method-scan passes compile `//` only, widened to `--` inside a `.sql`
 /// file. Printing the bare token would let a Python reader of an io-scan rule and a Python reader of a
@@ -95,11 +105,11 @@ fn matcher_kind(matcher: &Matcher) -> &'static str {
 /// condition rides the same derived-from-the-rule path as the marker itself (matched on THIS rule's own
 /// matcher kind), so no list of which rules are io-scan is kept here.
 fn suppress_marker_str(rule: &RuleDef) -> String {
-    match rule.matcher {
-        Matcher::SymbolScan(_) => {
+    match marker_channel(&rule.matcher) {
+        MarkerChannel::NoAnchorLine => {
             "none (symbol-scan findings have no line to anchor a marker)".to_string()
         }
-        Matcher::IoScan(_) => format!(
+        MarkerChannel::ReReadAnchorLine => format!(
             "{} (in a `//` or `#` line comment, on the finding's own line or the one directly above it) \
              — NATIVE-PARSE RUNS ONLY: in envelope mode (`analyze-envelope`) this finding's anchor line \
              has no source text, so no marker there can suppress anything; disable the rule id or exclude \
@@ -115,14 +125,19 @@ fn suppress_marker_str(rule: &RuleDef) -> String {
         // property of the marker.
         // literal-scan shares call-scan's leader set and its whole rationale (multi-language channel,
         // marker read off this file's own text, whole rule quiet in envelope mode).
-        Matcher::CallScan(_) | Matcher::LiteralScan(_) => format!(
+        MarkerChannel::MultiLanguageText => format!(
             "{} (in a `//` or `#` line comment, on the finding's own line or the one directly above it)",
             rule.suppress_marker()
         ),
-        _ => format!(
-            "{} (in a `//` line comment — also `--` inside a .sql file — on the finding's own line or \
-             the one directly above it)",
-            rule.suppress_marker()
+        // The widening clause is DERIVED (`zzop_core::dsl::marker_widening_prose`), not spelled here.
+        // Hand-written, this line named `--` and silently omitted the `#` family the marker axis
+        // gained — so for `security/config-file-secret` `explain` printed a `suppress marker:` line
+        // that contradicted the rule's own `message:` two lines above it, and pointed a `.env`/`.yml`
+        // author at `//`, which is not a comment in either format.
+        MarkerChannel::PerFileText => format!(
+            "{} (in a `//` line comment — {} — on the finding's own line or the one directly above it)",
+            rule.suppress_marker(),
+            zzop_core::dsl::marker_widening_prose()
         ),
     }
 }
@@ -130,7 +145,7 @@ fn suppress_marker_str(rule: &RuleDef) -> String {
 /// One line per exclusion/veto field the rule's OWN matcher kind actually carries, each with its REAL
 /// value — never a blanket `exclude_pattern: no` across kinds that have no such field but do have others.
 /// The kinds genuinely differ (`zzop_core::dsl::def::matcher`): `LineScan` has `exclude_pattern` +
-/// `file_exclude_pattern` + `require_file_absent`; `MethodScan` has `absent` (its veto) +
+/// `prev_line_exclude_pattern` + `file_exclude_pattern` + `require_file_absent`; `MethodScan` has `absent` (its veto) +
 /// `file_exclude_pattern` + `require_file_absent`; `IoScan` has `file_exclude_pattern` +
 /// `anchor_exclude_pattern`; `SymbolScan` has none at all and says so, rather than
 /// printing a `no` that reads as "this kind could carry one and this rule declines to".
@@ -150,6 +165,10 @@ fn exclusion_lines(matcher: &Matcher) -> Vec<String> {
         // precisely the misreading this whole section exists to prevent.
         Matcher::LineScan(m) => vec![
             optional_pattern_line("exclude_pattern", m.exclude_pattern.as_deref()),
+            optional_pattern_line(
+                "prev_line_exclude_pattern",
+                m.prev_line_exclude_pattern.as_deref(),
+            ),
             optional_pattern_line("file_exclude_pattern", m.file_exclude_pattern.as_deref()),
             require_file_absent_line(&m.require_file_absent),
             optional_pattern_line("attr_present", m.attr_present.as_deref()),

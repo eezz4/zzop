@@ -4,8 +4,8 @@
 use std::collections::HashMap;
 
 use super::*;
-use crate::scores::config::{FsdConfig, FsdMatcher};
-use crate::scores::types::{FileKind, FsdViolationKind};
+use crate::scores::config::{FeatureSlicedDesignConfig, FeatureSlicedDesignMatcher};
+use crate::scores::types::{FeatureSlicedDesignViolationKind, FileKind};
 
 fn node(path: &str) -> FileNode {
     FileNode {
@@ -48,8 +48,6 @@ fn compute(
             circular,
             target,
             file_kinds: &FileKinds::new(),
-            type_safety_counts: &HashMap::new(),
-            lod_by_file: &HashMap::new(),
             is_source: &|_| true,
             is_scored: &|_| true,
         },
@@ -198,54 +196,16 @@ fn routes_target_into_the_sfc_and_god_file_loc_limits_default_vs_fe_vs_be() {
     let cfg = ScoresConfig::default();
 
     let def = compute(&nodes, &DepGraph::new(), &[], None, &cfg);
-    assert_eq!(def.sfc.limit, 150); // default when target omitted
-    assert_eq!(def.god_file.limit, 300); // 2x sfc
+    assert_eq!(def.file_size_compliance.limit, 150); // default when target omitted
+    assert_eq!(def.god_file.limit, 300); // 2x file_size_compliance
 
     let fe = compute(&nodes, &DepGraph::new(), &[], Some("fe"), &cfg);
-    assert_eq!(fe.sfc.limit, 100);
+    assert_eq!(fe.file_size_compliance.limit, 100);
     assert_eq!(fe.god_file.limit, 200);
 
     let be = compute(&nodes, &DepGraph::new(), &[], Some("be"), &cfg);
-    assert_eq!(be.sfc.limit, 200);
+    assert_eq!(be.file_size_compliance.limit, 200);
     assert_eq!(be.god_file.limit, 400);
-}
-
-#[test]
-fn routes_type_safety_counts_into_type_safety_scoring() {
-    let nodes = [FileNode {
-        loc: 100,
-        ..node("f.ts")
-    }];
-    let cfg = ScoresConfig::default();
-
-    let mut counts = HashMap::new();
-    counts.insert(
-        "f.ts".to_string(),
-        TypeSafetyCounts {
-            as_cast: 10,
-            any_type: 10,
-        },
-    );
-    let with_counts = compute_scores(
-        &ScoresInput {
-            nodes: &nodes,
-            dep: &DepGraph::new(),
-            circular: &[],
-            target: None,
-            file_kinds: &FileKinds::new(),
-            type_safety_counts: &counts,
-            lod_by_file: &HashMap::new(),
-            is_source: &|_| true,
-            is_scored: &|_| true,
-        },
-        &cfg,
-    );
-    let without = compute(&nodes, &DepGraph::new(), &[], None, &cfg);
-
-    // density-bearing input must lower the score relative to the clean baseline.
-    assert!(with_counts.type_safety.score < without.type_safety.score);
-    assert_eq!(with_counts.type_safety.total_as_cast, 10);
-    assert_eq!(with_counts.type_safety.total_any_type, 10);
 }
 
 #[test]
@@ -265,8 +225,6 @@ fn file_kinds_routes_into_main_sequence_without_panicking_and_stays_in_range() {
             circular: &[],
             target: None,
             file_kinds: &kinds,
-            type_safety_counts: &HashMap::new(),
-            lod_by_file: &HashMap::new(),
             is_source: &|_| true,
             is_scored: &|_| true,
         },
@@ -283,17 +241,20 @@ fn config_driven_fsd_routing_custom_slice_container_makes_a_cross_slice_import_c
     let d = dep(&[("modules/auth/login.ts", &["modules/cart/cart.ts"])]);
     let default_cfg = ScoresConfig::default();
     let before = compute(&[], &d, &[], None, &default_cfg);
-    assert!(before.fsd.violations.is_empty());
-    assert_eq!(before.fsd.score, 100.0);
+    assert!(before.feature_sliced_design.violations.is_empty());
+    assert_eq!(before.feature_sliced_design.score, 100.0);
 
     // Teaching FSD that `modules/<slice>` is an L2 slice container makes the same import a cross-slice violation.
     let mut custom_cfg = ScoresConfig::default();
-    custom_cfg.fsd = FsdMatcher::new(FsdConfig {
+    custom_cfg.feature_sliced_design = FeatureSlicedDesignMatcher::new(FeatureSlicedDesignConfig {
         slice_containers: vec!["modules".to_string()],
-        ..custom_cfg.fsd.config.clone()
+        ..custom_cfg.feature_sliced_design.config.clone()
     });
     let after = compute(&[], &d, &[], None, &custom_cfg);
-    assert_eq!(after.fsd.violations.len(), 1);
-    assert_eq!(after.fsd.violations[0].kind, FsdViolationKind::CrossSlice);
-    assert_eq!(after.fsd.score, 0.0); // 100 - (1/1)*100
+    assert_eq!(after.feature_sliced_design.violations.len(), 1);
+    assert_eq!(
+        after.feature_sliced_design.violations[0].kind,
+        FeatureSlicedDesignViolationKind::CrossSlice
+    );
+    assert_eq!(after.feature_sliced_design.score, 0.0); // 100 - (1/1)*100
 }

@@ -125,17 +125,12 @@ pub(crate) fn extract_object_methods(
                     continue;
                 }
                 seen_names.insert(name.clone());
+                // `body_start` is the KEY's own line (`zzop_core::SourceSymbol`'s "Body span
+                // contract"); the function value supplies only the END.
+                let key_line = line_of(cm, name_id.span.lo);
                 let (is_fn, body_start, body_end) = match &*kv.value {
-                    Expr::Arrow(a) => (
-                        true,
-                        Some(line_of(cm, a.span.lo)),
-                        Some(line_of(cm, a.span.hi)),
-                    ),
-                    Expr::Fn(f) => (
-                        true,
-                        Some(line_of(cm, f.function.span.lo)),
-                        Some(line_of(cm, f.function.span.hi)),
-                    ),
+                    Expr::Arrow(a) => (true, Some(key_line), Some(line_of(cm, a.span.hi))),
+                    Expr::Fn(f) => (true, Some(key_line), Some(line_of(cm, f.function.span.hi))),
                     _ => (false, None, None),
                 };
                 let full = format!("{parent}.{name}");
@@ -148,7 +143,7 @@ pub(crate) fn extract_object_methods(
                     } else {
                         SourceSymbolKind::Const
                     },
-                    line: line_of(cm, name_id.span.lo),
+                    line: key_line,
                     exported: false,
                     is_default: false,
                     body_start,

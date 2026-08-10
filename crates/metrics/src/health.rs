@@ -4,79 +4,72 @@
 //! "how bad is this service" scalar and a ranked "why". Without it each consumer re-derives its own rollup from the
 //! 14 scores (a dashboard was doing exactly that) — and they disagree. Emitting it here makes the engine the SSOT.
 //!
-//! Formula: each metric contributes `weight x gap x 10`, where `gap = (100 - score) / 100` (how far below perfect).
-//! `circular` is binary — any import cycle scores its full weight (cycles are categorically bad, not a matter of
-//! degree). `pain` is the sum; higher = worse, 0 = every weighted structural score is perfect (and no cycles).
-
-use serde::{Deserialize, Serialize};
+//! # Formula (renormalized over the MEASURED metrics only — 2026-08-08)
+//!
+//! Each MEASURED metric contributes `weight x gap x 10`, where `gap = (100 - score) / 100` (how far below
+//! perfect). `circular` is binary — any import cycle scores its full weight (cycles are categorically bad,
+//! not a matter of degree). Those raw points are then scaled back onto the full weight table:
+//!
+//! ```text
+//! measured(m)     = population(m) > 0
+//! raw             = SUM over measured m of  weight(m) x gap(m) x 10
+//! measuredWeight  = SUM over measured m of  weight(m)
+//! pain            = raw x TOTAL_HEALTH_WEIGHT / measuredWeight        (measuredWeight > 0)
+//! pain            = null                                              (measuredWeight == 0)
+//! ```
+//!
+//! ## What this replaced, and why it was wrong
+//!
+//! The old formula was `pain = SUM over ALL 14 metrics of weight x gap x 10`, with contributors filtered to
+//! `contribution > 0.0`. Every per-metric score returns 100 when its population is empty (`if total == 0 {
+//! 100.0 }` — the guard appears in a dozen score modules), so a metric that had NOTHING TO MEASURE produced
+//! `gap 0`, contributed 0 pain, and was then dropped from `contributors` — byte-identical to a metric that
+//! scored 100 because the code is clean.
+//!
+//! **The consequence was backwards: an unmeasurable axis made a repo look HEALTHIER.** Measured on a Go
+//! tree, `featureSlicedDesign` (weight 2.5, the second highest) is defined over a directory convention Go
+//! does not use, so it silently removed 25 points of possible pain from the total while every other metric's
+//! contribution stayed put. A tree that zzop could see LESS of scored better than one it could see fully.
+//!
+//! Renormalizing fixes the direction: an unmeasured metric leaves the weighting entirely rather than
+//! passing it, so `pain` always describes the axes that were actually judged, on a stable 0..186 scale that
+//! stays comparable across trees measuring different numbers of axes. The scale is preserved on purpose —
+//! `pain` is quoted between runs and against other repos, so the fix must not silently re-base it.
+//!
+//! ## `pain` is `Option<f64>`, and `contributors` keeps its dark rows
+//!
+//! `null` (not `0.0`) when NOTHING was measurable: there is no population to renormalize over, and `0.0`
+//! there would be the strongest possible false all-clear. Same `null`-vs-`[]` convention `co_change`
+//! already uses — absence of data is not a measurement of zero.
+//!
+//! `contributors` no longer drops a metric just because it contributed nothing. A metric with
+//! `population: 0` rides the list with `gap: null` / `contribution: null`, so the reply STATES which axes
+//! were dark instead of leaving the reader to notice an absence. Measured-and-clean keeps `Some(0.0)` and
+//! is still dropped from the ranked "why" — the distinction the old filter erased is exactly the one that
+//! survives now.
+//!
+//! ## Why the population had to reach this file at all
+//!
+//! `health.pain` is a single composite scalar, and it is the ONLY score number the CLI and MCP surfaces
+//! publish (`crates/summary`'s `architecture.pain`; the full `scores` object rides only the direct
+//! `zzop-facade` embedding lane). `zzop_facade::query_coverage` forbids exactly this shape one crate over
+//! — *"there is deliberately NO single score field, and one must never be added"* (2026-07-31 user ruling)
+//! — because a folded number gets quoted without its exclusion list. `pain` cannot stop being a composite;
+//! what it can do is carry its own denominator, which is why `measured_weight`/`total_weight` are FIELDS
+//! and why `architecture` ships them beside `pain` rather than shipping the scalar alone.
 
 use crate::scores::types::Scores;
+
+mod types;
+
+pub use types::{
+    total_health_weight, HealthContributor, HealthIndex, HealthMetric, HEALTH_METRIC_WEIGHTS,
+};
 
 /// The 0-100 score scale.
 const PERCENT: f64 = 100.0;
 /// Each metric contributes `weight x gap x POINTS_PER_GAP` to the composite.
 const POINTS_PER_GAP: f64 = 10.0;
-
-/// One of the 14 structural metrics rolled into the composite pain index. Serializes to camelCase so
-/// JSON output/reporting field names stay consistent with this crate's other output types.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum HealthMetric {
-    Circular,
-    Fsd,
-    PublicApi,
-    Hierarchy,
-    Sdp,
-    SiblingCross,
-    GodFile,
-    Sfc,
-    Diamond,
-    MainSequence,
-    Modularity,
-    Cohesion,
-    RenameInstability,
-    BusFactor,
-}
-
-/// Per-metric weight for the composite, in `HEALTH_METRIC_WEIGHTS` iteration order (higher = this metric
-/// hurts the structure more).
-pub const HEALTH_METRIC_WEIGHTS: &[(HealthMetric, f64)] = &[
-    (HealthMetric::Circular, 3.0),
-    (HealthMetric::Fsd, 2.5),
-    (HealthMetric::PublicApi, 2.0),
-    (HealthMetric::Hierarchy, 2.0),
-    (HealthMetric::Sdp, 2.0),
-    (HealthMetric::SiblingCross, 1.5),
-    (HealthMetric::GodFile, 1.5),
-    (HealthMetric::Sfc, 1.0),
-    (HealthMetric::Diamond, 1.0),
-    (HealthMetric::MainSequence, 0.5),
-    (HealthMetric::Modularity, 0.5),
-    (HealthMetric::Cohesion, 0.5),
-    (HealthMetric::RenameInstability, 0.3),
-    (HealthMetric::BusFactor, 0.3),
-];
-
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HealthContributor {
-    pub metric: HealthMetric,
-    pub weight: f64,
-    /// Normalized shortfall 0-1 (how far below a perfect 100). `circular`: 1 if any cycle exists, else 0.
-    pub gap: f64,
-    /// `weight x gap x 10` — this metric's points of the composite.
-    pub contribution: f64,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HealthIndex {
-    /// Composite structural debt — higher = worse. 0 = every weighted structural score is at 100 and no cycles.
-    pub pain: f64,
-    /// Metrics driving the number, highest contribution first — the "why" behind the scalar (zero-contributors
-    /// dropped).
-    pub contributors: Vec<HealthContributor>,
-}
 
 /// Rounds to 3 decimal places.
 fn round3(x: f64) -> f64 {
@@ -98,6 +91,41 @@ fn gap(score: f64) -> f64 {
     ((PERCENT - score) / PERCENT).max(0.0)
 }
 
+/// Rolls up `scores` into a composite pain index plus the contributors behind it.
+///
+/// The POPULATION each metric judged, read off that score's own denominator — never off a second table.
+/// A metric whose population is 0 measured nothing and is excluded from the composite (see this module's
+/// doc for the renormalization).
+///
+/// `feature_sliced_design` reads `layer_classified_imports`, NOT its ratio denominator `total_imports`:
+/// the question here is "could this metric judge this tree at all", and an undeclared (or wrong-language)
+/// FSD vocabulary leaves every path unclassified, which produces a large `total_imports`, zero possible
+/// violations, and a perfect score for a repo that never adopted the convention.
+///
+/// `circular`'s population is `coupling`'s importer count: cycles are found in the resolved import graph,
+/// so "no file imports anything" is precisely the state in which "no cycles" is not a finding. Reading it
+/// off `coupling` rather than off a cycle count of its own is deliberate — a cycle count is the metric's
+/// RESULT, and a result can never be its own denominator (0 cycles would read as "nothing to measure",
+/// inverting the meaning of a clean graph).
+fn population_of(scores: &Scores, metric: HealthMetric) -> u32 {
+    match metric {
+        HealthMetric::Circular => scores.coupling.importer_count,
+        HealthMetric::FeatureSlicedDesign => scores.feature_sliced_design.layer_classified_imports,
+        HealthMetric::PublicApi => scores.public_api.total_cross_module_imports,
+        HealthMetric::Hierarchy => scores.hierarchy.total_intra_module_edges,
+        HealthMetric::Sdp => scores.sdp.total_cross_slice_edges,
+        HealthMetric::SiblingCross => scores.sibling_cross.total_intra_module_edges,
+        HealthMetric::GodFile => scores.god_file.total,
+        HealthMetric::FileSizeCompliance => scores.file_size_compliance.total,
+        HealthMetric::Diamond => scores.diamond.roots_examined,
+        HealthMetric::MainSequence => scores.main_sequence.classified_files,
+        HealthMetric::Modularity => scores.modularity.edge_count,
+        HealthMetric::Cohesion => scores.cohesion.slice_count,
+        HealthMetric::RenameInstability => scores.rename_instability.total,
+        HealthMetric::BusFactor => scores.bus_factor.total,
+    }
+}
+
 /// Rolls up `scores` into a single composite pain index plus the ranked, non-zero contributors behind it.
 pub fn compute_health_index(scores: &Scores) -> HealthIndex {
     let gap_of = |metric: HealthMetric| -> f64 {
@@ -109,13 +137,13 @@ pub fn compute_health_index(scores: &Scores) -> HealthIndex {
                     0.0
                 }
             }
-            HealthMetric::Fsd => gap(scores.fsd.score),
+            HealthMetric::FeatureSlicedDesign => gap(scores.feature_sliced_design.score),
             HealthMetric::PublicApi => gap(scores.public_api.score),
             HealthMetric::Hierarchy => gap(scores.hierarchy.score),
             HealthMetric::Sdp => gap(scores.sdp.score),
             HealthMetric::SiblingCross => gap(scores.sibling_cross.score),
             HealthMetric::GodFile => gap(scores.god_file.score),
-            HealthMetric::Sfc => gap(scores.sfc.score),
+            HealthMetric::FileSizeCompliance => gap(scores.file_size_compliance.score),
             HealthMetric::Diamond => gap(scores.diamond.score),
             HealthMetric::MainSequence => gap(scores.main_sequence.score),
             HealthMetric::Modularity => gap(scores.modularity.score),
@@ -125,176 +153,63 @@ pub fn compute_health_index(scores: &Scores) -> HealthIndex {
         }
     };
 
-    let mut contributors: Vec<HealthContributor> = HEALTH_METRIC_WEIGHTS
+    let all: Vec<HealthContributor> = HEALTH_METRIC_WEIGHTS
         .iter()
         .map(|&(metric, weight)| {
-            let g = gap_of(metric);
+            let population = population_of(scores, metric);
+            // A population of 0 is the "never measured" signal — no gap, no contribution, and no seat
+            // in the weighting below. Reporting `gap: 0.0` here is what used to make an unmeasurable
+            // axis indistinguishable from a clean one.
+            let (gap_v, contribution) = if population == 0 {
+                (None, None)
+            } else {
+                let g = gap_of(metric);
+                (Some(round3(g)), Some(round2(weight * g * POINTS_PER_GAP)))
+            };
             HealthContributor {
                 metric,
                 weight,
-                gap: round3(g),
-                contribution: round2(weight * g * POINTS_PER_GAP),
+                population,
+                gap: gap_v,
+                contribution,
             }
         })
-        .filter(|c| c.contribution > 0.0)
+        .collect();
+
+    // Only measured metrics carry weight — this is the renormalization denominator.
+    let measured_weight: f64 = all
+        .iter()
+        .filter(|c| c.population > 0)
+        .map(|c| c.weight)
+        .sum();
+    let raw: f64 = all.iter().filter_map(|c| c.contribution).sum();
+    let total_weight = total_health_weight();
+    // Scale the measured subset's raw points back onto the full table, so losing an axis can never lower
+    // `pain`. `measured_weight == 0` means nothing was judged at all: absence of data, not 0 pain.
+    let pain = (measured_weight > 0.0).then(|| round1(raw * total_weight / measured_weight));
+
+    // The ranked "why" keeps only metrics that explain something; the UNMEASURED ones follow, because
+    // "this axis was dark" is itself a thing the reader must be told rather than left to infer from an
+    // absence. Measured-and-clean (contribution 0.0) is dropped — it is neither a driver nor a gap.
+    let mut contributors: Vec<HealthContributor> = all
+        .iter()
+        .copied()
+        .filter(|c| c.contribution.is_some_and(|v| v > 0.0))
         .collect();
     contributors.sort_by(|a, b| {
         b.contribution
             .partial_cmp(&a.contribution)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
+    contributors.extend(all.iter().copied().filter(|c| c.population == 0));
 
-    let pain = round1(contributors.iter().map(|c| c.contribution).sum());
-
-    HealthIndex { pain, contributors }
+    HealthIndex {
+        pain,
+        measured_weight,
+        total_weight,
+        contributors,
+    }
 }
 
 #[cfg(test)]
-mod tests {
-    //! Exercises `compute_health_index`: all-perfect scores with no cycles yield pain 0 with no
-    //! contributors, a cycle alone contributes the circular weight as a binary full-weight hit, and gap
-    //! scales each metric's contribution with contributors sorted descending by contribution.
-    use super::*;
-    use crate::scores::types::{
-        BusFactorScore, CohesionScore, CouplingScore, DiamondScore, FixRatioScore, FsdScore,
-        GodFileScore, HierarchyScore, LodScore, MainSequenceScore, ModularityScore, PublicApiScore,
-        RenameScore, SdpScore, SfcScore, SiblingCrossScore, TypeSafetyScore,
-    };
-
-    /// A `Scores` with every metric perfect (100) and no cycles -> pain 0. Callers override individual fields.
-    fn perfect_scores() -> Scores {
-        Scores {
-            fsd: FsdScore {
-                score: 100.0,
-                total_imports: 0,
-                violations: vec![],
-            },
-            cohesion: CohesionScore {
-                score: 100.0,
-                slices: vec![],
-            },
-            coupling: CouplingScore {
-                score: 100.0,
-                avg_fan_out_among_importers: 0.0,
-                max_fan_out: 0.0,
-                circular_count: 0,
-            },
-            sdp: SdpScore {
-                score: 100.0,
-                total_cross_slice_edges: 0,
-                violations: vec![],
-            },
-            hierarchy: HierarchyScore {
-                score: 100.0,
-                total_intra_module_edges: 0,
-                violations: vec![],
-                violations_truncated: 0,
-            },
-            public_api: PublicApiScore {
-                score: 100.0,
-                total_cross_module_imports: 0,
-                deep_imports: vec![],
-                deep_imports_truncated: 0,
-            },
-            sfc: SfcScore {
-                score: 100.0,
-                limit: 0,
-                compliant: 0,
-                total: 0,
-                violations: vec![],
-                violations_truncated: 0,
-            },
-            main_sequence: MainSequenceScore {
-                score: 100.0,
-                avg_distance: 0.0,
-                modules: vec![],
-            },
-            modularity: ModularityScore {
-                score: 100.0,
-                q: 0.0,
-                edge_count: 0,
-                slice_count: 0,
-            },
-            god_file: GodFileScore {
-                score: 100.0,
-                limit: 0,
-                files: vec![],
-                files_truncated: 0,
-            },
-            sibling_cross: SiblingCrossScore {
-                score: 100.0,
-                total_intra_module_edges: 0,
-                violations: vec![],
-                violations_truncated: 0,
-            },
-            diamond: DiamondScore {
-                score: 100.0,
-                pairs: vec![],
-                pairs_truncated: 0,
-            },
-            rename_instability: RenameScore {
-                score: 100.0,
-                renamed: 0,
-                total: 0,
-                files: vec![],
-                files_truncated: 0,
-            },
-            bus_factor: BusFactorScore {
-                score: 100.0,
-                risky: 0,
-                files: vec![],
-                files_truncated: 0,
-            },
-            fix_ratio: FixRatioScore {
-                score: 100.0,
-                fix_file_touches: 0,
-                tagged_file_touches: 0,
-                fix_share_of_tagged_touches: 0.0,
-            },
-            type_safety: TypeSafetyScore {
-                score: 100.0,
-                total_as_cast: 0,
-                total_any_type: 0,
-                violations: vec![],
-                violations_truncated: 0,
-            },
-            lod: LodScore {
-                score: 100.0,
-                total_violations: 0,
-                violations: vec![],
-                violations_truncated: 0,
-            },
-        }
-    }
-
-    #[test]
-    fn all_perfect_scores_no_cycle_pain_0_no_contributors() {
-        let h = compute_health_index(&perfect_scores());
-        assert_eq!(h.pain, 0.0);
-        assert!(h.contributors.is_empty());
-    }
-
-    #[test]
-    fn a_cycle_alone_contributes_circular_weight_x_10_binary_full_weight() {
-        let mut scores = perfect_scores();
-        scores.coupling.circular_count = 2;
-        let h = compute_health_index(&scores);
-        assert_eq!(h.pain, 3.0 * 10.0); // 30
-        assert_eq!(h.contributors[0].metric, HealthMetric::Circular);
-        assert_eq!(h.contributors[0].gap, 1.0);
-    }
-
-    #[test]
-    fn gap_scales_the_contribution_and_contributors_are_sorted_by_contribution_desc() {
-        // fsd at 50 -> gap 0.5 -> 2.5*0.5*10 = 12.5 ; god_file at 80 -> gap 0.2 -> 1.5*0.2*10 = 3.0
-        let mut scores = perfect_scores();
-        scores.fsd.score = 50.0;
-        scores.god_file.score = 80.0;
-        let h = compute_health_index(&scores);
-        let metrics: Vec<HealthMetric> = h.contributors.iter().map(|c| c.metric).collect();
-        assert_eq!(metrics, vec![HealthMetric::Fsd, HealthMetric::GodFile]);
-        assert_eq!(h.contributors[0].contribution, 12.5);
-        assert_eq!(h.contributors[1].contribution, 3.0);
-        assert_eq!(h.pain, 15.5);
-    }
-}
+mod tests;

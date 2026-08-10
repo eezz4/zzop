@@ -37,17 +37,17 @@
 //!
 //! Contract shared by every category: OPTIONAL / graceful-degrade (an absent fact silently skips the
 //! rules that would read it — never a hard error; a parser that does not produce it is a matrix blank,
-//! not a failure), deterministic serialization, and — because this is the *cached* slice — a
-//! `CACHE_SCHEMA_VERSION` bump (or `#[serde(default)]` back-compat) on every add, so a warm run never
-//! serves a slice that silently lost the field. Language coverage is per-fact and uneven (e.g.
-//! `loop_spans` covers every structural statement-loop language — TS/Go/Python/Java/C#/Rust, since
-//! 2026-08-02 — while `function_spans` is TypeScript only, `test_spans` Rust only, `write_sites` and
-//! `io`'s `IoConsume::retry_configured` tag are
+//! not a failure), deterministic serialization, and — because this is the *cached* slice — either
+//! `#[serde(default)]` back-compat or reliance on the derived `CACHE_SCHEMA_VERSION`, which hashes this
+//! crate's own sources and therefore moves the moment a field is added here, so a warm run never serves
+//! a slice that silently lost the field. Language coverage is per-fact and uneven (e.g. `loop_spans`
+//! covers every structural statement-loop language while `function_spans` is TypeScript only,
+//! `test_spans` Rust only, `write_sites` and `io`'s `IoConsume::retry_configured` tag are
 //! TypeScript-only, while `symbols` / `io` (structure) span every parser); that unevenness is a
-//! deliberate, documented state, not an oversight. WHICH languages produce `call_sites` is deliberately
-//! not restated here at all: that set grows one dispatch arm at a time
-//! (`crates/engine/src/pipeline/fresh/call_sites.rs`), and a language list copied into this doc would
-//! go stale on the very next arm. The per-environment SSOT is
+//! deliberate, documented state, not an oversight. WHICH languages produce `call_sites` — or
+//! `loop_spans` — is deliberately not restated here at all: each set grows one dispatch arm at a time
+//! (`crates/engine/src/pipeline/fresh/call_sites.rs`, `crates/engine/src/pipeline/fresh/spans.rs`), and
+//! a language list copied into this doc would go stale on the very next arm. The per-environment SSOT is
 //! `crates/engine/tests/rule_contracts/capability_matrix.rs`'s declared table.
 
 use serde::{Deserialize, Serialize};
@@ -78,7 +78,8 @@ pub struct FileIrSlice {
     /// This file's runtime asset-URL references (raw path strings) — mirrors `FileArtifact::asset_refs`.
     /// Must round-trip through the cache: dropping it on a hit would silently undercount a `public/`-served
     /// worklet/worker's fan-in and re-introduce its `dead-candidates` false positive on every cache-warm
-    /// run. Introduced with the `CACHE_SCHEMA_VERSION` v33->v34 bump, so no pre-v34 entry is served stale.
+    /// run. Adding it moved the derived `CACHE_SCHEMA_VERSION` (it hashes this crate's own sources), so no
+    /// entry written before this field existed is served stale.
     #[serde(default)]
     pub asset_refs: Vec<String>,
     pub loc: u32,
@@ -105,8 +106,9 @@ pub struct FileIrSlice {
     #[serde(default)]
     pub exported_signature_names: Vec<String>,
     /// Whether this file was classified minified/generated — mirrors `FileArtifact::minified_or_generated`.
-    /// A stale entry defaulting to `false` would silently drop the DSL-skip warning, so a
-    /// schema-version bump (not `#[serde(default)]`) forces re-parsing — see `CACHE_SCHEMA_VERSION`'s doc.
+    /// A stale entry defaulting to `false` would silently drop the DSL-skip warning, so what forces
+    /// re-parsing is the derived `CACHE_SCHEMA_VERSION` moving (not `#[serde(default)]`) — see that
+    /// constant's doc.
     #[serde(default)]
     pub minified_or_generated: bool,
     /// This file's constant-map fragment (dotted constant access -> value, from this file's own
@@ -156,8 +158,9 @@ pub struct FileIrSlice {
     /// usage evidence, same reasoning as `query_call_sites` above.
     #[serde(default)]
     pub field_usage_tokens: Vec<String>,
-    /// This file's loop-body line spans (`zzop_parser_typescript::extract_loop_spans` /
-    /// `zzop_parser_go::extract_loop_spans`) — mirrors
+    /// This file's loop-body line spans (each producing parser's `extract_loop_spans`; WHICH languages
+    /// have an arm is the per-language table in `crates/engine/src/pipeline/fresh/spans.rs`, deliberately
+    /// not restated here — same stance as `call_sites` below) — mirrors
     /// `FileArtifact::loop_spans` / `zzop_core::dsl::SourceFile::loop_spans`. Must round-trip through the
     /// cache: dropping it on a hit would silently starve `Matcher::MethodScan::trigger_in_loop` of loop
     /// evidence for this file on every subsequent cache-warm run, same reasoning as `query_call_sites`
@@ -172,8 +175,8 @@ pub struct FileIrSlice {
     /// `Matcher::MethodScan::after_in_same_function` of scope evidence, and because the absent-fact
     /// degrade for THAT gate is "no pairing removed", the loss would restore the exact false positives
     /// the fact exists to remove — a silent regression, not a silent skip. `#[serde(default)]` keeps a
-    /// pre-existing entry deserializable; the `CACHE_SCHEMA_VERSION` bump is what actually prevents one
-    /// from being served (see that constant's doc).
+    /// pre-existing entry deserializable; what actually prevents one from being SERVED is the derived
+    /// `CACHE_SCHEMA_VERSION`, which hashes this crate's own sources (see that constant's doc).
     #[serde(default)]
     pub function_spans: Vec<(u32, u32)>,
     /// This file's TEST-ONLY line spans (`zzop_parser_rust::extract_test_spans`) — mirrors
@@ -183,8 +186,9 @@ pub struct FileIrSlice {
     /// round-trip through the cache, and the consequence of dropping it is the LOUD direction rather than
     /// the quiet one — a warm run that lost it would resurrect every finding inside every `#[cfg(test)]
     /// mod tests` in the tree, which is 100% of what this repo's own `.rs` findings were before the fact
-    /// existed. `#[serde(default)]` keeps a pre-existing entry deserializable; the `CACHE_SCHEMA_VERSION`
-    /// bump is what actually prevents one from being served (see that constant's doc).
+    /// existed. `#[serde(default)]` keeps a pre-existing entry deserializable; what actually prevents one
+    /// from being SERVED is the derived `CACHE_SCHEMA_VERSION`, which hashes this crate's own sources
+    /// (see that constant's doc).
     #[serde(default)]
     pub test_spans: Vec<(u32, u32)>,
     /// This file's projected CALL SITES (`zzop_core::call_sites::CallSite`) — mirrors

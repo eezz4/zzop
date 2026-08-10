@@ -41,15 +41,22 @@
 #     list the same bundles. That is deliberate: the stamping loop is positional, and a guard that
 #     accepted a reorder would accept exactly the mis-stamp this file exists to make unreachable.
 #
-# ### Parsing route: awk anchored to the matrix BLOCK, not a bare `platform:` grep — and not node
-# The extraction walks jobs: -> build: -> strategy: -> matrix: -> include: by INDENTATION and reads
-# `platform:` only inside that block, then cross-checks the number of list items (`- target: ...`) against
-# the number of `platform:` keys it found. Consequences, each one a failure this shape converts from
-# silent to loud: a renamed job/key aborts (no anchor), a matrix entry that forgets `platform:` aborts
-# (items != keys), and a stray `platform:` line elsewhere in the file is not read at all. The looser
-# `/^  build:/ ... /^    runs-on:/` idiom its sibling guards use (check-asset-name-prose.sh,
-# check-deploy-facts-prose.sh) is fine for their subject — a count or a name set used to judge PROSE —
-# but this list also drives what CI stamps, so it is parsed structurally.
+# ### Parsing route: the SHARED reader, awk anchored to the matrix BLOCK — and not node
+# The extraction lives in scripts/lib/release-matrix.sh (moved down a layer 2026-08-08; this guard's
+# walk IS that code, it just no longer lives here). It walks jobs: -> build: -> strategy: -> matrix: ->
+# include: by INDENTATION and reads `platform:`/`os:` only inside that block, then cross-checks the
+# number of list items (`- target: ...`) against the number of `platform:` keys it found. Consequences,
+# each one a failure this shape converts from silent to loud: a renamed job/key aborts (no anchor), a
+# matrix entry that forgets `platform:` aborts (items != keys), and a stray `platform:` line elsewhere
+# in the file is not read at all.
+# It is shared because the alternative was measured and rejected: check-asset-name-prose.sh and
+# check-deploy-facts-prose.sh each carried a LOOSER `/^  build:/ ... /^    runs-on:/` awk copy of this
+# same block, so a reshaped matrix had to be chased through three files and the one that got missed
+# would keep answering — greenly — a question the other two had stopped asking. Merging the guards was
+# rejected for separate reasons (decision-ledger row D62 — their scan surfaces and their zero-floors
+# must not merge); what is shared is the FACT, with each consumer injecting its
+# own reading of it — this one takes the platform values in matrix order, asset-name takes the `os:`
+# field too, deploy-facts takes only the count.
 # A `.mjs` helper was considered and rejected: there is no YAML parser available offline in the
 # pre-commit lane (no dependency install runs there), so a node helper would be a hand-written
 # indentation scanner too — the same parsing risk in another language, plus a node runtime on the
@@ -97,16 +104,24 @@
 #               `path` defaults to server.json (an explicit path exists so the mode is testable against
 #               a fixture without mutating the tree).
 #   --print-matrix-platforms
-#               Prints the build matrix's `platform:` values, one per line, and nothing else. It exists
-#               so that the stamping job and this guard cannot end up with TWO parsers of one matrix:
-#               if they disagreed, this guard could pass on set A at commit time while the job stamped
-#               set B at release time — which is the very hole the three-way equality closes, reopened
-#               one layer down. Aborts (non-zero, empty stdout) on any extraction failure.
+#               Prints the build matrix's `platform:` values, one per line, and nothing else — a THIN
+#               wrapper over scripts/lib/release-matrix.sh, kept as a flag on this script because
+#               prebuild.yml's stamping step calls it by that name and that contract is not worth
+#               breaking to save a wrapper. It exists so that the stamping job and this guard cannot
+#               end up with TWO parsers of one matrix: if they disagreed, this guard could pass on set
+#               A at commit time while the job stamped set B at release time — which is the very hole
+#               the three-way equality closes, reopened one layer down. Since 2026-08-08 that "one
+#               parser" is literally one file (scripts/lib/release-matrix.sh), shared with the prose
+#               guards that used to keep awk copies of it. Aborts (non-zero, empty stdout) on any
+#               extraction failure.
 #
 # No deps beyond grep/sed/awk — deliberately NOT jq, which is absent on this project's Windows dev
 # box while every other guard runs there.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
+# shellcheck source=scripts/lib/release-matrix.sh
+. ./scripts/lib/release-matrix.sh
 
 SELF=check-server-json-hashes
 PREBUILD=.github/workflows/prebuild.yml
@@ -139,78 +154,21 @@ if [ "$MODE" != print-matrix ]; then
 fi
 
 # --- A. The build matrix: the authority -----------------------------------------------------------
-# Structural walk (see the header for why it is not a bare `platform:` grep). Emits one `P:<platform>`
-# line per matrix entry in matrix order, plus one `#:status=... items=... plats=...` summary line that
-# says how far into jobs: -> build: -> strategy: -> matrix: -> include: the walk actually got. Full-line
-# comments and blank lines are skipped; a trailing CR is stripped (this repo checks out CRLF).
-matrix_raw="$(awk '
-  function indent_of(s,   i) { i = match(s, /[^ ]/); return (i == 0 ? -1 : i - 1) }
-  { sub(/\r$/, "") }
-  /^[[:space:]]*#/ { next }
-  /^[[:space:]]*$/ { next }
-  state == 9 { next }
-  { ind = indent_of($0); line = $0 }
-  state == 0 && line ~ /^jobs:[[:space:]]*$/                    { state = 1; if (state > deep) deep = state; next }
-  state == 1 && line ~ /^[[:space:]]+build:[[:space:]]*$/       { state = 2; if (state > deep) deep = state; jobind = ind; next }
-  # Any line at or left of the job key closes the build job; nothing after it is matrix.
-  state >= 2 && ind <= jobind                                   { state = 9; next }
-  state == 2 && line ~ /^[[:space:]]+strategy:[[:space:]]*$/    { state = 3; if (state > deep) deep = state; strind = ind; next }
-  state == 3 && ind <= strind                                   { state = 2 }
-  state == 3 && line ~ /^[[:space:]]+matrix:[[:space:]]*$/      { state = 4; if (state > deep) deep = state; matind = ind; next }
-  state == 4 && ind <= matind                                   { state = 2 }
-  state == 4 && line ~ /^[[:space:]]+include:[[:space:]]*$/     { state = 5; if (state > deep) deep = state; incind = ind; next }
-  state == 5 && ind <= incind                                   { state = 9; next }
-  state == 5 {
-    # A list item starts with `- `; its first key sits on that same line, so strip the dash and judge
-    # the remainder as an ordinary key line.
-    if (line ~ /^[[:space:]]*-[[:space:]]/) { items++; sub(/^[[:space:]]*-[[:space:]]*/, "", line) }
-    if (line ~ /^[[:space:]]*platform:[[:space:]]*[A-Za-z0-9._-]+[[:space:]]*$/) {
-      v = line
-      sub(/^[[:space:]]*platform:[[:space:]]*/, "", v)
-      sub(/[[:space:]]+$/, "", v)
-      print "P:" v
-      plats++
-    }
-  }
-  END {
-    st = "ok"
-    if (deep == 0) st = "no-jobs-key"
-    else if (deep == 1) st = "no-build-job"
-    else if (deep == 2) st = "no-strategy-key"
-    else if (deep == 3) st = "no-matrix-key"
-    else if (deep == 4) st = "no-include-key"
-    print "#:status=" st " items=" items + 0 " plats=" plats + 0
-  }
-' "$PREBUILD")"
+# The structural walk moved to scripts/lib/release-matrix.sh (2026-08-08) — see the "Parsing route"
+# section of the header. release_matrix_entries() emits one `<platform><TAB><os>` record per matrix
+# entry in matrix order and owns every floor this section used to spell out itself: no summary line
+# (its own awk broke), the walk never reaching include: (a renamed job/key), zero entries, an entry
+# with no `platform:` key, and an empty record list. Each of those ABORTS, because reporting OK over
+# zero platforms is how a guard certifies a set it never read (working-agreements §5.5).
+matrix_records="$(release_matrix_entries "$SELF" "$PREBUILD")" || exit 1
 
-matrix_status="$(sed -n 's/^#:status=\([a-z-]*\) .*$/\1/p' <<< "$matrix_raw")"
-matrix_items="$(sed -n 's/^#:.* items=\([0-9][0-9]*\) .*$/\1/p' <<< "$matrix_raw")"
-matrix_keys="$(sed -n 's/^#:.* plats=\([0-9][0-9]*\)$/\1/p' <<< "$matrix_raw")"
-matrix_platforms="$(sed -n 's/^P://p' <<< "$matrix_raw")"
-
-[ -n "$matrix_status" ] && [ -n "$matrix_items" ] && [ -n "$matrix_keys" ] || abort \
-  "the build-matrix extraction produced no summary line at all. That is this script's own awk failing,
-  not a tree problem -- do not silence it by removing the check."
-
-# The anchor floor. An extraction that lost its anchor must ABORT: reporting OK over zero platforms is
-# how a guard certifies a set it never read (working-agreements §5.5).
-[ "$matrix_status" = ok ] || abort \
-  "could not reach the build matrix in $PREBUILD (stopped at: $matrix_status).
-  This guard walks jobs: -> build: -> strategy: -> matrix: -> include: and reads include[].platform.
-  A renamed job or key breaks that walk, and the three-way platform equality below would then be
-  asserted over ZERO platforms -- vacuously true, which is worse than false. Re-point the walk at the
-  new spelling; do not hardcode a platform list here."
-[ "$matrix_items" -gt 0 ] || abort \
-  "read 0 entries out of $PREBUILD's build matrix. Same class as the anchor failure above: an empty
-  subject set makes every check below pass without reading anything."
-[ "$matrix_items" -eq "$matrix_keys" ] || abort \
-  "$PREBUILD's build matrix has $matrix_items include[] entr(ies) but $matrix_keys 'platform:' key(s).
-  Every matrix entry must name a platform -- the release asset names, the .mcpb bundle names and the
-  npm sub-package names are all built from that value, so an entry without one builds a binary that
-  nothing can name. Fix the matrix; this guard will not guess which entry was meant."
+# What THIS guard injects on top of the shared read: the platform values, in matrix order, and nothing
+# else — the three-way equality below is positional, so the order is the load-bearing half. The `os:`
+# field the same records carry is check-asset-name-prose.sh's business, not this one's.
+matrix_platforms="$(release_matrix_platforms "$matrix_records")"
 [ -n "$matrix_platforms" ] || abort \
-  "extracted 0 platform values despite a well-formed matrix summary -- the awk emitted counts it did
-  not emit values for. Broken extraction, not a clean tree."
+  "projected 0 platform values out of a non-empty matrix record list -- that is this script's own
+  projection failing, not a tree problem. Every check below would compare empty lists and pass."
 
 if [ "$MODE" = print-matrix ]; then
   printf '%s\n' "$matrix_platforms"

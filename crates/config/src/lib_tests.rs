@@ -105,6 +105,48 @@ fn a_trees_less_config_over_an_npm_workspaces_root_names_that_manifest_instead()
     );
 }
 
+/// The envelope lane takes ONLY the convention vocabulary and walks no tree, so the tree-walk advice
+/// must not ride along — every clause of it ("this run analyzed a SINGLE tree", `add "trees": "auto"`,
+/// "at the cost of the dependency graph, which is built per tree") is false there.
+///
+/// Observed 2026-08-08 in a real `zzop analyze-envelope` reply: the disclosure landed DIRECTLY AFTER
+/// the envelope lane's own line saying the vocabulary block "is the ONLY thing an envelope run takes
+/// from an adjacent config: every other key there configures a tree analysis … none of which an
+/// envelope run does". Two adjacent sentences, the second telling the reader to set a key the first
+/// had just called ignored.
+///
+/// The paired asserts are the point: the SAME fixture must keep producing it on `load_for_root`. A
+/// one-sided test would pass just as well if the disclosure had been deleted outright.
+#[test]
+fn the_vocabulary_only_entry_omits_tree_walk_advice_while_the_tree_entry_keeps_it() {
+    let dir = TempDir::new("zzop-config-ws-envelope");
+    dir.write("package.json", r#"{"workspaces": ["apps/*"]}"#);
+    dir.write("apps/one/package.json", r#"{"name": "one"}"#);
+    dir.write("apps/two/package.json", r#"{"name": "two"}"#);
+    dir.write(DEFAULT_CONFIG_FILENAME, TREES_LESS_CONFIG);
+
+    let tree_lane = load_for_root(dir.path()).unwrap();
+    assert_eq!(
+        workspace_warnings(&tree_lane).len(),
+        1,
+        "the tree lane must still disclose: {:?}",
+        tree_lane.warnings
+    );
+
+    let envelope_lane = crate::load_for_root_vocabulary_only(dir.path()).unwrap();
+    assert!(
+        workspace_warnings(&envelope_lane).is_empty(),
+        "a lane that walks no tree must not be told to add `trees`: {:?}",
+        envelope_lane.warnings
+    );
+    // Everything else still comes through — the split is by what a warning ASSERTS ABOUT THE RUN, not
+    // a blanket mute. Same request either way, so no caller loses anything but the false advice.
+    assert_eq!(
+        envelope_lane.request, tree_lane.request,
+        "the mapped request must be identical; only the disclosure differs"
+    );
+}
+
 #[test]
 fn a_config_declaring_trees_auto_suppresses_the_disclosure() {
     // The author answered "which trees?" with `"auto"`, and the expansion prints its own positive
@@ -162,7 +204,10 @@ fn a_config_that_never_declares_trees_gets_the_same_disclosure_worded_for_its_ow
                 "the config at {} declares no \"trees\" — pnpm-workspace.yaml at {} resolves to 2 \
                  workspace packages, but this run analyzed a SINGLE tree: the cross-layer join \
                  needs >= 2 trees with distinct sourceIds to fire, so it did not run. Add \
-                 \"trees\": \"auto\" to that config to analyze those 2 packages as separate trees.",
+                 \"trees\": \"auto\" to that config to analyze those 2 packages as separate trees \
+                 — at the cost of the dependency graph, which is built per tree: an import \
+                 crossing a package boundary then stops being a dep edge and is censused as an \
+                 external package instead.",
                 config_path.display(),
                 dir.path().display()
             )
@@ -328,6 +373,73 @@ fn strip_root(request: &serde_json::Value, root: &std::path::Path) -> serde_json
     cloned
 }
 
+/// The mirror pin: each of the two tree-shape disclosures names the COST of the remedy it recommends —
+/// the single-tree one that `trees: "auto"` splits the dependency graph (a cross-package import stops
+/// being a dep edge), the cross-tree-import one that a single tree turns the cross-layer join off. This
+/// is the mechanical stand-in for "a remedy must name its cost", which no lint can express; it asserts
+/// only that each message names its own remedy AND its own cost, nothing about their wording beyond
+/// those substrings. `zzop-config` is the only crate that sees both sides (it depends on `zzop-engine`;
+/// there is no dependency the other way).
+#[test]
+fn both_tree_shape_disclosures_name_the_cost_of_the_remedy_they_recommend() {
+    // Direction 1: one tree over a multi-package workspace -> "add trees: auto", and what that costs.
+    let mono = pnpm_monorepo("zzop-config-ws-mirror");
+    mono.write(DEFAULT_CONFIG_FILENAME, TREES_LESS_CONFIG);
+    let loaded = load_for_root(mono.path()).unwrap();
+    let single_tree = workspace_warnings(&loaded);
+    assert_eq!(single_tree.len(), 1, "got: {:?}", loaded.warnings);
+    let single_tree = single_tree[0];
+    assert!(
+        single_tree.contains("Add \"trees\": \"auto\" to that config"),
+        "{single_tree}"
+    );
+    assert!(
+        single_tree.contains("stops being a dep edge"),
+        "the trees:\"auto\" remedy must name its cost: {single_tree}"
+    );
+
+    // Direction 2: separate trees whose imports cross a tree boundary -> "analyze as one tree", and
+    // what THAT costs. Two real trees, run through the engine this crate already depends on.
+    let fe = TempDir::new("zzop-config-ws-mirror-fe");
+    fe.write("package.json", r#"{"name": "@apps/fe"}"#);
+    fe.write(
+        "src/app.ts",
+        "import { fmt } from \"@base/utils\";\nexport const render = () => fmt();\n",
+    );
+    let utils = TempDir::new("zzop-config-ws-mirror-utils");
+    utils.write("package.json", r#"{"name": "@base/utils"}"#);
+    utils.write("src/index.ts", "export const fmt = () => \"x\";\n");
+    let engine_config = |source_id: &str| zzop_engine::EngineConfig {
+        source_id: source_id.to_string(),
+        ..zzop_engine::EngineConfig::default()
+    };
+    let out = zzop_engine::analyze_trees(&[
+        (fe.path().to_path_buf(), engine_config("@apps/fe")),
+        (utils.path().to_path_buf(), engine_config("@base/utils")),
+    ]);
+    let fe_warnings = &out
+        .trees
+        .iter()
+        .find(|(_, source, _)| source == "@apps/fe")
+        .expect("fe tree present")
+        .2
+        .warnings;
+    // PREFIX, not `contains`: the sibling zero-edge warning now POINTS AT this one by name (it used to
+    // offer a closed two-way choice that excluded the tree-boundary cause), so a substring match counts
+    // the pointer as a second occurrence. Identity of a message is where it starts.
+    let cross_tree: Vec<&String> = fe_warnings
+        .iter()
+        .filter(|w| w.starts_with("cross-tree package imports:"))
+        .collect();
+    assert_eq!(cross_tree.len(), 1, "got: {fe_warnings:?}");
+    let cross_tree = cross_tree[0];
+    assert!(cross_tree.contains("\"roots\": [\".\"]"), "{cross_tree}");
+    assert!(
+        cross_tree.contains("at the cost of the cross-layer join"),
+        "the one-tree remedy must name its cost: {cross_tree}"
+    );
+}
+
 #[test]
 fn load_config_file_accepts_a_direct_file_path() {
     let dir = TempDir::new("zzop-config-lib-direct-file");
@@ -484,7 +596,7 @@ fn config_paths_are_derived_from_config_keys() {
             // The first NESTED scope under `vocabulary` (2026-07-27). Its four keys answer one question
             // ("what is your FSD layout?") and are meaningless apart, which is what the nesting says;
             // replacement granularity stays the LEAF, exactly as `packs.` and `git.` already work.
-            "fsd" => Some("vocabulary.fsd."),
+            "featureSlicedDesign" => Some("vocabulary.featureSlicedDesign."),
             "parsers" => Some("parsers."),
             "globOverride" => Some("parsers.globOverrides[]."),
             "report" => Some("report."),

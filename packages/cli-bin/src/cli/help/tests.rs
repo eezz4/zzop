@@ -165,7 +165,8 @@ fn every_dispatched_subcommand_has_an_elaboration_row() {
 /// discovery purposes, a subcommand that does not exist.
 #[test]
 fn the_usage_line_names_every_described_subcommand() {
-    let usage = crate::USAGE;
+    let usage = crate::usage();
+    let usage = usage.as_str();
     let described: Vec<&str> = elaborations().iter().map(|(n, _)| *n).collect();
     assert!(
         described.len() > 5,

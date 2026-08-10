@@ -51,13 +51,14 @@ FOREIGN='[\x{AC00}-\x{D7A3}\x{1100}-\x{11FF}\x{3130}-\x{318F}\x{3040}-\x{30FF}\x
 # carving out extensions that do not exist. Pre-emptive carve-outs are exactly what the allow-list was.
 SUBJECT_PATHSPEC=('*')
 
-# NON-SOURCE EXEMPTIONS — `<prefix>|<reason>`, subtracted from the derived subject above. A path is
-# exempt when it starts with <prefix>. A reason is mandatory: an exemption without one is where a
-# missing subject hides.
-#
-# EMPTY, and that is the measured state rather than an oversight: every one of the 1,388 files this
-# repo ships is text, and all 1,388 are clean of both patterns below as of 2026-08-01.
-NON_SOURCE_EXEMPTIONS=()
+# There is deliberately NO exemption list for the non-Latin scan (2026-08-09). One sat here empty
+# (`NON_SOURCE_EXEMPTIONS=()`) justified by "all 1,388 shipped files are clean" — a count that had
+# silently drifted 207 files stale while the empty slot stood, which is the exact failure an empty
+# slot invites: the next excuse sits down in it without anyone re-deriving the justification. The
+# guard prints the live count on every run instead. When the first genuinely exempt path lands
+# (e.g. a binary asset whose bytes collide with a UTF-8 letter range — fail-SAFE, a loud red),
+# reintroduce a `<prefix>|<reason>` array wired through `is_exempt` + `assert_exemption_is_live`;
+# CLAUDE_REF_EXEMPTIONS below is the live template for that shape.
 
 # The `.claude/`-reference scan's own exemption list, same shape and same rules. Kept separate from
 # the list above because the two scans ask different questions and a path that must skip one has no
@@ -117,9 +118,6 @@ subject_paths="$(git ls-files --cached --others --exclude-standard -- "${SUBJECT
 source_scanned=0
 while IFS= read -r _p; do
   [ -n "$_p" ] || continue
-  if [ ${#NON_SOURCE_EXEMPTIONS[@]} -gt 0 ] && is_exempt "$_p" "${NON_SOURCE_EXEMPTIONS[@]}"; then
-    continue
-  fi
   source_scanned=$((source_scanned + 1))
 done <<< "$subject_paths"
 
@@ -137,21 +135,12 @@ fi
 # 2026-07-31 measurement that motivated it).
 assert_workspace_members_scanned "English-only source guard" "${SUBJECT_PATHSPEC[@]}"
 
-if [ ${#NON_SOURCE_EXEMPTIONS[@]} -gt 0 ]; then
-  for entry in "${NON_SOURCE_EXEMPTIONS[@]}"; do
-    assert_exemption_is_live "NON_SOURCE_EXEMPTIONS" "${entry%%|*}" "${entry#*|}" "$subject_paths"
-  done
-fi
-
 # The enumeration call is kept OUTSIDE any `|| true` on purpose: tracked_and_untracked_files_matching's
 # own failure must still trip `set -e` and abort loud (see its header comment in tracked-grep.sh).
 raw_foreign=$(tracked_and_untracked_files_matching "$FOREIGN" "${SUBJECT_PATHSPEC[@]}")
 files=""
 while IFS= read -r f; do
   [ -n "$f" ] || continue
-  if [ ${#NON_SOURCE_EXEMPTIONS[@]} -gt 0 ] && is_exempt "$f" "${NON_SOURCE_EXEMPTIONS[@]}"; then
-    continue
-  fi
   files="${files}${f}"$'\n'
 done <<< "$raw_foreign"
 files="$(printf '%s' "$files")"

@@ -30,6 +30,21 @@
     // workspace packages. Build output and tool state are named by you, not by any tool.
     "skipDirs": ["node_modules", "dist", "build", ".next", ".git", "target", ".yarn", ".zzop", "zzop-reports", ".zzop-cache"],
     "workspaceSkipDirs": ["node_modules", ".git"],
+    // Extra paths that hold TEST code, ADDED to the language conventions zzop already knows: the Go
+    // "_test.go" suffix, Python "test_x.py"/"x_test.py", C# "XTests.cs" and "My.Tests/", Java
+    // "FooTest.java"/"TestFoo.java", the JS/TS ".test."/".spec." infix, and the directories
+    // "tests/" "spec/" "__tests__/" "e2e/" "fixtures/" "cypress/" ".storybook/" plus the test-runner
+    // config files. THE ONE ADDITIVE KEY IN THIS BLOCK — every other one REPLACES its built-in list,
+    // this one can only widen, so declaring "(^|/)it/" for your integration tests cannot cost you the
+    // Go suffix. Empty is therefore NOT "no test paths": it is "the built-ins, and nothing else".
+    // It has a built-in default at all — unlike every other key here — because a test convention is
+    // fixed by the LANGUAGE, not chosen by you. With no default, zzop would judge a "_test.go" file as
+    // production code and every finding on it would be a wrong CLAIM, rather than the quiet
+    // under-report the rest of this block degrades to when you leave a key out. Each entry is a regex
+    // over the tree-relative, forward-slash path; one that does not compile is dropped with a warning
+    // naming it. To be judged on a path after all, turn the rule off under `rules` — narrowing this
+    // list is deliberately not expressible.
+    "extraTestPathPatterns": [],
 
     // How you reach your ORM client, and which methods on a data-access receiver are writes. These
     // decide which lines zzop calls a write site, so a project whose repositories are named some other
@@ -107,14 +122,14 @@
     "routerNames": ["apiRoutes"],
 
     // Directories that are shared infrastructure rather than a layer, so importing them upward is not a
-    // layering violation. Separate from `vocabulary.fsd.shared` below on purpose: this one exempts, that
+    // layering violation. Separate from `vocabulary.featureSlicedDesign.shared` below on purpose: this one exempts, that
     // one names an FSD layer.
     "hierarchySharedDirs": ["utils","types","helpers","hooks","constants","lib","display","__test__"],
 
     // Your Feature-Sliced Design layout, if you use one. The four keys answer one question together, so
     // they are grouped — but each is replaced on its own, exactly like `packs.disabled` leaves
-    // `packs.extraDirs` alone. Retarget `vocabulary.fsd.sliceContainers` if your slices live elsewhere.
-    "fsd": {
+    // `packs.extraDirs` alone. Retarget `vocabulary.featureSlicedDesign.sliceContainers` if your slices live elsewhere.
+    "featureSlicedDesign": {
       "sliceContainers": ["features","domains"],
       "entry": ["pages","routes","api"],
       "shared": ["core","hooks","render","ui","shared","lib","utils","__test__"],

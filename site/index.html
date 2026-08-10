@@ -50,8 +50,12 @@
         <div class="code-panel__tab">Run it yourself (the zzop CLI)</div>
         <pre class="code-block"><code># download the zzop CLI from GitHub Releases (no Node.js, nothing to compile) —
 # or: npm i -g @zzop/cli
+zzop init                  # write the starter config — required once per tree
 zzop analyze .             # analyze this tree, print JSON findings
-zzop cross ./web ./api     # join two repos: which calls reach which routes
+
+# joining two repos? each tree needs its own config first:
+zzop init web &amp;&amp; zzop init api
+zzop cross ./web ./api     # which calls reach which routes
 
 # Want your AI agent to do the asking instead? That is the other binary,
 # zzop-mcp — install the Claude Code plugin and skip the terminal entirely.</code></pre>
@@ -136,7 +140,7 @@ zzop cross ./web ./api     # join two repos: which calls reach which routes
         </div>
         <div class="card">
           <h3>Customizable in any environment</h3>
-          <p>Rules are data, not engine code. Write your own packs in a JSON DSL, extend or override the bundled ones with <code>packsDir</code>, and feed languages the engine does not parse natively through the Normalized AST adapter protocol.</p>
+          <p>Rules are data, not engine code. Write your own packs in a JSON DSL, extend or override the bundled ones with <code>packs.extraDirs</code> in your config (or just drop them in <code>zzop/rules/</code>, which loads without a <code>packs.extraDirs</code> entry naming it), and feed languages the engine does not parse natively through the Normalized AST adapter protocol.</p>
         </div>
         <div class="card">
           <h3>Deterministic, honest output</h3>

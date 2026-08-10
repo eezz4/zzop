@@ -676,13 +676,16 @@ callers can refer to either unambiguously.
   (`analyze_envelope_json`), AND from the Node-free `zzop-mcp` binary — its `analyze_envelope` MCP tool
   and `zzop analyze-envelope <envelope.json>` CLI subcommand both run the same
   `zzop_summary::analyze_envelope_summary` call path (`crates/summary`, over
-  `zzop_facade::analyze_envelope_json`), the one lane that takes no config (an
-  envelope carries no filesystem location, so there is no config file to auto-discover). (The
-  historical JS implementation of the npm CLI — retired 2026-07-20 — never ran a Mode A envelope
-  either: its only envelope-shaped commands were `zzop adapter validate <path>`, structural validation
-  only, and `zzop init adapter --mode a|b`, which scaffolded starter FILES rather than running an
-  analysis. Today's `@zzop/cli` npm package ships the same native `zzop` binary, so it runs Mode A via
-  `zzop analyze-envelope`.) In short: to run a Mode A envelope, use the `zzop` / `zzop-mcp` binary
+  `zzop_facade::analyze_envelope_json`), the one lane that REQUIRES no config — an envelope document
+  carries no filesystem location inside it, so nothing is auto-discovered from the document. Where the
+  CALLER knows that location, though, the config beside it is read: `zzop analyze-envelope
+  <envelope.json>` looks for a `zzop.config.jsonc` in the envelope file's own directory (the same
+  discovery `zzop analyze <path>` makes at a tree root) and applies that project's declared
+  `vocabulary` — ONLY that key, since every other key configures a tree analysis this lane does not
+  perform — disclosing the applied file in the reply's `configWarnings`. The `analyze_envelope` MCP
+  tool is handed envelope TEXT with no location, so it discovers nothing and runs on the product's
+  built-in convention vocabulary; a project whose own naming conventions decide the verdict should use
+  the CLI form. In short: to run a Mode A envelope, use the `zzop` / `zzop-mcp` binary
   (its tool or CLI subcommand) or embed `zzop-facade` directly.
 
   Each overlay is validated with `validate_envelope` independently; an invalid overlay is skipped with

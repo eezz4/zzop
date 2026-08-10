@@ -66,14 +66,14 @@ fn scan_rust_workspace_maps_raw_and_underscore_normalized_names() {
     let map = scan_rust_workspace(&dir, walked.into_iter());
 
     assert_eq!(
-        map.get("zzop-core"),
+        map.crate_roots("zzop-core"),
         Some(&vec![
             "crates/core/src/lib.rs".to_string(),
             "crates/core/src/main.rs".to_string(),
         ])
     );
     assert_eq!(
-        map.get("zzop_core"),
+        map.crate_roots("zzop_core"),
         Some(&vec![
             "crates/core/src/lib.rs".to_string(),
             "crates/core/src/main.rs".to_string(),
@@ -98,7 +98,10 @@ fn scan_rust_workspace_ignores_a_directory_with_no_cargo_toml() {
 
     let walked = vec!["src/main.rs"];
     let map = scan_rust_workspace(&dir, walked.into_iter());
-    assert!(map.is_empty());
+    assert!(
+        map.crate_roots("anything").is_none() && map.target_roots().is_empty(),
+        "a directory with no manifest must contribute neither product"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -143,7 +146,7 @@ path = "perf/bench_main.rs"
 }
 
 #[test]
-fn declared_rust_target_paths_resolves_against_the_manifest_directory() {
+fn target_roots_resolve_against_the_manifest_directory_and_ride_the_same_scan() {
     let dir = std::env::temp_dir().join(format!(
         "zzop-rust-target-paths-{}-{}",
         std::process::id(),
@@ -161,10 +164,16 @@ fn declared_rust_target_paths_resolves_against_the_manifest_directory() {
     std::fs::write(dir.join("rules/dsl/http/http.rs"), "// pack test\n").unwrap();
 
     let walked = vec!["rules/dsl/http/http.rs"];
-    let entries = declared_rust_target_paths(&dir, walked.into_iter());
+    let scanned = scan_rust_workspace(&dir, walked.into_iter());
     assert_eq!(
-        entries.into_iter().collect::<Vec<_>>(),
+        scanned.target_roots().iter().cloned().collect::<Vec<_>>(),
         vec!["rules/dsl/http/http.rs".to_string()]
+    );
+    // The same pass must still produce the crate mapping — the merge is only worth it if one read of
+    // one manifest answers both questions.
+    assert!(
+        scanned.crate_roots("rules").is_some(),
+        "the merged scan dropped the crate mapping"
     );
 
     let _ = std::fs::remove_dir_all(&dir);

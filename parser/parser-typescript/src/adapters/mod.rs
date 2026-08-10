@@ -10,6 +10,8 @@
 pub mod class_shapes;
 pub mod client_base;
 pub mod client_base_generated;
+#[cfg(test)]
+mod client_base_tests;
 pub mod controller_decorators;
 pub mod db_table_consume;
 pub mod egress;

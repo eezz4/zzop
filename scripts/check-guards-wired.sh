@@ -31,14 +31,23 @@
 # cross-file constant with nothing checking it, i.e. the same shape this repo spent 2026-07-28 removing
 # from sixteen guards, committed in the very edit that added the gate.
 #
-# NOTE — limitation recorded rather than fixed (2026-08-01): `invoked_in` reads ci.yml as a flat stream
-# of LINES and cannot see JOB boundaries. A guard invoked inside a job that never runs (`if: false`, or
-# a job no trigger can reach) therefore still counts as wired, and this script would vouch for a fleet
-# that CI never executes. Not a live hole today — ci.yml runs every guard from its single `guards` job,
-# so any invocation this awk finds is an invocation that runs. It becomes a REQUIRED fix the moment that
-# job is split or conditioned. Closing it means reading ci.yml as YAML (jobs -> steps -> run, plus each
-# job's `if:`) instead of grepping lines, which is a larger change than this file has needed so far;
-# recorded here so the split does not land without it.
+# `invoked_in` reads ci.yml as a flat stream of LINES and cannot see JOB boundaries, so on its own it
+# proves a guard is NAMED in ci.yml, not that it RUNS. Those coincide only while every invocation sits
+# in one unconditional job.
+#
+# That precondition is now ASSERTED (see the shape check below), not assumed. Until 2026-08-08 this
+# note read "Not a live hole today ... becomes a REQUIRED fix the moment that job is split or
+# conditioned" — an audit result standing in for a check, with nothing able to notice the moment it
+# named. Adding `if:` to the guards job would have silenced the whole fleet on PRs while this script
+# printed `clean (27 guards checked)`.
+#
+# Closing it did NOT require reading ci.yml as YAML, which is what that note assumed and why it was
+# deferred. The property needed is structural — one job, no job-level `if:` — and asserting THAT is a
+# line-shape question. Invalidation-checked in all three directions (2026-08-08): a planted job-level
+# `if:` reports CONDITIONED, a planted second guard-holding job reports SPLIT, and neutralizing every
+# invocation reports ZERO rather than passing on an empty subject set. If a future split really is
+# wanted, the YAML rewrite is still the way — but now the tree goes red first instead of quietly
+# vouching for a fleet CI never executes.
 #
 # No deps beyond git + grep + awk. Exit 1 on any violation, listing the exact (guard,
 # missing-location) pairs.
@@ -47,7 +56,6 @@ cd "$(dirname "$0")/.."
 
 PRE_COMMIT=.githooks/pre-commit
 CI=.github/workflows/ci.yml
-TRACKED_GREP_LIB=scripts/lib/tracked-grep.sh
 
 
 missing=0        # any failure at all -> exit 1
@@ -150,11 +158,32 @@ list_guards() {
   } | sort -zu
 }
 
-if [ ! -f "$TRACKED_GREP_LIB" ]; then
-  echo "check-guards-wired: $TRACKED_GREP_LIB -- missing. Several isolation/scope guards source it" >&2
-  echo "  for their TRACKED-file enumeration; without it they fail at the '. ./$TRACKED_GREP_LIB' line." >&2
+# The shared libraries guards source. DERIVED, never hand-listed: a hand list silently stops covering
+# the next lib the day it lands, which is exactly what happened when `release-matrix.sh` joined a
+# one-name assertion. A guard that sources a missing lib dies at its `. ./scripts/lib/...` line, so the
+# value here is a named diagnosis instead of a bare shell error.
+# Derived from the SOURCING SITES, not from a listing of `scripts/lib/`. Two reasons the directory is
+# the wrong axis: `git ls-files` misses a lib that has not been committed yet (the first run of a new
+# lib is exactly when this check earns its keep), and a lib nobody sources cannot cause the failure
+# this assertion exists to name. The subject set is "what a guard will try to source", so read that.
+# Both POSIX sourcing spellings, `.` and `source`. Matching only one would leave a lib sourced the
+# other way outside the subject set while this header claimed completeness — the same shape as the
+# `git ls-files` attempt that preceded it, which silently dropped every uncommitted lib.
+guard_libs=$(grep -hoE '(^|[;&[:space:]])(\.|source)[[:space:]]+\./scripts/lib/[A-Za-z0-9_-]+\.sh' \
+  scripts/*.sh scripts/lib/*.sh .githooks/* 2>/dev/null |
+  grep -oE 'scripts/lib/[A-Za-z0-9_-]+\.sh' | sort -u)
+lib_count=$(printf '%s\n' "$guard_libs" | grep -c '.')
+if [ "$lib_count" -lt 1 ]; then
+  echo "check-guards-wired: no guard sources a scripts/lib/*.sh at all -- either every shared library" >&2
+  echo "  was inlined, or this extraction stopped matching. An empty set would pass vacuously." >&2
   missing=1; wiring_missing=1
 fi
+for lib in $guard_libs; do
+  [ -f "$lib" ] && continue
+  echo "check-guards-wired: $lib -- sourced by a guard but not present. That guard dies at its" >&2
+  echo "  '. ./$lib' line with a bare shell error; this names it instead." >&2
+  missing=1; wiring_missing=1
+done
 
 while IFS= read -r -d '' f; do
   base="$(basename "$f" .sh)"
@@ -170,6 +199,51 @@ while IFS= read -r -d '' f; do
     missing=1; wiring_missing=1
   fi
 done < <(list_guards)
+
+# --- the precondition that makes the flat-line reading above VALID ----------------------------------
+# `invoked_in` reads ci.yml as a stream of lines, so it proves "this guard is named somewhere in the
+# file", not "this guard runs". Those two coincide only while every guard invocation sits in ONE job
+# that carries no `if:`. That is a PROPERTY OF ci.yml, and until now it was a sentence in this header
+# ("Not a live hole today") with nothing enforcing it — precisely the shape §4.5 forbids: an audit
+# result standing in for a check. Someone adding `if: github.event_name != 'pull_request'` to the
+# guards job would silence the whole fleet on PRs while this script printed a clean bill.
+#
+# Enforcing the property needs no YAML parser, because it is about SHAPE, not semantics:
+#   1. every `bash scripts/check-*` invocation falls inside exactly ONE job's span, and
+#   2. that job declares no job-level `if:`.
+# Job spans come from 2-space-indented keys AFTER the top-level `jobs:` key — the `after jobs:` part is
+# load-bearing, since `on:`'s own `push:`/`pull_request:` keys sit at the same indent and would
+# otherwise read as jobs.
+shape="$(awk '
+  function indent_of(s,   i) { i = match(s, /[^ ]/); return (i == 0 ? -1 : i - 1) }
+  /^[[:space:]]*#/ { next }
+  /^jobs:[[:space:]]*$/ { injobs = 1; next }
+  injobs && /^  [A-Za-z_][A-Za-z0-9_-]*:[[:space:]]*$/ { job = $0; sub(/:[[:space:]]*$/, "", job); sub(/^  /, "", job); next }
+  # A job-level `if:` is indented exactly one step inside the job key.
+  injobs && job != "" && /^    if:/ { hasif[job] = 1; next }
+  injobs && job != "" && /bash[[:space:]]+scripts\/check-/ { holds[job]++ }
+  END {
+    n = 0
+    for (j in holds) { n++; owner = j }
+    if (n == 0) { print "ZERO: no job in this file invokes any scripts/check-* guard"; exit }
+    if (n > 1) {
+      msg = "SPLIT: guard invocations are spread across " n " jobs:"
+      for (j in holds) msg = msg " " j "(" holds[j] ")"
+      print msg
+      exit
+    }
+    if (hasif[owner]) print "CONDITIONED: job \047" owner "\047 holds every guard invocation AND declares a job-level if:"
+  }
+' "$CI")"
+
+if [ -n "$shape" ]; then
+  echo "check-guards-wired: FAILED -- $shape" >&2
+  echo "  This script proves a guard is NAMED in $CI, not that it RUNS. That inference holds only while" >&2
+  echo "  every invocation lives in one unconditional job. It no longer does, so every 'wired' verdict" >&2
+  echo "  above is now unproven. Fix by restoring the single unconditional guards job, or by teaching" >&2
+  echo "  invoked_in to read jobs -> steps -> run as YAML before splitting/conditioning." >&2
+  missing=1
+fi
 
 # --- cross-workflow `workflow_run` name references --------------------------------------------------
 # One awk pass over every tracked workflow: collect each file's `name:`, collect every workflow named by

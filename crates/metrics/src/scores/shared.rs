@@ -28,7 +28,7 @@ pub fn classify_path(cfg: &ScoresConfig, p: &str) -> PathClass {
             slice: None,
         };
     }
-    if cfg.fsd.entry_re.is_match(p) {
+    if cfg.feature_sliced_design.entry_re.is_match(p) {
         return PathClass {
             layer: 1,
             slice: None,
@@ -40,13 +40,13 @@ pub fn classify_path(cfg: &ScoresConfig, p: &str) -> PathClass {
             slice: None,
         };
     }
-    if let Some(caps) = cfg.fsd.slice_re.captures(p) {
+    if let Some(caps) = cfg.feature_sliced_design.slice_re.captures(p) {
         return PathClass {
             layer: 2,
             slice: Some(format!("{}/{}", &caps[1], &caps[2])),
         };
     }
-    if cfg.fsd.shared_re.is_match(p) {
+    if cfg.feature_sliced_design.shared_re.is_match(p) {
         return PathClass {
             layer: 3,
             slice: None,
@@ -62,7 +62,7 @@ pub fn module_of(cfg: &ScoresConfig, p: &str) -> Option<String> {
     if is_external(p) {
         return None;
     }
-    if let Some(caps) = cfg.fsd.slice_re.captures(p) {
+    if let Some(caps) = cfg.feature_sliced_design.slice_re.captures(p) {
         return Some(format!("{}/{}", &caps[1], &caps[2]));
     }
     if let Some(base) = base_module(cfg, p) {
@@ -75,14 +75,25 @@ pub fn module_of(cfg: &ScoresConfig, p: &str) -> Option<String> {
     Some(top.to_string())
 }
 
+/// The module a path's PUBLIC SURFACE belongs to — `module_of`'s sibling, used only by `public_api`.
+///
+/// Identical to [`module_of`] including the top-segment fallback. That fallback was missing here until
+/// 2026-08-08, and its absence silently emptied the metric: without it a path only had a module when it
+/// matched a declared FSD `sliceContainer` (`features/auth/...`) or a `baseDir`, so a perfectly ordinary
+/// `src/api/user.ts` / `internal/service/x.go` / `crates/metrics/src/lib.rs` resolved to `None` and its
+/// imports were skipped BEFORE `total_cross_module_imports` counted them. Any tree not laid out as
+/// Feature-Sliced Design therefore reached the `total == 0 -> score 100` guard with an empty denominator
+/// and published a perfect barrel-discipline score — including plain TypeScript repos, which is the
+/// convention the metric was written for. Its five siblings (`hierarchy`, `mainSequence`, `modularity`,
+/// `sdp`, `siblingCross`) all call `module_of` and always had the fallback, so `publicApi` was the one
+/// metric of the six blind to non-FSD layouts.
+///
+/// This is now a thin alias rather than a copy: keeping two nearly-identical resolvers is what let them
+/// drift apart in the first place, and `public_api` needs no different answer — it asks the same
+/// question ("which module owns this path"), then decides separately whether the import reached that
+/// module's barrel.
 pub fn module_root(cfg: &ScoresConfig, p: &str) -> Option<String> {
-    if is_external(p) {
-        return None;
-    }
-    if let Some(caps) = cfg.fsd.slice_re.captures(p) {
-        return Some(format!("{}/{}", &caps[1], &caps[2]));
-    }
-    base_module(cfg, p)
+    module_of(cfg, p)
 }
 
 /// First path segment under `module_root_path`, or `None` when the tail is directly a file (contains a `.`) or
@@ -145,7 +156,7 @@ pub fn round(n: f64) -> f64 {
 }
 
 fn has_base_dir(cfg: &ScoresConfig, p: &str) -> bool {
-    cfg.fsd
+    cfg.feature_sliced_design
         .config
         .base_dirs
         .iter()
@@ -154,7 +165,7 @@ fn has_base_dir(cfg: &ScoresConfig, p: &str) -> bool {
 
 /// `/{baseDir}/{name}/` -> `{baseDir}/{name}`, else `None`.
 fn base_module(cfg: &ScoresConfig, p: &str) -> Option<String> {
-    cfg.fsd
+    cfg.feature_sliced_design
         .base_re
         .captures(p)
         .map(|c| format!("{}/{}", &c[1], &c[2]))

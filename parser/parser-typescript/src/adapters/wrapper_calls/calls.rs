@@ -2,7 +2,7 @@
 //! recognizer spec.
 
 use swc_core::common::SourceMap;
-use swc_core::ecma::ast::{CallExpr, Callee, Expr, Lit, Tpl};
+use swc_core::ecma::ast::{CallExpr, Callee, Expr, Lit, MemberProp, Tpl};
 use swc_core::ecma::visit::{Visit, VisitWith};
 use zzop_core::{ImportMap, WrapperCallFragment};
 
@@ -27,10 +27,30 @@ impl CallCollector<'_> {
         let Callee::Expr(callee) = &call.callee else {
             return None;
         };
-        let Expr::Ident(id) = &**callee else {
-            return None; // member/other callee shapes are out of scope for this stage
+        // Two callee shapes resolve to a wrapper name: a bare identifier, and a member call on a
+        // NAMESPACE import (`import * as api from './client'; api.get('/x')`). The second was out of
+        // scope and it is the dominant shape in the wild — measured 19 of 19 call sites on
+        // `corpus/oss/fe-svelte`, with zero named imports, so the whole file read as callless.
+        //
+        // It needs no new resolution machinery: `imports.rs` already records the namespace binding
+        // with `original: "*"` and its specifier, the member name IS the wrapper name, and the
+        // receiver supplies the specifier the def side joins on. The receiver MUST be a namespace
+        // import of this file — a plain local object (`svc.get('/a')`) stays out, because treating any
+        // `x.get(...)` as a wrapper call would sweep in every helper that happens to expose a `get`.
+        let (callee_name, ns_specifier) = match &**callee {
+            Expr::Ident(id) => (id.sym.to_string(), None),
+            Expr::Member(m) => {
+                let (Expr::Ident(recv), MemberProp::Ident(prop)) = (&*m.obj, &m.prop) else {
+                    return None;
+                };
+                let binding = self.imports.get(recv.sym.as_ref())?;
+                if binding.original != "*" {
+                    return None; // a named/default import receiver is a value, not a module namespace
+                }
+                (prop.sym.to_string(), Some(binding.specifier.clone()))
+            }
+            _ => return None,
         };
-        let callee_name = id.sym.to_string();
 
         let mut args: Vec<Option<String>> = Vec::new();
         let mut has_verb_or_slash = false;
@@ -51,7 +71,9 @@ impl CallCollector<'_> {
             return None; // volume guard — see module doc
         }
 
-        let specifier = self.imports.get(&callee_name).map(|b| b.specifier.clone());
+        // A namespace receiver already named the module; otherwise the callee's own import binding does.
+        let specifier =
+            ns_specifier.or_else(|| self.imports.get(&callee_name).map(|b| b.specifier.clone()));
         Some(WrapperCallFragment {
             callee: callee_name,
             specifier,

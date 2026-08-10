@@ -123,7 +123,11 @@ if (!/^[A-Za-z0-9._@-]+$/.test(label)) {
   fail(`--label '${label}' — use only [A-Za-z0-9._@-]; a label is a directory name and must not normalize away.`);
 }
 
-const bin = path.resolve(arg("bin"));
+// On Windows a suffixless `--bin ./target/release/zzop-mcp` is the natural spelling and the file on
+// disk is `zzop-mcp.exe` — try the suffix before failing, one direction only (a path that already
+// resolves is never rewritten).
+let bin = path.resolve(arg("bin"));
+if (process.platform === "win32" && !fs.existsSync(bin) && fs.existsSync(bin + ".exe")) bin += ".exe";
 const configPath = path.resolve(arg("config"));
 const runsRoot = path.resolve(arg("runs", path.join(REPO, "scratchpad", "runs")));
 const limit = Number(arg("limit", "1000"));

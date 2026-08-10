@@ -4,74 +4,14 @@
 use std::sync::OnceLock;
 
 use regex::Regex;
-use swc_core::common::{SourceMap, SourceMapper, Span, Spanned};
-use swc_core::ecma::ast::{
-    BlockStmtOrExpr, Decl, Expr, FnDecl, Module, ModuleDecl, ModuleItem, Pat, Stmt, TsEntityName,
-    TsType, TsTypeAnn, VarDecl,
-};
+use swc_core::common::{SourceMap, SourceMapper, Span};
+use swc_core::ecma::ast::{Pat, TsEntityName, TsType, TsTypeAnn};
 use zzop_core::WrapperDefFragment;
 
-/// Every top-level function-like binding — declarations and `const` arrow/function expressions —
-/// regardless of export status, keyed to its body text. Feeds `reaches_sink`'s one-hop check: the
-/// sink-holding helper is typically NOT exported, so both must be collected the same way.
-pub(super) fn collect_top_level_functions(
-    module: &Module,
-    cm: &SourceMap,
-) -> Vec<(String, String)> {
-    let mut out = Vec::new();
-    for item in &module.body {
-        match item {
-            ModuleItem::Stmt(Stmt::Decl(Decl::Fn(f))) => push_fn_decl(f, cm, &mut out),
-            ModuleItem::Stmt(Stmt::Decl(Decl::Var(v))) => collect_var_fns(v, cm, &mut out),
-            ModuleItem::ModuleDecl(ModuleDecl::ExportDecl(export)) => match &export.decl {
-                Decl::Fn(f) => push_fn_decl(f, cm, &mut out),
-                Decl::Var(v) => collect_var_fns(v, cm, &mut out),
-                _ => {}
-            },
-            _ => {}
-        }
-    }
-    out
-}
+mod collect;
 
-fn push_fn_decl(f: &FnDecl, cm: &SourceMap, out: &mut Vec<(String, String)>) {
-    if let Some(body) = &f.function.body {
-        out.push((
-            f.ident.sym.to_string(),
-            cm.span_to_snippet(body.span).unwrap_or_default(),
-        ));
-    }
-}
-
-fn collect_var_fns(v: &VarDecl, cm: &SourceMap, out: &mut Vec<(String, String)>) {
-    for d in &v.decls {
-        let Pat::Ident(bi) = &d.name else { continue };
-        let Some(init) = d.init.as_deref() else {
-            continue;
-        };
-        match init {
-            Expr::Arrow(a) => {
-                let span = match &*a.body {
-                    BlockStmtOrExpr::BlockStmt(b) => b.span,
-                    BlockStmtOrExpr::Expr(e) => e.span(),
-                };
-                out.push((
-                    bi.id.sym.to_string(),
-                    cm.span_to_snippet(span).unwrap_or_default(),
-                ));
-            }
-            Expr::Fn(f) => {
-                if let Some(body) = &f.function.body {
-                    out.push((
-                        bi.id.sym.to_string(),
-                        cm.span_to_snippet(body.span).unwrap_or_default(),
-                    ));
-                }
-            }
-            _ => {}
-        }
-    }
-}
+pub(super) use collect::{collect_absolute_url_consts, collect_top_level_functions};
+use collect::{mentions_identifier, states_absolute_url};
 
 /// Classifies one candidate function (name + its parameter patterns + its body span, if it has one)
 /// as a `WrapperDefFragment`, or `None` when any gate in the module doc's recognizer spec fails.
@@ -81,6 +21,7 @@ pub(super) fn classify_def(
     body_span: Option<Span>,
     cm: &SourceMap,
     local_fns: &[(String, String)],
+    url_consts: &[String],
 ) -> Option<WrapperDefFragment> {
     let body_text = cm.span_to_snippet(body_span?).unwrap_or_default();
 
@@ -109,7 +50,19 @@ pub(super) fn classify_def(
     // consume keys for calls that actually leave the analyzed system. External egress is
     // `egress.rs`'s channel, so an absolute-URL sink disqualifies the wrapper (honest under-report
     // over mis-keying).
-    if sink_body.contains("http://") || sink_body.contains("https://") {
+    //
+    // Both spans are scanned, and the URL may be reached through a module binding rather than
+    // spelled inline. Scanning only the sink's own text was a measured hole: the common shape in the
+    // wild binds the base above the sink (`const base = 'https://…'; fetch(`${base}/${p}`)`), which
+    // sailed through and minted `GET /articles` for a call leaving the system — a key that then
+    // joined a same-named internal route and invented a cross-layer edge. The file states the host
+    // in both shapes; reading the binding is not inference.
+    if states_absolute_url(&sink_body)
+        || states_absolute_url(&body_text)
+        || url_consts
+            .iter()
+            .any(|c| mentions_identifier(&sink_body, c) || mentions_identifier(&body_text, c))
+    {
         return None;
     }
 
@@ -125,7 +78,18 @@ pub(super) fn classify_def(
     let path_param = path_param?;
 
     let fixed_method = if method_param.is_none() {
-        Some(fixed_verb_for_sink(&sink_body, is_fetch)?)
+        // The sink first, then the wrapper's OWN body — in that order, because the sink is what
+        // actually issues the request and a wrapper's literal may be a default the sink overrides.
+        // The fallback exists because a very common split (measured on `corpus/oss/fe-svelte`) puts
+        // the options object in the WRAPPER and leaves the sink a generic sender, so the verb is
+        // written down one span over and scanning only the sink dropped the whole def.
+        //
+        // `is_fetch` is deliberately NOT passed to the fallback: that flag licenses the bare-`fetch`
+        // GET default, which is a claim about the CALL, and the wrapper body does not make the call.
+        // Letting it through would fabricate GET for any wrapper whose body merely says `fetch`.
+        let verb = fixed_verb_for_sink(&sink_body, is_fetch)
+            .or_else(|| fixed_verb_for_sink(&body_text, false))?;
+        Some(verb)
     } else {
         None
     };
@@ -252,10 +216,55 @@ fn fixed_verb_for_sink(sink_body: &str, is_fetch: bool) -> Option<String> {
     if !verbs.is_empty() {
         return None; // more than one distinct literal verb — ambiguous, disqualify
     }
+    // No `method:` literal — the verb may still be spelled STRUCTURALLY, in the client method's own
+    // name (`axios.get(path)`). Checked AFTER the literal because a literal is the more specific
+    // statement: `axios.request({ method: 'DELETE' })` names a non-verb method and its real verb in
+    // the same call, and a name-derived answer must never shadow it.
+    let named = distinct_client_method_verbs(sink_body);
+    if named.len() == 1 {
+        return named.into_iter().next();
+    }
+    if !named.is_empty() {
+        return None; // `write ? axios.post(p) : axios.get(p)` — same ambiguity rule as above
+    }
     if is_fetch && !mentions_method_key(sink_body) && !fetch_has_opaque_options(sink_body) {
         return Some("GET".to_string());
     }
     None
+}
+
+/// Distinct UPPERCASED verbs read from a recognized client's METHOD NAME (`axios.get(...)`,
+/// `ky.put(...)`), in first-seen order.
+///
+/// Reading `get` off `axios.get` is not a guess: it is that client's published API surface, and it is
+/// the same vocabulary `egress/matchers.rs` keys member calls from — `zzop_core::HTTP_KEY_VERBS`,
+/// compared lowercase, so no second verb list exists to drift. Without this the single most common
+/// wrapper shape in the wild — `export const getThing = (path) => axios.get(path)` — produced no
+/// fragment at all, because the recognizer only ever looked for a `method: 'GET'` literal.
+///
+/// The client set is `axios`/`ky` deliberately: exactly the identifiers [`has_direct_sink`] already
+/// treats as sinks. A wrapper over `superagent.get(...)` still yields nothing, and that is a SINK-set
+/// gap rather than a verb-reading one — widening the verb reader here would silently claim a sink
+/// this channel does not recognize.
+fn distinct_client_method_verbs(text: &str) -> Vec<String> {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re =
+        RE.get_or_init(|| Regex::new(r"(?:^|[^\w$])(?:axios|ky)\s*\.\s*([A-Za-z]+)\s*\(").unwrap());
+    let mut verbs: Vec<String> = Vec::new();
+    for cap in re.captures_iter(text) {
+        let name = &cap[1];
+        if !zzop_core::HTTP_KEY_VERBS
+            .iter()
+            .any(|v| v.eq_ignore_ascii_case(name))
+        {
+            continue; // `axios.request`, `axios.create` — not a verb, says nothing about the method
+        }
+        let verb = name.to_uppercase();
+        if !verbs.contains(&verb) {
+            verbs.push(verb);
+        }
+    }
+    verbs
 }
 
 /// Distinct UPPERCASED verbs from `method: 'VERB'` literals in `text`, in first-seen order.

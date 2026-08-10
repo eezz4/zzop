@@ -52,6 +52,16 @@
 //!   model becomes a `SourceSymbolKind::Class` symbol, `parser/parser-prisma/src/analysis.rs`'s
 //!   `build_common_ir`) but every one has `body_start: None, body_end: None` by construction — `symbols`
 //!   present, `method_spans` absent, simultaneously, for the same environment.
+//! - `decl_in_span` — the SEMANTICS half of `method_spans`, and the reason that column alone was
+//!   dangerous to read. `method_spans: yes` says a span EXISTS; it says nothing about where the span
+//!   starts, and until 2026-08-10 six parsers answered that differently (TS/Java/C#: the body block's
+//!   `{` line; Go/Rust/Python: the first STATEMENT's line). Six `yes` cells therefore read as
+//!   portability while a rule anchored on a DECLARATION — `async`, `@Transactional`, `[HttpGet]`,
+//!   `#[get(...)]`, a parameter name — was writable for three of them by formatting coincidence and
+//!   structurally unwritable for the other three. This cell asks the question the rule author actually
+//!   has: **is the declaration line inside the span**, measured against a fixture whose signature wraps
+//!   onto a second line, so no brace placement can make it pass by accident. `zzop_core::SourceSymbol`'s
+//!   "Body span contract" is the rule; this column is what proves each environment obeys it.
 //! - `loop_spans` — `Matcher::MethodScan`'s `trigger_in_loop` substrate.
 //! - `io_provides` / `io_consumes` — `Matcher::IoScan`'s substrate: whether the ASSEMBLED WHOLE-TREE
 //!   `IoScanTreeContext::provides`/`::consumes` (`analyze::assemble::provides::compose`'s output — the
@@ -76,17 +86,26 @@
 //!   DEFAULT are not declarations that bind a name to a literal in the sense the channel carries, and
 //!   no parser arm projects them).
 //!
-//! | environment        | symbols | method_spans | loop_spans | io_provides | io_consumes | call_sites | string_literals |
-//! |---------------------|---------|---------------|------------|-------------|-------------|------------|-----------------|
-//! | typescript          | yes     | yes           | yes        | yes         | yes         | yes        | yes             |
-//! | python-3            | yes     | yes           | yes        | yes         | yes         | yes        | yes             |
-//! | java-21             | yes     | yes           | yes        | yes         | yes         | yes        | yes             |
-//! | rust                | yes     | yes           | yes        | yes         | yes         | yes        | yes             |
-//! | go                  | yes     | yes           | yes        | yes         | yes         | yes        | yes             |
-//! | prisma              | yes     | no            | no         | yes         | no          | no         | no              |
-//! | sql                 | no      | no            | no         | yes         | no          | no         | no              |
-//! | csharp              | yes     | yes           | yes        | yes         | yes         | yes        | yes             |
-//! | lexical-fallback    | no      | no            | no         | no          | no          | no         | no              |
+//! | environment        | symbols | method_spans | decl_in_span | loop_spans | io_provides | io_consumes | call_sites | string_literals |
+//! |---------------------|---------|---------------|--------------|------------|-------------|-------------|------------|-----------------|
+//! | typescript          | yes     | yes           | yes          | yes        | yes         | yes         | yes        | yes             |
+//! | python-3            | yes     | yes           | yes          | yes        | yes         | yes         | yes        | yes             |
+//! | java-21             | yes     | yes           | yes          | yes        | yes         | yes         | yes        | yes             |
+//! | rust                | yes     | yes           | yes          | yes        | yes         | yes         | yes        | yes             |
+//! | go                  | yes     | yes           | yes          | yes        | yes         | yes         | yes        | yes             |
+//! | prisma              | yes     | no            | no           | no         | yes         | no          | no         | no              |
+//! | sql                 | no      | no            | no           | no         | yes         | no          | no         | no              |
+//! | csharp              | yes     | yes           | yes          | yes        | yes         | yes         | yes        | yes             |
+//! | lexical-fallback    | no      | no            | no           | no         | no          | no         | no         | no              |
+//!
+//! `decl_in_span` landed 2026-08-10 with the contract it measures, and all six structural rows would
+//! have been RED the day before — each parser's own span pin was measured failing on exactly this
+//! shape first (`parser-*/src/lang/symbols{,/tests}.rs`, the tests naming the declaration line). That
+//! includes the three whose `method_spans: yes` had been carrying the shipped
+//! `typescript/async-handler-no-try` rule, because a wrapped signature defeats the block-line reading
+//! just as completely as it defeats the first-statement one. Which is the whole argument for the
+//! column: the old table could not distinguish "this environment can host a declaration-anchored rule"
+//! from "this environment happened to be formatted so one worked".
 //!
 //! `call_sites` flipped `no` -> `yes` for typescript/python-3 on 2026-08-03 in the wave (W1) that landed
 //! the first two producers together with the three rules that read them — `reliability/console-in-be`
@@ -182,6 +201,16 @@
 //! exclusion's business, not a parser channel's. A blank row would read as a gap when it is a statement
 //! that the other axis already covers that language.
 //!
+//! **That last sentence was FALSE for three of the languages it named, from the day it was written until
+//! 2026-08-10.** The premise held — Go, Python and C# do name their tests in the path — but the fragment
+//! did not match their spellings: it knew `tests/`, `spec/` and the `.test.`/`.spec.` dot-infix, i.e.
+//! TypeScript's conventions and only TypeScript's, so `handler_test.go`, `test_login.py` and
+//! `UserTests.cs` were all judged as production code. The worked example in the paragraph above is a
+//! `.ts` path, which is exactly how the claim survived review: every example given was one that happened
+//! to work, and the two languages with no example were the two that were broken. The fragment now carries
+//! every convention (`zzop_core::is_test_file` reads the same string), so the sentence is true — but the
+//! shape of the mistake is worth keeping: a claim about N languages backed by one language's example.
+//!
 //! Where the drift IS pinned, two-sided, on the one environment that has the channel:
 //! `crates/engine/tests/analyze_rust_test_spans.rs` — same violation inside and outside a `#[cfg(test)]`
 //! region, one finding, on the shipped line. **If a second language ever learns `test_spans`, revisit
@@ -203,6 +232,7 @@ use zzop_engine::{analyze_tree, AnalyzeOutput, EngineConfig};
 struct Capabilities {
     symbols: bool,
     method_spans: bool,
+    decl_in_span: bool,
     loop_spans: bool,
     io_provides: bool,
     io_consumes: bool,
@@ -222,6 +252,7 @@ const ENVIRONMENTS: &[(&str, Capabilities)] = &[
         Capabilities {
             symbols: true,
             method_spans: true,
+            decl_in_span: true,
             loop_spans: true,
             io_provides: true,
             io_consumes: true,
@@ -236,6 +267,7 @@ const ENVIRONMENTS: &[(&str, Capabilities)] = &[
         Capabilities {
             symbols: true,
             method_spans: true,
+            decl_in_span: true,
             loop_spans: true,
             io_provides: true,
             io_consumes: true,
@@ -253,6 +285,7 @@ const ENVIRONMENTS: &[(&str, Capabilities)] = &[
         Capabilities {
             symbols: true,
             method_spans: true,
+            decl_in_span: true,
             loop_spans: true,
             io_provides: true,
             io_consumes: true,
@@ -268,6 +301,7 @@ const ENVIRONMENTS: &[(&str, Capabilities)] = &[
         Capabilities {
             symbols: true,
             method_spans: true,
+            decl_in_span: true,
             loop_spans: true,
             io_provides: true,
             io_consumes: true,
@@ -282,6 +316,7 @@ const ENVIRONMENTS: &[(&str, Capabilities)] = &[
         Capabilities {
             symbols: true,
             method_spans: true,
+            decl_in_span: true,
             loop_spans: true,
             io_provides: true,
             io_consumes: true,
@@ -294,6 +329,7 @@ const ENVIRONMENTS: &[(&str, Capabilities)] = &[
         Capabilities {
             symbols: true,
             method_spans: false,
+            decl_in_span: false,
             loop_spans: false,
             io_provides: true,
             io_consumes: false,
@@ -306,6 +342,7 @@ const ENVIRONMENTS: &[(&str, Capabilities)] = &[
         Capabilities {
             symbols: false,
             method_spans: false,
+            decl_in_span: false,
             loop_spans: false,
             io_provides: true,
             io_consumes: false,
@@ -321,6 +358,7 @@ const ENVIRONMENTS: &[(&str, Capabilities)] = &[
         Capabilities {
             symbols: true,
             method_spans: true,
+            decl_in_span: true,
             loop_spans: true,
             io_provides: true,
             io_consumes: true,
@@ -333,6 +371,7 @@ const ENVIRONMENTS: &[(&str, Capabilities)] = &[
         Capabilities {
             symbols: false,
             method_spans: false,
+            decl_in_span: false,
             loop_spans: false,
             io_provides: false,
             io_consumes: false,
@@ -449,6 +488,15 @@ impl Drop for TempDir {
 /// against a source that genuinely has a loop, not merely against a fixture that omits one). A symbol
 /// literally named `ZzopCanaryTarget` gives every symbol-projecting environment something to declare.
 ///
+/// Every fixture whose language has a function ALSO carries `ZZOP_DECL_MARKER` — the `decl_in_span`
+/// column's probe. Its placement is the whole measurement and is not negotiable: a trailing comment on
+/// the DECLARATION line of a `zzopCanaryDeclSpan` function whose signature deliberately WRAPS onto a
+/// second line, so the opening brace is nowhere near it. A brace-line span misses it, a
+/// first-statement span misses it, and only a declaration-anchored span contains it — which is why the
+/// fixture cannot be shortened to a one-line header without turning the column back into a formatting
+/// coincidence. Prisma/SQL/Kotlin carry the marker as a bare comment, the same discipline
+/// `ZZOP_LOOP_MARKER` follows: their `no` is proven against a file that genuinely contains the string.
+///
 /// Every fixture ALSO carries a `zzopCanaryCallSites` function holding that language's own console write
 /// and environment read (`console.log`/`process.env`, `print`/`os.getenv`, `System.out.println`/
 /// `System.getenv`, `println!`/`std::env::var`, `fmt.Println`/`os.Getenv`, `Console.WriteLine`/
@@ -481,6 +529,11 @@ function ZzopCanaryTarget() {
 }
 
 function zzopLoopBody() {}
+
+function zzopCanaryDeclSpan( // ZZOP_DECL_MARKER
+) {
+  zzopLoopBody();
+}
 
 function zzopEgress() {
   fetch("https://api.example.com/zzop-canary");
@@ -525,6 +578,11 @@ def zzop_loop_body():
     pass
 
 
+def zzop_canary_decl_span(  # ZZOP_DECL_MARKER
+):
+    zzop_loop_body()
+
+
 def zzop_egress():
     requests.get("https://api.example.com/zzop-canary")
 
@@ -562,6 +620,11 @@ class ZzopCanaryTarget {
 
   void zzopLoopBody() {}
 
+  void zzopCanaryDeclSpan( // ZZOP_DECL_MARKER
+  ) {
+    zzopLoopBody();
+  }
+
   void zzopEgress() {
     new RestTemplate().getForObject("https://api.example.com/zzop-canary", String.class);
   }
@@ -598,6 +661,11 @@ fn ZzopCanaryTarget() {
 }
 
 fn zzop_loop_body() {}
+
+fn zzop_canary_decl_span( // ZZOP_DECL_MARKER
+) {
+    zzop_loop_body();
+}
 
 fn zzop_egress() {
     reqwest::get("https://api.example.com/zzop-canary");
@@ -640,6 +708,12 @@ func zzopCanaryHandler() {}
 // the comment instead of the `for_statement` and report `body_start: None` for the WHOLE function --
 // this canary caught that the hard way while this file was being written. Trailing-comment placement
 // (same line as a real statement) sidesteps it without touching parser/parser-go itself.
+//
+// That workaround is no longer load-bearing as of 2026-08-10: the span contract anchors `body_start` on
+// the declaration and `body_end` on the closing brace, so `body_line_range` reads nothing inside the
+// block and no comment placement can move either boundary. The placement is kept anyway, deliberately.
+// It costs nothing, and a fixture that would have caught a real bug is worth more than a tidier one --
+// if some future change reintroduces content-dependent boundaries, this shape still exercises them.
 func ZzopCanaryTarget() {
 	for i := 0; i < 1; i++ {
 		zzopLoopBody() // ZZOP_LOOP_MARKER
@@ -648,6 +722,11 @@ func ZzopCanaryTarget() {
 }
 
 func zzopLoopBody() {}
+
+func zzopCanaryDeclSpan( // ZZOP_DECL_MARKER
+) {
+	zzopLoopBody()
+}
 
 func zzopEgress() {
 	http.Get("/zzop-canary")
@@ -667,6 +746,7 @@ const zzopCanaryBoundLiteral = "zzop-canary-value"
             r#"// ZZOP_LINE_MARKER
 // ZZOP_METHOD_MARKER
 // ZZOP_LOOP_MARKER
+// ZZOP_DECL_MARKER
 model ZzopCanaryTarget {
   id String @id
 }
@@ -678,6 +758,7 @@ model ZzopCanaryTarget {
             r#"-- ZZOP_LINE_MARKER
 -- ZZOP_METHOD_MARKER
 -- ZZOP_LOOP_MARKER
+-- ZZOP_DECL_MARKER
 CREATE TABLE zzop_canary_table (id INT);
 "#,
         ),
@@ -703,6 +784,11 @@ public class ZzopCanaryTarget {
 
     public void ZzopLoopBody() {}
 
+    public void ZzopCanaryDeclSpan( // ZZOP_DECL_MARKER
+    ) {
+        ZzopLoopBody();
+    }
+
     public async void ZzopEgress() {
         var client = new HttpClient();
         var r = client.GetAsync("https://api.example.com/zzop-canary");
@@ -723,6 +809,7 @@ public class ZzopCanaryTarget {
             r#"// ZZOP_LINE_MARKER
 // ZZOP_METHOD_MARKER
 // ZZOP_LOOP_MARKER
+// ZZOP_DECL_MARKER
 // .kt is not dispatched by any parser this engine ships today (crates/engine/src/dispatch.rs's
 // dispatch_by_extension has no "kt" arm) -- this file exercises the lexical-fallback path on purpose.
 // The console write and env read below are REAL Kotlin ones, so `call_sites: false` on this row is
@@ -936,6 +1023,17 @@ const CANARY_PROBE_PACK_JSON: &str = r#"{
       }
     },
     {
+      "id": "decl-scan-probe",
+      "severity": "info",
+      "message": "capability-matrix MINIMAL-EXISTENCE probe (NOT a real finding): fires only when ZZOP_DECL_MARKER -- which sits in a trailing comment on a DECLARATION line whose signature wraps onto the next line -- falls inside a projected symbol body span. This is the decl_in_span column: the semantics half of method_spans. A miss does NOT mean the environment projects no spans (method_spans answers that separately) -- it means its spans start after the declaration, which makes every declaration-anchored rule concept (async, @Transactional, [HttpGet], #[get(...)]) structurally unwritable there. See this file's module doc and zzop_core::SourceSymbol's Body span contract.",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": ".*",
+        "patterns": [{ "pattern": "ZZOP_DECL_MARKER", "label": "hit" }],
+        "trigger": "hit"
+      }
+    },
+    {
       "id": "call-scan-probe",
       "severity": "info",
       "message": "capability-matrix MINIMAL-EXISTENCE probe (NOT a real finding): fires on ANY projected call site -- no `kind` and no `callee_pattern`, deliberately, so it asks the one question this column is about (does this environment project the call_sites channel at all) rather than any question about a particular family. A miss does NOT mean the fixture contains no console write and no environment read -- every fixture whose language can express one contains both -- it means this engine does not project call sites for that environment. See this file's module doc for the full claim boundary.",
@@ -1024,6 +1122,60 @@ fn canary_loop_spans_channel_matches_the_declared_table_via_a_trigger_in_loop_pr
         mismatches.is_empty(),
         "capability_matrix: ENVIRONMENTS table's loop_spans column (or the source_lines universality \
          sanity check) disagrees with the real engine projection: {mismatches:#?}"
+    );
+}
+
+/// Canary #6 (MINIMAL EXISTENCE): `decl_in_span` per environment — `method_spans`' semantics twin, and
+/// the only column here that can be `no` while its own prerequisite is `yes`. It is proven through a
+/// rule rather than by inspecting output because the question is about a COORDINATE, not a channel:
+/// "does `body_start` precede the declaration" is only answerable against a fixture whose declaration
+/// is at a known place, and running the real `MethodScan` over one is the honest way to ask.
+///
+/// A row can only be `no` here in two ways, and both are worth failing on. Either the environment has
+/// no spans at all (`method_spans: no` — prisma/sql/lexical-fallback, whose marker sits in a comment
+/// precisely so the negative is measured rather than assumed), or it has spans that begin after the
+/// declaration — which is the state ALL SIX structural rows were in before 2026-08-10 and which no
+/// other test in this file could see.
+#[test]
+fn canary_decl_in_span_column_matches_the_declared_table_via_a_declaration_anchored_probe_rule() {
+    let dir = TempDir::new("zzop-capability-matrix-declspan");
+    write_canary_files(&dir);
+    let out = canary_engine_output(&dir, vec![canary_probe_pack()]);
+
+    let decl_scan_hits: std::collections::BTreeSet<&str> = out
+        .findings
+        .iter()
+        .filter(|f| f.rule_id == "capability-matrix-canary/decl-scan-probe")
+        .map(|f| f.file.as_str())
+        .collect();
+
+    let mut mismatches = Vec::new();
+    for (env, file, _) in canary_files() {
+        let caps = capabilities_for(env);
+        let fired = decl_scan_hits.contains(file);
+        if fired != caps.decl_in_span {
+            mismatches.push(format!(
+                "{env} ({file}): declared decl_in_span={}, declaration-anchored probe actually \
+                 fired={fired} (MINIMAL-EXISTENCE mismatch, not a firing claim — see module doc). A \
+                 declared-present row that MISSED means this parser's `body_start` no longer begins \
+                 at the declaration line, which silently un-writes every declaration-anchored rule \
+                 concept for that language — see `zzop_core::SourceSymbol`'s Body span contract.",
+                caps.decl_in_span
+            ));
+        }
+        // The column is only meaningful ON TOP of `method_spans`; a row claiming the semantics
+        // without the substrate would be incoherent rather than merely wrong.
+        if caps.decl_in_span && !caps.method_spans {
+            mismatches.push(format!(
+                "{env} ({file}): declared decl_in_span=true with method_spans=false — the declaration \
+                 line cannot be inside a span the environment does not project"
+            ));
+        }
+    }
+    assert!(
+        mismatches.is_empty(),
+        "capability_matrix: ENVIRONMENTS table's decl_in_span column disagrees with the real engine \
+         projection: {mismatches:#?}"
     );
 }
 

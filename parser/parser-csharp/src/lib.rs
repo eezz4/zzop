@@ -1,8 +1,7 @@
 //! `zzop-parser-csharp` — a `tree-sitter-c-sharp`-based C# parser frontend -> Common IR projection,
 //! mirroring `zzop-parser-go`'s tree-sitter discipline exactly and `zzop-parser-java-21`'s nested-type/
 //! attribute-routing shape (grammar AST types stay inside this crate; only `zzop_core` types cross the
-//! crate boundary — enforced by `scripts/check-tree-sitter-isolation.sh`'s allowlist, which the wiring
-//! batch that adds this crate must extend).
+//! crate boundary — enforced by `scripts/check-tree-sitter-isolation.sh`'s allowlist).
 //!
 //! ## Layout
 //! - `lang` — CST -> Common-IR LANGUAGE projection: `SourceSymbol` extraction (`symbols`, top-level +
@@ -66,9 +65,10 @@ pub use lang::used_names::parse_local_identifier_refs;
 pub use project::{extract_csharp_http_provides_project, CSharpProjectProvidesReport};
 
 /// Cache-bust token for `zzop-cache`: `parser-id/pinned-toolchain/last-change-version`. The
-/// `tree-sitter-c-sharp` segment must match this crate's `Cargo.toml` pin (a grammar upgrade changes
-/// extraction → restamp); the trailing `CARGO_PKG_VERSION` is restamped when this crate's projected IR
-/// shape changes, else kept so warm C# caches survive the upgrade (2026-07-22 version reform).
+/// `tree-sitter-c-sharp` segment names this crate's REAL exact pin (`tree-sitter-c-sharp = "=0.23.5"`
+/// in `Cargo.toml`), so it stays accurate for whoever reads it — unlike
+/// `zzop_parser_typescript`'s caret-range label. Keeping the two in step is a courtesy to that
+/// reader, not a correctness duty.
 ///
 /// **This string is an ID, not a version — it no longer has to be bumped.** `crates/engine/build.rs`
 /// hashes this crate's whole dependency closure into the cache key beside it, so a change to any

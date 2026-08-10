@@ -29,11 +29,29 @@ use super::def::LabeledPattern;
 pub(super) struct RuleDiag<'a> {
     rule_id: &'a str,
     sink: &'a mut Vec<String>,
+    /// The owning pack's compiled-regex memo — see [`crate::dsl::RegexCache`]. It rides here rather than
+    /// being threaded through each call because every regex a rule needs already passes through this
+    /// type, so one field reaches all of them.
+    cache: &'a crate::dsl::RegexCache,
 }
 
 impl<'a> RuleDiag<'a> {
-    pub(super) fn new(rule_id: &'a str, sink: &'a mut Vec<String>) -> Self {
-        Self { rule_id, sink }
+    pub(super) fn new(
+        rule_id: &'a str,
+        sink: &'a mut Vec<String>,
+        cache: &'a crate::dsl::RegexCache,
+    ) -> Self {
+        Self {
+            rule_id,
+            sink,
+            cache,
+        }
+    }
+
+    /// The owning pack's memo, for the two compile paths that do NOT go through `compile`/`compile_opt`:
+    /// the prefilter's validity probe and the derived suppress marker.
+    pub(super) fn cache(&self) -> &'a crate::dsl::RegexCache {
+        self.cache
     }
 
     /// Appends `message` unless the sink already carries it verbatim. The per-file DSL pass calls
@@ -49,9 +67,22 @@ impl<'a> RuleDiag<'a> {
     /// Compiles a REQUIRED regex field. `None` means it did not compile and the failure is already
     /// reported — the caller's only correct response is to return (skip the rule).
     pub(super) fn compile(&mut self, field: &str, pattern: &str) -> Option<regex::Regex> {
-        match regex::Regex::new(pattern) {
+        // The memo answers the SUCCESS path (the hot one — the same pattern arrives once per scanned
+        // file). The FAILURE path re-derives the error text once per file that reaches the broken
+        // rule: the memo stores the miss as `None` with no error attached, so `compile_err` re-runs
+        // the failing compile here each time. What `push` below de-duplicates is the resulting
+        // MESSAGE — one line per broken field per run — not this derivation; see
+        // `RegexCache::compile_err` for why the error itself stays uncached.
+        match self
+            .cache
+            .compile(pattern)
+            .ok_or_else(|| crate::dsl::RegexCache::compile_err(pattern))
+        {
             Ok(re) => Some(re),
             Err(err) => {
+                let err = err
+                    .map(|e| e.to_string())
+                    .unwrap_or_else(|| "regex did not compile".to_string());
                 let message = format!(
                     "rule \"{}\": `{field}` is not a valid regex — the rule was SKIPPED and can never fire; \
                      catch this before a scan with `zzop validate-rule-pack <pack.json>` (CLI binary) / \

@@ -38,6 +38,7 @@
 use serde_json::{json, Map, Value};
 
 mod blind_spots;
+mod join_visibility;
 mod recognizers;
 
 /// One sentence per dispatch class (plus the per-row `inDepGraph` derived count), shipped in the
@@ -244,15 +245,7 @@ fn tree_view(tree: &Value, sightlines: &[zzop_core::RuleSightline]) -> Value {
         // misleading on a tree that already carried an import-alias overlay (no io) and stayed
         // join-blind. The reword makes the sentence true in both worlds: it names WHAT the overlay
         // must contribute, so it can never read as "add any overlay".
-        "joinVisibility": if join_zero {
-            "INVISIBLE to the cross-layer join: this tree extracted zero joinable io (no provides, no \
-             keyed consumes), so any join finding involving it is not meaningful — a framework/SDK the \
-             extractor cannot see is the common cause; a Mode B adapter overlay that contributes io \
-             facts (`io.provides`/`consumes`) restores visibility — an overlay carrying only imports \
-             or attributes does not"
-        } else {
-            "visible: this tree contributed joinable io facts to the cross-layer join"
-        },
+        "joinVisibility": join_visibility::join_visibility(&census, join_zero),
     });
     // CONDITIONAL by the same convention as `query_file`'s `otherTrees`: this surface's always-present
     // norm exists for fields whose ABSENCE would be ambiguous, and an absent `walkNote` is not — it can

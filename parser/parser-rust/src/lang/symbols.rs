@@ -4,6 +4,15 @@
 //! nested `def`/`class`). `macro_rules!` definitions are never extracted (crate root doc's "Scope note:
 //! macros").
 //!
+//! This scope is a CONTRACT the rest of the crate reads, not a local convenience: `lang::calls` must
+//! attribute a `RawCall` only to a symbol emitted here, or the call graph gets edges leaving a node
+//! nothing declares. Until 2026-08-10 `lang::calls` walked INTO inline `mod` bodies on the opposite
+//! written premise, and a nested `fn handler` therefore reused the id a TOP-LEVEL `fn handler` in the
+//! same file gets — one graph node carrying two unrelated functions' edges, which measurably cleared an
+//! unguarded mutating route via a homonym's auth call. Its module doc now states this same rule, and
+//! `every_from_symbol_is_a_symbol_parse_symbols_emits` (in `lang::calls`'s tests) fails if either side
+//! moves without the other. Widening this scope is therefore a change to BOTH files.
+//!
 //! ## `exported`
 //! `true` for ANY `pub` spelling — `pub`, `pub(crate)`, `pub(super)`, `pub(in ...)` — `false` only for
 //! the fully-private `syn::Visibility::Inherited` (no keyword at all). Rationale: zzop's `exported`
@@ -43,17 +52,20 @@
 //! methods, same coarse-signal tradeoff `exported`'s doc above already accepts elsewhere.
 //!
 //! ## `body_start`/`body_end`
-//! Only `Function`-kind symbols (top-level fns and `impl`-block methods) get a body line range: the
-//! first statement's START line through the last statement's END line — mirroring the FUNCTION side of
-//! `zzop_parser_python_3::lang::symbols`'s convention exactly (`s.start()`/`s.end()` there). Until
-//! 2026-08-02 `body_end` used the last statement's START line, which silently TRUNCATED the
-//! `MethodScan` scan region whenever the last statement was multi-line — discovered the day
-//! `lang::loop_spans` landed, because the commonest such statement is precisely a loop: a `for` sitting
-//! as a fn's final statement left its own body lines outside the fn's scannable span, so a
-//! `trigger_in_loop` probe inside it could never fire. Unlike Python (whose `class` body is a statement
-//! list, so `zzop_parser_python_3` computes a body range for classes too), a Rust struct/enum/union/trait
-//! has a FIELD or ASSOCIATED-ITEM list, not a statement body — there is no statement-shaped range to
-//! report, so every non-`Function` symbol here always carries `body_start: None, body_end: None`.
+//! `zzop_core::SourceSymbol`'s "Body span contract" owns the rule and this crate does not restate it;
+//! `fn_span` states the one thing that IS local to Rust — `body_start` is the first ATTRIBUTE's line
+//! when one is written, so it may sit above the symbol's `line` (pinned to the `fn` token by a
+//! separate convention).
+//!
+//! Only `Function`-kind symbols (top-level fns and `impl`-block methods) get a span, and that is a
+//! statement about RUST rather than a gap. Unlike Python — whose `class` body genuinely is a statement
+//! list, so `zzop_parser_python_3` computes a range for classes too — a Rust `struct`/`enum`/`union`/
+//! `trait` has a FIELD or ASSOCIATED-ITEM list. Projecting a span over one would make
+//! `dsl::method_scan::gates::drop_outer_spans` treat a field list as scannable and claim a per-member
+//! containment the language does not have, so every non-`Function` symbol here carries
+//! `None`/`None` and must keep doing so. There is likewise no container span to leave holes IN: an
+//! `impl` block itself projects no symbol, so this crate owes the contract's leaf-completeness half
+//! nothing.
 
 use syn::{ImplItem, Item, ItemConst, ItemFn, ItemStatic, Visibility};
 use zzop_core::{SourceSymbol, SourceSymbolKind};
@@ -152,10 +164,27 @@ fn end_line_of<T: syn::spanned::Spanned>(node: &T) -> u32 {
     node.span().end().line as u32
 }
 
+/// The span for an `fn` that has a block: the DECLARATION's own first line through the block's closing
+/// brace — `zzop_core::SourceSymbol`'s "Body span contract".
+///
+/// The declaration's first line is the first ATTRIBUTE when one is written, which is the one place in
+/// this repo where `body_start` may sit ABOVE the symbol's `line`. That is deliberate and it is what
+/// the contract asks for: `line` is pinned to the `fn` token by a separate, long-standing convention
+/// the call graph and the census both read (`line_numbers_are_one_based_and_track_declaration`), while
+/// an `#[get("/x")]`/`#[tokio::main]`-anchored method-scan concept is unwritable unless the attribute
+/// is inside the span. Nothing consumes the pair as an ordering.
+fn fn_span(attrs: &[syn::Attribute], sig: &syn::Signature, block: &syn::Block) -> (u32, u32) {
+    let start = attrs
+        .first()
+        .map(line_of)
+        .unwrap_or_else(|| line_of(&sig.fn_token));
+    (start, end_line_of(block))
+}
+
 fn function_symbol(rel: &str, name: String, f: &ItemFn, exported: bool) -> SourceSymbol {
     let line = line_of(&f.sig.fn_token);
-    let body_start = f.block.stmts.first().map(line_of);
-    let body_end = f.block.stmts.last().map(end_line_of);
+    let (start, end) = fn_span(&f.attrs, &f.sig, &f.block);
+    let (body_start, body_end) = (Some(start), Some(end));
     SourceSymbol {
         id: format!("{rel}#{name}"),
         file: rel.to_string(),
@@ -223,8 +252,8 @@ fn emit_impl(rel: &str, imp: &syn::ItemImpl, out: &mut Vec<SourceSymbol>) {
             ImplItem::Fn(f) => {
                 let name = format!("{type_name}.{}", f.sig.ident);
                 let line = line_of(&f.sig.fn_token);
-                let body_start = f.block.stmts.first().map(line_of);
-                let body_end = f.block.stmts.last().map(end_line_of);
+                let (start, end) = fn_span(&f.attrs, &f.sig, &f.block);
+                let (body_start, body_end) = (Some(start), Some(end));
                 out.push(SourceSymbol {
                     id: format!("{rel}#{name}"),
                     file: rel.to_string(),

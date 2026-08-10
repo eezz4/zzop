@@ -157,8 +157,9 @@ fn walk_member(
 
 /// This declaration's own `String`-typed, SCREAMING_SNAKE_CASE-named constant(s) — `always_const`
 /// bypasses the `static`+`final` modifier check (an interface/annotation-type `constant_declaration` is
-/// implicitly `public static final` with no keywords required, JLS 9.3/9.6.1). Mirrors the old lexical
-/// crate's `constant_decl_re`/`interface_field_re`'s exact type/name-shape restriction.
+/// implicitly `public static final` with no keywords required, JLS 9.3/9.6.1). The type must be
+/// written exactly `String` and the name SCREAMING_SNAKE — narrower than Java allows, deliberately:
+/// only a route-prefix-shaped constant is worth resolving, and anything else is skipped, never guessed.
 fn collect_constant(
     node: Node,
     src: &str,
@@ -199,7 +200,8 @@ fn collect_constant(
     }
 }
 
-/// `[A-Z][A-Z0-9_]*` — the Java constant-naming convention the old lexical crate's regexes required.
+/// `[A-Z][A-Z0-9_]*` — the Java constant-naming convention `collect_constant` requires of a name
+/// before it will record the declaration.
 fn is_screaming_snake_case(name: &str) -> bool {
     let mut chars = name.chars();
     matches!(chars.next(), Some(c) if c.is_ascii_uppercase())

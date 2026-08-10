@@ -30,6 +30,21 @@ const EXPECTED: &[(&str, &str)] = &[
     // metadata). Still `partial`, never `asserted` — one opt-in CLI lane, a subset of rules: the
     // analyze reply itself carries no such field, and undeclared rules stay prose-only.
     ("rule-evidence-language-gap", "partial"),
+    // Added 2026-08-08. The scoring lane had NO class at all, while every per-metric formula returned
+    // 100 on an empty population — so a metric with nothing to measure was byte-identical to a clean
+    // one, and `health.pain` (which dropped zero-contributors) read strictly BETTER for a tree zzop
+    // could see less of. Measured: `typeSafety`/`lod` scored 100 on every run ever made (no producer
+    // for either input channel anywhere in the build), `mainSequence` computed abstractness 0 for
+    // every module, and `featureSlicedDesign` scored a Go tree 0 purely because gRPC-Gateway puts
+    // `api/` at the BOTTOM while FSD reads that name as the TOP entry layer.
+    //
+    // `asserted` from the start, which is unusual for a new class and is earned by the SHAPE rather
+    // than by a detector: the population is a field on every score object, produced by the same
+    // computation as the number beside it, and a derived test rejects any score that ships without
+    // one. There is no run in which the signal can be absent, so `partial` would understate it. What
+    // the class explicitly does NOT claim is whether a non-zero population is representative — that
+    // residual is named in the summary rather than folded into the status.
+    ("score-population-empty", "asserted"),
     ("silent-truncation", "partial"),
     ("stale-cache", "partial"),
 ];

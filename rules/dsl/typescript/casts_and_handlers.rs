@@ -83,6 +83,17 @@ fn async_handler_without_await_is_not_detected() {
 }
 
 #[test]
+fn async_handler_with_a_catch_chain_instead_of_try_is_not_flagged() {
+    // The message says "Add try/catch (or `.catch()`)" — but `absent` carried only the try-guard
+    // arm, so a handler that does exactly what the message asks with `.catch()` still fired.
+    let f = async_handler_findings(&[(
+        "Btn.tsx",
+        "export function Btn() {\n  return <button onClick={async () => { await save().catch(reportError); }}>x</button>;\n}\n",
+    )]);
+    assert!(f.is_empty(), "{f:?}");
+}
+
+#[test]
 fn async_handler_ok_marker_directly_above_suppresses_the_finding() {
     let f = async_handler_findings(&[(
         "Marked.tsx",

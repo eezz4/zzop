@@ -23,11 +23,16 @@
 //!   whenever either id is enabled. Disabling `scores` alone still suppresses the `scores` field; it
 //!   just cannot also skip the computation while `health` still needs it (and the run then still
 //!   records the work honestly under the `scores` timing key — it did run).
-//! - `coupling` feeds `recommendations` and `seams` only, so it is built only when at least one of
-//!   those two is enabled.
+//! - `coupling` fed `recommendations` and `seams` only, and was built only when one of those two was
+//!   enabled. **Since 2026-08-06 it is also an OUTPUT** (`co_change`), so it is built whenever git is
+//!   active. The gate it lost only ever fired when BOTH ids were disabled, so the common path is
+//!   unchanged.
 //!
-//! `layer_co_churn` is deliberately NOT gated: it is not a registered id, so `disabledRules` never
-//! claims to control it (the only honest state — see `zzop_metrics::register_native_analyses`).
+//! `layer_co_churn` and `co_change` are deliberately NOT gated: neither is a registered id, so
+//! `disabledRules` never claims to control them (the only honest state — see
+//! `zzop_metrics::register_native_analyses`). They differ in what they carry: `layer_co_churn` keeps
+//! only pairs CROSSING an architectural layer, so it can never answer "what changes together" inside a
+//! module; `co_change` is the unrestricted edge set that question needs.
 
 use std::collections::HashMap;
 use std::time::Instant;
@@ -35,10 +40,10 @@ use std::time::Instant;
 use zzop_core::{ir::DepGraph, is_enabled, FileNode, Finding};
 use zzop_metrics::{
     apply_excludes_to_scores, build_coupling, build_cross_layer_co_churn, build_recommendations,
-    compute_criticality, compute_health_index, compute_scores, compute_seams, layer_of,
-    scores::types::FileKinds, BuildRecInput, CriticalFile, CrossLayerCoChurn,
-    CrossLayerCoChurnOptions, HealthIndex, Recommendation, RecommendationGates, Scores,
-    ScoresInput, SeamCandidate, COUPLING_TOP_PER_FILE, CRITICALITY_LIMIT,
+    co_change_edges, compute_criticality, compute_health_index, compute_scores, compute_seams,
+    layer_of, scores::types::FileKinds, BuildRecInput, CoChangeEdge, CriticalFile,
+    CrossLayerCoChurn, CrossLayerCoChurnOptions, HealthIndex, Recommendation, RecommendationGates,
+    Scores, ScoresInput, SeamCandidate, COUPLING_TOP_PER_FILE, CRITICALITY_LIMIT,
     CRITICALITY_MIN_BLAST_RADIUS, CRITICALITY_SILENT_CHANGE_MAX, SEAMS_LIMIT, SEAMS_MIN_FILES,
 };
 
@@ -53,6 +58,7 @@ pub(super) struct MetricsResult {
     pub(super) critical: Vec<CriticalFile>,
     pub(super) seams: Vec<SeamCandidate>,
     pub(super) layer_co_churn: Option<Vec<CrossLayerCoChurn>>,
+    pub(super) co_change: Option<Vec<CoChangeEdge>>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -80,12 +86,15 @@ pub(super) fn compute(
     let criticality_on = is_enabled(&config.rule_config, "criticality");
     let seams_on = is_enabled(&config.rule_config, "seams");
 
-    let (scores, health, recommendations, critical, seams) = if git_active {
-        let coupling = if recommendations_on || seams_on {
-            build_coupling(commits, COUPLING_TOP_PER_FILE)
-        } else {
-            Default::default()
-        };
+    let (scores, health, recommendations, critical, seams, co_change) = if git_active {
+        // Unconditional since 2026-08-06: `co_change` is an OUTPUT of its own now, not only an input to
+        // `recommendations`/`seams`, and it is ungated by `disabledRules` for the reason
+        // `layer_co_churn` is (see this module's doc). The gate it replaces only ever fired when both of
+        // those ids were disabled, so the common path costs the same.
+        let coupling = build_coupling(commits, COUPLING_TOP_PER_FILE);
+        // Derived from the SAME map the scores read, so the picture and the scores cannot disagree
+        // about what co-changed — a second computation here would be a second answer.
+        let co_change = co_change_edges(&coupling);
 
         // The top-level `exclude` says "do not judge these paths". It reaches the SCORE computation as a
         // per-file subject gate rather than as a graph edit: the excluded file stays a node with all its
@@ -103,10 +112,21 @@ pub(super) fn compute(
                     nodes,
                     dep,
                     circular: cycles,
+                    // Both still empty, and both now SAY SO on the wire rather than passing silently.
+                    //
+                    // `target` selects the per-role LOC limit (`fe:100 / be:200 / all:200`); no config
+                    // key reaches this argument, so the table is never consulted and every run scores
+                    // against `DEFAULT_LOC_LIMIT`. That one is already visible — `fileSizeCompliance`
+                    // and `godFile` both publish the `limit` they actually used — so it is a dead knob,
+                    // not a silent measurement claim, and it is tracked as such rather than fixed here.
+                    //
+                    // `file_kinds` has no producer anywhere in the workspace, which used to leave
+                    // `mainSequence` publishing a distance computed from a fabricated `abstractness: 0`.
+                    // It now reports `classifiedFiles: 0` and drops out of `health.pain` entirely — see
+                    // `ScoresInput::file_kinds`. The two channels that had NO live half at all
+                    // (`type_safety_counts`, `lod_by_file`) are gone with their metrics.
                     target: None,
                     file_kinds: &FileKinds::new(),
-                    type_safety_counts: &HashMap::new(),
-                    lod_by_file: &HashMap::new(),
                     is_source: &is_source,
                     is_scored: &is_scored,
                 },
@@ -196,9 +216,18 @@ pub(super) fn compute(
             apply_excludes_to_scores(scores, &config.rule_config.global_excludes);
         }
 
-        (scores, health, recommendations, critical, seams)
+        (
+            scores,
+            health,
+            recommendations,
+            critical,
+            seams,
+            Some(co_change),
+        )
     } else {
-        (None, None, Vec::new(), Vec::new(), Vec::new())
+        // `co_change` is `None`, not an empty Vec: nothing was MEASURED. An empty Vec here would claim
+        // the opposite — measured, and nothing co-changed.
+        (None, None, Vec::new(), Vec::new(), Vec::new(), None)
     };
 
     // `AnalyzeOutput::layer_co_churn` — git-gated like `scores`/`health` above: `None` when git is
@@ -219,5 +248,6 @@ pub(super) fn compute(
         critical,
         seams,
         layer_co_churn,
+        co_change,
     }
 }

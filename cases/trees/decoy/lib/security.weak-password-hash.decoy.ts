@@ -6,6 +6,14 @@
 // silent only because the statement's `;` (inside the error string, before `password`) trips the arms'
 // `[^;]*` statement-boundary heuristic. Unit twin: rules/dsl/security/crypto.rs
 // `negative_guard_line_rejecting_md5_is_not_flagged`.
+//
+// ALSO a decoy for security/weak-crypto since the 2026-08-09 six-language migration. In scope: `.ts`
+// is in that rule's file_pattern and this file sits under no test-path exclude, so the gate passes.
+// The md5 construction below is kept silent by the CHANNEL's own arm: `hash-call` sites are projected
+// only when the callee resolves to a crypto import (node:crypto), and `createHash` here is a local
+// `declare` — a spelling, not that binding — so no call site is projected and the rule reads nothing.
+// Deliberately NOT made "realistic" with a real `import { createHash } from 'node:crypto'`: that
+// would be a genuine weak-digest construction — a true positive, not a decoy — so don't.
 export declare const bcrypt: { hash(v: string, rounds: number): Promise<string> };
 export declare function createHash(algo: string): { update(b: Uint8Array): { digest(): string } };
 

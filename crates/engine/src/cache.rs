@@ -75,30 +75,24 @@ fn derived(id: &str, source_hash: &str) -> String {
     format!("{id}/{source_hash}")
 }
 
-/// Schema version passed to `AnalysisCache::open` — the cache's one bulk invalidator (see
-/// `AnalysisCache::open`'s own doc: a mismatch is a wipe, not a per-entry migration). Two axes, and
-/// neither one alone is enough:
+/// Schema version passed to `AnalysisCache::open` — the cache's one bulk invalidator (that function's
+/// doc has the rest: a mismatch wipes, and the test is EQUALITY, not an ordering). **One axis since
+/// 2026-08-05**: a hash of the two crates that DEFINE what gets persisted, `zzop-cache` and
+/// `zzop-core`, each by Cargo dependency closure. See `build.rs`.
 ///
-/// - **Release axis** — the workspace version. Every release reclaims exactly one cache generation,
-///   which matters because this crate has no GC (`zzop_cache`'s store module doc records
-///   non-eviction as designed), so a generation that stopped being addressed would otherwise sit
-///   unread on every user's disk forever. The price is one cold run per upgrade.
-/// - **Stored-shape axis** — a hash of the two crates that DEFINE what gets persisted, `zzop-cache`
-///   (the entry envelopes) and `zzop-core` (`FileIrSlice`, `Finding`, and the shared types they
-///   embed), each taken by Cargo dependency closure. See `build.rs`.
+/// **A release axis used to be glued to the front, and removing it is the point.** The value was
+/// `{workspace_version}+{hash}`, so every upgrade wiped — but that half never did INVALIDATION (the
+/// hash covers it), it did HOUSEKEEPING, reclaiming entries orphaned by ordinary edits, because nothing
+/// else did. So a release changing no analysis code still charged every user a cold run: `v0.29.0 ->
+/// v0.29.1` touched zero bytes of the hashed closure and wiped every cache anyway. What that half
+/// genuinely bought — that SOMETHING eventually reclaims, since for a released binary the hash is a
+/// constant that never moves — is now `zzop_cache::evict`'s size cap, without the false invalidation.
 ///
-/// **The second axis used to be a `+rN` counter bumped by hand**, and the whole apparatus around it —
-/// a ~400-line guard, a list of watched files inside that guard, and three escape hatches for the
-/// cases the guard read wrong — existed only because a human had to remember. The hash cannot be
-/// forgotten. It also covers what the hand list structurally could not: a NEW file under either crate
-/// is in the closure the day it lands, where a listed path had to be added by the same person who
-/// would have had to remember the bump.
-///
-/// It catches strictly more than shape, too. A `+rN` bump was also required whenever the MEANING of a
-/// key ingredient changed without its shape moving — a real 2026-07-27 case where an undeclared
-/// vocabulary stopped falling back to built-ins, leaving `vocabulary_fingerprint`'s hashed struct
-/// byte-identical while the slices it addressed were computed differently. That change edited
-/// `zzop-core`, so the source hash moves on it; the judgment call is gone.
+/// **It catches MEANING, not just shape** — which is what a hand-bumped counter kept getting wrong. A
+/// real 2026-07-27 case: an undeclared vocabulary stopped falling back to built-ins, leaving
+/// `vocabulary_fingerprint`'s hashed struct byte-identical while the slices it addressed were computed
+/// differently. That change edited `zzop-core`, so the source hash moves on it — and a NEW file under
+/// either crate is in the closure the day it lands, which no watched-file list could manage.
 ///
 /// Over-invalidation is the accepted direction: a comment-only edit in either crate wipes the cache,
 /// which costs recomputation, where under-invalidation serves a WRONG ANSWER from a stale entry.
@@ -295,6 +289,9 @@ impl CacheCounters {
     }
 }
 
+/// Shapes the manifest bytes `FP_ENGINE` hashes. Declared here so its tests run and so editing it moves
+/// the fingerprint it shapes; its CALLER is `build.rs`, which `include!`s the same file. See its header.
+mod manifest_version;
 pub(crate) mod surface;
 #[cfg(test)]
 mod tests;

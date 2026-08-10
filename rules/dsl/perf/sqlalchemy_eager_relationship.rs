@@ -212,23 +212,30 @@ fn a_declaration_under_a_tests_directory_is_not_flagged() {
 }
 
 #[test]
-fn a_top_level_test_prefixed_module_still_fires_documented_residual() {
-    // Residual, pinned rather than fixed: `${test-paths-stories}` matches DIRECTORIES (`tests/`) and the
-    // JS `.test.`/`.spec.` infixes, not pytest's `test_*.py` FILENAME convention outside such a
-    // directory. Widening it would be a change to a shared vocabulary every pack rides, not to this
-    // rule. If the fragment ever grows the Python filename clause, this test goes red and is the place
-    // that records why the expectation flipped.
+fn a_top_level_test_prefixed_module_is_not_flagged() {
+    // FLIPPED 2026-08-10, at the invitation of the version of this test it replaces. That one asserted
+    // `len() == 1` and called itself a "documented residual": `${test-paths-stories}` matched
+    // DIRECTORIES (`tests/`) and the JS `.test.`/`.spec.` infixes but not pytest's `test_*.py` FILENAME
+    // convention outside such a directory, and it said in as many words that widening the shared
+    // fragment was the fix and that this test was "the place that records why the expectation flipped".
+    //
+    // The fragment now carries every language's own convention — Python's `test_*.py`/`*_test.py`, Go's
+    // `_test.go`, C#'s `*Tests.cs`, Java's `FooTest.java` — because it and `zzop_core::is_test_file` were
+    // merged into one owner, and the half with 131 consumers had been the TypeScript-only one. This
+    // assertion is the same claim the sibling above makes for `tests/`: a model defined for a test
+    // fixture is not a production read path, and pytest names that file `test_models.py` whether or not
+    // it sits in a directory.
     let f = sqla_scan(
         "test_models.py",
         &format!("{IMPORTS}\n\nclass User(Base):\n    photos = relationship(\"Photo\", lazy=\"joined\")\n"),
     );
-    assert_eq!(f.len(), 1, "{f:?}");
+    assert!(f.is_empty(), "{f:?}");
 }
 
 #[test]
 fn a_bare_hash_suppress_marker_does_not_suppress_but_the_documented_spelling_does() {
     // THE Python plumbing gap, pinned in both directions because the rule's message documents exactly
-    // this: `crates/core/src/dsl/markers.rs`'s `compile_marker` anchors a line-scan marker as
+    // this: `crates/core/src/dsl/markers/`'s `compile_marker` anchors a line-scan marker as
     // `//\s*<marker>\b`, and only `.sql` files get a second leader (`--`). Python's `#` is not among
     // them, so the idiomatic spelling is INERT and the message tells the reader to write `# // <marker>`
     // instead. If line-scan ever gains `#` (io-scan's `compile_marker_line_comment` already has it), the

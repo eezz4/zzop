@@ -14,12 +14,21 @@ should never leak into the public IR).
 |-------|----------|
 | `parser-typescript` | **native swc** (parses in Rust, 0 N-API crossings) — full AST |
 | `parser-python-3` | **native ruff** (Astral's published parser crates — the same grammar powering ruff/ty, in Rust, 0 process crossings) — full AST |
-| `parser-rust` | **native syn 2** (parses in Rust, 0 process crossings) — full AST: symbols, imports/dep graph (module-path + workspace `Cargo.toml` resolution), axum router provides, `reqwest` egress consumes |
-| `parser-go` | **native tree-sitter-go** (tree-sitter-go 0.25) — full CST: symbols, imports/dep graph (`go.mod` package-directory resolution), gin/`net/http` router provides, `net/http` egress consumes |
+| `parser-rust` | **native syn 2** (parses in Rust, 0 process crossings) — full AST: symbols, imports/dep graph (module-path + workspace `Cargo.toml` resolution) |
+| `parser-go` | **native tree-sitter-go** (tree-sitter-go 0.25) — full CST: symbols, imports/dep graph (`go.mod` package-directory resolution) |
 | `parser-prisma` | parses the Prisma schema DSL — lexical: model `db-table` provides (accessor-cased key, feeds the db-table join channel) |
-| `parser-java-21` | **native tree-sitter-java** (tree-sitter-java 0.23.5, Java 21 grammar coverage) — full CST: symbols, imports/dep graph, Spring MVC HTTP route provides, call sites for the whole-repo call graph, Spring Security method-security auth-guard evidence |
+| `parser-java-21` | **native tree-sitter-java** (tree-sitter-java 0.23.5, Java 21 grammar coverage) — full CST: symbols, imports/dep graph, call sites for the whole-repo call graph |
 | `parser-sql` | owns the SQL vocabulary for BOTH directions of the `db-table` channel — lexical/regex, no grammar. PROVIDE: `CREATE TABLE` in a `.sql` file (quote-stripped, schema-qualifier dropped, lower-first canonical key — twin of the Prisma provide, for ORM-less migration stacks). CONSUME: the tables one SQL STATEMENT STRING reads/writes (`FROM`/`JOIN`/`INTO`/`UPDATE … SET`), for callers that hold such a string — `parser-typescript`'s `raw_sql` adapter hands it every string literal a `.ts` file contains, which is how a raw-SQL stack (Cloudflare D1, `better-sqlite3`, `pg`, `mysql2`) reaches the channel with no ORM symbol to key off. Both keys come out of one transform, so they cannot drift |
-| `parser-csharp` | **native tree-sitter-c-sharp** (tree-sitter-c-sharp 0.23.5) — full CST: symbols, imports/dep graph (`using` directives, namespace→files resolution), ASP.NET Core attribute-controller + Minimal-API HTTP route provides, `HttpClient` literal egress consumes |
+| `parser-csharp` | **native tree-sitter-c-sharp** (tree-sitter-c-sharp 0.23.5) — full CST: symbols, imports/dep graph (`using` directives, namespace→files resolution) |
+
+The column stops at the frontend and the language-layer facts on purpose. **Which FRAMEWORKS a crate
+recognizes is not restated here** — each crate's `FRAMEWORK_RECOGNIZERS` const in its own `lib.rs` is the
+machine-verified list (`zzop_engine::framework_recognizers` aggregates them, the engine's
+`rule_contracts::recognizer_channels` test checks every row against the io its adapters actually build,
+and `zzop coverage` ships the aggregate to users as `frameworkRecognizers`). A prose copy here would be a
+third count that nothing verifies, and it had already gone stale in four rows at once. Which four, and
+what each was silent on, is recorded once — in `scripts/check-framework-prose-enumeration.sh`, the guard
+that now refuses a partial list on this page. Repeating the names here would rebuild the copy.
 
 > A language dispatcher (in `core`) routes files to parsers by extension map + path-glob overrides — supporting a
 > single polyglot repo. Because the cross-layer linker is a multi-source join, even a crude JSP parser joins as a
@@ -28,10 +37,14 @@ should never leak into the public IR).
 ## `parser/tests/` is shared test material, not a crate
 
 `parser/tests/input_strategy.rs` has no `Cargo.toml` and belongs to no package. Each crate's
-`tests/no_panic_proptest.rs` pulls it in with `#[path = "../../tests/input_strategy.rs"]`, so the eight
-"arbitrary input must not panic this frontend" properties draw from one generator instead of eight copies
-that would drift apart. Its module doc owns the rationale — why the property is worth running when
-`catch_unwind` already exists, what the generated inputs are, and how each crate's case count was set.
+`tests/no_panic_proptest.rs` pulls it in with `#[path = "../../tests/input_strategy.rs"]`, so every
+"arbitrary input must not panic this frontend" property draws from one generator instead of a per-crate
+copy that would drift apart. **How many crates carry one is deliberately not stated here** — the
+directory is the list (`ls parser/*/tests/no_panic_proptest.rs` answers it), and a count here would be a
+hand-kept second copy of a set the tree already owns: right until the next frontend lands, wrong from
+then on, with nothing in the build to say so. Its module doc owns the rationale — why the property is
+worth running when `catch_unwind` already exists, what the generated inputs are, and how each crate's
+case count was set.
 
 ## The envelope path remains the default for the long tail (JSP, Ruby, ...)
 

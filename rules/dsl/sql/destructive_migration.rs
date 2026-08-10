@@ -63,7 +63,7 @@ fn drop_table_outside_a_migration_path_is_not_flagged() {
 #[test]
 fn sql_destructive_migration_dash_dash_ok_marker_in_a_sql_migration_file_suppresses_the_finding() {
     // `.sql` files use `--` line comments, not `//`, so the marker recognizer accepts a `--`-comment
-    // marker for `.sql` files specifically (see `dsl.rs::is_sql_file`/`compile_marker_sql`) — this is
+    // marker for `.sql` files specifically (see `dsl.rs::leaders_for_path`/`compile_marker_sql`) — this is
     // what lets a migration DROP be suppressed inline instead of only tree-wide via `disabled_rules`.
     let dir = TempDir::new("zzop-sql");
     dir.write(

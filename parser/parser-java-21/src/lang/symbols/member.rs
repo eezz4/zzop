@@ -2,16 +2,12 @@
 //! -> `SourceSymbol` — see the parent module doc (`mod.rs`) for the qualified-naming and kind-mapping
 //! rules this applies.
 //!
-//! ## Parity deviation vs the retired lexical crate (deliberate — opus review F1)
-//! A BODYLESS method (interface/abstract method) emits a symbol here with `body_start`/`body_end` =
-//! `None`; the old lexical `parser-java` emitted NO symbol for these at all (its brace-matcher only
-//! saw method BODIES, and it pinned that behavior by test). The CST view is the honest one — the
-//! declaration exists and is API surface — but two observable outputs shift for Java trees containing
-//! interfaces/abstract methods: the symbol SET gains those members, and the exported-symbol count in
-//! the coverage/diagnostics census grows accordingly (interface members are implicitly public). Same
-//! sanctioned tier-upgrade class as the other scope expansions (enum/record/annotation types,
-//! `static final` consts), called out separately because it REVERSES a behavior the old crate pinned
-//! rather than merely adding a shape the old crate never saw.
+//! ## Bodyless methods DO emit a symbol
+//! An interface/abstract method emits a `SourceSymbol` with `body_start`/`body_end` = `None` rather
+//! than being skipped — the declaration exists and is API surface, so the CST view reports it
+//! (`super::tests::interface_abstract_methods_carry_no_body_span`). Consequence worth knowing before
+//! reading a census: for a Java tree containing interfaces, the exported-symbol count includes those
+//! members, since a modifier-less interface member is implicitly public (`symbol_exported`).
 
 use tree_sitter::Node;
 use zzop_core::{SourceSymbol, SourceSymbolKind};
@@ -19,15 +15,32 @@ use zzop_core::{SourceSymbol, SourceSymbolKind};
 use super::symbol_exported;
 use crate::util::{end_line_of, has_modifier_keyword, line_of, modifiers_of, node_text};
 
+/// The member names an initializer block takes. A class may legally hold several of each and they have
+/// no key at all, so the 2nd and later take a 1-based ordinal suffix — the exact scheme (and the exact
+/// reason for it) `zzop_parser_typescript`'s `symbol_shapes::class::STATIC_BLOCK` states: without the
+/// ordinal every block after the first would share one name and one id. The `-` is what makes the
+/// spelling collision-proof against a real member: it cannot appear in a Java identifier.
+const STATIC_BLOCK: &str = "static-block";
+const INSTANCE_BLOCK: &str = "instance-block";
+
+/// Per-type counters for the two anonymous member kinds — one instance per `emit_body` walk, so
+/// ordinals restart in each type rather than running across a whole file.
+#[derive(Default)]
+pub(super) struct BlockOrdinals {
+    static_blocks: usize,
+    instance_blocks: usize,
+}
+
 /// Dispatches one `class_body`/`interface_body`/`annotation_type_body`/`enum_body_declarations` member
-/// node by kind — see parent module doc for the recognized shapes; anything else (a `block`,
-/// `static_initializer`, an annotation-type element, `;`) contributes no symbol.
+/// node by kind — see parent module doc for the recognized shapes; anything else (an annotation-type
+/// element, `;`) contributes no symbol.
 pub(super) fn emit_member(
     rel: &str,
     node: Node,
     src: &str,
     path: &[String],
     implicit_public: bool,
+    ordinals: &mut BlockOrdinals,
     out: &mut Vec<SourceSymbol>,
 ) {
     match node.kind() {
@@ -41,8 +54,54 @@ pub(super) fn emit_member(
         }
         "field_declaration" => emit_fields(rel, node, src, path, implicit_public, false, out),
         "constant_declaration" => emit_fields(rel, node, src, path, implicit_public, true, out),
+        "static_initializer" => {
+            ordinals.static_blocks += 1;
+            emit_init_block(rel, node, path, STATIC_BLOCK, ordinals.static_blocks, out);
+        }
+        // An instance initializer is a bare `block` sitting directly in a class body.
+        "block" => {
+            ordinals.instance_blocks += 1;
+            emit_init_block(
+                rel,
+                node,
+                path,
+                INSTANCE_BLOCK,
+                ordinals.instance_blocks,
+                out,
+            );
+        }
         _ => {}
     }
+}
+
+/// A `static { … }` / `{ … }` initializer's own leaf — see the parent module doc's leaf-completeness
+/// section for why one is owed. `exported: false` always: an initializer is not API surface, it is a
+/// region of executable statements that would otherwise be reachable only through the enclosing type's
+/// span, which `dsl::method_scan::gates::drop_outer_spans` discards as soon as any sibling member
+/// projects a leaf of its own.
+fn emit_init_block(
+    rel: &str,
+    node: Node,
+    path: &[String],
+    stem: &str,
+    ordinal: usize,
+    out: &mut Vec<SourceSymbol>,
+) {
+    let own_name = match ordinal {
+        1 => stem.to_string(),
+        n => format!("{stem}-{n}"),
+    };
+    push(
+        rel,
+        path,
+        &own_name,
+        SourceSymbolKind::Function,
+        line_of(node),
+        false,
+        Some(line_of(node)),
+        Some(end_line_of(node)),
+        out,
+    );
 }
 
 fn emit_method(
@@ -57,9 +116,12 @@ fn emit_method(
         return;
     };
     let method_name = node_text(name_node, src);
+    // `body_start` is the DECLARATION's own line — annotations and modifiers included, since `node` is
+    // the whole `*_declaration` — never the body block's `{`. See `zzop_core::SourceSymbol`'s "Body
+    // span contract". No `body` at all (an abstract/interface method) keeps `None`/`None`.
     let (body_start, body_end) = node
         .child_by_field_name("body")
-        .map(|b| (Some(line_of(b)), Some(end_line_of(b))))
+        .map(|b| (Some(line_of(node)), Some(end_line_of(b))))
         .unwrap_or((None, None));
     push(
         rel,
@@ -86,9 +148,12 @@ fn emit_ctor(
         return;
     };
     let ctor_name = node_text(name_node, src);
+    // `body_start` is the DECLARATION's own line — annotations and modifiers included, since `node` is
+    // the whole `*_declaration` — never the body block's `{`. See `zzop_core::SourceSymbol`'s "Body
+    // span contract". No `body` at all (an abstract/interface method) keeps `None`/`None`.
     let (body_start, body_end) = node
         .child_by_field_name("body")
-        .map(|b| (Some(line_of(b)), Some(end_line_of(b))))
+        .map(|b| (Some(line_of(node)), Some(end_line_of(b))))
         .unwrap_or((None, None));
     push(
         rel,
@@ -117,9 +182,12 @@ fn emit_compact_ctor(
         return;
     };
     let ctor_name = node_text(name_node, src);
+    // `body_start` is the DECLARATION's own line — annotations and modifiers included, since `node` is
+    // the whole `*_declaration` — never the body block's `{`. See `zzop_core::SourceSymbol`'s "Body
+    // span contract". No `body` at all (an abstract/interface method) keeps `None`/`None`.
     let (body_start, body_end) = node
         .child_by_field_name("body")
-        .map(|b| (Some(line_of(b)), Some(end_line_of(b))))
+        .map(|b| (Some(line_of(node)), Some(end_line_of(b))))
         .unwrap_or((None, None));
     push(
         rel,

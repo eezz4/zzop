@@ -286,11 +286,11 @@ pub(super) fn run_file_pass(
                 } else {
                     eval_pack(pack, &ctx)
                 };
-                // D13①: same config-disable-hint append `pipeline::findings::eval_packs` does for Mode
-                // A — via the SAME shared helper (never a second hand-written hint template). Mode B has
-                // no on-disk cache (see `envelope.rs`'s module doc), so this never touches
-                // `CACHE_SCHEMA_VERSION`'s contract the way the Mode A call site does.
-                crate::pipeline::findings::append_disable_hints(&mut found);
+                // D13①: same suppress-sentence + disable-hint append `pipeline::findings::eval_packs`
+                // does for Mode A, via the SAME shared helper (see its doc). Mode B has no on-disk
+                // cache, so this never touches `CACHE_SCHEMA_VERSION`. Only `pack` is passed: these
+                // findings came from it alone, so it is the exact lookup set.
+                crate::pipeline::findings::append_hints(&[pack], &mut found);
                 state.per_file_findings.extend(found);
             }
         }

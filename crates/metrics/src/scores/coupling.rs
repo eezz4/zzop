@@ -42,6 +42,9 @@ pub fn compute_coupling(
         return CouplingScore {
             score: 100.0,
             avg_fan_out_among_importers: 0.0,
+            // POPULATION 0 — nothing imported anything, so neither this score NOR the `circular` metric
+            // (which reads this field as its own population, see `crate::health`) measured a thing.
+            importer_count: 0,
             max_fan_out: 0.0,
             circular_count: circular_count as u32,
         };
@@ -57,6 +60,9 @@ pub fn compute_coupling(
     CouplingScore {
         score: score.round(),
         avg_fan_out_among_importers: (avg * 10.0).round() / 10.0,
+        // POPULATION: exactly the set `avg` was divided by — the field name has said "among importers"
+        // since 2026-07-31, and this is how big that population was.
+        importer_count: live.len() as u32,
         max_fan_out: max as f64,
         circular_count: circular_count as u32,
     }

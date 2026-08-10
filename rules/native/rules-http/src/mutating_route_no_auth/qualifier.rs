@@ -128,7 +128,7 @@ pub(super) fn is_guard(
 fn tokens_are_guard(qualifier: &str, tokens: &[&str]) -> bool {
     camel_tokens(qualifier)
         .iter()
-        .any(|t| tokens.contains(&t.to_ascii_lowercase().as_str()))
+        .any(|t| tokens.contains(&zzop_core::vocab_norm::ascii_lowercase(t).as_str()))
 }
 
 /// Split an identifier into its camelCase/underscore words: `AuthorizationService` ->

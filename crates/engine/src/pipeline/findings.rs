@@ -34,13 +34,15 @@ pub(super) struct SpanFacts<'a> {
 /// `true` calls `eval_pack_profiled` and concatenates every pack's `RuleTiming`s, summed later across
 /// every artifact by `analyze::assemble`.
 ///
-/// D13①: every DSL finding this returns has `zzop_core::disable_hint`'s config-disable fragment appended
-/// to its `message`, AFTER the pack's own suppress-marker sentence — the same hint native findings carry
-/// (see `disable_hint`'s doc), built from the SAME helper (never a second hand-written template). This is
-/// the single per-file DSL finding-construction site in the engine's fused pass — `envelope::file_pass`
-/// (Mode B's own `eval_pack` call site) appends identically, via the same helper, since it never routes
-/// through this function. `Finding::rule_id` is already `"<pack>/<rule>"` (stamped inside `eval_pack`
-/// itself), so no extra id plumbing is needed here.
+/// D13①: every DSL finding this returns has BOTH engine-owned sentences appended to its `message` by
+/// [`append_hints`] — the suppress-marker sentence, then `zzop_core::disable_hint`'s config-disable
+/// fragment (the same hint native findings carry). Both come from shared helpers, never a second
+/// hand-written template; the suppress sentence used to be typed into 106 pack `message` fields by hand
+/// instead, which is what this append replaced. This is the single per-file DSL finding-construction
+/// site in the engine's fused pass — `envelope::file_pass` (Mode B's own `eval_pack` call site) appends
+/// identically, via the same helper, since it never routes through this function. `Finding::rule_id` is
+/// already `"<pack>/<rule>"` (stamped inside `eval_pack` itself), which is also what lets `append_hints`
+/// find each finding's `RuleDef` in `packs` without extra id plumbing.
 ///
 /// This runs BEFORE the caller (`fresh::compute_fresh_artifact` / `artifact::process_file`) hands
 /// `findings` to `AnalysisCache::put_findings` — the hint text is therefore part of the cached findings
@@ -67,7 +69,7 @@ pub(super) fn eval_packs(
     string_literals: &[zzop_core::BoundStringLiteral],
     profile: bool,
 ) -> (Vec<zzop_core::Finding>, Vec<RuleTiming>, bool) {
-    if zzop_core::dsl::is_minified_or_generated(text) {
+    if zzop_core::dsl::has_minified_line_shape(text) {
         return (Vec::new(), Vec::new(), true);
     }
     let file = SourceFile {
@@ -96,17 +98,62 @@ pub(super) fn eval_packs(
             }
         }
     }
-    append_disable_hints(&mut out);
+    append_hints(packs, &mut out);
     (out, timings, false)
 }
 
-/// Appends `zzop_core::disable_hint(&finding.rule_id)` to every finding's `message` — the one place both
-/// DSL finding-construction call sites (this module's `eval_packs`, and `envelope::file_pass`'s direct
-/// `eval_pack` call) route through the SAME hint text, never a hand-rolled second copy. Every element of
-/// `findings` here is a freshly-built DSL finding (this function is only ever called on an `eval_pack`/
-/// `eval_pack_profiled` result), so `rule_id` is always the `"<pack>/<rule>"` shape the hint expects.
-pub(crate) fn append_disable_hints(findings: &mut [zzop_core::Finding]) {
+/// The `RuleDef` a `"<pack>/<rule>"` finding id names, or `None` when no pack in `packs` declares it.
+///
+/// Pack and rule ids are both kebab-case with no `/` (`rule_contracts`' `rule_ids_are_kebab_case`), so
+/// the FIRST `/` is the only separator and `split_once` cannot mis-split.
+fn rule_for_id<'a>(
+    packs: &[&'a RulePackDef],
+    rule_id: &str,
+) -> Option<&'a zzop_core::dsl::RuleDef> {
+    let (pack_id, rule) = rule_id.split_once('/')?;
+    packs
+        .iter()
+        .find(|pack| pack.id == pack_id)?
+        .rules
+        .iter()
+        .find(|r| r.id == rule)
+}
+
+/// Appends the two engine-owned sentences to every finding's `message`, in this order:
+///
+/// 1. `zzop_core::dsl::suppress_hint` — how to suppress THIS finding with a one-line comment. Omitted
+///    when the rule's matcher kind has no working marker (symbol-scan has no anchor line; io-scan's
+///    anchor line is re-read through a callback envelope mode answers with `None`) or when the author
+///    already named the marker in their own `message`. See that function for the full judgment; the
+///    per-matcher-kind part of it lives in `zzop-core` precisely so this site and `zzop-facade`'s
+///    `explain` renderer cannot drift.
+/// 2. `zzop_core::disable_hint(&finding.rule_id)` — how to turn the rule off wholesale.
+///
+/// This is the one place every DSL finding-construction call site routes through the SAME two texts,
+/// never a hand-rolled second copy. Every element of `findings` is a freshly-built DSL finding (this is
+/// only ever called on an `eval_pack`/`eval_pack_profiled`/`eval_pack_io_scan` result), so `rule_id` is
+/// always the `"<pack>/<rule>"` shape both helpers expect.
+///
+/// `packs` must contain the pack that produced each finding — every call site passes the very packs it
+/// just evaluated. A miss would SILENTLY drop the suppress sentence from that finding, which is the
+/// failure this repo refuses to ship unnoticed, so it is `debug_assert`ed rather than trusted.
+///
+/// ORDER IS A CONTRACT, not a preference. 106 shipped rules used to end their own `message` with the
+/// sentence in (1) and the engine then appended (2); moving (1) here keeps every one of those messages
+/// byte-identical only while it stays in front of (2). The append also runs BEFORE
+/// `AnalysisCache::put_findings`, so a reordering would additionally cold every warm cache.
+pub(crate) fn append_hints(packs: &[&RulePackDef], findings: &mut [zzop_core::Finding]) {
     for finding in findings.iter_mut() {
+        let rule = rule_for_id(packs, &finding.rule_id);
+        debug_assert!(
+            rule.is_some(),
+            "no pack passed to append_hints declares `{}`, so its suppress sentence was silently \
+             dropped — pass the packs that produced these findings",
+            finding.rule_id
+        );
+        if let Some(sentence) = rule.and_then(zzop_core::dsl::suppress_hint) {
+            finding.message = format!("{} {sentence}", finding.message);
+        }
         finding.message = format!(
             "{} {}",
             finding.message,

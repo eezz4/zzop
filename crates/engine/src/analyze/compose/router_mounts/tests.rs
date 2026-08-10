@@ -592,3 +592,70 @@ fn go_mount_with_unresolvable_specifier_stays_conservative() {
         compose_router_mount_provides(fragments, no_resolver(), &no_consts(), &mut Vec::new());
     assert!(out.is_empty());
 }
+
+/// The measured Mode-B collision, reduced to its smallest shape: TWO producers (the native pass and
+/// an adapter overlay) each describe the SAME files' routers, so every file carries a duplicate
+/// fragment, and the composition emits LESS than either producer alone would.
+///
+/// This pins WHICH guard does the subtraction, because two of them could and only one does. The
+/// global `mounted_names` exclusion is the obvious suspect — but it behaves identically here whether
+/// the duplicates are present or not (`router` is mounted by `api.py` either way). The operative
+/// guard is `candidates_in`'s SOLE-fragment fallback: `main.py` mounts the child by its import alias
+/// `api_router`, no fragment in `api.py` is named that, and with two fragments there the file is
+/// ambiguous — so the mount resolves to nothing and the whole subtree below it is skipped. One
+/// producer alone leaves exactly one fragment per file and the same fallback resolves.
+///
+/// Both guards are individually correct: refusing to guess between two same-named fragments is the
+/// same conservatism as refusing to emit a mounted child at a truncated prefix. What is missing is
+/// upstream of both — nothing stops, or reports, two producers describing one file's routers. The
+/// disclosure lives at the merge seam that can still see the provenance
+/// (`envelope::merge::merge_projection_onto_artifact`); by the time fragments reach this composer
+/// they are one undifferentiated pool and "who said this" is unrecoverable.
+#[test]
+fn two_producers_describing_one_file_compose_to_less_than_one_producer_alone() {
+    let native = || {
+        vec![
+            (
+                "main.py".to_string(),
+                vec![frag(
+                    "application",
+                    vec![mount("/", "api_router", Some("api.py"))],
+                )],
+            ),
+            (
+                "api.py".to_string(),
+                vec![frag(
+                    "router",
+                    vec![mount("/users", "router", Some("users.py"))],
+                )],
+            ),
+            (
+                "users.py".to_string(),
+                vec![frag("router", vec![verb("GET", "/me", "current_user", 12)])],
+            ),
+        ]
+    };
+    let identity = |spec: &str, _from: &str, _ident: &str| Some(spec.to_string());
+
+    let (one_producer, _) =
+        compose_router_mount_provides(native(), identity, &no_consts(), &mut Vec::new());
+    assert_eq!(one_producer.len(), 1);
+    assert_eq!(one_producer[0].key, "GET /users/me");
+
+    // Same three files, each now carrying the native fragment AND a byte-identical overlay one —
+    // exactly what `merge_projection_onto_artifact`'s `extend` produces.
+    let doubled: Vec<_> = native()
+        .into_iter()
+        .zip(native())
+        .map(|((file, mut frags), (_, overlay_frags))| {
+            frags.extend(overlay_frags);
+            (file, frags)
+        })
+        .collect();
+    let (two_producers, _) =
+        compose_router_mount_provides(doubled, identity, &no_consts(), &mut Vec::new());
+    assert!(
+        two_producers.is_empty(),
+        "expected the documented total loss, got {two_producers:?}"
+    );
+}

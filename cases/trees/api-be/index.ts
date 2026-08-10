@@ -47,6 +47,7 @@ import * as beSecurityRawQueryInterpolation from "./services/be-security.raw-que
 import * as beSecurityShellExecInterpolation from "./services/be-security.shell-exec-interpolation";
 import * as beSecuritySsrfUserUrl from "./services/be-security.ssrf-user-url";
 import * as beSecurityTimingUnsafeCompare from "./services/be-security.timing-unsafe-compare";
+import * as beSecurityWeakCrypto from "./services/be-security.weak-crypto";
 import * as beSecurityWeakPasswordHash from "./services/be-security.weak-password-hash";
 import * as beSecurityWeakTokenRandom from "./services/be-security.weak-token-random";
 import * as fullstackLocalhostEgressCommitted from "./services/fullstack.localhost-egress-committed";
@@ -56,6 +57,16 @@ import * as securityTaintFlow from "./services/security.taint-flow";
 import * as sqlAppSideAggregationFilterLength from "./services/sql.app-side-aggregation-filter-length";
 import * as sqlAppSideAggregationReduce from "./services/sql.app-side-aggregation-reduce";
 import * as sqlQueryLogicDensity from "./services/sql.query-logic-density";
+import * as spansDbEmptyCatchAndWrite from "./spans/db.empty-catch-and-write.span";
+import * as spansDbMultiWriteNoTx from "./spans/db.multi-write-no-tx.span";
+import * as spansDbUpdateDeleteNoWhere from "./spans/db.update-delete-no-where.span";
+import * as spansSecurityHtmlResponseFromRequest from "./spans/security.html-response-from-request.span";
+import * as spansSecurityInsecureCookie from "./spans/security.insecure-cookie.span";
+import * as spansSecurityMassAssignment from "./spans/security.mass-assignment.span";
+import * as spansSecurityOpenRedirect from "./spans/security.open-redirect.span";
+import * as spansSecurityPathTraversal from "./spans/security.path-traversal.span";
+import * as spansSecuritySsrfUserUrl from "./spans/security.ssrf-user-url.span";
+import * as spansSecurityTaintFlow from "./spans/security.taint-flow.span";
 import * as srcApiSqlNplus1Nested from "./src/api/sql.nplus1-nested";
 import * as srcDomainsOrdersRoutesSqlNplus1Domain from "./src/domains/orders/routes/sql.nplus1-domain";
 import * as srcQueries from "./src/queries";
@@ -106,6 +117,7 @@ export const registry = {
   beSecurityShellExecInterpolation,
   beSecuritySsrfUserUrl,
   beSecurityTimingUnsafeCompare,
+  beSecurityWeakCrypto,
   beSecurityWeakPasswordHash,
   beSecurityWeakTokenRandom,
   fullstackLocalhostEgressCommitted,
@@ -115,6 +127,16 @@ export const registry = {
   sqlAppSideAggregationFilterLength,
   sqlAppSideAggregationReduce,
   sqlQueryLogicDensity,
+  spansDbEmptyCatchAndWrite,
+  spansDbMultiWriteNoTx,
+  spansDbUpdateDeleteNoWhere,
+  spansSecurityHtmlResponseFromRequest,
+  spansSecurityInsecureCookie,
+  spansSecurityMassAssignment,
+  spansSecurityOpenRedirect,
+  spansSecurityPathTraversal,
+  spansSecuritySsrfUserUrl,
+  spansSecurityTaintFlow,
   srcApiSqlNplus1Nested,
   srcDomainsOrdersRoutesSqlNplus1Domain,
   srcQueries,

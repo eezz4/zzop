@@ -11,8 +11,8 @@ use crate::dispatch;
 use crate::EngineConfig;
 
 use super::findings::{eval_packs, schema_findings, schema_findings_eligible, SpanFacts};
-use super::fresh::compute_fresh_artifact;
-use super::FileArtifact;
+use super::fresh::{compute_fresh_artifact, is_oversized};
+use super::{DegradeCause, FileArtifact};
 
 /// Processes one file end to end: read -> cache lookup -> (size-cap / dispatch / parse) -> per-file DSL
 /// rules -> artifact. Never panics outward: an unreadable file, oversized file, or parser panic all
@@ -46,7 +46,7 @@ pub(super) fn process_file(
                 asset_refs: Vec::new(),
                 loc: 0,
                 findings: Vec::new(),
-                degraded: true,
+                degrade_cause: Some(DegradeCause::Unreadable),
                 minified_or_generated: false,
                 io: None,
                 rule_timings: Vec::new(),
@@ -94,7 +94,8 @@ pub(super) fn process_file(
                     c.record_hit();
                 }
                 // Full cache hit: no rule evaluation ran this call, so nothing to time.
-                return artifact_from_ir(rel, ir, findings, Vec::new());
+                let cause = cached_degrade_cause(ir.degraded, &bytes, config);
+                return artifact_from_ir(rel, ir, findings, Vec::new(), cause);
             }
             // IR hit, findings miss: reuse the parsed IR, re-run rules only.
             let text = String::from_utf8_lossy(&bytes).into_owned();
@@ -130,7 +131,8 @@ pub(super) fn process_file(
             if let Some(c) = counters {
                 c.record_miss();
             }
-            return artifact_from_ir(rel, ir, findings, rule_timings);
+            let cause = cached_degrade_cause(ir.degraded, &bytes, config);
+            return artifact_from_ir(rel, ir, findings, rule_timings, cause);
         }
     }
     if cache_key.is_some() {
@@ -150,7 +152,7 @@ pub(super) fn process_file(
             dynamic_imports: artifact.dynamic_imports.clone(),
             asset_refs: artifact.asset_refs.clone(),
             loc: artifact.loc,
-            degraded: artifact.degraded,
+            degraded: artifact.degrade_cause.is_some(),
             io: artifact.io.clone(),
             used_names: artifact.used_names.clone(),
             exported_signature_names: artifact.exported_signature_names.clone(),
@@ -177,15 +179,52 @@ pub(super) fn process_file(
     artifact
 }
 
+/// The warm-cache half of the degrade-cause verdict: the cached slice remembers THAT a file degraded
+/// (`FileIrSlice::degraded`) but not why, so the reason is re-derived here rather than added to the
+/// cached payload.
+///
+/// **Re-deriving cannot disagree with the cold run's verdict, and that rests on a pinned invariant
+/// rather than on care.** The oversize test is the same call the cold gate makes
+/// ([`is_oversized`] — one predicate, not a copy), applied to the same `bytes`, because an IR hit means
+/// the content hash matched. Its other input, `size_cap`, is folded into `parser_fingerprint` and so
+/// into every `CacheKey` (`crate::cache`'s module doc says why; `cache::tests::
+/// parser_fingerprint_changes_with_size_cap` pins it) — a run under a different cap cannot hit this
+/// entry at all. So "degraded and not oversized" leaves exactly one possibility, the parser verdict.
+///
+/// `Unreadable` is structurally absent here: that path returns before any cache lookup, since a file
+/// with no bytes has no content to hash.
+///
+/// The alternative — a `degrade_cause` field on `FileIrSlice` — was not taken. It would put an
+/// engine-side enum in `zzop-cache` (a `zzop-core` leaf today) and move `CACHE_SCHEMA_VERSION`, i.e.
+/// cold-start every existing cache, to store a value that is a pure function of two things the caller
+/// already holds in hand.
+fn cached_degrade_cause(
+    degraded: bool,
+    bytes: &[u8],
+    config: &EngineConfig,
+) -> Option<DegradeCause> {
+    if !degraded {
+        return None;
+    }
+    Some(if is_oversized(bytes, config) {
+        DegradeCause::Oversized
+    } else {
+        DegradeCause::ParseFailure
+    })
+}
+
 /// Rebuilds a `FileArtifact` from a cached `FileIrSlice` + its (possibly just-recomputed) findings —
 /// `rel` is the only piece `FileIrSlice` doesn't carry (not part of the cached payload; the lookup path
-/// already knows it). `rule_timings` is empty on a full cache hit.
+/// already knows it). `rule_timings` is empty on a full cache hit. `degrade_cause` is the caller's
+/// [`cached_degrade_cause`] verdict, which is the second piece the cached payload does not carry.
 fn artifact_from_ir(
     rel: &str,
     ir: FileIrSlice,
     findings: Vec<zzop_core::Finding>,
     rule_timings: Vec<RuleTiming>,
+    degrade_cause: Option<DegradeCause>,
 ) -> FileArtifact {
+    debug_assert_eq!(ir.degraded, degrade_cause.is_some());
     FileArtifact {
         rel: rel.to_string(),
         symbols: ir.symbols,
@@ -195,7 +234,7 @@ fn artifact_from_ir(
         asset_refs: ir.asset_refs,
         loc: ir.loc,
         findings,
-        degraded: ir.degraded,
+        degrade_cause,
         minified_or_generated: ir.minified_or_generated,
         io: ir.io,
         rule_timings,

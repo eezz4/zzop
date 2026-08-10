@@ -2,12 +2,14 @@
 //! (`symbols` / `factory` / `cjs_exports`).
 
 use swc_core::common::{BytePos, SourceMap};
-use swc_core::ecma::ast::{
-    Callee, Class, ClassMember, Expr, Function, Lit, ObjectPatProp, Pat, PropName, VarDeclarator,
-};
+use swc_core::ecma::ast::{Callee, Expr, Function, Lit, ObjectPatProp, Pat, VarDeclarator};
 use zzop_core::{SourceSymbol, SourceSymbolKind};
 
 use crate::line_of;
+
+mod class;
+
+pub(crate) use class::emit_class;
 
 pub(crate) fn fn_symbol(
     cm: &SourceMap,
@@ -17,8 +19,11 @@ pub(crate) fn fn_symbol(
     exported: bool,
     is_default: bool,
 ) -> SourceSymbol {
+    // `body_start` is the DECLARATION's line, not the body block's — `zzop_core::SourceSymbol`'s "Body
+    // span contract". An overload signature (no `body`) keeps `None`/`None`: there is no region.
+    let line = line_of(cm, function.span.lo);
     let (body_start, body_end) = match &function.body {
-        Some(b) => (Some(line_of(cm, b.span.lo)), Some(line_of(cm, b.span.hi))),
+        Some(b) => (Some(line), Some(line_of(cm, b.span.hi))),
         None => (None, None),
     };
     SourceSymbol {
@@ -26,100 +31,12 @@ pub(crate) fn fn_symbol(
         file: file.into(),
         name,
         kind: SourceSymbolKind::Function,
-        line: line_of(cm, function.span.lo),
+        line,
         exported,
         is_default,
         body_start,
         body_end,
         write_sites: Vec::new(),
-    }
-}
-
-fn class_symbol(
-    cm: &SourceMap,
-    file: &str,
-    name: String,
-    class: &Class,
-    exported: bool,
-    is_default: bool,
-) -> SourceSymbol {
-    let line = line_of(cm, class.span.lo);
-    SourceSymbol {
-        id: format!("{file}#{name}"),
-        file: file.into(),
-        name,
-        kind: SourceSymbolKind::Class,
-        line,
-        exported,
-        is_default,
-        body_start: Some(line), // class bodyStart uses the node's own start line
-        body_end: Some(line_of(cm, class.span.hi)),
-        write_sites: Vec::new(),
-    }
-}
-
-/// Class symbol + method sub-symbols (`Class.method`) — constructor/method/getter/setter/private-method
-/// only, properties/computed/string-literal names skipped. Same-name pairs (e.g. get/set) emit once.
-pub(crate) fn emit_class(
-    cm: &SourceMap,
-    file: &str,
-    name: String,
-    class: &Class,
-    exported: bool,
-    is_default: bool,
-    out: &mut Vec<SourceSymbol>,
-) {
-    out.push(class_symbol(
-        cm,
-        file,
-        name.clone(),
-        class,
-        exported,
-        is_default,
-    ));
-    let mut seen = std::collections::HashSet::new();
-    for member in &class.body {
-        let (mname, lo, body_span) = match member {
-            ClassMember::Constructor(c) => (
-                "constructor".to_string(),
-                c.span.lo,
-                c.body.as_ref().map(|b| b.span),
-            ),
-            ClassMember::Method(m) => {
-                let Some(n) = prop_name(&m.key) else { continue };
-                (n, m.span.lo, m.function.body.as_ref().map(|b| b.span))
-            }
-            ClassMember::PrivateMethod(m) => (
-                format!("#{}", m.key.name),
-                m.span.lo,
-                m.function.body.as_ref().map(|b| b.span),
-            ),
-            _ => continue, // properties / index signatures / etc.
-        };
-        if !seen.insert(mname.clone()) {
-            continue;
-        }
-        let full = format!("{name}.{mname}");
-        out.push(SourceSymbol {
-            id: format!("{file}#{full}"),
-            file: file.into(),
-            name: full,
-            kind: SourceSymbolKind::Function,
-            line: line_of(cm, lo),
-            exported: false,
-            is_default: false,
-            body_start: body_span.map(|s| line_of(cm, s.lo)),
-            body_end: body_span.map(|s| line_of(cm, s.hi)),
-            write_sites: Vec::new(),
-        });
-    }
-}
-
-/// PropName -> static name (Ident only; computed/string/num are not statically extractable -> None).
-fn prop_name(key: &PropName) -> Option<String> {
-    match key {
-        PropName::Ident(i) => Some(i.sym.to_string()),
-        _ => None,
     }
 }
 

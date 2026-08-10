@@ -145,9 +145,34 @@ fn module_root_returns_base_module() {
     );
 }
 
+/// REPLACES `module_root_no_top_level_fallback`, which pinned the defect rather than the contract.
+///
+/// That test asserted `module_root("app/main.ts") == None` — i.e. that a path outside the declared FSD
+/// vocabulary belongs to no module. `public_api` is the only caller, and it `continue`s on a `None`
+/// target module, so every import in a non-FSD tree was skipped BEFORE reaching the
+/// `total_cross_module_imports` denominator. The metric then hit its `total == 0 -> 100.0` guard and
+/// published perfect barrel discipline for trees it had not examined at all — plain TypeScript repos
+/// included, which is the layout the score was written for.
+///
+/// The five sibling metrics that call `module_of` (`hierarchy`, `mainSequence`, `modularity`, `sdp`,
+/// `siblingCross`) always had the top-segment fallback, so this was a one-metric blind spot rather than
+/// a shared convention. `module_root` is now an alias of `module_of`, which is why the assertion flips.
 #[test]
-fn module_root_no_top_level_fallback() {
-    assert_eq!(module_root(&cfg(), "app/main.ts"), None);
+fn module_root_falls_back_to_the_top_segment_like_its_five_siblings() {
+    assert_eq!(
+        module_root(&cfg(), "app/main.ts"),
+        Some("app".to_string()),
+        "a path outside the FSD vocabulary still belongs to a module — returning None here removed \
+         its imports from publicApi's denominator and manufactured a perfect score"
+    );
+    assert_eq!(
+        module_root(&cfg(), "app/main.ts"),
+        module_of(&cfg(), "app/main.ts"),
+        "the two resolvers must answer identically — keeping two near-copies is what let them drift"
+    );
+    // A file at the tree root has no module (there is no segment before the basename), and a
+    // dotted top segment is a file, not a directory — both still `None`, same as `module_of`.
+    assert_eq!(module_root(&cfg(), "main.ts"), None);
 }
 
 #[test]

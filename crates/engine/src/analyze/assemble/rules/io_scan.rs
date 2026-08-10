@@ -80,7 +80,7 @@ impl<'a> LineCache<'a> {
 /// Runs every loaded+enabled DSL pack's `IoScan` rules against the whole tree, mirroring the per-file
 /// pass's own pack gating EXACTLY (`registry::is_enabled` at the pack level, `pipeline::gate_pack_rules`
 /// for a per-rule `"{pack}/{rule}"` id — the same two calls `pipeline::run_file_pass` makes) and the same
-/// disable-hint append (`pipeline::findings::append_disable_hints`) every other DSL finding-construction
+/// disable-hint append (`pipeline::findings::append_hints`) every other DSL finding-construction
 /// site uses — so an `IoScan` finding is indistinguishable, disable/hint-wise, from a per-file DSL finding.
 /// `attribute_store` is first extended with [`mint_auth_guarded`]'s minted evidence — gap-filling within
 /// the same target-shape class, though a minted exact `IoKey` outranks a covering `PathScope` by
@@ -121,11 +121,11 @@ pub(super) fn run(
     let minted = mint_auth_guarded(io_provides, decorator_guarded);
     let augmented = attribute_store.extended(minted);
 
-    let mut gated_packs: Vec<RulePackDef> = config
+    let gated_packs: Vec<RulePackDef> = config
         .packs
         .iter()
         .filter(|p| is_pack_enabled(&config.rule_config, &p.id))
-        .map(|p| crate::pipeline::gate_pack_rules(p, &config.rule_config))
+        .map(|p| crate::pipeline::gate_pack_rules(p, config))
         .collect();
 
     let line_cache = LineCache::new(root);
@@ -142,7 +142,12 @@ pub(super) fn run(
     // made, so it pays no `Instant::now()` and no pack surgery at all.
     let mut findings = Vec::new();
     if config.profile_rules {
-        for pack in &mut gated_packs {
+        // CLONED, where this used to drain `gated_packs` in place: `append_hints` below needs the rule
+        // definitions to decide each finding's suppress sentence, and `eval_pack_timed` moves a pack's
+        // rule list out. Same idiom `envelope::ingest` already uses at its own profiled call
+        // (`&mut enabled_packs.clone()`), and confined to the profiled branch, so an ordinary run pays
+        // nothing.
+        for pack in &mut gated_packs.clone() {
             eval_pack_timed(pack, &ctx, rule_time, &mut findings);
         }
     } else {
@@ -150,7 +155,13 @@ pub(super) fn run(
             eval_pack_io_scan(pack, &ctx, &mut findings);
         }
     }
-    crate::pipeline::findings::append_disable_hints(&mut findings);
+    // Every finding here is an io-scan finding, so `append_hints` will append the disable hint and NO
+    // suppress sentence — an io-scan marker is read off an anchor line envelope mode cannot supply. The
+    // packs are threaded anyway rather than the exclusion being assumed at this call site: the judgment
+    // belongs to the matcher kind (`zzop_core::dsl::marker_channel`), in one place, not to a comment
+    // here about what this lane happens to produce.
+    let pack_refs: Vec<&RulePackDef> = gated_packs.iter().collect();
+    crate::pipeline::findings::append_hints(&pack_refs, &mut findings);
     findings
 }
 

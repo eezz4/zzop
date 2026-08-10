@@ -1,23 +1,29 @@
 //! Rule-skip diagnostics — a rule the evaluator cannot compile must SAY so, not vanish.
 //!
-//! Pins five matcher families (line-scan, method-scan, symbol-scan, io-scan, call-scan) plus the two
-//! invariants that make the channel safe to wire into a user-facing warnings list: a healthy pack emits
-//! NOTHING, and one broken rule is reported once even across many files.
+//! Pins EVERY matcher family in `zzop_core::dsl::def::Matcher` — one `#[test] fn <family>_…` per
+//! variant (`<family>` = the variant in snake_case), split across this file (line-scan) and
+//! `family_cases` (the rest) — plus the two invariants that make the channel safe to wire into a
+//! user-facing warnings list: a healthy pack emits NOTHING, and one broken rule is reported once even
+//! across many files. The families are neither counted nor listed here: `check-matcher-glossary-sync.sh`
+//! derives the set from the enum and reds when a variant has no `<family>_…` test, so the quantifier in
+//! the first sentence is checked rather than claimed.
 //!
-//! ⚠ **`literal-scan` has no case here** and this header used to say "every matcher family", which was
-//! the same closed-enumeration-behind-a-totality-quantifier defect the v0.29.0 release audit found in
-//! the shipped contract descriptions. The gap is partly covered elsewhere — `pack_loader::rule_issues`
-//! checks that family's two regex fields on the LOADER path — so an uncompilable `name_pattern` is not
-//! wholly silent; what is unpinned is the EVALUATOR-side skip diagnostic. Backlog owns closing it; this
-//! header states the real coverage until then rather than claiming the set.
+//! The `literal-scan` gap was closed 2026-08-08. It is worth remembering how it read while open,
+//! because the shape recurs: this header said **"every matcher family"** while enumerating five of six
+//! — a closed list standing behind a totality quantifier, the same defect the v0.29.0 release audit
+//! found in the shipped contract descriptions. It was also only PARTLY a gap (`pack_loader::rule_issues`
+//! already checked that family's two regex fields on the LOADER path), which is exactly what let the
+//! overclaim survive: spot-checking found the family covered somewhere and stopped there. The list and
+//! the count left this header once the guard existed: what makes the quantifier safe is the check, not
+//! a hand recount.
 
-use crate::attributes::AttributeStore;
 use crate::finding::Finding;
-use crate::ir::{SourceSymbol, SourceSymbolKind};
+use crate::ir::SourceSymbol;
 
-use super::ir_scan::{eval_pack_io_scan_into, IoScanTreeContext};
-use super::test_support::{io_provide, method, rule_pack, symbol};
+use super::test_support::rule_pack;
 use super::{eval_pack_into, RuleContext, SourceFile};
+
+mod family_cases;
 
 /// Evaluates a one-rule pack over `files`, returning `(findings, diagnostics)`.
 fn eval(rule_json: &str, files: Vec<SourceFile>) -> (Vec<Finding>, Vec<String>) {
@@ -139,6 +145,10 @@ fn every_line_scan_regex_field_reports_its_own_name() {
             r#"{"type":"line-scan","file_pattern":"\\.ts$","exclude_pattern":"(","line_pattern":"x"}"#,
         ),
         (
+            "prev_line_exclude_pattern",
+            r#"{"type":"line-scan","file_pattern":"\\.ts$","prev_line_exclude_pattern":"(","line_pattern":"x"}"#,
+        ),
+        (
             "any[].pattern",
             r#"{"type":"line-scan","file_pattern":"\\.ts$","any":[{"pattern":"(","label":"l"}]}"#,
         ),
@@ -167,86 +177,6 @@ fn a_line_scan_rule_with_no_pattern_field_at_all_is_reported_as_malformed() {
     // The `malformed` message is the OTHER shape this module ships and never went through
     // `assert_actionable` (it names no field), so its validator pointer needs its own pin.
     assert_points_at_the_validator(&diags[0]);
-}
-
-#[test]
-fn method_scan_bad_pattern_and_unknown_trigger_are_both_reported() {
-    let src = "void f() {\n  create();\n}\n";
-    let symbols = vec![method("f", 1, 3)];
-    let (_, diags) = eval(
-        r#"{"id":"bad","severity":"warning","message":"m","matcher":{"type":"method-scan","file_pattern":"C\\.java$","patterns":[{"pattern":"(","label":"w"}],"trigger":"w"}}"#,
-        vec![file("C.java", src, symbols.clone())],
-    );
-    assert_eq!(diags.len(), 1, "{diags:?}");
-    assert_actionable(&diags[0], "t/bad", "patterns[].pattern");
-
-    let (_, diags) = eval(
-        r#"{"id":"typo","severity":"warning","message":"m","matcher":{"type":"method-scan","file_pattern":"C\\.java$","patterns":[{"pattern":"\\bcreate\\(","label":"write"}],"trigger":"wirte"}}"#,
-        vec![file("C.java", src, symbols)],
-    );
-    assert_eq!(diags.len(), 1, "{diags:?}");
-    assert!(
-        diags[0].contains("`trigger` names label \"wirte\"") && diags[0].contains("SKIPPED"),
-        "{}",
-        diags[0]
-    );
-    assert_points_at_the_validator(&diags[0]);
-}
-
-#[test]
-fn symbol_scan_bad_name_pattern_is_reported() {
-    let (findings, diags) = eval(
-        r#"{"id":"bad","severity":"info","message":"m","matcher":{"type":"symbol-scan","file_pattern":"\\.ts$","name_pattern":"("}}"#,
-        vec![file(
-            "f.ts",
-            "",
-            vec![symbol("handler", SourceSymbolKind::Function, 1, true)],
-        )],
-    );
-    assert!(findings.is_empty());
-    assert_eq!(diags.len(), 1, "{diags:?}");
-    assert_actionable(&diags[0], "t/bad", "name_pattern");
-}
-
-#[test]
-fn call_scan_bad_callee_pattern_is_reported() {
-    // The site is present and would otherwise match — so the silence here is caused by the skip, not by
-    // an empty channel, which is the distinction the diagnostic exists to make visible.
-    let mut f = file("f.ts", "console.error('x');\n", Vec::new());
-    f.call_sites = vec![crate::CallSite {
-        kind: crate::CALL_KIND_CONSOLE_WRITE.to_string(),
-        line: 1,
-        callee: "console.error".to_string(),
-        algorithm: None,
-    }];
-    let (findings, diags) = eval(
-        r#"{"id":"bad","severity":"info","message":"m","matcher":{"type":"call-scan","file_pattern":"\\.ts$","callee_pattern":"("}}"#,
-        vec![f],
-    );
-    assert!(findings.is_empty());
-    assert_eq!(diags.len(), 1, "{diags:?}");
-    assert_actionable(&diags[0], "t/bad", "callee_pattern");
-}
-
-#[test]
-fn io_scan_bad_key_pattern_is_reported() {
-    let pack = rule_pack(
-        r#"{"id":"bad","severity":"info","message":"m","matcher":{"type":"io-scan","file_pattern":"\\.ts$","direction":"provides","key_pattern":"("}}"#,
-    );
-    let provides = vec![io_provide("http", "GET /users", 3)];
-    let attrs = AttributeStore::from_attrs(Vec::new());
-    let ctx = IoScanTreeContext {
-        provides: &provides,
-        consumes: &[],
-        attrs: &attrs,
-        anchor_line: &|_file: &str, _line: u32| None,
-    };
-    let mut out = Vec::new();
-    let mut diags = Vec::new();
-    eval_pack_io_scan_into(&pack, &ctx, &mut out, &mut diags);
-    assert!(out.is_empty(), "a rule that cannot compile stays inert");
-    assert_eq!(diags.len(), 1, "{diags:?}");
-    assert_actionable(&diags[0], "t/bad", "key_pattern");
 }
 
 /// The per-file pass calls the evaluator once per file against one accumulator, so a single broken rule

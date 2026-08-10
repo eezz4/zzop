@@ -11,8 +11,8 @@ use serde::Serialize;
 use zzop_core::{CommonIr, FileNode, Finding};
 use zzop_engine::AnalyzeOutput;
 use zzop_metrics::{
-    CriticalFile, CrossLayerCoChurn, FolderAggregates, HealthIndex, Recommendation, Scores,
-    SeamCandidate,
+    CoChangeEdge, CriticalFile, CrossLayerCoChurn, FolderAggregates, HealthIndex, Recommendation,
+    Scores, SeamCandidate,
 };
 
 mod mirrors;
@@ -78,7 +78,7 @@ pub(crate) struct AnalyzeOutputView<'a> {
     scores: &'a Option<Scores>,
     /// What each `scores` key MEANS, one sentence apiece — the same self-describing-reply device
     /// `verdictMeaning` uses, for the same reason and after the same measurement. Four of the seventeen
-    /// score keys are bare acronyms (`sdp`, `sfc`, `lod`, `fsd`) whose expansion existed only in Rust
+    /// score keys are bare acronyms (`sdp`, `file_size_compliance`, `lod`, `feature_sliced_design`) whose expansion existed only in Rust
     /// doc-comments: a 2026-08-04 name survey found `docs/` and `site/` carried zero occurrences of
     /// "Stable Dependencies Principle", and the MCP tool descriptions name no score field at all. A
     /// consumer holding `scores.sdp = 41.2` had no vocabulary on any surface.
@@ -98,6 +98,13 @@ pub(crate) struct AnalyzeOutputView<'a> {
     seams: &'a [SeamCandidate],
     folders: &'a Option<FolderAggregates>,
     layer_co_churn: &'a Option<Vec<CrossLayerCoChurn>>,
+    /// Undirected file-pair co-change edges — the git-history relation over the same nodes `nodes`/the
+    /// dep graph describe, and the substrate `graph --domain cochange` draws. `null` and `[]` say
+    /// DIFFERENT things and must not be folded together: `null` = git inactive or collection failed, so
+    /// nothing was measured; `[]` = measured, nothing co-changed. See
+    /// `zzop_engine::AnalyzeOutput::co_change` for why it is not gated by `disabledRules`, and
+    /// `zzop_metrics::co_change_edges` for the two filters that make it a sample rather than a total.
+    co_change: &'a Option<Vec<CoChangeEdge>>,
     /// Positive pack-load confirmation, sorted by pack id — ALWAYS serialized (no skip-if-empty): an
     /// empty array is the honest "zero DSL packs loaded" signal, not a field to hide.
     packs_loaded: Vec<PackLoadedView<'a>>,
@@ -152,6 +159,7 @@ impl<'a> AnalyzeOutputView<'a> {
             seams: &output.seams,
             folders: &output.folders,
             layer_co_churn: &output.layer_co_churn,
+            co_change: &output.co_change,
             packs_loaded: output
                 .packs_loaded
                 .iter()
@@ -187,7 +195,8 @@ pub(crate) struct TreeEntryView<'a> {
 pub(crate) struct MultiAnalyzeOutputView<'a> {
     pub(crate) trees: Vec<TreeEntryView<'a>>,
     pub(crate) cross_layer: &'a zzop_core::CrossLayerResult,
-    /// The 23 `cross-layer/*` native rules run over `cross_layer` (`zzop_engine::analyze_trees`'s own
+    /// The `cross-layer/*` native rules run over `cross_layer` — how many there are is owned by
+    /// `zzop_rules_cross_layer::register_native_analyses` (`zzop_engine::analyze_trees`'s own
     /// `MultiAnalyzeOutput::cross_layer_findings` field — a plain `&'a [Finding]` borrow, same
     /// zero-copy-view convention as every other field on this struct, since `Finding` already derives
     /// `Serialize` in `zzop-core`).

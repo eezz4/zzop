@@ -4,6 +4,26 @@ fn analysis(trees: Value) -> String {
     json!({ "trees": trees }).to_string()
 }
 
+/// A tree stating exactly `keyed` keyed and `unresolved` unresolved consumes — the two counts
+/// `joinVisibility` reports. Everything else is held at the minimum that keeps the
+/// census self-consistent (`joinContributionZero` is the census's own `files > 0 && provides == 0 &&
+/// keyed == 0` definition, restated here rather than recomputed so a change to that rule shows up as
+/// a failing fixture instead of a silently agreeing one).
+fn keyed_consume_tree(keyed: usize, unresolved: usize) -> Value {
+    json!({
+        "sourceId": "fe",
+        "output": {
+            "ir": { "loc": { "src/api.ts": 20 }, "symbols": [ { "file": "src/api.ts", "name": "get" } ], "dep": {} },
+            "degraded": [],
+            "coverage": {
+                "files": 1, "parserDispatched": 1, "symbols": 1, "resolvedImportEdges": 0,
+                "ioProvides": 0, "ioConsumesKeyed": keyed, "ioConsumesUnresolved": unresolved,
+                "degraded": 0, "joinContributionZero": keyed == 0
+            }
+        }
+    })
+}
+
 /// A tree whose files cover all three dispatch classes: two structural (one via symbols, one via dep
 /// membership alone), one lexical-only, one degraded.
 fn mixed_tree() -> Value {
@@ -352,9 +372,61 @@ fn a_tree_without_git_internals_has_no_walk_note_key() {
 }
 
 #[test]
+fn join_visibility_carries_the_counts_not_only_a_sentence() {
+    // The sentence answered "did this tree contribute anything at all", which reads the SAME at 1
+    // keyed consume and at 400. A tree with one visible call was told "visible" and then went on to
+    // accuse the other tree's endpoints of being unconsumed. The magnitude has to be readable.
+    let v = run(json!([keyed_consume_tree(1, 9)]));
+    let vis = &v["trees"][0]["joinVisibility"];
+    assert_eq!(vis["consumesKeyed"], 1);
+    assert_eq!(vis["consumesUnresolved"], 9);
+    assert_eq!(vis["provides"], 0);
+    let meaning = vis["meaning"].as_str().expect("meaning is a string");
+    // A key is a PRECONDITION for joining, never proof of it — a keyed consume still misses when the
+    // prefix drifts. Calling this a join count would overclaim by exactly that gap.
+    assert!(
+        meaning.contains("not proof") || meaning.contains("does not prove"),
+        "must not read as a join count: {meaning}"
+    );
+}
+
+#[test]
+fn join_visibility_ships_counts_and_no_derived_rate() {
+    // Deliberate, and it cost a design revision to get here. The first cut of this field carried a
+    // `keyedRatio`, which `no_single_score_field_and_recall_is_declared_unmeasured` rejected — and
+    // that ruling is RIGHT on this exact field, not merely adjacent to it: `keyedRatio: 1.0` over a
+    // single extracted call is the same "reads full at 5%" failure the sentence had, wearing a
+    // number instead of a word. Counts cannot be quoted without their magnitude. Anyone who wants
+    // the quotient can divide two fields that are both in front of them.
+    let v = run(json!([keyed_consume_tree(1, 9)]));
+    let vis = &v["trees"][0]["joinVisibility"];
+    for k in ["keyedRatio", "ratio", "rate", "score", "percent"] {
+        assert!(
+            vis.get(k).is_none(),
+            "derived rate leaked back in as {k}: {vis}"
+        );
+    }
+}
+
+#[test]
+fn a_tree_that_extracted_no_external_calls_says_so_rather_than_reading_complete() {
+    // 0/0 is the trap: under every naive formula an extractor that saw NOTHING scores identically to
+    // one that resolved everything. With counts only there is no quotient to invert — the zeros are
+    // visible — and the sentence names the state outright.
+    let v = run(json!([keyed_consume_tree(0, 0)]));
+    let vis = &v["trees"][0]["joinVisibility"];
+    assert_eq!(vis["consumesKeyed"], 0);
+    assert_eq!(vis["consumesUnresolved"], 0);
+    let meaning = vis["meaning"].as_str().expect("string");
+    assert!(meaning.contains("INVISIBLE"), "{meaning}");
+}
+
+#[test]
 fn join_invisibility_is_a_sentence_not_a_bare_bool() {
     let v = run(json!([mixed_tree()]));
-    let vis = v["trees"][0]["joinVisibility"].as_str().expect("string");
+    let vis = v["trees"][0]["joinVisibility"]["meaning"]
+        .as_str()
+        .expect("string");
     assert!(vis.starts_with("INVISIBLE"), "{vis}");
     // F5: the fix must name WHAT the overlay contributes — the generic "an adapter overlay restores
     // visibility" was measured misleading on a tree that already carried a non-io (import-alias)

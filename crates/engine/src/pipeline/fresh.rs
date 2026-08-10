@@ -5,8 +5,11 @@
 //! channels, each with its own per-language table and degrade note.
 
 mod call_sites;
+mod oversized;
 mod spans;
 mod string_literals;
+
+pub(in crate::pipeline) use oversized::is_oversized;
 
 use zzop_core::{ImportMap, IoFacts, RulePackDef};
 
@@ -18,7 +21,7 @@ use super::parsers::{
     lexical_loc, parse_csharp, parse_go, parse_java21, parse_prisma, parse_python, parse_rust,
     parse_typescript,
 };
-use super::FileArtifact;
+use super::{DegradeCause, FileArtifact};
 
 /// TS-only per-file extractor gate: runs `f` on a non-degraded TypeScript file, else an empty vec.
 fn ts_only<T>(is_ts_fresh: bool, rel: &str, text: &str, f: fn(&str, &str) -> Vec<T>) -> Vec<T> {
@@ -39,53 +42,8 @@ pub(super) fn compute_fresh_artifact(
     vocab: &crate::vocabulary::ResolvedVocabulary<'_>,
     packs: &[&RulePackDef],
 ) -> FileArtifact {
-    if bytes.len() > config.size_cap {
-        // Oversized: loc counted lexically, no symbols/imports/io, but the text is still scanned by line-scan DSL rules
-        // (lexical-only files are excluded from structural projection, not rule evaluation). `store_bound_models`/`field_usage_tokens` are raw-text regex scans, never an AST parse, so they run here too (like the removed `scan_store_map`/`scan_field_usage` walks), unaffected by the size cap.
-        let loc = lexical_loc(text);
-        let (findings, rule_timings, minified_or_generated) = eval_packs(
-            packs,
-            rel,
-            text,
-            &[],
-            None,
-            spans::ProjectedSpans::none().facts(),
-            // No AST ⇒ no call sites, no bound string literals: `CallScan`/`LiteralScan` are silent
-            // on an oversized file (recall-side degrade); line-scan still runs on the raw text.
-            &[],
-            &[],
-            config.profile_rules,
-        );
-        return FileArtifact {
-            rel: rel.to_string(),
-            symbols: Vec::new(),
-            imports: ts_slot(language),
-            re_exports: Vec::new(),
-            dynamic_imports: Vec::new(),
-            asset_refs: Vec::new(),
-            loc,
-            findings,
-            degraded: true,
-            minified_or_generated,
-            io: None,
-            rule_timings,
-            used_names: Vec::new(),
-            exported_signature_names: Vec::new(),
-            const_map_fragment: std::collections::HashMap::new(),
-            procedure_router_fragments: Vec::new(),
-            router_mount_fragments: Vec::new(),
-            wrapper_def_fragments: Vec::new(),
-            wrapper_call_fragments: Vec::new(),
-            controller_prefix_route_fragments: Vec::new(),
-            class_shape_fragments: Vec::new(),
-            query_call_sites: Vec::new(),
-            loop_spans: Vec::new(),
-            function_spans: Vec::new(),
-            test_spans: Vec::new(),
-            call_sites: Vec::new(),
-            string_literals: Vec::new(),
-            field_usage_tokens: sorted_field_usage_tokens(rel, text),
-        };
+    if is_oversized(bytes, config) {
+        return oversized::oversized_artifact(rel, text, language, config, packs);
     }
 
     // Prisma is the one language whose io PROJECTION is computed by the same call that produces its
@@ -251,7 +209,10 @@ pub(super) fn compute_fresh_artifact(
         asset_refs,
         loc,
         findings,
-        degraded,
+        // Past the oversize gate above, a `degraded` verdict can only have come from the parse match —
+        // `super::parsers`' frontends are its only other producer, and the two non-parsing arms
+        // (`Language::Sql`, `None`) hard-code `false`.
+        degrade_cause: degraded.then_some(DegradeCause::ParseFailure),
         minified_or_generated,
         io,
         rule_timings,
@@ -283,9 +244,9 @@ fn sorted_field_usage_tokens(rel: &str, text: &str) -> Vec<String> {
     tokens
 }
 
-/// `Some(empty map)` for a TypeScript-, Python-, Rust-, Go-, or Java21-dispatched file (gives it a dep-graph node even when parsing
-/// was skipped/degraded), `None` otherwise. Named `ts_slot` for historical reasons (predates Python/Rust/Go/Java21 dispatch) — see
-/// `FileArtifact::imports`'s doc for what participating in this slot actually grants downstream. `.java` joined this slot only once its dispatch target became a real structural parser (`Language::Java21`) — the retired lexical brace-matcher never produced an `ImportMap` at all, so `.java` was excluded here before.
+/// `Some(empty map)` for a dispatched file whose language is in the slot (gives it a dep-graph node even when parsing
+/// was skipped/degraded), `None` otherwise. Named `ts_slot` for historical reasons — TypeScript was the only member once — see
+/// `FileArtifact::imports`'s doc for what participating in this slot actually grants downstream. The `matches!` below IS the roster: a language belongs here exactly when its dispatch target is a structural parser that can produce an `ImportMap`, so prose must not carry a second copy of the list. It already drifted once as a copy — the list omitted C# while the `matches!` accepted it.
 fn ts_slot(language: Option<Language>) -> Option<ImportMap> {
     matches!(
         language,

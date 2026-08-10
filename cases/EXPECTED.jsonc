@@ -210,6 +210,14 @@
   // boundary; the substring mock-name veto silenced it, the boundary-anchored veto must not.
   "api/services/be-security.high-entropy-secret.ts:13": ["security/high-entropy-secret"],
   "api/services/be-security.insecure-cookie.ts:5": ["security/insecure-cookie"],
+  // Promoted from `gap` 2026-08-09, the day the weak-crypto six-language migration landed (see the
+  // gap block's own note at the bottom of this file). Three spellings on purpose — string argument /
+  // algorithm-named constructor / algorithm-named package — and none is a password hash (cache key,
+  // rate-limit bucket, ETag), so `weak-password-hash` correctly stays silent on all three. Each
+  // file's SHA-256 twin stays unlabeled and must stay silent.
+  "api/services/be-security.weak-crypto.ts:23": ["security/weak-crypto"],
+  "api/services/be-security.weak-crypto.py:15": ["security/weak-crypto"],
+  "api/services/be-security.weak-crypto.go:20": ["security/weak-crypto"],
   // W3 of the call-site channel (2026-08-03): the first corpus POSITIVE this rule has ever had. It
   // needs both halves now — the lexical interpolation shape AND a projected `process-exec` site on
   // the same line — so it also measures that the TypeScript producer resolves `exec` through this
@@ -231,9 +239,13 @@
   // a strong digest (the algorithm filter declines it) and — the never-guess case — a construction
   // whose algorithm the source does not spell, which stays silent instead of being approximated.
   "api/services/be-security.bcrypt-cost-too-low.ts:10": ["security/bcrypt-cost-too-low"],
-  "api/services/be-security.weak-password-hash.cs:7": ["security/weak-password-hash"],
-  "api/services/be-security.weak-password-hash.py:10": ["security/weak-password-hash"],
-  "api/services/be-security.weak-password-hash.ts:6": ["security/weak-password-hash"],
+  // The three lines below (and rust/src/credentials.rs:40) CO-FIRE weak-crypto + weak-password-hash
+  // since the 2026-08-09 six-language migration — the same doctrine CredentialsConfig.java:29 already
+  // scores: MD5 is both a weak digest and the wrong tool for a password, and the two rules say
+  // different things. Upheld for all six languages the day the general rule arrived.
+  "api/services/be-security.weak-password-hash.cs:7": ["security/weak-password-hash","security/weak-crypto"],
+  "api/services/be-security.weak-password-hash.py:10": ["security/weak-password-hash","security/weak-crypto"],
+  "api/services/be-security.weak-password-hash.ts:6": ["security/weak-password-hash","security/weak-crypto"],
   "api/services/be-security.weak-token-random.ts:5": ["security/weak-token-random"],
   "api/services/fullstack.localhost-egress-committed.ts:3": ["egress/localhost-url-literal-committed"],
   "api/services/fullstack.ws-no-auth.ts:6": ["egress/ws-no-auth"],
@@ -242,6 +254,65 @@
   "api/services/sql.app-side-aggregation-filter-length.ts:11": ["sql/app-side-aggregation-filter-length"],
   "api/services/sql.app-side-aggregation-reduce.ts:10": ["sql/app-side-aggregation-reduce"],
   "api/services/sql.query-logic-density.ts:3": ["sql/query-logic-density"],
+
+  // ==== THE METHOD-SCAN SPAN-BOUNDARY AXIS (trees/api-be/spans/, added 2026-08-08) ==================
+  // Read `trees/api-be/spans/README.md` first — it owns the mechanism. In one line: a TypeScript class
+  // whose members are all property-assigned arrow functions USED TO project exactly ONE symbol span
+  // (the whole class body), because `symbol_shapes.rs` emitted sub-symbols for methods and skipped
+  // properties; every `Matcher::MethodScan` rule then paired its patterns across the whole class.
+  //
+  // ✅ THE PROJECTION REPAIR LANDED 2026-08-09 (`symbol_shapes::emit_class`: function-valued
+  // properties project their own leaf spans, and `drop_outer_spans` discards the class-wide span).
+  // Per the consequence this section stated in advance: the nine TypeScript `FP-PROBE` expectation
+  // lines were DELETED (their silence is the repair working — the probes stay in the fixtures as
+  // permanent regression tripwires: if the class-wide span ever returns, they fire as unexpected FPs
+  // and the gate goes red), the two FN-direction probes (:20 `db/update-delete-no-where`, :22
+  // `security/insecure-cookie`) were PROMOTED to ordinary expectations because the over-suppression
+  // that silenced them died with the same span, and the `api` row of
+  // `scripts/detection-expected-baseline.txt` was hand-lowered 131 -> 124 (-9 probes, +2 promotions)
+  // — the hand edit `--update-baseline` refuses to do, and exactly the evidence trail it refuses it
+  // for. The proposed fourth disposition ("known-wrong") is no longer needed for this axis; the ONE
+  // remaining known-wrong pair is the JAVA arm (see the LambdaRoutes block further down), which this
+  // TypeScript repair deliberately does not touch.
+  //
+  // Each module also carries a `TP-CONTROL` — the same two patterns genuinely together in a
+  // standalone function. Those are ordinary true positives and are unchanged; for three rules the
+  // control remains the first scored detection they ever had (db/multi-write-no-tx,
+  // db/empty-catch-and-write, security/html-response-from-request).
+
+  // db/empty-catch-and-write — FP-PROBE at :23 (silent since the repair; the empty catch belongs to a
+  // socket teardown, the write to another member). TP-CONTROL at :33.
+  "api/spans/db.empty-catch-and-write.span.ts:33": ["db/empty-catch-and-write"],
+  // db/multi-write-no-tx — FP-PROBE at :25 (silent since the repair; outbox insert and seat-count
+  // stamp are two members, two unrelated jobs). TP-CONTROL at :32.
+  "api/spans/db.multi-write-no-tx.span.ts:32": ["db/multi-write-no-tx"],
+  // db/update-delete-no-where — FN DIRECTION. :28 is the TP-CONTROL. :20 is the whole-table delete
+  // that was SILENCED by an unrelated sibling member's `where:` until the repair — promoted to an
+  // expectation 2026-08-09, exactly as the pre-repair comment here said to do. A `critical` recovered
+  // from an oversized veto span is the FN half of what the repair bought.
+  "api/spans/db.update-delete-no-where.span.ts:20": ["db/update-delete-no-where"],
+  "api/spans/db.update-delete-no-where.span.ts:28": ["db/update-delete-no-where"],
+  // security/html-response-from-request — FP-PROBE at :29 (silent since the repair). TP-CONTROL at :37.
+  "api/spans/security.html-response-from-request.span.ts:37": ["security/html-response-from-request"],
+  // security/insecure-cookie — FN DIRECTION, same shape as update-delete-no-where above. :22 is the
+  // session cookie genuinely missing `httpOnly` that the sibling refresh cookie's veto silenced until
+  // the repair — promoted 2026-08-09. :28 is the TP-CONTROL.
+  "api/spans/security.insecure-cookie.span.ts:22": ["security/insecure-cookie"],
+  "api/spans/security.insecure-cookie.span.ts:28": ["security/insecure-cookie"],
+  // security/mass-assignment — FP-PROBE at :24 (silent since the repair). TP-CONTROL at :35.
+  "api/spans/security.mass-assignment.span.ts:35": ["security/mass-assignment"],
+  // security/open-redirect — FP-PROBE at :21 (silent since the repair). TP-CONTROL at :31.
+  "api/spans/security.open-redirect.span.ts:31": ["security/open-redirect"],
+  // security/path-traversal + reliability/sync-fs-in-handler — TWO A-exposed rules on ONE fixture, not by
+  // design: both want a synchronous fs call plus request evidence, and the oversized span served both.
+  // FP-PROBE at :27 (silent since the repair — two rules went quiet on one leaf, the compounding in
+  // reverse). TP-CONTROL at :37.
+  "api/spans/security.path-traversal.span.ts:37": ["security/path-traversal","reliability/sync-fs-in-handler"],
+  // security/ssrf-user-url — FP-PROBE at :18 (silent since the repair). TP-CONTROL at :31.
+  "api/spans/security.ssrf-user-url.span.ts:31": ["security/ssrf-user-url"],
+  // security/taint-flow — FP-PROBE at :23 (silent since the repair). TP-CONTROL at :31.
+  "api/spans/security.taint-flow.span.ts:31": ["security/taint-flow"],
+
   // ---- THE TWO NESTED PATH-SCOPE FIXTURES (added 2026-08-02) --------------------------------------
   // `sql/nplus1` scans only `.ts` under a `domains/<name>/routes/` or `api/` path SEGMENT. Until
   // 2026-08-01 its file_pattern was ROOT-anchored, so `src/api/orders.ts` was structurally invisible;
@@ -389,7 +460,54 @@
   "java/src/main/java/com/example/svc/CredentialsConfig.java:19": ["security/conn-string-credentials"],
   "java/src/main/java/com/example/svc/CredentialsConfig.java:24": ["security/api-key-in-url"],
   "java/src/main/java/com/example/svc/CredentialsConfig.java:29": ["security/weak-crypto","security/weak-password-hash"],
-  "java/src/main/java/com/example/svc/UnsafeController.java:19": ["security/sql-string-concat"],
+  // The two rules v0.29.0 widened to `.java`. They shipped with the extension admitted and no Java
+  // fixture, so their Java half went unscored — the tree WAS being scored (17 rows above), the two rules
+  // simply had nothing here to hit. `high-entropy-secret` needed a literal clearing the 80-bit floor:
+  // `apiKey` on line 14 trips the shape-judging `hardcoded-secret` and stays UNDER this rule's measured
+  // floor on purpose, so the two rows together pin that the axes are separate.
+  "java/src/main/java/com/example/svc/CredentialsConfig.java:40": ["security/high-entropy-secret"],
+  "java/src/main/java/com/example/svc/CredentialsConfig.java:47": ["security/bcrypt-cost-too-low"],
+  // ---- THE JAVA ARM OF THE SPAN-BOUNDARY AXIS (LambdaRoutes.java, added 2026-08-08) ---------------
+  // Both entries below are FP-PROBEs and — since the 2026-08-09 TypeScript repair — THE ONLY remaining
+  // known-wrong expectations in this file: the TS arm's probes went silent and were deleted, these two
+  // still fire, because their mechanism is the Java parser folding handler lambdas into the enclosing
+  // registration method's span, which the TS property fix does not touch. Delete them the day THAT
+  // projection changes, per the same rule the TS arm followed. Java has
+  // no property-only-class shape (every method gets a span), so the oversized unit here is a route
+  // REGISTRATION method holding several handler lambdas, which the Java parser folds into the enclosing
+  // method's span by design (`parser/parser-java-21/src/lang/calls.rs`).
+  // WEAKER THAN ITS TYPESCRIPT SIBLINGS, and recorded as such rather than counted alongside them: both
+  // rules word their claim as "in the same METHOD", and these lambdas are textually in the same method,
+  // so the wording is not violated even though two independent handler functions were paired. What the
+  // pair establishes is that the axis is not TypeScript-only.
+  // :37 — `new File` on a constant name in one handler; `request.getParameter` in the next handler,
+  //       answering from an in-memory index. No parameter reaches any path.
+  // :55 — `printStackTrace()` to stderr in a rebuild handler; `getWriter()` in the CSV-export handler.
+  //       The trace reaches neither the client nor the other handler.
+  // TP CONTROLS already exist and are labeled below: UnsafeController.java:51 (java-path-traversal) and
+  // :62 (stacktrace-to-response). This file adds only the probes.
+  "java/src/main/java/com/example/svc/LambdaRoutes.java:37": ["security/java-path-traversal"],
+  "java/src/main/java/com/example/svc/LambdaRoutes.java:55": ["security/stacktrace-to-response"],
+  // ---- THE CIPHER HALF (PayloadCipher.java, added 2026-08-08) --------------------------------------
+  // Ordinary true positives, and the first ones these two arms have ever had: before this file the
+  // corpus contained no `Cipher.getInstance` line at all, so the cipher arms shipped with unit tests
+  // only. They report under `security/weak-cipher` since 2026-08-09 — the migration that made
+  // `weak-crypto` the six-language call-scan hash rule split the cipher arms out under their own id
+  // (one rule, one concept, one suppress marker). The third transform in that file, `AES/GCM/NoPadding`
+  // at :35, is the negative control and carries no entry on purpose — its silence is what says the two
+  // arms read the transform string rather than merely co-occurring with the word `Cipher`.
+  "java/src/main/java/com/example/svc/PayloadCipher.java:19": ["security/weak-cipher"],
+  "java/src/main/java/com/example/svc/PayloadCipher.java:27": ["security/weak-cipher"],
+  // TWO labels since 2026-08-10, and the pairing is the CO-FIRE RULING for this line rather than an
+  // accident of widening. `sql/select-star` gained `.java` in that batch, and this line — `"SELECT * FROM
+  // users WHERE name = '" + name + "'"` — is genuinely both defects at once: the concatenation is the
+  // injection (warning, fix = bind the parameter) and the `*` is the over-fetch (info, fix = name the
+  // columns). Neither repair performs the other, and neither rule's silence would imply the other's, so
+  // this is the weak-crypto / weak-password-hash ruling one domain over — a general and a specific judge
+  // reading the same line for different reasons is the answer, not a duplicate. The three DESTRUCTIVE
+  // siblings cannot reach this line at all: they veto on exactly the `" + ident` concatenation
+  // `security/sql-string-concat` requires, so those four partition rather than share.
+  "java/src/main/java/com/example/svc/UnsafeController.java:19": ["security/sql-string-concat","sql/select-star"],
   "java/src/main/java/com/example/svc/UnsafeController.java:25": ["security/weak-crypto"],
   "java/src/main/java/com/example/svc/UnsafeController.java:30": ["security/cmd-injection"],
   "java/src/main/java/com/example/svc/UnsafeController.java:35": ["security/hardcoded-password"],
@@ -400,6 +518,16 @@
   "java/src/main/java/com/example/svc/UnsafeController.java:62": ["security/stacktrace-to-response"],
   "java/src/main/java/com/example/svc/UnsafeController.java:68": ["security/trust-all-tls"],
   "java/src/main/java/com/example/svc/UserRepository.java:8": ["security/annotation-sql-concat"],
+  // Adjudicated 2026-08-10 with the leaf-completeness fix, and it is a SPAN label rather than a regex
+  // one: `security/xxe-no-guard`'s pattern already matched this `newInstance()` and had always matched
+  // it, but the line sat inside a `static { }` block that projected no symbol, so `drop_outer_spans`
+  // discarded the class-wide span in favour of the sibling `parse` method's leaf and no span ever
+  // covered it. Confirmed real the way the fixture's own header records: deleting the sibling method
+  // made the identical line fire. A default-configured `DocumentBuilderFactory` resolving external
+  // entities is a genuine critical whichever member builds it, and the canonical Java hardening idiom
+  // is precisely a static initializer — so this was the shape the rule most needed to see and the one
+  // shape it could not.
+  "java/src/main/java/com/example/svc/XmlBootstrap.java:19": ["security/xxe-no-guard"],
   // ---- THE RUST LANE (added 2026-08-02) -----------------------------------------------------------
   // Before this tree existed, ZERO of the 138 shipped DSL rules admitted a `.rs` file (java 18, ts 117),
   // so a Rust-only tree got the D16 "no applicable DSL rules" self-report and nothing else. Fifteen rules
@@ -446,7 +574,7 @@
   "rust/src/credentials.rs:25": ["security/conn-string-credentials"],
   "rust/src/credentials.rs:29": ["security/api-key-in-url"],
   "rust/src/credentials.rs:34": ["security/private-key-committed"],
-  "rust/src/credentials.rs:40": ["security/weak-password-hash"],
+  "rust/src/credentials.rs:40": ["security/weak-password-hash","security/weak-crypto"],
   // 2026-08-03: sql-format-interpolation's matcher now requires the template to BEGIN with the
   // statement and accepts the `{}` placeholder on EITHER side of the statement keywords. These two are
   // the directions the original after-the-keyword matcher could not see (dynamic column list, dynamic
@@ -493,6 +621,99 @@
   "rust/src/queries.rs:71": ["security/sql-format-interpolation"],
   // ---- end rust lane -----------------------------------------------------------------------------
   "sdk/billingPage.ts:1": ["cross-layer/untraced-client-import-no-visible-consume"],
+  // ---- sql-langs lane (added 2026-08-10) -----------------------------------------------------------
+  // THE PRODUCTION HALVES OF FOUR PAIRS, plus a MIGRATION twin whose both halves are expectations. The
+  // claim under test is the founding thesis in its own domain: five `sql` rules whose patterns carry NOT
+  // ONE character of host-language syntax were gated to `.ts/.rs`, so `conn.execute("DELETE FROM users")`
+  // was CRITICAL in TypeScript and silent in Python, Go, C# and Java. Every literal anchored below is
+  // byte-identical across the four production twins; the only difference is the host language.
+  // See trees/sql-langs/README.md.
+  //
+  // Adjudication (2026-08-10, every anchor read against its source line): each is a CLOSED single-line
+  // string literal holding a complete whole-table statement, a `SELECT *`, or a `LIKE '%...`. Nothing
+  // here is a shape the rule infers — the statement is entirely inside the quotes on the anchored line,
+  // which is the only thing these matchers ever claimed to read.
+  //
+  // The rows past the five-per-file block are QUOTE-FORM evidence, and each one is a different claim:
+  //   * `Api/Queries.cs:35`  — C# verbatim `@"..."`. The `@` sits BEFORE the quote, so the quote is still
+  //                            adjacent to the keyword. Fires, and the multi-line `@"` two lines down
+  //                            does not (it is in no expectation and in no benign file: its silence is
+  //                            covered by the whole-tree FP check, since any finding here that is not
+  //                            listed above scores as one).
+  //   * `services/queries.go:37` — Go raw backtick string. Same shape, different quote character.
+  //   * `services/queries.go:53` — `LIKE '%%%s%%'`, where the leading `%` IS a wildcard. This is the
+  //                            other side of the printf exclusion added with the widening, and it is
+  //                            what stops that exclusion from decaying into a blanket veto on `%`:
+  //                            delete the escape-awareness and this row goes FN while the `'%s'` line
+  //                            above it stays silent.
+  //   * `services/queries.py:61` — a SINGLE-LINE `"""..."""`. The third quote is still adjacent to the
+  //                            keyword; the multi-line form is the disclosed residual and stays silent.
+  //   * `services/queries.py:87` — `cur.execute("UPDATE ... SET active = %s", (0,))`. A psycopg `%s` is a
+  //                            BOUND VALUE, exactly as `?` already is in the TypeScript lane, so the
+  //                            statement is complete and still touches every row. Deliberately NOT
+  //                            treated as interpolation: `{}`/`${}` are, because those spellings cannot
+  //                            mean a bound parameter and `%s` can.
+  //
+  // The three `alembic/versions/` rows are the migration handoff, asserted rather than assumed. The three
+  // CRITICAL rules must be silent there (that path is a migration) AND `sql/destructive-migration` must
+  // fire on each line at info — the disclosure their messages promise. `alembic/versions/` is Python's
+  // dominant migration layout and the shared vocabulary did not know it; measured on corpus/oss, the ONLY
+  // lines in 277 Python files matching any of the five widened patterns were five Alembic backfills, so
+  // without that arm this widening would have shipped three critical false positives on deliberate
+  // one-time writes. A silent-only fixture could not tell that apart from the disclosure rule quietly
+  // dropping `.py`, which is why both halves are labeled.
+  "sqllang/Api/Queries.cs:7": ["sql/delete-no-where"],
+  "sqllang/Api/Queries.cs:12": ["sql/update-no-where"],
+  "sqllang/Api/Queries.cs:17": ["sql/truncate-in-app-code"],
+  "sqllang/Api/Queries.cs:22": ["sql/select-star"],
+  "sqllang/Api/Queries.cs:27": ["sql/like-leading-wildcard"],
+  "sqllang/Api/Queries.cs:35": ["sql/delete-no-where"],
+  "sqllang/alembic/versions/0001_backfill_ids.py:23": ["sql/destructive-migration"],
+  "sqllang/alembic/versions/0001_backfill_ids.py:24": ["sql/destructive-migration"],
+  "sqllang/alembic/versions/0001_backfill_ids.py:25": ["sql/destructive-migration"],
+  "sqllang/services/queries.go:9": ["sql/delete-no-where"],
+  "sqllang/services/queries.go:14": ["sql/update-no-where"],
+  "sqllang/services/queries.go:19": ["sql/truncate-in-app-code"],
+  "sqllang/services/queries.go:24": ["sql/select-star"],
+  "sqllang/services/queries.go:29": ["sql/like-leading-wildcard"],
+  "sqllang/services/queries.go:37": ["sql/delete-no-where"],
+  "sqllang/services/queries.go:53": ["sql/like-leading-wildcard"],
+  "sqllang/services/queries.py:12": ["sql/delete-no-where"],
+  "sqllang/services/queries.py:21": ["sql/update-no-where"],
+  "sqllang/services/queries.py:30": ["sql/truncate-in-app-code"],
+  "sqllang/services/queries.py:39": ["sql/select-star"],
+  "sqllang/services/queries.py:48": ["sql/like-leading-wildcard"],
+  "sqllang/services/queries.py:61": ["sql/delete-no-where"],
+  "sqllang/services/queries.py:87": ["sql/update-no-where"],
+  "sqllang/src/main/java/com/example/sqllangs/Queries.java:16": ["sql/delete-no-where"],
+  "sqllang/src/main/java/com/example/sqllangs/Queries.java:21": ["sql/update-no-where"],
+  "sqllang/src/main/java/com/example/sqllangs/Queries.java:26": ["sql/truncate-in-app-code"],
+  "sqllang/src/main/java/com/example/sqllangs/Queries.java:31": ["sql/select-star"],
+  "sqllang/src/main/java/com/example/sqllangs/Queries.java:36": ["sql/like-leading-wildcard"],
+  // ---- end sql-langs lane --------------------------------------------------------------------------
+  // ---- test-conventions lane (added 2026-08-10) ----------------------------------------------------
+  // THE PRODUCTION HALVES OF THREE PAIRS. Each of the six rows below has a byte-identical twin on the
+  // path its language uses for tests, and that twin is in `benign` — so this lane is scored from both
+  // sides at once. The 12 findings here say "these defects are real"; the three benign entries say "and
+  // the path is what silences them". Delete either side and the other stops proving anything: without
+  // these rows a matcher regression reads as success, and without the benign entries the path gate could
+  // vanish unnoticed. See trees/test-conventions/README.md.
+  //
+  // Adjudication (2026-08-10, all six read against the anchored source line): every anchor is an
+  // unbounded `go` statement inside a `for` body, a console write inside a loop body, a console write in
+  // a backend directory, or an MD5 construction — each the shape its rule's message describes.
+  // `Api/UserService.cs:20` deliberately carries `security/weak-crypto` and NOT
+  // `security/weak-password-hash`: the hash call sits on the `MD5.Create()` line, and that rule's
+  // `line_pattern` requires a credential word on the anchored line itself, which is one line down. The
+  // Python twin at `services/login.py:13` has both on one line and carries both, which is what makes
+  // the C# row's single entry a measurement rather than an omission.
+  "testconv/Api/UserService.cs:14": ["reliability/console-in-loop","reliability/console-in-be"],
+  "testconv/Api/UserService.cs:20": ["security/weak-crypto"],
+  "testconv/services/handler.go:12": ["go/goroutine-in-loop","reliability/console-in-loop","reliability/console-in-be"],
+  "testconv/services/handler.go:13": ["reliability/console-in-loop","reliability/console-in-be"],
+  "testconv/services/login.py:9": ["reliability/console-in-loop","reliability/console-in-be"],
+  "testconv/services/login.py:13": ["security/weak-crypto","security/weak-password-hash"],
+  // ---- end test-conventions lane -------------------------------------------------------------------
   "trpc/router.ts:9": ["cross-layer/unconsumed-procedure"],
   "unresolved/gateway.ts:8": ["cross-layer/unresolved-consume-ratio"],
   "unresolved/gateway.ts:9": ["cross-layer/method-mismatch"],
@@ -615,7 +836,25 @@
     "decoy/services/reliability.fetch-no-timeout.decoy.ts",
     "decoy/services/reliability.json-parse-no-try.decoy.ts",
     "decoy/web/security.secret-env-in-fe.decoy.ts",
-    "rust/migrations/v2_backfill.rs"
+    "rust/migrations/v2_backfill.rs",
+    // The TEST halves of the three test-conventions pairs. Unlike every decoy above, these are NOT in
+    // scope for the rules they bait -- that is the whole claim: the path gate declines them before any
+    // matcher runs. A decoy earns its silence by satisfying the gates and losing on a matcher arm; these
+    // earn theirs from their production twins in the expectation block above, which hold the same lines
+    // and DO fire. Any finding here means the language's own test-path spelling stopped being
+    // recognized, which is exactly the state that shipped 14 false positives before 2026-08-10.
+    "testconv/services/handler_test.go",
+    "testconv/services/test_login.py",
+    "testconv/Api.Tests/UserTests.cs",
+    // The TEST halves of the four sql-langs pairs — the same discipline one domain over, and the half
+    // that proves the PREREQUISITE for admitting `.py`/`.go`/`.cs`/`.java` to three CRITICAL rules. Each
+    // holds the byte-identical SQL literals its production twin is scored on above, so a finding here
+    // means that language's test-path spelling stopped being recognized and every test fixture full of
+    // SQL strings is about to be reported as a whole-table delete.
+    "sqllang/services/queries_test.go",
+    "sqllang/services/test_queries.py",
+    "sqllang/Api.Tests/QueriesTests.cs",
+    "sqllang/src/test/java/com/example/sqllangs/QueriesTest.java"
   ],
 
   // KNOWN CAPABILITY GAPS -- the third disposition (added 2026-07-29 together with the scorer support;
@@ -637,6 +876,16 @@
   // `feaxios/pages/articles.ts:39` and `fegensdk/api/Api.ts:20` (see the negative-case-pairs note above
   // for what that promotion cost and why the harness made it a hand edit). The disposition stays declared
   // rather than deleted because the next acknowledged gap should be written here, not re-invented.
+  //
+  // RE-OPENED 2026-08-08 with three entries, the measurement floor for the `security/weak-crypto`
+  // multi-language migration — and CLOSED 2026-08-09 when that migration landed: all three fired on
+  // the first post-migration run and were promoted to ordinary expectations (they live with their
+  // tree's other entries above), per this disposition's contract. The three were deliberately three
+  // DIFFERENT spellings — a string argument (`createHash('md5')`), a constructor named for the
+  // algorithm (`hashlib.md5(...)`), and a PACKAGE named for it with no string anywhere (`md5.Sum`) —
+  // and the migration saw all three because it rode the parser's `hash-call` channel rather than a
+  // transliteration of the Java regex. Each file's SHA-256 twin stayed silent, which is what lets the
+  // promotion stand: the rule reads the algorithm, it does not fire on every digest call.
   "gap": {},
 
   // Expectations anchored in files deliberately kept OUT of the tracked tree, as "<sourceId>/<path>"

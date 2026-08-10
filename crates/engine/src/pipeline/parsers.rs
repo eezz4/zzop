@@ -121,8 +121,7 @@ pub(super) fn parse_prisma(
 /// parse-failure case internally (`Option::None` = the source did not parse into a usable CST) and
 /// returns all four facts behind ONE all-or-nothing gate, so there is no separate `parse_ok` probe here —
 /// just the `catch_unwind` defense-in-depth every parser frontend in this fused pass carries. Now
-/// participates in the shared TS/Python/Rust/Go dep graph (`ts_slot`, `pipeline::fresh`'s doc) — a real
-/// change from the retired lexical brace-matcher, which never produced an `ImportMap` at all.
+/// participates in the shared dep graph, on the terms `fresh::ts_slot` sets.
 pub(super) fn parse_java21(
     rel: &str,
     text: &str,

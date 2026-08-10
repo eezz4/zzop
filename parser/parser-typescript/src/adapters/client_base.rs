@@ -10,11 +10,20 @@
 //!
 //! Only the base URL's PATH PART is carried — the host is deliberately ignored (deploy config, not
 //! contract: the same effective-URL stance as the openapi example adapter's `servers[].url`
-//! handling and `base-carrier head-drop`'s opaque-base rule). Only a string-literal (or
-//! zero-interpolation template) value is recognized; `axios.defaults.baseURL = settings.baseApiUrl`
-//! or any other non-literal expression emits nothing, per the repo's never-guess IO convention — a
-//! wrong prefix would mis-key every axios consume in the tree. Non-literal bases stay on the
-//! existing disclosure path (route-near-miss / prefix-drift) or an adapter overlay.
+//! handling and `base-carrier head-drop`'s opaque-base rule). Recognized values are a string literal,
+//! a zero-interpolation template, or — since 2026-08-08 — a **bare identifier this file binds exactly
+//! once to such a literal** (`const API_BASE = '/api'; axios.defaults.baseURL = API_BASE`). That last
+//! shape is the common one in the wild, and while it was unrecognized this whole channel stayed dark
+//! on most real trees. It is a READ, not an inference: the hop reuses
+//! [`super::egress::local_consts::LocalConsts`], so the same gates that let a URL argument resolve
+//! against a same-file constant apply here — bound exactly once in this file, never reassigned, no
+//! parameter shadow, plain literal initializer.
+//!
+//! Everything else still emits nothing, per the repo's never-guess IO convention — a wrong prefix
+//! would mis-key every axios consume in the tree. `axios.defaults.baseURL = settings.baseApiUrl`, a
+//! name bound twice, and `const API_BASE = process.env.API_BASE` all stay unresolved (an environment
+//! base enters by injection, never by inference) and ride the existing disclosure path
+//! (route-near-miss / prefix-drift) or an adapter overlay.
 //!
 //! Path-part extraction rule (see [`base_path_from_string`]):
 //! - a value carrying `"://"` (an absolute URL) keys off the first `/` AFTER the scheme+host portion
@@ -37,6 +46,8 @@ use swc_core::ecma::ast::{
 use swc_core::ecma::visit::{Visit, VisitWith};
 use zzop_core::IoConsume;
 
+use super::egress::local_consts::LocalConsts;
+
 /// The sentinel `IoConsume::kind` — assemble consumes and strips it (never joined, never output).
 pub const CLIENT_BASE_PREFIX_KIND: &str = "client-base-prefix";
 
@@ -55,8 +66,13 @@ pub const CLIENT_BASE_PREFIX_KIND: &str = "client-base-prefix";
 pub fn extract_client_base_prefix_marker(rel: &str, text: &str) -> Option<IoConsume> {
     let (cm, module) = crate::parse_with_cm(rel, text)?;
     let cm_ref: &SourceMap = &cm;
+    // The same-file one-hop map, sharing `egress`'s gates rather than re-collecting (see
+    // `LocalConsts::literal_for_name`). The project-wide DOTTED map is deliberately empty here:
+    // this extractor is per-file by signature, and that map admits no bare names anyway.
+    let locals = LocalConsts::build(&module, &Default::default(), cm_ref);
     let mut c = ClientBaseCollector {
         cm: cm_ref,
+        locals: &locals,
         file: rel,
         found: false,
         out: None,
@@ -67,6 +83,7 @@ pub fn extract_client_base_prefix_marker(rel: &str, text: &str) -> Option<IoCons
 
 struct ClientBaseCollector<'a> {
     cm: &'a SourceMap,
+    locals: &'a LocalConsts,
     file: &'a str,
     /// True once the first `axios.defaults.baseURL = ...` assignment has been seen — gates further
     /// search regardless of whether that first assignment's value resolved to a marker (`out` may
@@ -79,7 +96,21 @@ impl Visit for ClientBaseCollector<'_> {
     fn visit_assign_expr(&mut self, n: &AssignExpr) {
         if !self.found && n.op == AssignOp::Assign && is_axios_defaults_base_url_target(&n.left) {
             self.found = true;
-            if let Some(path) = base_url_value_to_path(&n.right) {
+            // The value inline, or ONE hop through a same-file binding. Almost nobody writes the base
+            // at the assignment — they bind it once above and assign the binding — and that value is
+            // written down in this file, so reading it is not inference. The hop is gated by
+            // `LocalConsts`' own rules (bound exactly once here, never reassigned, no parameter
+            // shadow, plain literal initializer), which is why this reuses that map instead of
+            // collecting its own: a second set of gates is how "reads the value" and "proves the
+            // value is readable" drift apart.
+            let resolved = base_url_value_to_path(&n.right).or_else(|| {
+                let Expr::Ident(id) = &*n.right else {
+                    return None;
+                };
+                let literal = self.locals.literal_for_name(id.sym.as_ref())?;
+                base_path_from_string(literal)
+            });
+            if let Some(path) = resolved {
                 self.out = Some(IoConsume {
                     kind: CLIENT_BASE_PREFIX_KIND.to_string(),
                     key: Some(path),
@@ -181,120 +212,4 @@ fn base_path_from_string(base: &str) -> Option<String> {
         return None; // degenerate config: query/fragment baked into a base URL
     }
     Some(trimmed.to_string())
-}
-
-#[cfg(test)]
-mod tests {
-    //! Coverage for `extract_client_base_prefix_marker`: the absolute-URL and bare-path literal happy
-    //! paths (with trailing-slash trimming), the host-only/never-guess refusals (non-literal value,
-    //! concat, interpolated template, wrong receiver, wrong property, query/fragment-in-base), the
-    //! zero-interpolation template acceptance, and the inside-a-function-body case.
-    use super::*;
-
-    #[test]
-    fn literal_with_host_and_path_yields_the_path_part() {
-        let src = r#"axios.defaults.baseURL = "https://api.example.io/api/";"#;
-        let m = extract_client_base_prefix_marker("main.ts", src).expect("expected a marker");
-        assert_eq!(m.kind, CLIENT_BASE_PREFIX_KIND);
-        assert_eq!(m.key.as_deref(), Some("/api"));
-        assert_eq!(m.client.as_deref(), Some("axios"));
-        assert_eq!(m.file, "main.ts");
-        assert_eq!(m.line, 1);
-        assert!(m.raw.is_none() && m.method.is_none() && m.body.is_none());
-    }
-
-    #[test]
-    fn bare_path_literal_is_kept_as_is() {
-        let src = r#"axios.defaults.baseURL = "/api";"#;
-        let m = extract_client_base_prefix_marker("main.ts", src).expect("expected a marker");
-        assert_eq!(m.key.as_deref(), Some("/api"));
-    }
-
-    #[test]
-    fn trailing_slash_is_trimmed() {
-        let src = r#"axios.defaults.baseURL = "/api/";"#;
-        let m = extract_client_base_prefix_marker("main.ts", src).expect("expected a marker");
-        assert_eq!(m.key.as_deref(), Some("/api"));
-    }
-
-    #[test]
-    fn host_only_base_yields_none() {
-        let src = r#"axios.defaults.baseURL = "https://api.example.io";"#;
-        assert!(extract_client_base_prefix_marker("main.ts", src).is_none());
-        let src2 = r#"axios.defaults.baseURL = "https://api.example.io/";"#;
-        assert!(extract_client_base_prefix_marker("main.ts", src2).is_none());
-    }
-
-    #[test]
-    fn zero_interpolation_template_literal_works() {
-        let src = "axios.defaults.baseURL = `https://api.example.io/api`;";
-        let m = extract_client_base_prefix_marker("main.ts", src).expect("expected a marker");
-        assert_eq!(m.key.as_deref(), Some("/api"));
-    }
-
-    #[test]
-    fn member_expression_value_is_never_guessed() {
-        let src = "axios.defaults.baseURL = settings.baseApiUrl;";
-        assert!(extract_client_base_prefix_marker("main.ts", src).is_none());
-    }
-
-    #[test]
-    fn string_concatenation_value_is_never_guessed() {
-        let src = r#"axios.defaults.baseURL = HOST + "/api";"#;
-        assert!(extract_client_base_prefix_marker("main.ts", src).is_none());
-    }
-
-    #[test]
-    fn interpolated_template_value_is_never_guessed() {
-        let src = "axios.defaults.baseURL = `${HOST}/api`;";
-        assert!(extract_client_base_prefix_marker("main.ts", src).is_none());
-    }
-
-    #[test]
-    fn assignment_inside_a_function_body_is_found() {
-        let src = r#"
-            function setup() {
-                axios.defaults.baseURL = "https://api.example.io/api";
-            }
-        "#;
-        let m = extract_client_base_prefix_marker("main.ts", src).expect("expected a marker");
-        assert_eq!(m.key.as_deref(), Some("/api"));
-    }
-
-    #[test]
-    fn unrelated_receiver_is_never_matched() {
-        let src = r#"x.defaults.baseURL = "/api";"#;
-        assert!(extract_client_base_prefix_marker("main.ts", src).is_none());
-    }
-
-    #[test]
-    fn unrelated_property_is_never_matched() {
-        let src = r#"axios.defaults.headers = { "X-Foo": "1" };"#;
-        assert!(extract_client_base_prefix_marker("main.ts", src).is_none());
-    }
-
-    #[test]
-    fn query_or_fragment_in_base_is_never_guessed() {
-        let src = r#"axios.defaults.baseURL = "https://api.example.io/api?v=1";"#;
-        assert!(extract_client_base_prefix_marker("main.ts", src).is_none());
-        let src2 = r#"axios.defaults.baseURL = "/api#frag";"#;
-        assert!(extract_client_base_prefix_marker("main.ts", src2).is_none());
-    }
-
-    #[test]
-    fn protocol_relative_base_strips_the_host_like_an_absolute_url() {
-        // `//host/api` is a HOST carrier, not a path — taking it verbatim would bake the host into
-        // every prefixed key (the exact "host is deploy config, not contract" breach).
-        let src = r#"axios.defaults.baseURL = "//cdn.acme.com/api";"#;
-        let m = extract_client_base_prefix_marker("main.ts", src).expect("marker");
-        assert_eq!(m.key.as_deref(), Some("/api"));
-    }
-
-    #[test]
-    fn protocol_relative_host_only_base_is_a_no_op() {
-        let src = r#"axios.defaults.baseURL = "//cdn.acme.com";"#;
-        assert!(extract_client_base_prefix_marker("main.ts", src).is_none());
-        let src2 = r#"axios.defaults.baseURL = "//cdn.acme.com/";"#;
-        assert!(extract_client_base_prefix_marker("main.ts", src2).is_none());
-    }
 }

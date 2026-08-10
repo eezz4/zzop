@@ -60,6 +60,74 @@ fn blind(sources: &[&str]) -> BTreeSet<String> {
     sources.iter().map(|s| s.to_string()).collect()
 }
 
+fn near_miss_at(
+    source: &str,
+    file: &str,
+    line: u32,
+) -> BTreeMap<(String, String, u32), NearMissTargetRef> {
+    let mut m = BTreeMap::new();
+    m.insert(
+        (source.to_string(), file.to_string(), line),
+        NearMissTargetRef {
+            consume_file: "fe/api.ts".to_string(),
+            consume_line: 9,
+            count: 1,
+        },
+    );
+    m
+}
+
+#[test]
+fn a_provide_that_is_a_known_near_miss_target_is_not_a_confident_zero() {
+    // The inversion this closes: a caller was FOUND — off by a base prefix, named in this very
+    // finding's cross-reference note — and the endpoint was still reported at Warning as if nobody
+    // called it. Meanwhile `cross-layer/prefix-drift`, which states the actual cause, is info. The
+    // louder message was the wrong one.
+    //
+    // This rule's own doctrine already says a zero is only confident when the consume key space was
+    // resolved. The run-level `blind_sources` predicate cannot witness THIS case — those consumes are
+    // resolved, they just land one prefix over — so the near-miss evidence, which is per-provide and
+    // already in hand, decides this finding's severity.
+    let out = unconsumed_mutation_endpoint_findings(
+        &[unconsumed_provide(
+            "http",
+            "DELETE /api/users/{}",
+            "be",
+            "Api.java",
+            12,
+            Some("deleteUser"),
+        )],
+        &[],
+        &no_blind(),
+        &near_miss_at("be", "Api.java", 12),
+        &no_trpc(),
+    );
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].severity, Severity::Info, "{:?}", out[0]);
+    // The de-escalation must SAY why, the same discipline the blind-source branch follows.
+    assert!(out[0].message.contains("near-miss"), "{}", out[0].message);
+}
+
+#[test]
+fn a_provide_with_no_near_miss_keeps_warning() {
+    // Guard for the above: the de-escalation is evidence-driven, not a blanket softening.
+    let out = unconsumed_mutation_endpoint_findings(
+        &[unconsumed_provide(
+            "http",
+            "DELETE /api/users/{}",
+            "be",
+            "Api.java",
+            12,
+            Some("deleteUser"),
+        )],
+        &[],
+        &no_blind(),
+        &no_near_miss(),
+        &no_trpc(),
+    );
+    assert_eq!(out[0].severity, Severity::Warning);
+}
+
 #[test]
 fn dead_write_endpoint_is_flagged_with_method_and_source() {
     let out = unconsumed_mutation_endpoint_findings(

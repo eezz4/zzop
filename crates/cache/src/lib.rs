@@ -6,6 +6,7 @@
 //! they're a cheap linear combination of the per-file IRs. Every entry is file-independent, so this is
 //! safe to drive from a `rayon` file-parallel walk.
 
+mod evict;
 mod hash;
 mod ir_slice;
 mod key;

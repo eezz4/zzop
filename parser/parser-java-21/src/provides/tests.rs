@@ -1,9 +1,8 @@
-//! Ported parity fixtures from `zzop_parser_java::provides::tests` — every method-level mapping-
+//! `extract_http_provides`' behavior contract, fixture by fixture — every method-level mapping-
 //! annotation shape (bare / positional string / `value=` / `path=`), class-level `@RequestMapping`
 //! prefixing, `@RequestMapping` with an explicit `method` attribute, the ambiguous-no-method-attribute
 //! skip, the `@RestController`/`@Controller` class gate (including the negative), and a multi-method
-//! controller class shape end to end — same expectations as the old lexical crate, `extract_http_provides`
-//! having the exact same signature/behavior contract.
+//! controller class shape end to end.
 use zzop_core::IoProvide;
 
 use super::annotations::{METHOD_ANNOTATIONS, REQUEST_METHOD_NAMES};
@@ -254,15 +253,16 @@ fn ctrl_authen_shape_yields_three_get_routes_under_the_authen_prefix() {
     assert_eq!(user_info.key, "GET /authen/getUserInfo");
 }
 
-// --- AST-grade precision gains beyond the old lexical crate (documented in `annotations`' module doc)
+// --- annotation shapes a text scan would mis-read (`annotations`' module doc)
 
 #[test]
-fn a_deeply_nested_annotation_argument_no_longer_defeats_extraction() {
-    // Two levels of paren nesting inside a mapping annotation's own args — the old lexical crate's
-    // module doc calls this out as a still-unhandled limit; the real grammar has no such limit.
-    let src = "@RestController\nclass C {\n  @GetMapping(value = \"/x\", headers = \"Accept=application/json\")\n  void x() {}\n}\n";
+fn a_literal_paren_inside_an_argument_string_does_not_defeat_extraction() {
+    // A `)` inside a quoted argument is where a text scan looking for the annotation's closing paren
+    // stops early. The grammar hands this module a whole, paren-balanced `annotation` node instead, so
+    // there is no scan here to defeat — this is the shape `annotations`' module doc cites.
+    let src = "@RestController\nclass C {\n  @GetMapping(value = \"/x)y\", headers = \"Accept=application/json\")\n  void x() {}\n}\n";
     let out = extract_http_provides("C.java", src);
-    assert_eq!(keys(&out), vec!["GET /x"]);
+    assert_eq!(keys(&out), vec!["GET /x)y"]);
 }
 
 #[test]
@@ -276,8 +276,9 @@ fn a_blank_line_between_annotation_and_declaration_no_longer_drops_the_annotatio
 
 #[test]
 fn a_string_attribute_preceding_value_no_longer_wins_the_path_at_method_level() {
-    // `produces` is a string-valued attribute that happens to appear BEFORE `value` — the old
-    // first-quoted-string keying would wrongly take "application/json" as the path.
+    // `produces` is a string-valued attribute that happens to appear BEFORE `value` — a bare
+    // first-quoted-string read (`annotations::first_quoted_string`, the positional-form fallback)
+    // would wrongly take "application/json" as the path.
     let src = "@RestController\nclass C {\n  @GetMapping(produces = \"application/json\", value = \"/users\")\n  void x() {}\n}\n";
     let out = extract_http_provides("C.java", src);
     assert_eq!(keys(&out), vec!["GET /users"]);

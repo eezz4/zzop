@@ -21,10 +21,12 @@ pub mod pack_loader;
 pub mod paths;
 pub mod recognizer;
 pub mod registry;
+pub mod rule_channels;
 pub mod schema;
 pub mod serde_util;
 pub mod sightline;
 pub mod string_literals;
+pub mod vocab_norm;
 
 pub use attributes::{attr_is_truthy, Attribute, AttributeStore, EntityRef};
 pub use call_sites::{
@@ -49,6 +51,7 @@ pub use dsl::{
     IoScanTreeContext, LabeledPattern, LineScan, Matcher, MethodScan, RuleContext, RuleDef,
     RulePackDef, SourceFile, SymbolScan, NEAR_MISS_MARKER_TOKEN_PATTERN,
 };
+pub use dsl::{leaders_for_path, strip_comment_leader, Leaders};
 
 pub use finding::{disable_hint, Finding, RuleExplain, Severity};
 pub use graph::{circular_from_dep, circular_from_dep_excluding, find_cycles, ComponentEdge};
@@ -84,6 +87,7 @@ pub use registry::{
     is_suppressed, merge_findings, register_native_analysis_stub, suppression_matches_path,
     GlobalExclude, RuleConfig, RuleRegistry, Suppression, REDACTED,
 };
+pub use rule_channels::{declare_native_rule_channels, NativeRuleChannels, RuleIoChannel};
 pub use sightline::RuleSightline;
 
 pub use file_nodes::{

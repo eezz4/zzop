@@ -1,7 +1,6 @@
-//! The per-file `extract_http_provides` entry point — AST-grade reimplementation of the old lexical
-//! `zzop_parser_java::provides::extract`'s span-overlap `enclosing_class` search: this crate walks the
-//! real type-NESTING structure directly (a method's enclosing class is simply its AST parent's `body`
-//! owner), so there is no separate "smallest containing span" search to port at all.
+//! The per-file `extract_http_provides` entry point. Enclosing-type recognition is structural, not a
+//! span search: this walks the real type-NESTING tree top-down, so a method's gating class is simply
+//! the type whose `body` it sits in.
 
 use tree_sitter::Node;
 use zzop_core::{http_interface_key, IoProvide};

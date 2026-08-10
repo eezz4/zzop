@@ -24,40 +24,20 @@ fn prefilter_matches_unoptimized_findings_across_the_moved_java_rules() {
             io: None,
         },
         SourceFile {
-            loop_spans: Vec::new(),
-            function_spans: Vec::new(),
-            test_spans: Vec::new(),
-            call_sites: Vec::new(),
-
-            string_literals: Vec::new(),
             rel: "D.java".into(),
             text: "MessageDigest md = MessageDigest.getInstance(\"MD5\");\nCipher.getInstance(\"DES/CBC/PKCS5Padding\");\n// legacy DigestUtils.md5DigestAsHex\n".into(),
-            symbols: vec![],
-            io: None,
+            ..Default::default()
         },
         SourceFile {
-            loop_spans: Vec::new(),
-            function_spans: Vec::new(),
-            test_spans: Vec::new(),
-            call_sites: Vec::new(),
-
-            string_literals: Vec::new(),
             rel: "E.java".into(),
             text: "public class E { void noop() { System.out.println(\"nothing interesting\"); } }".into(),
-            symbols: vec![],
-            io: None,
+            ..Default::default()
         },
         SourceFile {
-            loop_spans: Vec::new(),
-            function_spans: Vec::new(),
-            test_spans: Vec::new(),
-            call_sites: Vec::new(),
-
-            string_literals: Vec::new(),
             rel: "F.java".into(),
             text: "public class F {\n  void run() {\n    String[] cmd = { \"sh\", \"-c\", \"ping \" + host };\n    Runtime.getRuntime().exec(cmd);\n  }\n}".into(),
             symbols: vec![method("run", 2, 5)],
-            io: None,
+            ..Default::default()
         },
     ];
     let ctx = RuleContext { files: &files };
@@ -93,29 +73,15 @@ fn prefilter_respects_require_file_cheap_skip_semantics_unchanged() {
     let files = vec![
         // RegexSet candidate (contains "foo") but require_file ("NEEDLE") is absent -> must stay skipped.
         SourceFile {
-            loop_spans: Vec::new(),
-            function_spans: Vec::new(),
-            test_spans: Vec::new(),
-            call_sites: Vec::new(),
-
-            string_literals: Vec::new(),
             rel: "a.txt".into(),
             text: "foo bar".into(),
-            symbols: vec![],
-            io: None,
+            ..Default::default()
         },
         // RegexSet candidate AND require_file present -> must be flagged.
         SourceFile {
-            loop_spans: Vec::new(),
-            function_spans: Vec::new(),
-            test_spans: Vec::new(),
-            call_sites: Vec::new(),
-
-            string_literals: Vec::new(),
             rel: "b.txt".into(),
             text: "foo NEEDLE".into(),
-            symbols: vec![],
-            io: None,
+            ..Default::default()
         },
     ];
     let ctx = RuleContext { files: &files };
@@ -145,16 +111,9 @@ fn eval_pack_profiled_findings_match_eval_pack_exactly() {
             io: None,
         },
         SourceFile {
-            loop_spans: Vec::new(),
-            function_spans: Vec::new(),
-            test_spans: Vec::new(),
-            call_sites: Vec::new(),
-
-            string_literals: Vec::new(),
             rel: "D.java".into(),
             text: "MessageDigest.getInstance(\"MD5\");\n".into(),
-            symbols: vec![],
-            io: None,
+            ..Default::default()
         },
     ];
     let ctx = RuleContext { files: &files };
@@ -182,6 +141,7 @@ fn eval_pack_profiled_on_empty_pack_yields_no_timings() {
         schema_version: 1,
         fragments: Default::default(),
         rules: vec![],
+        regex_cache: Default::default(),
     };
     let files = vec![];
     let ctx = RuleContext { files: &files };

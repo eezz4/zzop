@@ -34,15 +34,18 @@ pub fn reset_parse_count() -> u64 {
     PARSE_COUNT.swap(0, Ordering::Relaxed)
 }
 
+mod memo;
+
+#[cfg(test)]
+mod hygiene_pin_tests;
+
+pub(crate) use memo::{parse_module, parse_with_cm};
+
 pub(crate) fn line_of(cm: &SourceMap, pos: BytePos) -> u32 {
     cm.lookup_char_pos(pos).line as u32
 }
 
-pub(crate) fn parse_module(file: &str, source: &str) -> Option<Module> {
-    parse_with_cm(file, source).map(|(_, m)| m)
-}
-
-pub(crate) fn parse_with_cm(file: &str, source: &str) -> Option<(Lrc<SourceMap>, Module)> {
+pub(super) fn parse_uncached(file: &str, source: &str) -> Option<(Lrc<SourceMap>, Lrc<Module>)> {
     PARSE_COUNT.fetch_add(1, Ordering::Relaxed);
     let cm: Lrc<SourceMap> = Default::default();
     let fm = cm.new_source_file(
@@ -93,7 +96,7 @@ pub(crate) fn parse_with_cm(file: &str, source: &str) -> Option<(Lrc<SourceMap>,
     }))
     .ok()
     .flatten()?;
-    Some((cm, module))
+    Some((cm, Lrc::new(module)))
 }
 
 /// Distinguishes "parse failed" from "legitimately empty file" — a signal `parse_symbols`/`parse_imports`

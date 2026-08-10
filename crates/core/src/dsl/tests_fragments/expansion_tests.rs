@@ -33,6 +33,7 @@ fn minimal_pack(
         schema_version: 1,
         fragments,
         rules,
+        regex_cache: Default::default(),
     }
 }
 
@@ -64,9 +65,14 @@ fn expand_fragments_resolves_a_shared_bundled_fragment() {
     assert_eq!(
         m.file_exclude_pattern.as_deref(),
         Some(
-            "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|\
-             (^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)"
-        )
+            "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing|cypress|playwright)/|\\.tests?/|\
+             \\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.|\
+             _test\\.go$|(^|/)test_[^/]*\\.py$|_test\\.py$|(?-i:Tests?\\.java$)|\
+             (?-i:(^|/)Test[A-Z][^/]*\\.java$)|(?-i:Tests?\\.cs$))"
+        ),
+        "a byte-exact copy of the shared `test-paths` body: this pin is what makes an edit to the ONE \
+         owner (`shared_fragments.json`, which `zzop_core::is_test_file` also reads since 2026-08-10) \
+         show up as a deliberate change here rather than as a silent shift under every rule that references it"
     );
     assert!(
         pack.fragments.is_empty(),

@@ -15,17 +15,30 @@ use super::{print_or_exit, read_or_exit};
 /// `facts`/`manifest`, not the cap-governed MCP wire — so the only rejections are "not a number" and
 /// "negative", both of which `usize` parsing already refuses.
 pub fn run_graph(args: &[String]) -> ! {
-    const USAGE_GRAPH: &str = "usage: zzop graph <path>... | graph --config <zzop.config.jsonc> [--domain <join|dep|risk|posture>] [--format <mermaid|cosmograph-nodes|cosmograph-links>] [--scope <prefix>] [--top <n>]";
+    // DERIVED, not spelled: `WIRE_NAMES` says it is the one owner of the accepted set so that a new
+    // domain cannot ship with a usage line that omits it — and this line spelled the set by hand until
+    // 2026-08-06, which made that promise false here while the `--domain` REJECTION message two screens
+    // below already derived correctly. A caller was told a domain does not exist and then told it does.
+    let usage_graph = format!(
+        "usage: zzop graph <path>... | graph --config <zzop.config.jsonc> [--domain <{}>] [--format <mermaid|cosmograph-nodes|cosmograph-links>] [--scope <prefix>] [--top <n>] [--fold <n>]",
+        zzop_summary::GraphDomain::WIRE_NAMES.join("|")
+    );
+    let usage_graph = usage_graph.as_str();
     let mut rest: Vec<String> = args[..2.min(args.len())].to_vec();
-    let (mut scope, mut top) = (None, None);
+    let (mut scope, mut top, mut fold) = (None, None, None);
     let mut domain: Option<zzop_summary::GraphDomain> = None;
     let mut format = zzop_summary::GraphFormat::Mermaid;
     let mut i = 2;
     while i < args.len() {
         let flag = args[i].as_str();
-        if flag == "--scope" || flag == "--top" || flag == "--domain" || flag == "--format" {
+        if flag == "--scope"
+            || flag == "--top"
+            || flag == "--domain"
+            || flag == "--format"
+            || flag == "--fold"
+        {
             let Some(value) = args.get(i + 1).filter(|v| !v.starts_with('-')) else {
-                eprintln!("{USAGE_GRAPH} ({flag} needs a value)");
+                eprintln!("{usage_graph} ({flag} needs a value)");
                 std::process::exit(2);
             };
             if flag == "--scope" {
@@ -37,7 +50,7 @@ pub fn run_graph(args: &[String]) -> ! {
                     Some(f) => format = f,
                     None => {
                         eprintln!(
-                            "{USAGE_GRAPH} (--format must be one of {}, got {value:?})",
+                            "{usage_graph} (--format must be one of {}, got {value:?})",
                             zzop_summary::GraphFormat::WIRE_NAMES.join("|")
                         );
                         std::process::exit(2);
@@ -51,8 +64,29 @@ pub fn run_graph(args: &[String]) -> ! {
                     Some(d) => domain = Some(d),
                     None => {
                         eprintln!(
-                            "{USAGE_GRAPH} (--domain must be one of {}, got {value:?})",
+                            "{usage_graph} (--domain must be one of {}, got {value:?})",
                             zzop_summary::GraphDomain::WIRE_NAMES.join("|")
+                        );
+                        std::process::exit(2);
+                    }
+                }
+            } else if flag == "--fold" {
+                // A depth of 0 would name ONE box for the whole tree. Far more likely a typo than a
+                // request, and a picture with a single node is indistinguishable from a broken run — so
+                // it is an argument-shape error, like every other value this parser cannot honour.
+                match value.parse::<usize>() {
+                    Ok(0) => {
+                        eprintln!(
+                            "{usage_graph} (--fold needs at least 1 path segment; 0 would draw the \
+                             whole tree as one box)"
+                        );
+                        std::process::exit(2);
+                    }
+                    Ok(n) => fold = Some(n),
+                    Err(_) => {
+                        eprintln!(
+                            "{usage_graph} (--fold needs a positive integer of path segments, got \
+                             {value:?})"
                         );
                         std::process::exit(2);
                     }
@@ -62,7 +96,7 @@ pub fn run_graph(args: &[String]) -> ! {
                     Ok(n) => top = Some(n),
                     Err(_) => {
                         eprintln!(
-                            "{USAGE_GRAPH} (--top needs a non-negative integer, got {value:?})"
+                            "{usage_graph} (--top needs a non-negative integer, got {value:?})"
                         );
                         std::process::exit(2);
                     }
@@ -75,6 +109,21 @@ pub fn run_graph(args: &[String]) -> ! {
         i += 1;
     }
     let (paths, config_path) = parse_trees_args(&rest, "graph", 1);
+    // A fold only means something where a node IS a path — refused rather than ignored elsewhere, and
+    // the accepted set is read off `accepts_fold` so a new relation domain cannot ship unmentioned here.
+    if fold.is_some() {
+        let effective = domain.unwrap_or(zzop_summary::GraphDomain::Join);
+        if !effective.accepts_fold() {
+            eprintln!(
+                "{usage_graph} (--fold applies only to --domain {} — those are the domains whose nodes \
+                 are PATHS, so a coarser path is a coarser node. risk/posture nodes are engine verdicts \
+                 and join nodes are io keys; neither has a path granularity to fold, and accepting the \
+                 flag to do nothing would be worse than refusing it)",
+                zzop_summary::GraphDomain::fold_capable_names().join("|")
+            );
+            std::process::exit(2);
+        }
+    }
     if format.is_cosmograph() {
         // Two refusals rather than two silent accommodations, because a flag that is accepted and then
         // ignored is the failure class this repo's message audit named ("no knob that does nothing").
@@ -82,7 +131,7 @@ pub fn run_graph(args: &[String]) -> ! {
         // merely enforcing it.
         if domain != Some(zzop_summary::GraphDomain::Dep) {
             eprintln!(
-                "{USAGE_GRAPH} (--format cosmograph-* requires --domain dep — the only domain whose \
+                "{usage_graph} (--format cosmograph-* requires --domain dep — the only domain whose \
                  graph outgrows a flowchart; join/risk/posture are tens of nodes, where mermaid is \
                  strictly better)"
             );
@@ -90,8 +139,16 @@ pub fn run_graph(args: &[String]) -> ! {
         }
         if top.is_some() {
             eprintln!(
-                "{USAGE_GRAPH} (--top does not apply to --format cosmograph-*: the lane is UNCAPPED \
+                "{usage_graph} (--top does not apply to --format cosmograph-*: the lane is UNCAPPED \
                  because a viewer with zoom does the job a node cap does for a drawn picture)"
+            );
+            std::process::exit(2);
+        }
+        if fold.is_some() {
+            eprintln!(
+                "{usage_graph} (--fold does not apply to --format cosmograph-*: folding is the DRAWN \
+                 picture's answer to too many nodes, and this lane emits the uncapped table precisely \
+                 so a viewer can do that itself — interactively, at any depth, without re-running zzop)"
             );
             std::process::exit(2);
         }
@@ -102,10 +159,12 @@ pub fn run_graph(args: &[String]) -> ! {
             format == zzop_summary::GraphFormat::CosmographLinks,
         ) {
             Ok(o) => o,
-            Err(e) => {
-                eprintln!("{e}");
-                std::process::exit(1);
-            }
+            // The THIRD hand-written copy of the error sink until 2026-08-10: a bare `eprintln!("{e}")`
+            // + exit(1) that skipped the `zzop:` prefix and the missing-config init hint every other
+            // lane gets. Same one-sink rule `main::print_result` records: every lane's `Err` lands in
+            // `cli::print_or_exit`. Only the error leg routes there — the success leg below has its own
+            // stdout/stderr split (data table + census) that `print_or_exit`'s `println!` cannot carry.
+            Err(e) => print_or_exit(Err(e)),
         };
         // stdout stays a pure data table for the viewer; the honesty channel rides stderr so it survives
         // `zzop graph ... > links.ndjson` without corrupting a row.
@@ -119,6 +178,7 @@ pub fn run_graph(args: &[String]) -> ! {
         scope.as_deref(),
         top,
         domain.unwrap_or(zzop_summary::GraphDomain::Join),
+        fold,
     ));
 }
 
@@ -198,27 +258,6 @@ pub fn run_diff(args: &[String]) -> ! {
     print_or_exit(zzop_summary::diff_manifests_json(&a, &b, allow_tool_drift));
 }
 
-/// `zzop init [--force]`: writes the embedded `config-template` document — the ONE canon behind all three
-/// surfaces (this, `zzop contract config-template`, MCP `resources/read`) — to the config filename in the
-/// current directory; argv parsing plus one file write, no template text. An existing file is never
-/// overwritten without `--force`: a RUNTIME refusal (exit 1) like `diff`'s, where a bad argument is exit 2.
-pub fn run_init(args: &[String]) -> ! {
-    if let Some(bad) = args[2..].iter().find(|a| *a != "--force") {
-        eprintln!("usage: zzop init [--force] (unexpected argument {bad:?})");
-        std::process::exit(2);
-    }
-    // Every argument that survived the check above IS `--force`, so any argument at all means forced.
-    let force = args.len() > 2;
-    let target = zzop_summary::contracts::CONFIG_TEMPLATE_FILENAME;
-    let doc = zzop_summary::contracts::find(zzop_summary::contracts::CONFIG_TEMPLATE_NAME)
-        .expect("the config-template document is embedded in this binary");
-    if !force && std::path::Path::new(target).exists() {
-        eprintln!("zzop: {target} exists — pass --force to overwrite it");
-        std::process::exit(1);
-    }
-    print_or_exit(
-        std::fs::write(target, doc.content)
-            .map(|()| format!("wrote {target}"))
-            .map_err(|e| format!("failed to write {target}: {e}")),
-    );
-}
+mod init;
+
+pub use init::run_init;

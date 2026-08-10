@@ -73,8 +73,14 @@ fn eval_pack_impl(
 ) -> (Vec<Finding>, Vec<RuleTiming>) {
     let mut out = Vec::new();
     let mut timings = Vec::new();
+    // Built through the pack's own cache, not per call: `eval_pack_impl` runs once per FILE, and a
+    // `RegexSet` compiles every line-scan pattern into one automaton — the most rule-count-proportional
+    // work in the pass. See `RegexCache`'s `prefilter` field for the measurement.
     let prefilter = use_prefilter
-        .then(|| LineScanPrefilter::build(pack))
+        .then(|| {
+            pack.regex_cache
+                .prefilter_or_init(|| LineScanPrefilter::build(pack))
+        })
         .flatten();
     let candidates = prefilter
         .as_ref()
@@ -98,14 +104,27 @@ fn eval_pack_impl(
                     file_candidates,
                     &mut out,
                     diagnostics,
+                    &pack.regex_cache,
                 );
             }
-            Matcher::MethodScan(m) => {
-                eval_method_scan(&pack.id, rule, m, ctx, &mut out, diagnostics)
-            }
-            Matcher::SymbolScan(m) => {
-                eval_symbol_scan(&pack.id, rule, m, ctx, &mut out, diagnostics)
-            }
+            Matcher::MethodScan(m) => eval_method_scan(
+                &pack.id,
+                rule,
+                m,
+                ctx,
+                &mut out,
+                diagnostics,
+                &pack.regex_cache,
+            ),
+            Matcher::SymbolScan(m) => eval_symbol_scan(
+                &pack.id,
+                rule,
+                m,
+                ctx,
+                &mut out,
+                diagnostics,
+                &pack.regex_cache,
+            ),
             // No `candidates` lookup, deliberately: the `RegexSet` pre-filter is built from LINE-TEXT
             // patterns and answers "could this rule's regex hit some line of this file". `callee_pattern`
             // is anchored on a PROJECTED callee string (`console.error`), not on a line, so a set built
@@ -114,14 +133,28 @@ fn eval_pack_impl(
             // would drop a file that genuinely matches. Since a pre-filter must be observationally
             // invisible, the conservative reading is the only correct one: every file is a candidate, and
             // `eval_call_scan`'s own `call_sites.is_empty()` pre-skip is what makes that cheap.
-            Matcher::CallScan(m) => eval_call_scan(&pack.id, rule, m, ctx, &mut out, diagnostics),
+            Matcher::CallScan(m) => eval_call_scan(
+                &pack.id,
+                rule,
+                m,
+                ctx,
+                &mut out,
+                diagnostics,
+                &pack.regex_cache,
+            ),
             // Same conservative no-prefilter reading as `CallScan` directly above: the `RegexSet`
             // pre-filter is built from LINE-TEXT patterns, and a `name_pattern` is anchored on a
             // projected binding NAME, not on a line — `eval_literal_scan`'s own
             // `string_literals.is_empty()` pre-skip is what makes every-file-a-candidate cheap.
-            Matcher::LiteralScan(m) => {
-                eval_literal_scan(&pack.id, rule, m, ctx, &mut out, diagnostics)
-            }
+            Matcher::LiteralScan(m) => eval_literal_scan(
+                &pack.id,
+                rule,
+                m,
+                ctx,
+                &mut out,
+                diagnostics,
+                &pack.regex_cache,
+            ),
             // io-scan evaluates whole-tree via eval_pack_io_scan since the 2026 projection redesign — see
             // ir_scan.rs's module doc.
             Matcher::IoScan(_) => {}

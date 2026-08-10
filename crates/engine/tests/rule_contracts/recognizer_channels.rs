@@ -117,7 +117,7 @@ const CHANNEL_NOT_CODE_DERIVED: &[(&str, &str, &str)] = &[];
 /// `#[cfg(test)] mod tests;` in the MIDDLE of the file, and truncating there silently blinded this
 /// contract to the rest — `db_table_consume`'s only `kind: "db-table"` sits 67 lines below its
 /// declaration, and the row read as unproven until the cut was narrowed.
-fn code_only(text: &str) -> String {
+pub(crate) fn code_only(text: &str) -> String {
     strip_cfg_test_items(&strip_comments(text))
 }
 
@@ -221,7 +221,7 @@ fn strip_comments(text: &str) -> String {
 }
 
 /// Every non-test `.rs` file under one module UNIT (`foo.rs` plus `foo/`), read and stripped.
-fn unit_sources(root: &Path, unit: &str) -> Vec<String> {
+pub(crate) fn unit_sources(root: &Path, unit: &str) -> Vec<String> {
     let mut out = Vec::new();
     let file = root.join(format!("{unit}.rs"));
     if file.is_file() {

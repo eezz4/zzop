@@ -43,18 +43,28 @@ use serde_json::Value;
 /// doc's density note; a flowchart stops being readable well before it stops being renderable.
 pub const DEFAULT_DEP_TOP: usize = 40;
 
+mod folded;
 mod node;
+mod render;
 mod window;
 
+use super::fold::{self, Fold};
+
 pub(super) use node::DepNode;
+use render::render;
 pub(super) use window::GitWindows;
 
-/// One file node, keyed by its display id so two trees' identical relative paths cannot collide.
+/// One drawn node, keyed by its display id so two trees' identical relative paths cannot collide. A node
+/// is a FILE at the default granularity and a path prefix under `--fold` — see [`super::fold`]; the
+/// ranking, capping and rendering below are written once and read the same shape either way.
 #[derive(Default)]
 struct DepGraph {
     /// display id -> node
     nodes: BTreeMap<String, DepNode>,
-    edges: BTreeSet<(String, String)>,
+    /// `(from, to) -> how many FILE-LEVEL import edges this drawn edge stands for`. Always 1 without
+    /// `--fold`, which is why the label is emitted only when folding: a picture where every edge says
+    /// `|1|` teaches nothing and costs width.
+    edges: BTreeMap<(String, String), usize>,
     in_cycle: BTreeSet<String>,
 }
 
@@ -157,7 +167,7 @@ pub(super) fn collect(v: &Value) -> DepUniverse {
 }
 
 /// `analyzeTrees` output -> mermaid text for the dependency domain. Pure, like `super::project`.
-pub(super) fn project(v: &Value, scope: Option<&str>, top: usize) -> String {
+pub(super) fn project(v: &Value, scope: Option<&str>, top: usize, fold: Fold) -> String {
     let DepUniverse {
         nodes: all_nodes,
         edges: all_edges,
@@ -168,14 +178,51 @@ pub(super) fn project(v: &Value, scope: Option<&str>, top: usize) -> String {
         git_windows: _,
     } = collect(v);
 
-    // Pass 2 — scope, then rank by degree and cap NODES. Ranking is (degree desc, id asc): a total
-    // order, so the same analysis always draws the same picture.
+    // Pass 2 — scope, then (optionally) fold, then rank by degree and cap. That ORDER is the contract,
+    // and `super::fold`'s module doc carries why: `--scope` keeps meaning "which files are in this
+    // picture" and `--top` keeps meaning "how many boxes are drawn".
     let in_scope: BTreeMap<&String, &DepNode> = all_nodes
         .iter()
         .filter(|(id, n)| node_in_scope(scope, id, &n.source, &n.rel))
         .collect();
-    let mut degree: BTreeMap<&String, usize> = in_scope.keys().map(|k| (*k, 0)).collect();
-    for (a, b) in &all_edges {
+
+    // The two granularities differ ONLY in what a node is; everything below this point is written once.
+    // The unfolded arm keeps the file-level counts it always had — the fold's own loss is reported by
+    // `fold_note` against a different denominator, because "the cap dropped it" and "the fold merged it"
+    // are two reasons a reader is not seeing something and one number cannot carry both.
+    let (universe, edges, in_cycle, fold_note, total_nodes, total_edges) = if fold.is_on() {
+        let f = folded::collapse(fold, &in_scope, &all_edges, &cycle_files);
+        let note = fold::census(
+            fold,
+            in_scope.len(),
+            f.nodes.len(),
+            f.unfoldable,
+            f.file_edges,
+            f.edges.len(),
+        );
+        let (n, e) = (f.nodes.len(), f.edges.len());
+        (f.nodes, f.edges, f.in_cycle, note, n, e)
+    } else {
+        let universe: BTreeMap<String, DepNode> = in_scope
+            .iter()
+            .map(|(id, n)| ((*id).clone(), (*n).clone()))
+            .collect();
+        let edges: BTreeMap<(String, String), usize> =
+            all_edges.iter().map(|e| (e.clone(), 1)).collect();
+        (
+            universe,
+            edges,
+            cycle_files.clone(),
+            String::new(),
+            all_nodes.len(),
+            all_edges.len(),
+        )
+    };
+
+    // Ranking is (degree desc, id asc): a total order, so the same analysis always draws the same
+    // picture.
+    let mut degree: BTreeMap<&String, usize> = universe.keys().map(|k| (k, 0)).collect();
+    for (a, b) in edges.keys() {
         for end in [a, b] {
             if let Some(d) = degree.get_mut(end) {
                 *d += 1;
@@ -188,101 +235,32 @@ pub(super) fn project(v: &Value, scope: Option<&str>, top: usize) -> String {
 
     let mut g = DepGraph::default();
     for id in &kept {
-        if let Some(v) = all_nodes.get(*id) {
+        if let Some(v) = universe.get(*id) {
             g.nodes.insert((*id).clone(), v.clone());
         }
-        if cycle_files.contains(*id) {
+        if in_cycle.contains(*id) {
             g.in_cycle.insert((*id).clone());
         }
     }
-    for (a, b) in &all_edges {
+    for ((a, b), weight) in &edges {
         if kept.contains(a) && kept.contains(b) {
-            g.edges.insert((a.clone(), b.clone()));
+            g.edges.insert((a.clone(), b.clone()), *weight);
         }
     }
 
     let census = DepCensus {
-        total_nodes: all_nodes.len(),
-        total_edges: all_edges.len(),
+        total_nodes,
+        total_edges,
         drawn_nodes: g.nodes.len(),
         drawn_edges: g.edges.len(),
-        in_scope_nodes: in_scope.len(),
+        in_scope_nodes: if fold.is_on() {
+            universe.len()
+        } else {
+            in_scope.len()
+        },
         cycles,
     };
-    render(&g, &census, scope, top)
-}
-
-/// Mermaid id for a node — mermaid ids cannot carry `/`, `.` or `:`, so a stable sanitized form plus an
-/// index keeps them unique even when two different paths sanitize identically.
-fn mermaid_id(index: usize) -> String {
-    format!("f{index}")
-}
-
-fn render(g: &DepGraph, c: &DepCensus, scope: Option<&str>, top: usize) -> String {
-    let mut out = String::new();
-    out.push_str("%% zzop graph --domain dep — file import graph\n");
-    out.push_str(&format!(
-        "%% nodes: drawn {} / in-scope {} / total {} | edges: drawn {} / total {} | cycles reported: {}\n",
-        c.drawn_nodes, c.in_scope_nodes, c.total_nodes, c.drawn_edges, c.total_edges, c.cycles
-    ));
-    out.push_str(&format!(
-        "%% node cap --top {top}{}\n",
-        scope.map(|s| format!(" | --scope {s}")).unwrap_or_default()
-    ));
-    out.push_str("flowchart LR\n");
-
-    let index: BTreeMap<&String, usize> = g.nodes.keys().enumerate().map(|(i, k)| (k, i)).collect();
-    for (id, n) in &g.nodes {
-        let i = index[id];
-        let label = n.rel.replace('"', "'");
-        if g.in_cycle.contains(id) {
-            // A distinct SHAPE, not only a class: a reader looking at raw mermaid text (or a renderer
-            // with no CSS) still sees which files are in a cycle.
-            out.push_str(&format!("  {}{{{{\"{label}\"}}}}\n", mermaid_id(i)));
-        } else {
-            out.push_str(&format!("  {}[\"{label}\"]\n", mermaid_id(i)));
-        }
-    }
-    for (a, b) in &g.edges {
-        let (Some(ia), Some(ib)) = (index.get(a), index.get(b)) else {
-            continue;
-        };
-        let arrow = if g.in_cycle.contains(a) && g.in_cycle.contains(b) {
-            "==>"
-        } else {
-            "-->"
-        };
-        out.push_str(&format!(
-            "  {} {arrow} {}\n",
-            mermaid_id(*ia),
-            mermaid_id(*ib)
-        ));
-    }
-
-    // The disclosure has to survive into the PICTURE, not only the source text — same rule the join map
-    // follows, and the reason a `%%` header alone is not enough.
-    let dropped_nodes = c.in_scope_nodes.saturating_sub(c.drawn_nodes);
-    let dropped_edges = c.total_edges.saturating_sub(c.drawn_edges);
-    let note = if dropped_nodes == 0 && dropped_edges == 0 && scope.is_none() {
-        format!(
-            "complete: all {} files and {} import edges drawn",
-            c.total_nodes, c.total_edges
-        )
-    } else {
-        format!(
-            "PARTIAL VIEW: {} of {} files drawn ({} dropped by --top {}), {} of {} edges. An edge whose \
-             other end was dropped is not drawn. Use zzop facts for the uncapped graph.",
-            c.drawn_nodes, c.in_scope_nodes, dropped_nodes, top, c.drawn_edges, c.total_edges
-        )
-    };
-    out.push_str(&format!("  zzopNote[\"{note}\"]\n"));
-    if c.cycles > 0 {
-        out.push_str(&format!(
-            "  zzopCycles[\"{} circular finding(s) — files in a cycle are drawn as hexagons with thick arrows\"]\n",
-            c.cycles
-        ));
-    }
-    out
+    render(&g, &census, scope, top, &fold_note, fold)
 }
 
 #[cfg(test)]

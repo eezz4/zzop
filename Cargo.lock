@@ -1983,7 +1983,7 @@ checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
 
 [[package]]
 name = "zzop-cache"
-version = "0.29.1"
+version = "0.30.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1992,7 +1992,7 @@ dependencies = [
 
 [[package]]
 name = "zzop-cli-bin"
-version = "0.29.1"
+version = "0.30.0"
 dependencies = [
  "serde_json",
  "zzop-config",
@@ -2002,7 +2002,7 @@ dependencies = [
 
 [[package]]
 name = "zzop-config"
-version = "0.29.1"
+version = "0.30.0"
 dependencies = [
  "serde_json",
  "zzop-cache",
@@ -2011,7 +2011,7 @@ dependencies = [
 
 [[package]]
 name = "zzop-core"
-version = "0.29.1"
+version = "0.30.0"
 dependencies = [
  "regex",
  "serde",
@@ -2020,7 +2020,7 @@ dependencies = [
 
 [[package]]
 name = "zzop-engine"
-version = "0.29.1"
+version = "0.30.0"
 dependencies = [
  "ignore",
  "rayon",
@@ -2049,7 +2049,7 @@ dependencies = [
 
 [[package]]
 name = "zzop-facade"
-version = "0.29.1"
+version = "0.30.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2062,7 +2062,7 @@ dependencies = [
 
 [[package]]
 name = "zzop-git"
-version = "0.29.1"
+version = "0.30.0"
 dependencies = [
  "regex",
  "serde",
@@ -2073,7 +2073,7 @@ dependencies = [
 
 [[package]]
 name = "zzop-mcp"
-version = "0.29.1"
+version = "0.30.0"
 dependencies = [
  "serde_json",
  "zzop-config",
@@ -2082,7 +2082,7 @@ dependencies = [
 
 [[package]]
 name = "zzop-metrics"
-version = "0.29.1"
+version = "0.30.0"
 dependencies = [
  "regex",
  "serde",
@@ -2092,7 +2092,7 @@ dependencies = [
 
 [[package]]
 name = "zzop-parser-csharp"
-version = "0.29.1"
+version = "0.30.0"
 dependencies = [
  "proptest",
  "regex",
@@ -2103,7 +2103,7 @@ dependencies = [
 
 [[package]]
 name = "zzop-parser-go"
-version = "0.29.1"
+version = "0.30.0"
 dependencies = [
  "proptest",
  "tree-sitter",
@@ -2113,7 +2113,7 @@ dependencies = [
 
 [[package]]
 name = "zzop-parser-java-21"
-version = "0.29.1"
+version = "0.30.0"
 dependencies = [
  "proptest",
  "regex",
@@ -2124,7 +2124,7 @@ dependencies = [
 
 [[package]]
 name = "zzop-parser-prisma"
-version = "0.29.1"
+version = "0.30.0"
 dependencies = [
  "proptest",
  "regex",
@@ -2134,7 +2134,7 @@ dependencies = [
 
 [[package]]
 name = "zzop-parser-python-3"
-version = "0.29.1"
+version = "0.30.0"
 dependencies = [
  "proptest",
  "ruff_python_ast",
@@ -2145,7 +2145,7 @@ dependencies = [
 
 [[package]]
 name = "zzop-parser-rust"
-version = "0.29.1"
+version = "0.30.0"
 dependencies = [
  "proc-macro2",
  "proptest",
@@ -2156,7 +2156,7 @@ dependencies = [
 
 [[package]]
 name = "zzop-parser-sql"
-version = "0.29.1"
+version = "0.30.0"
 dependencies = [
  "proptest",
  "regex",
@@ -2165,7 +2165,7 @@ dependencies = [
 
 [[package]]
 name = "zzop-parser-typescript"
-version = "0.29.1"
+version = "0.30.0"
 dependencies = [
  "proptest",
  "regex",
@@ -2176,7 +2176,7 @@ dependencies = [
 
 [[package]]
 name = "zzop-rule-packs"
-version = "0.29.1"
+version = "0.30.0"
 dependencies = [
  "serde_json",
  "zzop-core",
@@ -2185,7 +2185,7 @@ dependencies = [
 
 [[package]]
 name = "zzop-rules-cross-layer"
-version = "0.29.1"
+version = "0.30.0"
 dependencies = [
  "regex",
  "serde",
@@ -2195,7 +2195,7 @@ dependencies = [
 
 [[package]]
 name = "zzop-rules-graph"
-version = "0.29.1"
+version = "0.30.0"
 dependencies = [
  "regex",
  "serde",
@@ -2205,7 +2205,7 @@ dependencies = [
 
 [[package]]
 name = "zzop-rules-http"
-version = "0.29.1"
+version = "0.30.0"
 dependencies = [
  "regex",
  "serde",
@@ -2216,7 +2216,7 @@ dependencies = [
 
 [[package]]
 name = "zzop-rules-schema"
-version = "0.29.1"
+version = "0.30.0"
 dependencies = [
  "regex",
  "serde",
@@ -2226,9 +2226,10 @@ dependencies = [
 
 [[package]]
 name = "zzop-summary"
-version = "0.29.1"
+version = "0.30.0"
 dependencies = [
  "regex",
+ "serde",
  "serde_json",
  "zzop-config",
  "zzop-core",
@@ -2239,4 +2240,4 @@ dependencies = [
 
 [[package]]
 name = "zzop-test-support"
-version = "0.29.1"
+version = "0.30.0"

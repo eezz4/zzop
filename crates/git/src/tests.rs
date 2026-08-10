@@ -405,6 +405,77 @@ fn collect_end_to_end_round_trips_a_non_ascii_korean_filename_unescaped() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
+/// Regression test for the cwd-sensitive numstat bug: with `diff.relative=true` in effect (a plain
+/// user-level config), `git log --numstat` emits paths relative to the process cwd AND silently
+/// DROPS files outside the cwd. `collect()` runs in the caller's tree root, which in a monorepo is a
+/// SUBDIRECTORY of the repository — and the engine memoizes the collection per repo root, so one
+/// poisoned collection would be shared with every other tree of the run. `process::spawn_git` must
+/// pin `-c diff.relative=false` per call, same choke point as `core.quotepath` above.
+#[test]
+fn collect_from_a_subdirectory_is_immune_to_diff_relative_config() {
+    use std::process::Command;
+
+    let git_available = Command::new("git").arg("--version").output().is_ok();
+    if !git_available {
+        skip_notice!("git not on PATH");
+        return;
+    }
+
+    let dir = std::env::temp_dir().join(format!(
+        "zzop-git-diff-relative-test-{}-{}",
+        std::process::id(),
+        now_ms()
+    ));
+    std::fs::create_dir_all(dir.join("api")).expect("create temp repo dirs");
+    std::fs::create_dir_all(dir.join("web")).expect("create temp repo dirs");
+
+    let run = |args: &[&str]| {
+        let out = Command::new("git")
+            .args(args)
+            .current_dir(&dir)
+            .output()
+            .unwrap_or_else(|e| panic!("git {args:?} failed to spawn: {e}"));
+        assert!(
+            out.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+
+    run(&["init", "-q"]);
+    run(&["config", "user.email", "test@example.com"]);
+    run(&["config", "user.name", "Test User"]);
+    // The hostile setting, repo-local so the test needs no global state — the fix must override it
+    // per call exactly like `core.quotepath` above.
+    run(&["config", "diff.relative", "true"]);
+
+    std::fs::write(dir.join("api/main.ts"), "export const a = 1;\n").unwrap();
+    std::fs::write(dir.join("web/app.ts"), "export const b = 2;\n").unwrap();
+    run(&["add", "."]);
+    run(&["commit", "-q", "-m", "[FEAT] add both trees"]);
+
+    // Collect from the SUBDIRECTORY, as the engine does for a monorepo tree root.
+    let result = collect(&dir.join("api"), &CollectOptions::default());
+    let collection = result.unwrap_or_else(|e| panic!("collect() failed: {e}"));
+
+    // Repo-root-relative and complete: the sibling tree's file must not be dropped, and the cwd
+    // tree's file must keep its full path (not a cwd-relative "main.ts").
+    for key in ["api/main.ts", "web/app.ts"] {
+        assert!(
+            collection.stats.by_path.contains_key(key),
+            "expected repo-root-relative key {key:?} in by_path, got keys: {:?}",
+            collection.stats.by_path.keys().collect::<Vec<_>>()
+        );
+    }
+    assert!(
+        !collection.stats.by_path.contains_key("main.ts"),
+        "found a cwd-relative phantom key: {:?}",
+        collection.stats.by_path.keys().collect::<Vec<_>>()
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
 #[test]
 fn collect_on_a_non_git_directory_returns_a_typed_error() {
     let dir = std::env::temp_dir().join(format!("zzop-git-not-a-repo-{}", now_ms()));

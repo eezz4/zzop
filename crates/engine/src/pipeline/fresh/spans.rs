@@ -11,10 +11,16 @@
 //! each one happened to get written. They were three adjacent `let ... = match language` blocks in
 //! `fresh.rs` until that file hit this repo's 300-line limit; the seam was already here.
 //!
-//! Note: the four newer `loop_spans` arms — Python/Java/C#/Rust — currently have ZERO consuming rules
-//! (every shipped `trigger_in_loop` rule's `file_pattern` admits only ts/js and go paths). That is
-//! substrate shipped ahead of its rules on purpose; it is recorded here because this exact silence,
-//! left unrecorded, is how `loop_spans` once sat TS+Go-only without anyone noticing.
+//! Note: `loop_spans` is produced for more languages than consume it, and the gap is now **Rust only**.
+//! `reliability/console-in-loop` admits `ts|tsx|js|jsx|mjs|cjs|py|go|java|cs`, so Python/Java/C# — which
+//! this note listed as silent alongside Rust until 2026-08-06 — are consumed. Rust is not, and that is
+//! deliberate: `println!` is a CLI's normal output, so the console family never accepts `.rs`
+//! (`projection-contract.md` records that as a permanent blank, not a gap to close).
+//!
+//! The note exists at all because this exact silence, left unrecorded, is how `loop_spans` once sat
+//! TS+Go-only without anyone noticing — and it went stale in the same way, by naming languages instead
+//! of pointing at the pattern that decides them:
+//! `grep -A6 '"console-in-loop"' rules/dsl/reliability/reliability.json`.
 //!
 //! ## The degrade direction is NOT uniform, and that is the important part
 //! - `loop_spans` absent ⇒ `MethodScan::trigger_in_loop` SILENTLY SKIPS the file (a rule using it cannot

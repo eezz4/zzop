@@ -40,7 +40,20 @@ Neither repo depends on the other. The contract between them lives in **runtime 
   router.put('/user', auth.required, async (req, res, next) => { … })
   ```
 
-Baseline: zzop resolves **49 cross-layer edges** — 19 HTTP routes + 30 shared DB tables — and `PUT /api/user` is one matched edge (that `axios.put` ↔ that `router.put`).
+Baseline: zzop resolves **79 cross-layer EDGES** — 19 HTTP-route edges + 60 db-table edges — and `PUT /api/user` is one matched edge (that `axios.put` ↔ that `router.put`).
+
+The metric is **edges**, one per provide×consume pair — not distinct keys. Those 60 db-table edges run
+over only **4** distinct table keys, because several files on each side touch the same table, so
+"60 shared DB tables" would be a different and much larger claim than the tool actually makes.
+Recount both halves rather than trusting this paragraph:
+
+```sh
+cargo run --release -q -p zzop-engine --example xlayer_dump -- \
+  corpus/oss/fe-vite corpus/oss/be-express \
+  | sed -n '/^=== edges/,/^=== unprovided/p' | grep '^  ' | sed 's/^  //' | sort | uniq -c
+```
+
+Your own vendored pair may differ from ours; the shape of the story does not depend on the totals, only on the ONE edge that disappears.
 
 ## The break
 
@@ -56,10 +69,10 @@ The frontend is **not touched**.
 ## What zzop reports
 
 ```
-=== edges (48) ===            ← was 49; the PUT /api/user edge is gone
+=== edges (78) ===            ← was 79; the PUT /api/user edge is gone
 
 === unprovided consumes (2) ===
-  "PUT /api/user"        @ fe-vite     src/pages/Settings.jsx:19          ← the FE call now hits nothing
+  Some("PUT /api/user")  @ fe-vite     src/pages/Settings.jsx:19          ← the FE call now hits nothing
 
 === unconsumed provides (6) ===
   "PUT /api/users/me"    @ be-express  src/app/routes/auth/auth.controller.ts:61   ← the BE route nobody calls

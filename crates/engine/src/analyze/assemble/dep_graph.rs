@@ -54,6 +54,7 @@ pub(super) fn build(
     csharp_index: &CSharpIndex,
     sfc_import_pairs: &[(String, ImportMap)],
     asset_ref_pairs: &[(String, Vec<String>)],
+    git_cache: &crate::analyze::GitCache,
 ) -> DepGraphResult {
     // `type_only_edges` is the ephemeral noncycle-exclusion set (never cached/serialized — see
     // `circular_from_dep_excluding`'s doc): a pair present here is contributed ONLY by edges excludable
@@ -169,7 +170,12 @@ pub(super) fn build(
     if let Some(w) = zero_packs_warning(config) {
         warnings.push(w);
     }
-    let (git_stats, commits, git_active) = collect_git(root, config, warnings);
+    // A declared `vocabulary.extraTestPathPatterns` entry that is not a valid regex adds nothing, and
+    // the rules it was meant to widen keep reporting on the paths the author wanted declined. Said out
+    // loud here rather than left to be inferred from findings — the whole point of the key is to REMOVE
+    // findings, so its failure mode is indistinguishable from "I typed the wrong directory".
+    warnings.extend(crate::vocabulary::extra_test_path_tail(&config.vocabulary).1);
+    let (git_stats, commits, git_active) = collect_git(root, config, warnings, git_cache);
 
     // `is_source`: reuses the same dispatch classification the fused pass used to pick a parser
     // frontend, so `risk_score`/`hotspot_score` are zeroed for non-source files (data/config/assets)

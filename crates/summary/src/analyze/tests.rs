@@ -199,6 +199,190 @@ fn every_summary_reply_key_is_a_registry_field_or_a_declared_shaper_invention() 
     );
 }
 
+/// ADJACENT-CONFIG DISCOVERY on the located lane — the envelope file's own directory is read for a
+/// `zzop.config.jsonc`, exactly the way the tree lane reads one at a tree root
+/// (`zzop_config::load_for_root`), and that config's convention vocabulary governs the run.
+///
+/// The gap these pin: the facade request has always had a `vocabulary` field, and no host had a way to
+/// fill it — so zzop's own finding messages told a user to declare `vocabulary.*` keys that an envelope
+/// run could not read. The three axes below are the whole contract: the declaration REACHES the
+/// analysis, a run with no adjacent config is unchanged, and applying one is never silent.
+#[cfg(test)]
+mod adjacent_config_discovery {
+    use super::{no_filters, EXAMPLE_ENVELOPE};
+    use crate::output::RunKnobs;
+
+    /// A Mode A envelope whose mutating route's handler calls `save` (declared in the same file, so the
+    /// call edge RESOLVES) — the same substrate `crates/facade/src/envelope_tests.rs` uses for its own
+    /// vocabulary pins, because `mutating-route-no-auth` is the cheapest rule whose verdict a single
+    /// declared vocabulary key flips.
+    ///
+    /// The contract version is READ OFF the shipped example envelope rather than spelled here: a
+    /// literal would have to be chased on every contract bump, and this crate does not depend on the
+    /// core crate that owns the constant.
+    fn callgraph_envelope() -> String {
+        let version = serde_json::from_str::<serde_json::Value>(EXAMPLE_ENVELOPE)
+            .expect("the shipped example envelope must be valid JSON")["version"]
+            .as_str()
+            .expect("the example envelope declares its contract version")
+            .to_string();
+        format!(
+            r#"{{
+            "format": "zzop-normalized-ast",
+            "version": "{version}",
+            "parser": "java-lexical/1",
+            "source": "legacy",
+            "files": [
+                {{
+                    "path": "src/main/java/OrderController.java",
+                    "loc": 40,
+                    "symbols": [
+                        {{"id": "src/main/java/OrderController.java#createOrder", "file": "src/main/java/OrderController.java", "name": "createOrder", "kind": "function", "line": 5, "exported": true}},
+                        {{"id": "src/main/java/OrderController.java#save", "file": "src/main/java/OrderController.java", "name": "save", "kind": "function", "line": 25, "exported": false}}
+                    ],
+                    "io": {{
+                        "provides": [{{"kind": "http", "key": "POST /orders", "file": "src/main/java/OrderController.java", "line": 5, "symbol": "createOrder"}}],
+                        "consumes": []
+                    }},
+                    "calls": [{{"from_symbol": "src/main/java/OrderController.java#createOrder", "callee_name": "save", "line": 7}}]
+                }}
+            ]
+        }}"#
+        )
+    }
+
+    /// A fresh directory holding `envelope.json`, plus a `zzop.config.jsonc` when `config` is given.
+    /// Returns the envelope file's path — what a terminal caller passes and what the discovery reads
+    /// the neighbouring directory entry from.
+    fn envelope_dir(name: &str, config: Option<&str>) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("zzop-envcfg-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let envelope = dir.join("envelope.json");
+        std::fs::write(&envelope, callgraph_envelope()).unwrap();
+        if let Some(text) = config {
+            std::fs::write(dir.join("zzop.config.jsonc"), text).unwrap();
+        }
+        envelope
+    }
+
+    fn analyze_located(envelope: &std::path::Path) -> serde_json::Value {
+        let text = std::fs::read_to_string(envelope).unwrap();
+        let out = super::super::analyze_envelope_summary_with(
+            &text,
+            Some(envelope.to_str().unwrap()),
+            &no_filters(),
+            RunKnobs::default(),
+        )
+        .expect("the envelope must analyze");
+        serde_json::from_str(&out).expect("the summary must be valid JSON")
+    }
+
+    fn fires_unguarded_route(v: &serde_json::Value) -> bool {
+        v["findings"]["byRule"]
+            .get("mutating-route-no-auth")
+            .is_some()
+    }
+
+    /// (a) The declaration REACHES the analysis, asserted on the shaped reply's own `findings.byRule`
+    /// census — an observable verdict change, not an internal struct.
+    #[test]
+    fn an_adjacent_configs_vocabulary_changes_what_the_envelope_run_finds() {
+        let bare = analyze_located(&envelope_dir("bare", None));
+        assert!(
+            fires_unguarded_route(&bare),
+            "with no adjacent config the built-in vocabulary does not know the callee name as a \
+             guard, so the mutating route must fire: {bare}"
+        );
+        let declared = analyze_located(&envelope_dir(
+            "declared",
+            Some("{ \"vocabulary\": { \"authGuardPattern\": \"^save$\" } }"),
+        ));
+        assert!(
+            !fires_unguarded_route(&declared),
+            "the adjacent config declares ^save$ as this project's guard spelling, so the reached \
+             callee must clear the route: {declared}"
+        );
+    }
+
+    /// (b) The no-config-found path is BYTE-identical to the locationless form — the property the
+    /// pre-knob `\"{}\"` construction had, kept as an assertion instead of a memory. Compares the raw
+    /// strings, not parsed values: a reordered or grown key is a change too.
+    #[test]
+    fn an_envelope_with_no_adjacent_config_is_byte_identical_to_the_locationless_run() {
+        let envelope = envelope_dir("byte-identical", None);
+        let text = std::fs::read_to_string(&envelope).unwrap();
+        let located = super::super::analyze_envelope_summary_with(
+            &text,
+            Some(envelope.to_str().unwrap()),
+            &no_filters(),
+            RunKnobs::default(),
+        )
+        .expect("the envelope must analyze");
+        let locationless = super::super::analyze_envelope_summary(&text, &no_filters())
+            .expect("the envelope must analyze");
+        assert_eq!(
+            located, locationless,
+            "a located run that discovers nothing must produce exactly what a locationless run \
+             produces — the lane with no config file is not allowed to drift"
+        );
+    }
+
+    /// (c) The disclosure fires EXACTLY when a config was found and applied: present (naming the file)
+    /// when one is discovered, and the channel stays empty when none is.
+    #[test]
+    fn applying_an_adjacent_config_is_disclosed_and_nothing_is_disclosed_otherwise() {
+        let with_config = analyze_located(&envelope_dir(
+            "disclosed",
+            Some("{ \"vocabulary\": { \"authGuardPattern\": \"^save$\" } }"),
+        ));
+        let warnings = with_config["configWarnings"]
+            .as_array()
+            .expect("configWarnings is always an array");
+        let applied: Vec<&str> = warnings
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .filter(|w| w.contains("vocabulary") && w.contains("zzop.config.jsonc"))
+            .collect();
+        assert_eq!(
+            applied.len(),
+            1,
+            "applying a discovered config must say so exactly once, naming the file: {warnings:#?}"
+        );
+        assert!(
+            applied[0].contains("zzop-envcfg-disclosed"),
+            "the disclosure must name the config it applied by path: {}",
+            applied[0]
+        );
+
+        let bare = analyze_located(&envelope_dir("undisclosed", None));
+        assert_eq!(
+            bare["configWarnings"]
+                .as_array()
+                .expect("configWarnings is always an array")
+                .len(),
+            0,
+            "a run that discovered no config has nothing to disclose: {bare}"
+        );
+    }
+
+    /// The never-guess leg: a config file that IS there but cannot be read is an error, never a silent
+    /// fall-back to the built-in vocabulary. Same refusal the tree lane gives for the same file.
+    #[test]
+    fn an_unparseable_adjacent_config_is_refused_rather_than_ignored() {
+        let envelope = envelope_dir("broken", Some("{ this is not json"));
+        let text = std::fs::read_to_string(&envelope).unwrap();
+        let err = super::super::analyze_envelope_summary_with(
+            &text,
+            Some(envelope.to_str().unwrap()),
+            &no_filters(),
+            RunKnobs::default(),
+        )
+        .expect_err("a broken adjacent config must not be silently skipped");
+        assert!(err.contains("zzop.config.jsonc"), "{err}");
+    }
+}
+
 /// `--profile-rules` END TO END — a real zzop.config.jsonc on disk, through the config mapper, the
 /// request wire field, the engine's `EngineConfig::profile_rules`, and back out as a report.
 ///

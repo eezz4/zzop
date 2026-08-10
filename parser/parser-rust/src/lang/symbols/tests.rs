@@ -72,48 +72,80 @@ fn line_numbers_are_one_based_and_track_declaration() {
 }
 
 #[test]
-fn function_body_start_end_from_first_last_statement() {
+fn function_body_span_covers_declaration_through_closing_brace() {
     let src = "fn f() {\n    let x = 1;\n    let y = 2;\n}\n";
     let out = parse_symbols("a.rs", src);
     let f = sym(&out, "f");
-    assert_eq!(f.body_start, Some(2));
-    assert_eq!(f.body_end, Some(3));
+    assert_eq!(f.body_start, Some(1));
+    assert_eq!(f.body_end, Some(4));
 }
 
-/// Regression pin for the 2026-08-02 `body_end` fix (module doc): a MULTI-LINE last statement — most
-/// commonly a loop sitting as the fn's final statement — must contribute its END line, or the
-/// `MethodScan` scan region truncates to the statement's first line and a `trigger_in_loop` probe
-/// inside that loop can never fire (measured: this exact shape was the engine-level failure that
-/// surfaced the bug the day `lang::loop_spans` landed).
+/// Regression pin, kept from the 2026-08-02 `body_end` fix: a MULTI-LINE last statement — most commonly
+/// a loop sitting as the fn's final statement — must lie fully inside the scan region, or a
+/// `trigger_in_loop` probe inside that loop can never fire (measured: this exact shape was the
+/// engine-level failure that surfaced the bug the day `lang::loop_spans` landed). The original bug took
+/// the last statement's START line; the span is now anchored on the brace, so the failure mode is
+/// structurally gone rather than patched, and this test is what says so.
 #[test]
 fn function_body_end_covers_a_multi_line_last_statement() {
     let src = "fn f(xs: &[u32]) {\n    for x in xs {\n        use_it(*x);\n    }\n}\n";
     let out = parse_symbols("a.rs", src);
     let f = sym(&out, "f");
-    assert_eq!(f.body_start, Some(2));
-    assert_eq!(f.body_end, Some(4));
+    assert_eq!(f.body_start, Some(1));
+    assert_eq!(f.body_end, Some(5));
 }
 
-#[test]
-fn empty_function_body_has_no_start_end() {
-    let out = parse_symbols("a.rs", "fn f() {}\n");
-    let f = sym(&out, "f");
-    assert_eq!(f.body_start, None);
-    assert_eq!(f.body_end, None);
-}
-
-/// Same-defect-class audit pin (see `zzop_parser_go::lang::symbols`'s leading-comment `body_line_range`
-/// bug this mirrors the check for): `syn` discards `//` comments during tokenization — a `syn::Block`'s
-/// `stmts: Vec<Stmt>` never contains a comment as an item, unlike tree-sitter's `comment` "extra" node —
-/// so a function body opening with a comment line cannot shift `body_start` onto the comment. This
-/// proves that rather than assuming it.
+/// Same-defect-class audit pin (see `zzop_parser_go::lang::symbols`'s comment pins): `syn` discards
+/// `//` comments during tokenization — a `syn::Block`'s `stmts: Vec<Stmt>` never contains one as an
+/// item, unlike tree-sitter's `comment` "extra" node. Since the span no longer reads the block's
+/// contents at all, a comment cannot move either boundary in any position. This proves that rather
+/// than assuming it.
 #[test]
 fn function_body_opening_with_comment_is_unaffected() {
     let src = "fn f() {\n    // leading comment\n    let x = 1;\n    let y = 2;\n}\n";
     let out = parse_symbols("a.rs", src);
     let f = sym(&out, "f");
-    assert_eq!(f.body_start, Some(3));
-    assert_eq!(f.body_end, Some(4));
+    assert_eq!(f.body_start, Some(1));
+    assert_eq!(f.body_end, Some(5));
+}
+
+// --- THE SPAN CONTRACT: `body_start` is the DECLARATION's line, ATTRIBUTES included ---
+
+/// `zzop_core::SourceSymbol`'s "Body span contract". Rust is the one language where `line` is NOT the
+/// declaration's first line — it is the `fn` token, a long-standing convention the call graph and the
+/// census both read — so `body_start` here is deliberately allowed to sit ABOVE `line`, at the first
+/// attribute. That is what makes an `#[get("/x")]`/`#[tokio::main]`-anchored method-scan concept
+/// writable for `.rs` at all; under the first-statement reading the attribute was two lines outside
+/// every span.
+#[test]
+fn function_body_span_starts_at_the_first_attribute_and_ends_at_the_closing_brace() {
+    let src = "#[tokio::main]\n#[allow(dead_code)]\npub async fn handler(\n    a: u32,\n) -> u32 {\n    a\n}\n";
+    let out = parse_symbols("a.rs", src);
+    let f = sym(&out, "handler");
+    assert_eq!(f.line, 3); // the `fn` token — unchanged, other consumers read it
+    assert_eq!(f.body_start, Some(1));
+    assert_eq!(f.body_end, Some(7));
+}
+
+#[test]
+fn impl_method_body_span_starts_at_its_first_attribute() {
+    let src =
+        "struct S;\nimpl S {\n    #[inline]\n    pub fn m(&self) -> u32 {\n        1\n    }\n}\n";
+    let out = parse_symbols("a.rs", src);
+    let m = sym(&out, "S.m");
+    assert_eq!(m.body_start, Some(3));
+    assert_eq!(m.body_end, Some(6));
+}
+
+/// The contract's totality clause: an empty body still has a declaration line, so it reports a span.
+/// Under the first-statement reading `fn f() {}` collapsed to `None`/`None` — indistinguishable in the
+/// IR from a `struct`, which genuinely has no scannable region at all.
+#[test]
+fn empty_function_body_still_reports_the_declaration_span() {
+    let out = parse_symbols("a.rs", "fn f() {}\n");
+    let f = sym(&out, "f");
+    assert_eq!(f.body_start, Some(1));
+    assert_eq!(f.body_end, Some(1));
 }
 
 #[test]

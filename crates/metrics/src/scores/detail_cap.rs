@@ -34,7 +34,7 @@
 //! dozens. Both values are the ones those modules already shipped; centralizing them here changes what a
 //! reader is TOLD, not what they are shown.
 
-/// Cap for per-FILE and per-PAIR detail lists (`sfc`, `godFile`, `diamond`, `rename`, `busFactor`,
+/// Cap for per-FILE and per-PAIR detail lists (`file_size_compliance`, `godFile`, `diamond`, `rename`, `busFactor`,
 /// `typeSafety`, `lod`). One row per file (or per root/leaf pair), so a tree's row count is bounded by
 /// its file count.
 pub(crate) const MAX_FILE_ROWS_LISTED: usize = 50;

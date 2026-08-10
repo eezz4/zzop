@@ -45,7 +45,16 @@ impl Drop for TempDir {
 }
 
 /// Loads the real `egress.json` pack, filtered so this test is unaffected by sibling packs under concurrent development.
+/// The pack this file's tests scan with. The disk load below reads and parses ALL 12 pack JSONs and
+/// throws away 11, so doing it per test cost this binary that work once per test; the `OnceLock` makes
+/// it once per binary. The clone is cheap and — importantly — SHARES the pack's compiled-regex memo
+/// (`zzop_core::dsl::RegexCache`), so the second test onward also skips recompiling every pattern.
 fn egress_pack() -> RulePackDef {
+    static PACK: std::sync::OnceLock<RulePackDef> = std::sync::OnceLock::new();
+    PACK.get_or_init(egress_pack_uncached).clone()
+}
+
+fn egress_pack_uncached() -> RulePackDef {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("dsl");
     let result = load_dsl_packs(&dir);
     assert!(
@@ -90,6 +99,7 @@ fn hits<'a>(out: &'a AnalyzeOutput, rule: &str) -> Vec<&'a zzop_core::Finding> {
 }
 
 // Test modules (split by rule/theme; the fixtures above are shared via `use super::*;`).
+mod generated_banner_exemption;
 mod http_shapes;
 mod localhost_egress;
 mod sockets_and_routes;

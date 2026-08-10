@@ -2,45 +2,41 @@
 //! "not deployed / test surface" reasoning (e.g. skipping a test file's DB access when it isn't real
 //! deployed coupling).
 
-use std::sync::OnceLock;
-
-use regex::Regex;
-
 /// True when `path` looks like a test/spec file or sits under a test-only directory — the shared
 /// "not deployed" path predicate. Also used to skip route registrations / DB-table access / query call
 /// sites that only exist in test/fixture code, not real deployed surface.
+///
+/// ## One owner, and why it is the DSL fragment rather than a table here (2026-08-10)
+/// This function used to carry its OWN arm table, and the DSL packs' `${test-paths}` fragment carried a
+/// second one. Neither dominated the other and both were incomplete in the direction the other covered:
+/// this table knew `_test.go`, `test_*.py`, `*Tests.cs` and `FooTest.java`; the fragment knew
+/// `fixtures/`, `foo-spec.ts` and the runner config files. 132 of the 144 bundled rules (measured 2026-08-10) consult the
+/// FRAGMENT, so every non-TypeScript test convention was invisible to the rule layer — measured on a
+/// tree holding nothing but `services/handler_test.go`, `services/test_login.py` and
+/// `Api.Tests/UserTests.cs`: 14 findings, every one of them a false positive, and 1 for the same bytes
+/// moved under `tests/`.
+///
+/// The repair is not a third table. `crates/core/src/dsl/shared_fragments.json` now holds the UNION and
+/// is the only place a test-path arm may be written; this predicate reads it. That direction (fragment
+/// owns, Rust consumes) rather than the reverse, because the fragment is the side with those consumers, a
+/// published name (`${test-paths}`, which external packs reference), and three guards already reading it
+/// (`dsl::tests_fragments::{superset, name_census}`, `scripts/check-rule-desc-tokens.sh`). The pins that
+/// used to guard the Rust table stay below and now guard the fragment — which is what wires "the repo
+/// already knew the answer" to the layer that was getting it wrong.
+///
+/// ## The two conflicts the merge had to settle
+/// * `e2e/`, `cypress/`, `playwright/`, `testing/` — this table matched them case-SENSITIVELY ("JS
+///   ecosystem tool names, always lowercase"), the fragment case-insensitively. The fragment's spelling
+///   wins, so `E2E/` and `Testing/` are now test paths (see the pins below, which changed polarity for
+///   exactly these two). The failure directions are not symmetric: over-excluding a directory literally
+///   named `Testing/` costs an allowed under-report, while under-excluding it produces a wrong claim
+///   about code that never ships.
+/// * `Tests?.cs` / `Tests?.java` / `Test[A-Z]*.java` — these stay case-SENSITIVE, spelled `(?-i:…)`
+///   inside the otherwise case-insensitive fragment. Not the same call as above: `Contests.cs` is a word
+///   that happens to end in "tests", not a file named for testing, and the PascalCase requirement is the
+///   only thing telling them apart.
 pub fn is_test_file(path: &str) -> bool {
-    test_patterns().iter().any(|re| re.is_match(path))
-}
-
-fn test_patterns() -> &'static [Regex] {
-    static R: OnceLock<Vec<Regex>> = OnceLock::new();
-    R.get_or_init(|| {
-        [
-            r"\.(test|spec)\.(t|j)sx?$",
-            r"_test\.go$",
-            r"(^|/)test_[^/]*\.py$",
-            r"_test\.py$",
-            r"Tests?\.java$",
-            r"(^|/)Test[A-Z][^/]*\.java$",
-            // C# conventions: `FooTests.cs`/`FooTest.cs` files (case-sensitive on purpose — the
-            // convention is PascalCase, and a lowercase tail like `contests.cs` must not match) and
-            // `MyApp.Tests/` project directories.
-            r"Tests?\.cs$",
-            r"(?i)\.tests?/",
-            // `(?i)` (added with the C# arm, 2026-08-03) also admits spellings the old case-sensitive
-            // arm rejected — `Tests/`, `TESTS/`, `Spec/` — which .NET solutions actually use for the
-            // directory itself. The runner-directory arm below stays case-sensitive: those are JS
-            // ecosystem tool names, always lowercase.
-            r"(?i)(^|/)(__tests__|__test__|tests?|spec)/",
-            // Directories named for a test runner (or literally `testing`) are test surface by the same
-            // "not deployed" reasoning as `__tests__`.
-            r"(^|/)(e2e|cypress|playwright|testing)/",
-        ]
-        .iter()
-        .map(|p| Regex::new(p).unwrap())
-        .collect()
-    })
+    crate::dsl::test_path_re().is_match(path)
 }
 
 #[cfg(test)]
@@ -80,12 +76,55 @@ mod tests {
         assert!(is_test_file("Tests/Fixture.cs"));
         assert!(is_test_file("src/TESTS/helper.ts"));
         assert!(is_test_file("Spec/models/user.rb"));
-        // Unchanged: the runner-directory arm stays case-sensitive.
-        assert!(!is_test_file("Testing/service.cs"));
-        assert!(!is_test_file("E2E/flows/login.ts"));
+        // CHANGED POLARITY 2026-08-10, when this predicate and the DSL's `${test-paths}` fragment were
+        // merged into one owner: the runner-directory arm used to be case-sensitive HERE and
+        // case-insensitive THERE, and the fragment's spelling won. See `is_test_file`'s doc for why the
+        // wider reading is the honest one for a subtractive predicate.
+        assert!(is_test_file("Testing/service.cs"));
+        assert!(is_test_file("E2E/flows/login.ts"));
         // Unchanged: whole-segment discipline survives the flag.
         assert!(!is_test_file("src/latest/service.ts"));
         assert!(!is_test_file("src/app-testing-utils/service.ts"));
+    }
+
+    /// The arms that were the FRAGMENT's alone before the 2026-08-10 merge — pinned here so the union
+    /// cannot silently shrink back to either side's old table. Their absence from this predicate was
+    /// never the reported defect (the DSL had them); their absence from the DSL for Go/Python/C# was.
+    #[test]
+    fn arms_the_dsl_fragment_contributed_to_the_merge() {
+        assert!(is_test_file("src/fixtures/user.json"));
+        assert!(is_test_file("src/fixture/user.json"));
+        assert!(is_test_file("src/user-spec.ts"));
+        assert!(is_test_file("vitest.config.ts"));
+        assert!(is_test_file("app/playwright.config.ts"));
+        // The dot-infix arm is extension-agnostic in the fragment, so it reaches languages the old
+        // `\.(test|spec)\.(t|j)sx?$` arm here could not.
+        assert!(is_test_file("api/user.test.py"));
+        assert!(!is_test_file("src/spectrum/service.ts"));
+    }
+
+    /// The whole point of the merge, stated as the three conventions that produced the measured false
+    /// positives — asserted through the DSL's own fragment, which is what the rule layer consults.
+    #[test]
+    fn the_dsl_fragment_matches_every_language_convention_this_predicate_knows() {
+        let re = crate::dsl::test_path_re();
+        for path in [
+            "services/handler_test.go",
+            "services/test_login.py",
+            "services/login_test.py",
+            "Api.Tests/UserTests.cs",
+            "src/UserServiceTest.cs",
+            "src/FooTest.java",
+            "src/TestFoo.java",
+        ] {
+            assert!(
+                re.is_match(path),
+                "{path} is an idiomatic test path the rule layer must decline"
+            );
+        }
+        for path in ["src/Contests.cs", "src/service.go", "app/login.py"] {
+            assert!(!re.is_match(path), "{path} is production code");
+        }
     }
 
     #[test]

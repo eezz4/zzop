@@ -36,6 +36,11 @@ regex = { workspace = true }
 # its own crate root, so the crate-level `#![allow]` that covers every other stderr writer in the
 # workspace cannot reach `tests/`; a dev-dependency can.
 zzop-test-support = { path = "../test-support" }
+# Test-only, one derivation: `wire_contract_tests.rs` enumerates `AnalyzeRequest`'s wire field
+# names by handing the derive a `Deserializer` that records the static field array it is passed. That
+# needs the `serde` trait itself, which `serde_json` does not re-export; nothing shipped in this crate
+# names `serde` directly.
+serde = { workspace = true }
 
 # Inherit the workspace lint policy (root Cargo.toml [workspace.lints.clippy]) — every member does,
 # with no exceptions. Where a single target legitimately violates one, the exemption is a crate-level

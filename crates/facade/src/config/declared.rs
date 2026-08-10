@@ -67,10 +67,15 @@ pub(crate) fn apply_declared(
         .iter()
         .cloned()
         .collect();
-    config.scores_config.fsd = zzop_metrics::FsdMatcher::new(zzop_metrics::FsdConfig {
-        slice_containers: req.vocabulary.fsd.slice_containers.clone(),
-        entry: req.vocabulary.fsd.entry.clone(),
-        shared: req.vocabulary.fsd.shared.clone(),
-        base_dirs: req.vocabulary.fsd.base_dirs.clone(),
-    });
+    config.scores_config.feature_sliced_design =
+        zzop_metrics::FeatureSlicedDesignMatcher::new(zzop_metrics::FeatureSlicedDesignConfig {
+            slice_containers: req
+                .vocabulary
+                .feature_sliced_design
+                .slice_containers
+                .clone(),
+            entry: req.vocabulary.feature_sliced_design.entry.clone(),
+            shared: req.vocabulary.feature_sliced_design.shared.clone(),
+            base_dirs: req.vocabulary.feature_sliced_design.base_dirs.clone(),
+        });
 }

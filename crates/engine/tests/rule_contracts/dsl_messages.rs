@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use crate::dsl_dir;
 
 /// The tokens a DSL author must never write. `disabledRules` is the embedder-facing half of the ONE
-/// disable-hint fragment `crates/engine/src/pipeline/findings.rs`'s `append_disable_hints` appends to
+/// disable-hint fragment `crates/engine/src/pipeline/findings.rs`'s `append_hints` appends to
 /// EVERY finding `eval_packs` (and `envelope::file_pass`'s Mode B `eval_pack`) produces —
 /// unconditionally, before the finding reaches the cache, so the appended sentence is present in
 /// warm-cache reads too. `disabled_rules` is the snake_case spelling that fragment emitted until
@@ -80,7 +80,7 @@ fn collect_messages(
 /// `disabled_rules` spelling).
 ///
 /// The engine appends the disable hint to every DSL finding itself
-/// (`pipeline::findings::append_disable_hints`), so a hand-written copy does not ADD the sentence — it
+/// (`pipeline::findings::append_hints`), so a hand-written copy does not ADD the sentence — it
 /// makes the finding carry it TWICE. `docs/rules/authoring-guide.md` states the rule for authors ("Do NOT
 /// write your own 'Disable via config ...' sentence in `message`"); this is that rule mechanized.
 ///
@@ -142,7 +142,7 @@ fn no_dsl_pack_message_hand_writes_the_engine_appended_disable_hint() {
     assert!(
         offenders.is_empty(),
         "DSL rule messages that hand-write the engine-owned disable-hint token ({ENGINE_OWNED_TOKENS:?}). The engine appends the disable hint to \
-         every DSL finding already (`pipeline::findings::append_disable_hints`), so this text renders \
+         every DSL finding already (`pipeline::findings::append_hints`), so this text renders \
          TWICE in the finding a user reads — delete the hand-written sentence, keep only your rule's own \
          `zzop-<id>-ok` marker (docs/rules/authoring-guide.md): {offenders:#?}"
     );

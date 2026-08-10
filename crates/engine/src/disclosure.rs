@@ -17,51 +17,10 @@
 //! Vocabulary-free by construction: every `summary` describes a MECHANISM (a census fact, a self-report,
 //! a low-confidence marker), never a rule-pack id — the registry is meta about detection, not a rule list.
 
-/// How completely zzop detects a given silent-failure class today. The status is an honest snapshot of
-/// SHIPPED detection, not of the design's aspiration — a class the design intends to assert but has not
-/// implemented yet is `NotYetDetected` here.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DisclosureStatus {
-    /// Asserted from a structural fact on every run — cannot be silently missed (e.g. a count that is
-    /// always emitted).
-    Asserted,
-    /// Detected in the common cases, but a member of the class can still slip past — a heuristic, or a
-    /// signal that is folded into a coarser count rather than broken out.
-    Partial,
-    /// Recognized as a real failure class that zzop does NOT yet detect — declared precisely so the agent
-    /// does not assume coverage it does not have.
-    NotYetDetected,
-}
+mod types;
 
-impl DisclosureStatus {
-    /// The camelCase wire token (the output contract; the wire output view serializes this verbatim).
-    pub fn as_str(self) -> &'static str {
-        match self {
-            DisclosureStatus::Asserted => "asserted",
-            DisclosureStatus::Partial => "partial",
-            DisclosureStatus::NotYetDetected => "notYetDetected",
-        }
-    }
-}
-
-/// One entry in the silent-failure-class registry.
-#[derive(Debug, Clone, Copy)]
-pub struct BlindnessClass {
-    /// Stable kebab-case id — part of the output contract, never renamed silently (the meta test pins the
-    /// exact set).
-    pub id: &'static str,
-    /// Taxonomy group: one of `extraction-blind`, `analysis-dark`, `input-config`, `trust-calibration`.
-    pub group: &'static str,
-    /// The concrete way an agent could silently misread zzop's output for this class — phrased as the
-    /// misreading, so a `NotYetDetected` entry reads as an actionable "do not assume I caught this".
-    pub summary: &'static str,
-    pub status: DisclosureStatus,
-}
-
-const EXTRACTION_BLIND: &str = "extraction-blind";
-const ANALYSIS_DARK: &str = "analysis-dark";
-const INPUT_CONFIG: &str = "input-config";
-const TRUST_CALIBRATION: &str = "trust-calibration";
+pub use types::{BlindnessClass, DisclosureStatus};
+use types::{ANALYSIS_DARK, EXTRACTION_BLIND, INPUT_CONFIG, TRUST_CALIBRATION};
 
 /// The pinned registry, in stable order (group extraction -> analysis -> input -> trust, taxonomy order
 /// within a group). Statuses reflect what is SHIPPED as of Stage 2 (the per-tree coverage census +
@@ -198,6 +157,35 @@ pub const BLINDNESS_REGISTRY: &[BlindnessClass] = &[
         // for every uneven fact everywhere, which does not exist, and `zzop explain` prints this token
         // verbatim.
         status: DisclosureStatus::Partial,
+    },
+    BlindnessClass {
+        id: "score-population-empty",
+        group: ANALYSIS_DARK,
+        summary: "A structural score is 0-100 with higher being healthier, and EVERY per-metric formula \
+                  returns 100 when its population is empty — so \"judged thousands of subjects, all \
+                  clean\" and \"found nothing it could judge\" produced the same number. Three ways a \
+                  population empties, all measured on real trees: an input channel with no producer \
+                  anywhere in the build; a metric defined over a directory CONVENTION the tree never \
+                  adopted (a Go tree's `api/` is its BOTTOM layer while Feature-Sliced Design reads \
+                  that name as the TOP entry layer, so the same directory scores 0 or 100 depending \
+                  only on a name collision); and a resolver that returns \"no module\" for every path \
+                  outside a declared vocabulary, which empties the denominator before counting starts. \
+                  Asserted: every score ships the POPULATION it scored over in the same object \
+                  (`featureSlicedDesign.totalImports`, `busFactor.total`, `mainSequence.classifiedFiles`, \
+                  ...), so a 0 there IS the never-measured signal — a denominator cannot be dropped in \
+                  transit the way a caveat sentence can, and a derived test refuses any score field that \
+                  ships without one. `health.pain` renormalizes over the measured metrics only and \
+                  carries `measuredWeight`/`totalWeight` beside it, so an unmeasurable axis can no \
+                  longer make a repo look HEALTHIER by quietly passing; `pain` is `null`, never 0, when \
+                  nothing was measurable at all. NOT detected: whether a population that is non-zero is \
+                  REPRESENTATIVE — a metric judging 3 of a tree's 4,000 files reports 3 honestly and \
+                  says nothing about the other 3,997, so read every score against its own denominator \
+                  rather than against the tree's file count.",
+        // `Asserted`, not `Partial`: the population rides every score unconditionally and is derived
+        // from the same computation that produced the number, so there is no case where a score ships
+        // without it. The residual named above is a different question (is the population big enough to
+        // generalize from), which this class deliberately does not claim to answer.
+        status: DisclosureStatus::Asserted,
     },
     BlindnessClass {
         id: "capability-absent-vs-empty",

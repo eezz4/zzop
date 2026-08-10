@@ -267,7 +267,8 @@ if [ -n "$notices_present" ]; then
     echo "$SELF: $NOTICES copies that differ from the root $NOTICES:" >&2
     printf '%s' "$notices_drift" >&2
     echo "  A stale notices file is worse than a missing one -- it names a dependency set that is not the" >&2
-    echo "  one being shipped, while looking like compliance. Regenerate, then re-copy verbatim." >&2
+    echo "  one being shipped, while looking like compliance." >&2
+    echo "  Fix: bash scripts/sync-license-artifacts.sh   # regenerates AND re-copies, then re-runs this check" >&2
     fail=1
   fi
 fi
@@ -344,7 +345,10 @@ else
   if ! gen_out="$(node "$GENERATOR" --check 2>&1)"; then
     printf '%s\n' "$gen_out" >&2
     echo "$SELF: $NOTICES failed verification (details above)." >&2
-    echo "  Regenerate it: node $GENERATOR   # regeneration is the step that needs a cargo toolchain" >&2
+    # Names the FIXER, not the generator: regenerating alone leaves the shipped copies stale and this
+    # check fails a second time on a different line. A prescription you can follow exactly and still be
+    # red teaches the reader to stop trusting the check.
+    echo "  Fix: bash scripts/sync-license-artifacts.sh   # needs a cargo toolchain (the regenerate step does)" >&2
     fail=1
   else
     case "$gen_out" in

@@ -49,6 +49,14 @@ pub(crate) struct ResolvedVocabulary<'a> {
     pub(crate) api_segment_pattern: Option<&'a str>,
     pub(crate) java_source_root: Option<&'a str>,
     pub(crate) python_package_roots: Vec<&'a str>,
+    // `extra_test_path_patterns` is deliberately NOT a member. Every field here is read by a per-FILE
+    // lane, which is why the struct is built once per pass and borrowed; that key is consumed one layer
+    // earlier and once per PACK, by `pipeline::gate_pack_rules`, which rewrites the affected rules'
+    // `file_exclude_pattern` before any file is opened. Carrying it here too would put a second reader
+    // in front of a value that has exactly one, and the "declared or not made" normalization this
+    // struct exists to apply is the wrong normalization for it besides (it is additive, and its default
+    // is not empty — see `VocabularyConfig::extra_test_path_patterns`, and `vocabulary::
+    // extra_test_path_tail` for the resolution rule it uses instead).
     pub(crate) prisma_client_getter: Option<&'a str>,
     pub(crate) retry_wrappers: Vec<&'a str>,
     pub(crate) middleware_guard_callees: Vec<&'a str>,

@@ -49,7 +49,7 @@ zzop ships as two Node-free binaries. Decide which one you need before you insta
 | If you want | Use | How you drive it |
 |---|---|---|
 | An AI agent (Claude Code, Claude Desktop, any MCP client) to answer questions about your repos | **`zzop-mcp`** — an MCP server over stdio | Install the plugin or the `.mcpb` bundle and the agent calls the tools. You run no commands. → [Use in Claude Code](#use-in-claude-code-mcp-plugin) |
-| To run analyses yourself — a terminal, a CI job, a script | **`zzop`** — a plain CLI | `zzop analyze .`, `zzop cross ./web ./api`, … JSON to stdout, ESLint-style. → [Use in a terminal or CI](#use-in-a-terminal-or-ci-zzop-cli) |
+| To run analyses yourself — a terminal, a CI job, a script | **`zzop`** — a plain CLI | `zzop init` once per tree, then `zzop analyze .` or `zzop cross --config …`. JSON to stdout. → [Use in a terminal or CI](#use-in-a-terminal-or-ci-zzop-cli) |
 
 Both binaries dispatch to the same shared handlers over the same engine, so a tool call and a CLI run
 against the same path give the identical answer. Neither one makes a network request of any kind — they
@@ -70,7 +70,14 @@ Neither binary needs Node.js, npm, or a compiler. Get them one of four ways:
 
 - **Download the binaries.** Grab the `zzop-cli-<platform>[.exe]` (CLI) and/or `zzop-mcp-<platform>[.exe]`
   (MCP server) assets for your platform from [GitHub Releases](https://github.com/eezz4/zzop/releases)
-  and run them directly, or put them on `PATH`.
+  and run them directly, or put them on `PATH`. **From the next release onward** each release also
+  carries a `SHA256SUMS` asset covering every one of those assets — releases up to and including
+  v0.29.1 do not have one, so check that the file is there before relying on it. Verify with
+  `sha256sum -c SHA256SUMS --ignore-missing`, or `shasum -a 256 -c SHA256SUMS --ignore-missing` on a
+  macOS box that has no `sha256sum`. Its scope is narrow and worth stating: it catches a corrupted
+  download, and it is a hook for anyone who obtained the digest through another channel. It does
+  **not** defend against a compromised release origin — an attacker who can swap an asset can swap
+  `SHA256SUMS` beside it — and TLS already refuses MITM.
 - **Claude Code plugin.** `/plugin marketplace add eezz4/zzop`, then `/plugin install zzop@zzop` —
   see [Use in Claude Code](#use-in-claude-code-mcp-plugin) below.
 - **Claude Desktop.** One-click `.mcpb` bundle (drag-and-drop install) — see
@@ -137,6 +144,12 @@ zzop graph . --domain risk > risk.mmd        # blast-radius hubs + extraction se
                                              # SCORES are NOT drawn — a table of numbers is not a graph
 zzop graph . --domain posture               # the mutating attack surface and its guard status —
                                              # a box means GUARDED-OR-EXEMPT, never proven guarded
+zzop graph . --domain cochange > churn.mmd   # which files keep changing TOGETHER, from git history —
+                                             # not imports, so it finds the coupling no dep graph can see
+zzop graph . --domain dep --fold 2           # the SAME import graph with each path's first 2 segments
+                                             # drawn as one box — the module map you were trying to see
+                                             # IS the picture, and every edge says how many file edges
+                                             # it collapsed. --fold 1 for the top-level view
 ```
 
 The manifest is deliberately uncapped and carries no file or line, so a pure refactor diffs empty while
@@ -171,25 +184,37 @@ let report: serde_json::Value =
 
 ## Result (abridged)
 
-Every finding carries a rule id, severity, and a `file:line` location, e.g.:
+This is what the two binaries above actually print — `findings` is a **census object**, not an array,
+because the reply is a shaped summary rather than a raw dump. The numbers below are a real run against
+this repository's own `cases/trees/api-be` fixture, so you can reproduce them:
+`zzop analyze --config cases/trees/api-be/zzop.config.jsonc`. (To the next editor: these numbers move
+whenever `cases/trees/api-be` changes — re-run that command and re-measure them, never patch one in
+isolation.)
 
 ```json
 {
-  "findings": [
-    {
-      "ruleId": "sql/nplus1",
-      "severity": "warning",
-      "file": "src/routes/orders.ts",
-      "line": 42,
-      "message": "await on a store/ORM call (`Repository`/`Store`/`prisma`/`db`/`orm`/`tx`/`trx`) verified structurally inside a for/for-of/for-in/while/do-while statement or an array-iteration callback — checked against the parser's projected loop spans, not merely co-occurring with loop syntax somewhere in the same function — N+1 query pattern. HOUSE-CONVENTION PATH SCOPE, disclosed because nothing else announces it: this rule's `file_pattern` is `^(?:domains/[^/]+/routes/.+|api/.+)\\.ts$`, so it only ever scans `.ts` files under a `domains/<name>/routes/` or `api/` prefix — an awaited store call inside a loop ANYWHERE else in the tree (services, repositories, jobs, a differently-laid-out repo) is silently not checked, and zero findings from this rule means \"not scanned there\", never \"no N+1 there\". Batch the fetch (e.g. `findMany` with an `in` filter) instead of one call per item. Suppress a vetted case with `// zzop-nplus1-ok`."
-    }
-  ],
-  "scores":             { /* structural subscores, 0-100 */ },
-  "health":             { "pain": 12.4, "contributors": [ /* metrics driving the pain score, highest first */ ] },
-  "recommendations":    [ /* refactor-first candidates, ROI-ordered */ ],
-  "warnings":           [ /* anything this run could not provide */ ]
+  "fileCount": 84,
+  "findings": {
+    "total": 114,
+    "bySeverity":  { "critical": 5, "warning": 75, "info": 34 },
+    "byRule":      { "reliability/console-in-be": 10, "db/unawaited-write": 1 },
+    "shown":       [ /* 50 here — the listed slice, capped by --limit; each entry has ruleId, severity, file, line, message */ ]
+  },
+  "architecture": { "pain": 6.4, "topRecommendation": null, "criticalTop": [] },
+  "coverage":     { /* how much of the tree zzop actually saw, per extension */ },
+  "disclosure":   { "classes": 17, "asserted": 5, "partial": 10, "notYetDetected": 2 },
+  "warnings":     [ /* anything this run could not provide */ ]
 }
 ```
+
+Every finding carries a rule id, severity, a `file:line` location, and a message naming the config key
+that silences it — the records themselves ride in `shown`. `bySeverity`/`byRule` always count the WHOLE
+run, so a `--limit` that shortens that list never changes them; that split is why `findings` is an object.
+
+The per-metric `scores` block, the `health` object and `recommendations` are **not** on this wire: the
+shaped summary folds them into the compact `architecture` object above. They exist in full only in the
+`zzop-facade` embedding lane (`zzop_facade::analyze_json`, the snippet just above) — see
+[docs/modules/facade.md](docs/modules/facade.md) for that lane's own shape.
 
 `analyzeTrees` (multi-tree) additionally returns `crossLayerFindings` — frontend fetch <-> backend
 route joins — which has no single-tree equivalent.
@@ -219,11 +244,11 @@ defaults — a house extension, your own guard names, a gateway prefix, a rule t
 
 | Language | Support |
 |---|---|
-| TypeScript / JavaScript (`.ts, .tsx, .js, .jsx, .mjs, .cjs, .mts, .cts`) | Native, full AST (swc): symbols, imports, calls, HTTP routes/egress, `db-table` consumes from ORM accessors AND from raw SQL statement strings |
-| Python (`.py, .pyi`) | Native, full AST (ruff, Python 3 — Python-2-only syntax falls back to lexical): symbols, imports, FastAPI route provides, Django URLconf route provides (`urlpatterns` `url()`/`re_path()`/`path()` entries with cross-file `include('<dotted.module>')` mounts, emitted verb-unknown since the method lives in the view class), `requests`/`httpx` consumes (module-level calls plus `Session`/`Client`/`AsyncClient` instances), SQLModel/SQLAlchemy + Django ORM `db-table` provides and their query-site consumes — v1 scope |
+| TypeScript / JavaScript (`.ts, .tsx, .js, .jsx, .mjs, .cjs, .mts, .cts`) | Native, full AST (swc): symbols, imports, calls, HTTP routes/egress, TypeORM `@Entity`/`@Column` `db-table` **provides** (the schema side, joining the client-side consumes), `db-table` consumes from ORM accessors AND from raw SQL statement strings |
+| Python (`.py, .pyi`) | Native, full AST (ruff, Python 3 — Python-2-only syntax falls back to lexical): symbols, imports, FastAPI route provides, Django URLconf route provides (`urlpatterns` `url()`/`re_path()`/`path()` entries with cross-file `include('<dotted.module>')` mounts, emitted verb-unknown since the method lives in the view class), `requests`/`httpx` consumes (module-level calls plus `Session`/`Client`/`AsyncClient` instances), SQLModel/SQLAlchemy + Django ORM `db-table` provides and their query-site consumes, call sites, auth-guard evidence (FastAPI `Depends` + DRF `permission_classes`) — v1 scope |
 | Rust (`.rs`) | Native, full AST (syn 2): symbols, imports/`mod` tree (incl. same-workspace crate resolution), axum route provides, `reqwest` consumes, raw-SQL `db-table` consumes (sqlx/tokio-postgres/rusqlite/…), call sites for the whole-repo call graph, extractor-based auth-guard evidence — v1 scope |
-| Go (`.go`) | Native, full CST (tree-sitter-go 0.25): symbols, imports/dep graph (`go.mod` module resolution, package-directory-wide edges), gin + `net/http` route provides (cross-file mount composition — a function-parameter router mounted from another file's call site — incl. Go 1.22 `"METHOD /path"` mux syntax), `net/http` literal egress consumes (package free functions plus bound `http.Client` values) — v1 scope |
-| Java (`.java`) | Native, full CST (tree-sitter-java 0.23.5, Java 21 grammar): symbols (incl. nested types, dot-qualified method names, real visibility), imports/dep graph (`(package, type)`-indexed resolution, glob package-directory-wide edges), Spring MVC route provides (cross-file `extends`-chain + constant-prefix resolution), `RestTemplate`/`WebClient` literal egress consumes (Feign and `java.net.http` not recognized; `RestTemplate.put`/`.delete` deliberately not recognized, generic names that would false-key `Map.put` — disclosed), JPA `@Entity`/`@Table` `db-table` provides — v1 scope |
+| Go (`.go`) | Native, full CST (tree-sitter-go 0.25): symbols, imports/dep graph (`go.mod` module resolution, package-directory-wide edges), gin + `net/http` route provides (cross-file mount composition — a function-parameter router mounted from another file's call site — incl. Go 1.22 `"METHOD /path"` mux syntax), `net/http` literal egress consumes (package free functions plus bound `http.Client` values), GORM `db-table` facts, call sites — v1 scope |
+| Java (`.java`) | Native, full CST (tree-sitter-java 0.23.5, Java 21 grammar): symbols (incl. nested types, dot-qualified method names, real visibility), imports/dep graph (`(package, type)`-indexed resolution, glob package-directory-wide edges), Spring MVC route provides (cross-file `extends`-chain + constant-prefix resolution), `RestTemplate`/`WebClient` literal egress consumes (Feign and `java.net.http` not recognized; `RestTemplate.put`/`.delete` deliberately not recognized, generic names that would false-key `Map.put` — disclosed), JPA `@Entity`/`@Table` `db-table` provides, call sites, Spring Security auth-guard evidence (`@PreAuthorize`/`@Secured`/`@RolesAllowed`) — v1 scope |
 | C# (`.cs`) | Native, full CST (tree-sitter-c-sharp 0.23.5): symbols (incl. nested types, dot-qualified method names, `public` visibility), imports/dep graph (namespace→files index, `using` package-directory-wide edges), ASP.NET Core route provides (attribute controllers with `[Route("api/[controller]")]` + `[HttpGet]`/… composition, plus same-file Minimal-API `app.MapGet`/`MapGroup`), `HttpClient` literal egress consumes, EF Core `DbSet<T>`/`[Table]` `db-table` provides — v1 scope |
 | Prisma schema (`.prisma`) | Native, lexical schema: models/fields (structural + usage-aware schema rules) + `db-table` provides joining the client-side consumes |
 | SQL (`.sql`) | Native, lexical: `CREATE TABLE` → `db-table` provides (migration files light up the db-table channel for MyBatis/JDBC-style stacks). The crate also owns the channel's consume-side statement reader, which other parsers call on the SQL strings they hold |
@@ -253,79 +278,14 @@ defaults without notice, so pin an exact version (not a `^`/`~` range) and re-te
 Semantic Versioning and a maintained changelog begin at `1.0.0`. Full policy:
 [VERSIONING.md](VERSIONING.md).
 
-## Layout
+## Layout & development
 
-- `crates/core` — engine library: Common IR, cross-layer linker, graph analyses, call graph, rule
-  DSL interpreter (line/method/symbol/io matchers), unified rule registry + gating
-- `crates/metrics` — score channels consumed by `engine`: roi/health/criticality/coupling/
-  seams/recommendations/diagnostics
-- `crates/engine` — fused execution pipeline: language dispatch (TS/Prisma/Python/Rust/Go/Java/C#/SQL) → rayon
-  per-file parse + per-file rules → AST drop → whole-graph passes; graceful degrade, cache
-  consumption, git/scores integration, multi-tree cross-layer join, rule profiling
-- `crates/git` — git history collection (single `git log --numstat` pass → per-file stats +
-  per-commit sets)
-- `crates/cache` — per-file IR/findings cache (content hash + parser fingerprint + ruleset
-  fingerprint)
-- `crates/facade` — the analysis-meaning contract layer. Its JSON-string-in/JSON-string-out entry points
-  are `analyze`/`analyzeTrees`/`analyzeEnvelope` (the analyses) plus `validateEnvelopeOnly`/
-  `validateRulePackOnly`/`queryIo` (read-only lookups over engine and rule data — the verdict
-  vocabulary, envelope and rule-pack validation). Two more reads answer with no JSON at all: `explain`
-  returns one bundled rule's compiled-in data as human-readable lines, and `version` returns the bare
-  release number. Called by `crates/summary`, no Node and no native addon in between
-- `crates/config` — shared Rust config front end (`zzop.config.jsonc` discovery → JSONC strip →
-  config→facade-request mapper → `trees: "auto"` workspace expansion) plus request assembly (which
-  trees a call is about) and host-boundary path absolutization, used by `crates/summary`
-- `crates/summary` — the host-shared answer layer BOTH products call: reply shaping, caps, filters and
-  warning merging, the `facts`/`graph`/`manifest` projections, and the embedded authoring-contract
-  table. It is the only zzop crate either product package ships against: `packages/cli-bin` (→ `zzop`)
-  and `packages/mcp` (→ `zzop-mcp`) each declare exactly `zzop-summary` + `serde_json` as
-  `[dependencies]` and nothing below it (`zzop-config`/`zzop-core` appear only as `[dev-dependencies]`,
-  for test-only pins against those crates' own embeds) — which is what keeps a CLI query and an MCP tool
-  call on one code path
-- `packages/` — the two shipped binaries plus the npm shim and Desktop manifest
-  ([packages/README.md](packages/README.md))
-- `parser/` — parser frontends: source → Common IR, including HTTP route/consume extraction across
-  languages and frameworks ([parser/README.md](parser/README.md))
-- `rules/native/` — whole-graph native rules (`rules-graph`, `rules-http`, `rules-cross-layer`, `rules-schema`) plus `rules/dsl/`
-  declarative JSON rule packs ([rules/README.md](rules/README.md))
-
-## Development
-
-Contributing? Start with [`CONTRIBUTING.md`](./CONTRIBUTING.md).
-
-### Build & test
-
-```
-cargo test --workspace
-cargo clippy --workspace --all-targets   # kept at 0 warnings
-cargo fmt --all
-```
-
-See [`packages/README.md`](packages/README.md) for building/running the `zzop`/`zzop-mcp` binaries
-(`cargo build -p zzop-cli-bin -p zzop-mcp --release`).
-
-Cold/warm benchmark over a real tree:
-
-```
-cargo run --release -p zzop-engine --example bench -- <root> --packs rules/dsl --cache <dir> --git
-```
-
-`crates/engine/examples/` holds several more ad hoc measurement harnesses — `ls` that directory for the
-current set, since each one's own header says what it measures and a list here would only go stale.
-One of them is not ad hoc and is documented as a reference:
-`fastapi_overlay_adapter` (reference external adapter — a lexical FastAPI/Python router scanner feeding
-`EngineConfig::adapter_overlays`, Mode B; now the reference for what native Python v1 deliberately skips
-— non-literal prefixes, Flask, custom conventions — since native FastAPI and Django URLconf extraction cover the
-common literal shapes directly; also reachable via the `adapterOverlays` config field; see
-[`docs/NORMALIZED_AST.md`](docs/NORMALIZED_AST.md)'s "Adapter overlays" section).
-
-Run the English-only source guard (OSS-facing files must be English; Korean is confined to the internal
-notes directory, which is gitignored and not part of this repo's published contents):
-
-```
-bash scripts/check-english-source.sh
-```
+Contributing, or just want the crate map? [`CONTRIBUTING.md`](./CONTRIBUTING.md) carries both — the
+per-crate responsibility list and the build/test/measure commands. They live there rather than here
+because this page is read to DECIDE whether to adopt zzop, and a dependency graph answers a question
+nobody asks before installing.
 
 ## License
 
 MIT — see [`LICENSE`](./LICENSE).
+

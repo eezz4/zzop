@@ -103,6 +103,10 @@ const SELF = 'gen-third-party-notices';
  * every section clears the same bar), so the two can never disagree about what counts as present. */
 const MIN_TEXT_CHARS = 200;
 const UNAVAILABLE_MARKER = 'NO LOCAL LICENSE TEXT FOUND';
+/* The heading of the third category (see `derive`'s `unattributed`). Named once because both the
+ * renderer and the --check parser must agree on the exact bytes, and a second spelling would make the
+ * checker count zero bodies in a section that has some - the silent shape this whole file is against. */
+const UNATTRIBUTED_SECTION = 'License texts that name no single identifier';
 
 /* The committed inputs the shipped inventory is a pure function of, as `git ls-files` pathspecs.
  * fnmatch WITHOUT FNM_PATHNAME, so a star crosses a slash and the second glob below reaches every
@@ -479,58 +483,115 @@ function derive() {
     if (info.files.length === 0) textless.push(p);
   }
 
-  /* Two passes so a hint match from ANY crate beats a generic filename from an earlier one. */
+  /* EVERY distinct body per identifier, not one specimen of it.
+   *
+   * This used to keep the FIRST body it found for an identifier and drop the rest, which is a
+   * compliance defect, not a formatting choice. MIT and BSD grant rights *on the condition* that
+   * "the above copyright notice ... be included in all copies"; Apache-2.0 §4(c) says the same for
+   * the NOTICE file. Those bodies are byte-identical apart from their copyright line, so keeping one
+   * of them keeps ONE holder's notice and silently drops every other. Measured on this tree before
+   * the fix: 143 crates ship a license file, carrying 57 distinct copyright lines - and the notices
+   * file reproduced 4. The other 109 crates' holders were credited nowhere in anything we publish.
+   *
+   * DEDUP IS BY BODY TEXT, deliberately not by an extracted copyright line. Extraction needs a
+   * pattern for "the copyright line", and upstreams write it every way there is (`Copyright (c) 2016
+   * Foo`, `Copyright 2019 The Bar Authors`, a NOTICE-style header, a name that never says
+   * "copyright" at all). A pattern that misses one produces a file that LOOKS complete while
+   * omitting exactly the holder it failed to parse - a silent gap in the one artifact whose whole
+   * job is to have no gaps. Comparing whole bodies has no pattern to miss: two upstreams that differ
+   * only in their copyright line differ as texts, so both are reproduced verbatim, and two that are
+   * truly identical collapse to one entry that names both crates. The cost is size, which is the
+   * cheap axis. */
   const texts = new Map();
+  /* Every crate whose own body reached SOME identifier's section. Its complement is the point: see
+   * `unattributed` below. */
+  const attributed = new Set();
   for (const id of ids) {
     const hint = FILENAME_HINTS[id];
     const crates = idToCrates.get(id);
-    let chosen = null;
+    /* Per crate, its own best file for THIS identifier: a hint match first, then - only for a crate
+     * licensed under exactly one identifier - its unqualified LICENSE/COPYING. A multi-license
+     * crate's bare LICENSE is ambiguous and is deliberately never used here. */
+    const found = [];
+    for (const p of crates) {
+      let hit = hint ? pickFromCrate(p, perCrateFiles, hintPredicate(hint)) : null;
+      if (!hit && licenseIds(p.license).length === 1) {
+        hit = pickFromCrate(p, perCrateFiles, genericPredicate);
+      }
+      if (hit) found.push(hit);
+    }
 
-    if (hint) {
-      chosen = pick(crates, perCrateFiles, hintPredicate(hint));
-    }
-    if (!chosen) {
-      /* A crate licensed under exactly one identifier can only mean THAT identifier by its
-       * unqualified LICENSE/COPYING file. A multi-license crate's bare LICENSE is ambiguous and is
-       * deliberately never used here. */
-      const single = crates.filter((p) => licenseIds(p.license).length === 1);
-      chosen = pick(single, perCrateFiles, genericPredicate);
-    }
+    /* A body too short to BE a license is dropped from the variants rather than nulling the whole
+     * identifier: one upstream's stub must not erase every real text beside it. If that leaves
+     * nothing, the unavailable branch below states it. */
+    const usable = found.filter((h) => h.text.length >= MIN_TEXT_CHARS);
 
-    if (chosen && chosen.text.length < MIN_TEXT_CHARS) {
-      chosen = {
-        ...chosen,
-        text: null,
-        reason:
-          `the only local file found was ${chosen.source} (${chosen.text.length} bytes), which is too ` +
-          `short to be a license text`,
-      };
+    /* Insertion-ordered by first appearance, so the output is a function of the (sorted) crate
+     * order and never of Map iteration luck. */
+    const byBody = new Map();
+    for (const h of usable) {
+      if (!byBody.has(h.text)) byBody.set(h.text, { text: h.text, sources: [] });
+      byBody.get(h.text).sources.push(h.source);
+      attributed.add(h.crate.id);
     }
+    const variants = [...byBody.values()];
+
     texts.set(
       id,
-      chosen || {
-        text: null,
-        source: null,
-        reason:
-          'no crate carrying this identifier ships a matching LICENSE/COPYING file in its published ' +
-          'package, so no verbatim text could be sourced locally',
-      }
+      variants.length > 0
+        ? { variants }
+        : {
+            variants: [],
+            reason:
+              found.length > 0
+                ? `the only local file(s) found (${found.map((h) => `${h.source}, ${h.text.length} bytes`).join('; ')}) ` +
+                  `are all shorter than the ${MIN_TEXT_CHARS} bytes a license text takes`
+                : 'no crate carrying this identifier ships a matching LICENSE/COPYING file in its published ' +
+                  'package, so no verbatim text could be sourced locally',
+          }
     );
   }
 
-  return { deps, ids, idToCrates, texts, textless };
+  /* THE THIRD CATEGORY, and the one that used to fall between the two others.
+   *
+   * A crate declaring more than one identifier whose only license file is an unqualified
+   * LICENSE/COPYING cannot be attributed: nothing in the file says which of its identifiers it is the
+   * text of, and guessing by reading the body is the pattern-matching this file refuses everywhere
+   * else. So it is skipped by every section above - correctly. But it is NOT `textless` either (it
+   * ships a file), so before 2026-08-09 it appeared in no table and no section, and its copyright
+   * holder was reproduced nowhere while we shipped the crate. Measured then: 4 crate entries, whose
+   * holders returned zero hits in the generated file.
+   *
+   * Reproduced here verbatim, under a heading that claims NO identifier - which is the honest shape:
+   * the notice obligation is discharged (the text and its copyright line are in the artifact) without
+   * asserting a mapping the upstream did not make. The crate's full SPDX expression is printed beside
+   * it so a reader can see the ambiguity for themselves. */
+  const unattributed = [];
+  for (const p of deps) {
+    if (attributed.has(p.id)) continue;
+    const info = perCrateFiles.get(p.id);
+    if (!info || info.files.length === 0) continue; /* that one is `textless`, disclosed already */
+    /* `info.files` is the already-filtered candidate pool, root-first, so the first entry is this
+     * crate's most prominent license file. No predicate: the point here is precisely that no
+     * predicate could decide, and taking the pool's own first element keeps that honest. */
+    const hit = pickFromCrate(p, perCrateFiles, () => true);
+    if (!hit || hit.text.length < MIN_TEXT_CHARS) continue;
+    unattributed.push(hit);
+  }
+
+  return { deps, ids, idToCrates, texts, textless, unattributed };
 }
 
-function pick(crates, perCrateFiles, nameMatches) {
-  for (const p of crates) {
-    const info = perCrateFiles.get(p.id);
-    if (!info) continue;
-    for (const name of info.files) {
-      if (!nameMatches(name)) continue;
-      const text = readText(info.dir, name);
-      if (text === null) continue;
-      return { text, source: `${p.name}-${p.version}/${name}`, crate: p };
-    }
+/* ONE crate's best file for a predicate. Callers loop; this never does, so "which crate did this
+ * body come from" is always the caller's own variable rather than something recovered afterwards. */
+function pickFromCrate(p, perCrateFiles, nameMatches) {
+  const info = perCrateFiles.get(p.id);
+  if (!info) return null;
+  for (const name of info.files) {
+    if (!nameMatches(name)) continue;
+    const text = readText(info.dir, name);
+    if (text === null) continue;
+    return { text, source: `${p.name}-${p.version}/${name}`, crate: p };
   }
   return null;
 }
@@ -552,12 +613,12 @@ function mdCell(s) {
   return String(s).replace(/\|/g, '\\|');
 }
 
-function render({ deps, ids, idToCrates, texts, textless }) {
+function render({ deps, ids, idToCrates, texts, textless, unattributed }) {
   const L = [];
   L.push('# Third-Party Notices');
   L.push('');
   L.push('<!-- GENERATED FILE - DO NOT EDIT BY HAND.');
-  L.push('     Regenerate: node scripts/gen-third-party-notices.mjs');
+  L.push('     Regenerate: bash scripts/sync-license-artifacts.sh   (regenerates AND re-copies the shipped copies)');
   L.push('     Enforced by: scripts/check-license-shipping.sh');
   L.push('');
   L.push('     The two digests below let that guard verify this file EXACTLY and OFFLINE: no cargo, no');
@@ -594,6 +655,11 @@ function render({ deps, ids, idToCrates, texts, textless }) {
   L.push(`- Third-party crates linked: **${deps.length}**`);
   L.push(`- Distinct license identifiers: **${ids.length}**`);
   L.push(`- Crates whose published package carries no license text of its own: **${textless.length}**`);
+  /* Counted so that a deleted license body fails --check BY NAME. The digest already catches any
+   * byte change, but a digest failure says only "something moved"; this says which axis moved, and
+   * the axis it names is the one whose loss is a license violation rather than a typo. */
+  L.push(`- Distinct license texts reproduced verbatim: **${[...texts.values()].reduce((n, e) => n + e.variants.length, 0)}**`);
+  L.push(`- License texts that name no single identifier, reproduced anyway: **${unattributed.length}**`);
   L.push('');
   L.push('## Dependencies');
   L.push('');
@@ -632,13 +698,26 @@ function render({ deps, ids, idToCrates, texts, textless }) {
     L.push('');
     L.push(`Applies to ${crates.length} crate(s): ${crates.map((p) => `\`${p.name}\``).join(', ')}`);
     L.push('');
-    if (entry.text) {
-      L.push(`Reproduced verbatim from \`${entry.source}\`.`);
+    if (entry.variants.length > 0) {
+      /* Every DISTINCT body, because the copyright line inside each one is the notice this file
+       * exists to carry - see the harvest comment in derive() for why one specimen is not enough
+       * and why the fold is by body text rather than by an extracted holder name. */
+      L.push(
+        `${entry.variants.length} distinct license text(s) for this identifier, each reproduced ` +
+          'verbatim. Bodies that differ only in their copyright line are DIFFERENT texts and all ' +
+          'appear below; crates whose file is byte-identical share one entry.'
+      );
       L.push('');
-      const fence = fenceFor(entry.text);
-      L.push(fence);
-      L.push(...entry.text.split('\n'));
-      L.push(fence);
+      for (const v of entry.variants) {
+        L.push(`Reproduced verbatim from \`${v.sources[0]}\`${v.sources.length > 1 ? `, byte-identical in ${v.sources.length - 1} other crate(s)` : ''}:`);
+        L.push('');
+        const fence = fenceFor(v.text);
+        L.push(fence);
+        L.push(...v.text.split('\n'));
+        L.push(fence);
+        L.push('');
+      }
+      L.pop(); /* the loop's trailing blank; the section adds its own below */
     } else {
       L.push(`> **${UNAVAILABLE_MARKER}** for \`${id}\`: ${entry.reason}.`);
       L.push('>');
@@ -648,6 +727,29 @@ function render({ deps, ids, idToCrates, texts, textless }) {
       L.push('> a silently missing license is indistinguishable from a license that was never owed.');
     }
     L.push('');
+  }
+
+  if (unattributed.length > 0) {
+    L.push(`## ${UNATTRIBUTED_SECTION}`);
+    L.push('');
+    L.push(
+      'These crates declare more than one SPDX identifier and ship a single, unqualified license file. ' +
+        'Nothing in the file says which of the crate\'s identifiers it is the text of, and this generator ' +
+        'refuses to decide that by reading the body - so the text appears here rather than under a ' +
+        'heading that would assert a mapping the upstream never made. The copyright notice inside each ' +
+        'one is reproduced verbatim, which is what the MIT/BSD grant is conditioned on; the crate\'s full ' +
+        'SPDX expression is printed beside it so the ambiguity is visible rather than resolved silently.'
+    );
+    L.push('');
+    for (const h of unattributed) {
+      L.push(`\`${h.crate.name}\` ${h.crate.version} - declares \`${h.crate.license}\` - from \`${h.source}\`:`);
+      L.push('');
+      const fence = fenceFor(h.text);
+      L.push(fence);
+      L.push(...h.text.split('\n'));
+      L.push(fence);
+      L.push('');
+    }
   }
 
   return L;
@@ -718,14 +820,22 @@ function parseCommitted(text) {
   let section = null;
   let currentId = null;
   let body = []; /* every line of the current section, fence contents included */
-  let payload = []; /* only the lines between the current section's first fence pair */
+  /* The lines inside EVERY fence pair in the section, and how many pairs there were. Both used to
+   * be "the first fence only", from when a section carried exactly one license body. A section now
+   * carries one body per distinct upstream text, and a first-fence-only reader would have let the
+   * second through twenty-ninth be deleted without a word - which is the precise failure the
+   * multi-body harvest exists to prevent, reintroduced one layer down in the checker. */
+  let payload = [];
+  let blocks = 0;
+  let unattributedBlocks = 0; /* fenced bodies in the third-category section, which has no `### ` ids */
   let fence = null; /* the open fence's backticks, or null when outside a fence */
 
   const flush = () => {
-    if (currentId !== null) sections.set(currentId, { body: body.join('\n'), payload: payload.join('\n') });
+    if (currentId !== null) sections.set(currentId, { body: body.join('\n'), payload: payload.join('\n'), blocks });
     currentId = null;
     body = [];
     payload = [];
+    blocks = 0;
   };
 
   for (const line of lines) {
@@ -736,8 +846,18 @@ function parseCommitted(text) {
       else payload.push(line);
       continue;
     }
-    if (fenceMatch && currentId !== null && payload.length === 0) {
+    /* Every bare fence opens a body, ANYWHERE in the file - not only inside a `### <id>` section.
+     * It was `### `-scoped until the unattributed section arrived, and that scoping would have been a
+     * real hazard the moment a license body landed outside one: the loop below would have read the
+     * MPL's own `## Exhibit A` as a section boundary and its table-shaped lines as dependency rows,
+     * which is the exact fence-blindness this parser's header describes being burned by once. Nothing
+     * we generate outside a fence can start with backticks - the prose lines are "Applies to ...",
+     * "Reproduced verbatim from ...", and the unattributed section's crate headers, all of which open
+     * with a letter or a backtick-quoted name, never a bare ``` line. */
+    if (fenceMatch) {
       fence = fenceMatch[1];
+      if (currentId !== null) blocks += 1;
+      else if (section === UNATTRIBUTED_SECTION) unattributedBlocks += 1;
       body.push(line);
       continue;
     }
@@ -779,7 +899,7 @@ function parseCommitted(text) {
     );
   }
   flush();
-  return { rows, sections, textless, summary };
+  return { rows, sections, textless, summary, unattributedBlocks };
 }
 
 /* The recorded fingerprints, read only from the header comment (everything before the first `## `
@@ -864,6 +984,16 @@ function check() {
     ['Third-party crates linked', committed.rows.length, 'rows in the Dependencies table'],
     ['Distinct license identifiers', tableIds.size, 'distinct SPDX identifiers in that table'],
     ['Crates whose published package carries no license text of its own', committed.textless.length, 'rows in the textless table'],
+    [
+      'Distinct license texts reproduced verbatim',
+      committedIds.reduce((n, id) => n + committed.sections.get(id).blocks, 0),
+      'fenced license bodies across the license-text sections',
+    ],
+    [
+      'License texts that name no single identifier, reproduced anyway',
+      committed.unattributedBlocks,
+      `fenced bodies under "## ${UNATTRIBUTED_SECTION}"`,
+    ],
   ];
   for (const [label, actual, what] of counted) {
     if (!committed.summary.has(label)) {
@@ -913,7 +1043,10 @@ function check() {
   if (problems.length > 0) {
     process.stderr.write(`${SELF}: ${rel} failed verification:\n`);
     for (const p of problems.sort()) process.stderr.write(`    ${p}\n`);
-    process.stderr.write(`  Regenerate: node scripts/gen-third-party-notices.mjs\n`);
+    // The FIXER, not this generator: running this file alone regenerates the root notices and leaves
+    // the shipped copies stale, so a reader who follows the line exactly is red again on the next
+    // check — which teaches them to stop trusting the check rather than to fix the tree.
+    process.stderr.write(`  Fix: bash scripts/sync-license-artifacts.sh\n`);
     process.exit(1);
   }
 
@@ -941,7 +1074,7 @@ function check() {
  * about CLI behavior; the main-guard below does the same job `require.main === module` does in CJS. */
 export {
   licenseFilesOf,
-  pick,
+  pickFromCrate,
   baseName,
   hintPredicate,
   genericPredicate,

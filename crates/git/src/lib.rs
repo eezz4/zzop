@@ -19,6 +19,7 @@ use std::path::Path;
 
 pub use error::GitError;
 pub use parse::parse_git_log;
+pub use process::{repo_root, spawn_log};
 pub use subject::compile_commit_subject_pattern;
 
 use zzop_core::{CommitFileSet, GitStats};
@@ -57,7 +58,11 @@ pub struct GitWindow {
 }
 
 /// Options for [`collect`] / [`parse_git_log`].
-#[derive(Debug, Clone)]
+/// `PartialEq`/`Eq`/`Hash` are derived so a caller can use these options as part of a memo key for a
+/// whole collection: two `collect` calls with an equal `repo` root and equal options produce
+/// byte-identical output (this crate does no path or branch scoping), which is exactly what makes
+/// collapsing them safe.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CollectOptions {
     /// `git log --since=<since>`; `None` = full history.
     pub since: Option<String>,

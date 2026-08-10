@@ -13,6 +13,22 @@
     // records the measurement — a plain `users` there made a cross-tree rule fire in this tree AND in
     // `api-be`, so adding this tree changed another tree's expected set).
     { "root": "trees/rust-svc", "sourceId": "rust" },
+    // The TEST-CONVENTION lane, added 2026-08-10. Three PAIRS of files carrying identical defects, one
+    // twin on a production path and one on the path Go/Python/C# use for tests — see
+    // trees/test-conventions/README.md for why a lone silent half would measure nothing. Join-inert by
+    // construction (no routes, no SQL), so it perturbs no other tree's expected set. It exists because
+    // `cases/trees/` held ZERO files in any of those three conventions, which is why the gate never
+    // caught that the DSL's `${test-paths}` vocabulary knew only TypeScript's spellings.
+    { "root": "trees/test-conventions", "sourceId": "testconv" },
+    // The SQL-LANGUAGE lane, added 2026-08-10 with the widening of the five quote-anchored `sql` rules to
+    // the four languages they had never been admitted to. Four PAIRS (production twin + that language's
+    // test path) carrying byte-identical SQL literals, plus an `alembic/versions/` migration twin whose
+    // BOTH halves are expectations — see trees/sql-langs/README.md. MEASURED join-inert
+    // (`ioConsumesKeyed: 0`), which is a fact about the four NEW languages rather than a property of the
+    // fixtures: the SQL-literal-to-`db-table` extraction that made `trees/rust-svc` join-active does not
+    // run for `.py`/`.go`/`.cs`/`.java`. Table names are prefixed `sqlx_<lang>_` anyway — the cheap
+    // insurance rust-svc's own header explains, against the day that extraction does reach them.
+    { "root": "trees/sql-langs", "sourceId": "sqllang" },
     { "root": "trees/graph", "sourceId": "graph" },
     { "root": "trees/island", "sourceId": "island" },
     { "root": "trees/trpc", "sourceId": "trpc" },
@@ -90,6 +106,21 @@
     // workspace packages. Build output and tool state are named by you, not by any tool.
     "skipDirs": ["node_modules", "dist", "build", ".next", ".git", "target", ".yarn", ".zzop", "zzop-reports", ".zzop-cache"],
     "workspaceSkipDirs": ["node_modules", ".git"],
+    // Extra paths that hold TEST code, ADDED to the language conventions zzop already knows: the Go
+    // "_test.go" suffix, Python "test_x.py"/"x_test.py", C# "XTests.cs" and "My.Tests/", Java
+    // "FooTest.java"/"TestFoo.java", the JS/TS ".test."/".spec." infix, and the directories
+    // "tests/" "spec/" "__tests__/" "e2e/" "fixtures/" "cypress/" ".storybook/" plus the test-runner
+    // config files. THE ONE ADDITIVE KEY IN THIS BLOCK — every other one REPLACES its built-in list,
+    // this one can only widen, so declaring "(^|/)it/" for your integration tests cannot cost you the
+    // Go suffix. Empty is therefore NOT "no test paths": it is "the built-ins, and nothing else".
+    // It has a built-in default at all — unlike every other key here — because a test convention is
+    // fixed by the LANGUAGE, not chosen by you. With no default, zzop would judge a "_test.go" file as
+    // production code and every finding on it would be a wrong CLAIM, rather than the quiet
+    // under-report the rest of this block degrades to when you leave a key out. Each entry is a regex
+    // over the tree-relative, forward-slash path; one that does not compile is dropped with a warning
+    // naming it. To be judged on a path after all, turn the rule off under `rules` — narrowing this
+    // list is deliberately not expressible.
+    "extraTestPathPatterns": [],
 
     // How you reach your ORM client, and which methods on a data-access receiver are writes. These
     // decide which lines zzop calls a write site, so a project whose repositories are named some other
@@ -167,14 +198,14 @@
     "routerNames": ["apiRoutes"],
 
     // Directories that are shared infrastructure rather than a layer, so importing them upward is not a
-    // layering violation. Separate from `vocabulary.fsd.shared` below on purpose: this one exempts, that
+    // layering violation. Separate from `vocabulary.featureSlicedDesign.shared` below on purpose: this one exempts, that
     // one names an FSD layer.
     "hierarchySharedDirs": ["utils","types","helpers","hooks","constants","lib","display","__test__"],
 
     // Your Feature-Sliced Design layout, if you use one. The four keys answer one question together, so
     // they are grouped — but each is replaced on its own, exactly like `packs.disabled` leaves
-    // `packs.extraDirs` alone. Retarget `vocabulary.fsd.sliceContainers` if your slices live elsewhere.
-    "fsd": {
+    // `packs.extraDirs` alone. Retarget `vocabulary.featureSlicedDesign.sliceContainers` if your slices live elsewhere.
+    "featureSlicedDesign": {
       "sliceContainers": ["features","domains"],
       "entry": ["pages","routes","api"],
       "shared": ["core","hooks","render","ui","shared","lib","utils","__test__"],

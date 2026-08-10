@@ -62,7 +62,9 @@ pub fn external_secret_in_url_findings(
                 continue;
             }
             let (name, value) = pair.split_once('=').unwrap_or((pair, ""));
-            let lower_name = name.to_ascii_lowercase();
+            // Shared with the config front end's "can this entry ever match?" check — see
+            // `zzop_core::vocab_norm`'s module doc for why a local copy would be the wrong shape.
+            let lower_name = zzop_core::vocab_norm::ascii_lowercase(name);
             if !secret_param_names.contains(&lower_name.as_str()) {
                 continue;
             }

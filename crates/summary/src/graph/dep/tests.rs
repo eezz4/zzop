@@ -1,4 +1,5 @@
 use super::*;
+use crate::graph::fold::Fold;
 use serde_json::json;
 
 /// One tree, a 3-file cycle plus an unrelated leaf — enough to exercise every branch that shapes the
@@ -25,7 +26,7 @@ fn one_tree() -> Value {
 
 #[test]
 fn every_file_and_edge_is_drawn_when_nothing_is_capped() {
-    let m = project(&one_tree(), None, DEFAULT_DEP_TOP);
+    let m = project(&one_tree(), None, DEFAULT_DEP_TOP, Fold::of(None));
     assert!(m.contains("flowchart LR"), "{m}");
     for f in ["src/a.ts", "src/b.ts", "src/c.ts", "src/leaf.ts"] {
         assert!(m.contains(f), "{f} missing from:\n{m}");
@@ -39,7 +40,7 @@ fn every_file_and_edge_is_drawn_when_nothing_is_capped() {
 /// and it must be visible in the SHAPE, so a renderer with no styling still shows it.
 #[test]
 fn files_in_a_cycle_get_a_distinct_shape_and_a_thick_arrow() {
-    let m = project(&one_tree(), None, DEFAULT_DEP_TOP);
+    let m = project(&one_tree(), None, DEFAULT_DEP_TOP, Fold::of(None));
     assert!(
         m.contains("{{\"src/a.ts\"}}"),
         "cycle member is a hexagon:\n{m}"
@@ -61,7 +62,7 @@ fn a_tree_with_no_cycle_prints_no_cycle_legend() {
             "ir": { "dep": { "src/a.ts": ["src/b.ts"], "src/b.ts": [] } }, "findings": []
         }}]
     });
-    let m = project(&v, None, DEFAULT_DEP_TOP);
+    let m = project(&v, None, DEFAULT_DEP_TOP, Fold::of(None));
     assert!(!m.contains("circular finding"), "{m}");
     assert!(!m.contains("==>"), "{m}");
 }
@@ -69,7 +70,7 @@ fn a_tree_with_no_cycle_prints_no_cycle_legend() {
 /// The cap drops the LEAST connected files, and says so twice — in the header and in a visible node.
 #[test]
 fn capping_keeps_the_most_connected_files_and_discloses_the_drop_in_the_picture() {
-    let m = project(&one_tree(), None, 2);
+    let m = project(&one_tree(), None, 2, Fold::of(None));
     assert!(m.contains("nodes: drawn 2 / in-scope 4 / total 4"), "{m}");
     assert!(
         m.contains("PARTIAL VIEW"),
@@ -86,7 +87,7 @@ fn capping_keeps_the_most_connected_files_and_discloses_the_drop_in_the_picture(
 /// because a reader counting arrows would otherwise conclude the file has fewer imports than it has.
 #[test]
 fn an_edge_to_a_dropped_node_is_not_drawn_and_the_note_explains_it() {
-    let m = project(&one_tree(), None, 2);
+    let m = project(&one_tree(), None, 2, Fold::of(None));
     let arrows = m.matches("-->").count() + m.matches("==>").count();
     assert!(arrows <= 1, "only edges with both ends kept: {arrows}\n{m}");
     assert!(m.contains("other end was dropped is not drawn"), "{m}");
@@ -94,7 +95,7 @@ fn an_edge_to_a_dropped_node_is_not_drawn_and_the_note_explains_it() {
 
 #[test]
 fn scope_filters_by_path_prefix_and_the_header_says_how_many_survived() {
-    let m = project(&one_tree(), Some("src/a"), DEFAULT_DEP_TOP);
+    let m = project(&one_tree(), Some("src/a"), DEFAULT_DEP_TOP, Fold::of(None));
     assert!(m.contains("in-scope 1 / total 4"), "{m}");
     assert!(m.contains("--scope src/a"), "{m}");
 }
@@ -108,7 +109,7 @@ fn two_trees_with_the_same_relative_path_do_not_collide() {
             { "sourceId": "be", "output": { "ir": { "dep": { "src/index.ts": [] } }, "findings": [] } }
         ]
     });
-    let m = project(&v, None, DEFAULT_DEP_TOP);
+    let m = project(&v, None, DEFAULT_DEP_TOP, Fold::of(None));
     assert!(m.contains("nodes: drawn 2 / in-scope 2 / total 2"), "{m}");
 }
 
@@ -118,14 +119,19 @@ fn two_trees_with_the_same_relative_path_do_not_collide() {
 fn the_same_analysis_renders_identical_bytes() {
     let v = one_tree();
     assert_eq!(
-        project(&v, None, DEFAULT_DEP_TOP),
-        project(&v, None, DEFAULT_DEP_TOP)
+        project(&v, None, DEFAULT_DEP_TOP, Fold::of(None)),
+        project(&v, None, DEFAULT_DEP_TOP, Fold::of(None))
     );
 }
 
 #[test]
 fn a_run_with_no_dep_data_still_renders_a_valid_empty_flowchart() {
-    let m = project(&json!({ "trees": [] }), None, DEFAULT_DEP_TOP);
+    let m = project(
+        &json!({ "trees": [] }),
+        None,
+        DEFAULT_DEP_TOP,
+        Fold::of(None),
+    );
     assert!(m.contains("flowchart LR"), "{m}");
     assert!(m.contains("nodes: drawn 0"), "{m}");
 }

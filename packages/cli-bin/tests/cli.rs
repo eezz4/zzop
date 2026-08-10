@@ -38,7 +38,9 @@ fn version_subcommand_and_flag_print_the_server_version_and_exit_zero() {
     // Both spellings print the exact `server::version()` value (= `CARGO_PKG_VERSION`, the workspace
     // release SSOT) — the same string MCP `initialize` reports as serverInfo.version, so the CLI and the
     // protocol can never disagree. CI verifies the release tag matches it.
-    for arg in ["version", "--version"] {
+    // `-V` is in the loop for the same reason `-h` sits beside `--help` in the dispatch: a user who
+    // reaches for the conventional short flag must not be told the binary has no such thing.
+    for arg in ["version", "--version", "-V"] {
         let out = run(&[arg]);
         assert!(out.status.success(), "`zzop {arg}` must exit 0");
         assert_eq!(
@@ -85,8 +87,8 @@ fn analyze_unknown_flag_is_a_usage_error_never_a_path() {
 ///
 /// `main.rs`'s `USAGE` const is not reachable from an integration test (this is a binary crate), and
 /// the point is to read what the binary actually prints anyway. The alternatives are separated by
-/// `" | "` — with the spaces, because `[--domain <join|dep|risk|posture>]` spells a bare `|` inside one
-/// of them — and each alternative leads with its subcommand name. The parse is deliberately dumb; the
+/// `" | "` — with the spaces, because `graph`'s `[--domain <...>]` spells its alternatives with bare
+/// `|`s inside one of them — and each alternative leads with its subcommand name. The parse is deliberately dumb; the
 /// caller asserts the result is not a stub.
 fn subcommands_named_by_the_usage_line() -> Vec<String> {
     let help = stdout(&run(&["help"]));
@@ -1242,10 +1244,13 @@ fn coverage_aggregates_dispatch_by_extension_and_declares_recall_unmeasured() {
     // jsonc appears too (the config init_config wrote) — lexical-only, and that is fine; what this
     // test pins is that the two planted files landed in DIFFERENT dispatch classes.
     assert_eq!(v["unmeasured"][0]["axis"], "recall", "{v}");
-    assert!(
-        v["trees"][0]["joinVisibility"].as_str().is_some(),
-        "join visibility must be a sentence: {v}"
-    );
+    // Counts AND the sentence — the sentence alone read identically at 1 keyed consume and at 400,
+    // which is what let a barely-visible tree accuse another tree's endpoints of being unconsumed.
+    let vis = &v["trees"][0]["joinVisibility"];
+    assert!(vis["meaning"].as_str().is_some(), "meaning: {v}");
+    for k in ["provides", "consumesKeyed", "consumesUnresolved"] {
+        assert!(vis[k].is_u64(), "{k} must be a count: {v}");
+    }
 }
 
 #[test]
@@ -1495,6 +1500,60 @@ fn init_refuses_to_overwrite_without_force_and_obeys_it_with() {
 }
 
 #[test]
+fn init_takes_a_directory_so_the_flagship_command_can_be_set_up_from_one_place() {
+    // `zzop cross ./fe ./be` needs a config in EACH tree, and until now `init` only ever wrote to the
+    // process CWD — so the minimum path to the flagship command was `cd fe && init && cd ../be &&
+    // init && cd .. && cross`, and steps 2-3 appeared in no document. Running it once in the parent
+    // does not help: that config declares a single tree and `cross` refuses it.
+    let dir = TempDir::new("zzop-init-dir");
+    std::fs::create_dir_all(dir.path().join("fe")).unwrap();
+    std::fs::create_dir_all(dir.path().join("be")).unwrap();
+    for tree in ["fe", "be"] {
+        let out = run_in(dir.path(), &["init", tree]);
+        assert!(out.status.success(), "init {tree}: {}", stderr(&out));
+        assert!(
+            dir.path().join(tree).join("zzop.config.jsonc").exists(),
+            "init must write into the named directory"
+        );
+    }
+    // and the CWD itself is untouched — the argument replaces the default, never adds to it.
+    assert!(!dir.path().join("zzop.config.jsonc").exists());
+}
+
+#[test]
+fn init_ignores_its_own_cache_directory_with_the_anchored_pattern() {
+    // `init` creates the tree that the first run then litters with `.zzop/`. Leaving that to the user
+    // is how `zzop*` gets typed — a glob that also swallows the hand-authored `zzop/` rule packs, with
+    // no error from git or from zzop. `docs/getting-started.md` warns about exactly this at length;
+    // the command that exists to set a tree up should not hand that trap over.
+    let dir = TempDir::new("zzop-init-ignore");
+    let out = run_in(dir.path(), &["init"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let ignored = std::fs::read_to_string(dir.path().join(".gitignore")).expect(".gitignore");
+    assert!(ignored.contains("**/.zzop/"), "{ignored}");
+    assert!(
+        !ignored.contains("zzop*"),
+        "never a glob — it would swallow the user's own zzop/ packs: {ignored}"
+    );
+}
+
+#[test]
+fn init_appends_to_an_existing_gitignore_once_and_never_twice() {
+    let dir = TempDir::new("zzop-init-ignore-idem");
+    dir.write(".gitignore", "node_modules/\n");
+    for _ in 0..2 {
+        assert!(run_in(dir.path(), &["init", "--force"]).status.success());
+    }
+    let ignored = std::fs::read_to_string(dir.path().join(".gitignore")).unwrap();
+    assert!(ignored.starts_with("node_modules/\n"), "{ignored}");
+    assert_eq!(
+        ignored.matches("**/.zzop/").count(),
+        1,
+        "re-running init must not stack duplicate lines: {ignored}"
+    );
+}
+
+#[test]
 fn init_rejects_any_argument_that_is_not_force() {
     // `--force` is the only argument, so anything else is an argument-shape mistake (exit 2) rather
     // than a silently ignored option — the same never-swallow rule every sibling subcommand carries.
@@ -1532,46 +1591,87 @@ fn a_freshly_initialized_repo_analyzes_with_no_config_warnings() {
 /// D15, at the product boundary: an analysis lane pointed at a tree with no config REFUSES, and does so
 /// as a runtime/environment failure (exit 1) rather than a usage error (exit 2) — the argv was fine, the
 /// prerequisite was not. Pinned through the real binary because this is the first thing a new user hits.
+/// LOOPED over lanes rather than pinned on `analyze` alone since 2026-08-10: the graph cosmograph
+/// branch shipped its own hand-written error sink (a bare `eprintln!("{e}")` — no `zzop:` prefix, no
+/// init hint), and this test, analyze-only until then, vouched for a sink that lane never used.
 #[test]
 fn an_analysis_lane_without_a_config_refuses_with_exit_one_and_names_the_template() {
     let dir = TempDir::new("zzop-no-config");
     dir.write("src/api.ts", "export const a = 1;\n");
+    let root = dir.path().to_str().unwrap();
 
-    let out = run(&["analyze", dir.path().to_str().unwrap()]);
-    assert_eq!(
-        out.status.code(),
-        Some(1),
-        "a missing config is an environment failure (1), not a usage error (2); stderr: {}",
-        stderr(&out)
-    );
-    assert!(
-        stdout(&out).is_empty(),
-        "a refusal must print nothing on stdout, got: {}",
-        stdout(&out)
-    );
-    let err = stderr(&out);
-    assert!(
-        err.contains("`config-template` contract document"),
-        "the refusal must name the artifact both hosts can serve: {err}"
-    );
-    // Neither host's spelling may appear: this same sentence is what an MCP client receives.
-    assert!(
-        !err.contains("zzop init"),
-        "CLI-only vocabulary leaked: {err}"
-    );
-    assert!(
-        !err.contains("resources/read"),
-        "MCP-only vocabulary leaked: {err}"
-    );
+    let lanes: &[&[&str]] = &[
+        &["analyze", root],
+        &["graph", root],
+        &[
+            "graph",
+            root,
+            "--domain",
+            "dep",
+            "--format",
+            "cosmograph-nodes",
+        ],
+        &[
+            "graph",
+            root,
+            "--domain",
+            "dep",
+            "--format",
+            "cosmograph-links",
+        ],
+    ];
+    for lane in lanes {
+        let out = run(lane);
+        let cmd = lane.join(" ");
+        assert_eq!(
+            out.status.code(),
+            Some(1),
+            "`zzop {cmd}`: a missing config is an environment failure (1), not a usage error (2); \
+             stderr: {}",
+            stderr(&out)
+        );
+        assert!(
+            stdout(&out).is_empty(),
+            "`zzop {cmd}`: a refusal must print nothing on stdout, got: {}",
+            stdout(&out)
+        );
+        let err = stderr(&out);
+        assert!(
+            err.contains("zzop: "),
+            "`zzop {cmd}`: the refusal must carry the shared sink's `zzop:` prefix: {err}"
+        );
+        assert!(
+            err.contains("`config-template` contract document"),
+            "`zzop {cmd}`: the refusal must name the artifact both hosts can serve: {err}"
+        );
+        // The CLI display layer appends its own host's prescription — reversed 2026-08-09 (user
+        // ruling). The SHARED string stays host-neutral (host_vocabulary contracts 15 & 16 guard that
+        // in crates/**); what this binary prints on top of it is exactly the symmetry the MCP host
+        // already has, where `orientation.rs` prescribes `zzop://contract/config-template` in its own
+        // spelling. Until this ruling, the CLI was the one host whose users got the artifact name and
+        // no runnable next step.
+        assert!(
+            err.contains("Run `zzop init`"),
+            "`zzop {cmd}`: the CLI must append its own host's prescription to the missing-config \
+             refusal: {err}"
+        );
+        assert!(
+            !err.contains("resources/read"),
+            "`zzop {cmd}`: MCP-only vocabulary leaked: {err}"
+        );
+    }
 
-    // ...and `init` is the way out: the same tree analyzes once the starter config lands.
+    // ...and `init` is the way out: every lane above runs once the starter config lands.
     init_config(dir.path());
-    let after = run(&["analyze", dir.path().to_str().unwrap()]);
-    assert!(
-        after.status.success(),
-        "the starter config must be enough to analyze, stderr: {}",
-        stderr(&after)
-    );
+    for lane in lanes {
+        let after = run(lane);
+        assert!(
+            after.status.success(),
+            "`zzop {}`: the starter config must be enough, stderr: {}",
+            lane.join(" "),
+            stderr(&after)
+        );
+    }
 }
 
 /// The lanes that must keep working WITHOUT a config, because they are how a user gets one (or asks the

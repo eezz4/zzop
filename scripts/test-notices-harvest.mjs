@@ -3,7 +3,7 @@
  * WHY THIS EXISTS
  * check-license-shipping.sh --check verifies the COMMITTED notices file against digests the
  * generator itself stamped at write time. That closes hand edits and stale inventories; it closes
- * nothing about the harvest: a regression in licenseFilesOf()/pick() regenerates wrong license
+ * nothing about the harvest: a regression in licenseFilesOf()/pickFromCrate() regenerates wrong license
  * BODIES with a fresh, self-consistent digest, and every gate stays green. The two named hazards
  * this file pins:
  *   - a "consistency" refactor that basenames the generic-pass match would let a subdirectory's
@@ -12,7 +12,7 @@
  *     candidates for the crate's OWN license.
  *
  * REGISTRY-FREE BY CONSTRUCTION: builds a synthetic crate tree in a temp dir and imports the REAL
- * licenseFilesOf/pick/FILENAME_HINTS from the generator (named exports; importing runs no CLI --
+ * licenseFilesOf/pickFromCrate/FILENAME_HINTS from the generator (named exports; importing runs no CLI --
  * the generator is main-guarded). No cargo, no git, no network. Exit 1 on the first violated
  * assertion, naming the case.
  *
@@ -25,7 +25,7 @@ import os from 'os';
 import path from 'path';
 import {
   licenseFilesOf,
-  pick,
+  pickFromCrate,
   hintPredicate,
   genericPredicate,
   skippedSubdir,
@@ -106,7 +106,7 @@ try {
     `root files must sort before subdirectory files within one crate, got [${infoA.files}]`);
 
   /* ---- The hint pass, exactly as derive() runs it -------------------------------------------- */
-  /* `hintPredicate` is THE function derive() passes to pick(), imported, not rebuilt. It was
+  /* `hintPredicate` is THE function derive() passes to pickFromCrate(), imported, not rebuilt. It was
    * rebuilt here until 2026-08-01, and a mutation test proved what that cost: changing derive()'s
    * call site to match on the full path instead of the basename left this file GREEN while it
    * printed a success line naming that exact hazard. A fixture that reconstructs its subject tests
@@ -114,7 +114,7 @@ try {
   const hintPred = hintPredicate(FILENAME_HINTS.MIT);
   const perCrate = new Map([[pkgA.id, infoA], [pkgB.id, infoB]]);
 
-  const chosenA = pick([pkgA], perCrate, hintPred);
+  const chosenA = pickFromCrate(pkgA, perCrate, hintPred);
   assert(chosenA !== null && chosenA.source === 'fake-crate-1.0.0/LICENSE-MIT',
     'hint-picks-root-license',
     `MIT hint on crate A picked ${chosenA && chosenA.source}, expected fake-crate-1.0.0/LICENSE-MIT`);
@@ -122,13 +122,13 @@ try {
     'hint-pick-body-is-roots',
     `MIT hint returned a body that is not the root license's: ${chosenA.text.slice(0, 60)}...`);
 
-  const chosenB = pick([pkgB], perCrate, hintPred);
+  const chosenB = pickFromCrate(pkgB, perCrate, hintPred);
   assert(chosenB === null, 'hint-matches-basename-not-dir',
     `MIT hint on crate B (no root license) picked ${chosenB && chosenB.source} -- either the /mit/i hint ` +
       'matched the limits/ DIRECTORY name instead of the basename, or a vendor/ file leaked into the pool');
 
   /* ---- The generic pass ---------------------------------------------------------------------- */
-  const chosenGenericB = pick([pkgB], perCrate, genericPredicate);
+  const chosenGenericB = pickFromCrate(pkgB, perCrate, genericPredicate);
   assert(chosenGenericB === null, 'generic-pass-never-descends',
     `the generic pass picked ${chosenGenericB && chosenGenericB.source} from crate B -- a subdirectory's bare ` +
       'LICENSE (the vendored-third-party shape) satisfied the generic predicate. It must stay anchored on ' +

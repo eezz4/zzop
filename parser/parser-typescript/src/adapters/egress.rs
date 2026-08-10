@@ -86,8 +86,10 @@ mod consts;
 mod correlation;
 mod generated_client;
 mod keying;
-mod local_consts;
+pub(crate) mod local_consts;
 mod matchers;
+#[cfg(test)]
+mod matchers_tests;
 mod object_shape;
 mod react_query;
 pub mod retry;

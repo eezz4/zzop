@@ -42,13 +42,16 @@ impl Drop for TempDir {
 }
 
 /// Loads the real `rules/dsl/security/security.json` from the repo, resolved from
-/// `CARGO_MANIFEST_DIR` (`crates/engine` -> up two -> repo root -> `rules/dsl/...`), filtered to the
-/// three Java security-concern rules (`sql-string-concat`/`weak-crypto`/`cmd-injection`) that moved into
-/// `security` when the language-named `java-security` pack was dissolved (v0.15). Filtering keeps
-/// this fixture a small, fully-`.java`-applicable pack (every rule fires only on the `.java` fixture
-/// file), which the profiling/degradation tests below rely on. Goes through `zzop_core::parse_dsl_pack`
-/// (not a raw `serde_json::from_str`) so this pack's `${NAME}` fragment refs (its shared test-path
-/// `file_exclude_pattern`) resolve exactly like they do at real load time.
+/// `CARGO_MANIFEST_DIR` (`crates/engine` -> up two -> repo root -> `rules/dsl/...`), filtered to
+/// three Java security-concern LINE-SCAN rules (`sql-string-concat`/`weak-cipher`/`cmd-injection`)
+/// that trace back to the dissolved language-named `java-security` pack (v0.15). `weak-crypto` was
+/// in this set until 2026-08-09, when its hash half became a six-language call-scan rule (10
+/// extensions, no longer `.java`-only) and its cipher arms split out as `weak-cipher` — which is
+/// what keeps this fixture a small, fully-`.java`-applicable pack (every rule's `file_pattern`
+/// admits only the `.java` fixture file), the property the profiling/degradation tests below rely
+/// on. Goes through `zzop_core::parse_dsl_pack` (not a raw `serde_json::from_str`) so this pack's
+/// `${NAME}` fragment refs (its shared test-path `file_exclude_pattern`) resolve exactly like they
+/// do at real load time.
 fn security_java_pack() -> RulePackDef {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rules/dsl/security/security.json");
     let text = fs::read_to_string(&path)
@@ -57,7 +60,7 @@ fn security_java_pack() -> RulePackDef {
     pack.rules.retain(|r| {
         matches!(
             r.id.as_str(),
-            "sql-string-concat" | "weak-crypto" | "cmd-injection"
+            "sql-string-concat" | "weak-cipher" | "cmd-injection"
         )
     });
     pack
@@ -164,6 +167,99 @@ fn syntactically_broken_ts_file_degrades_without_panicking() {
     assert!(loc > 0);
 }
 
+/// Red step for the degraded-cause self-report: this tree really has TWO degraded files with two
+/// DIFFERENT causes, and `coverage.degraded`/`output.degraded` state neither the cause nor the lever.
+#[test]
+fn degraded_files_self_report_their_count_and_cause_breakdown() {
+    let dir = fixture_tree();
+    // Cap chosen so `generated/big.ts` is oversized while `broken.ts` (a parse failure) stays under it —
+    // both degrade paths live in one run, which is the only way the breakdown can be observed at all.
+    let out = analyze_tree(dir.path(), &config(500));
+    assert!(out.degraded.contains(&"generated/big.ts".to_string()));
+    assert!(out.degraded.contains(&"broken.ts".to_string()));
+
+    let report = out
+        .warnings
+        .iter()
+        .find(|w| w.contains("got NO STRUCTURAL PROJECTION from"))
+        .unwrap_or_else(|| {
+            panic!(
+                "no degraded-cause self-report among the run's warnings: {:?}",
+                out.warnings
+            )
+        });
+    // The count, both cause buckets by name, one example from each bucket, and the lever for each.
+    assert!(report.contains("2 file(s)"), "{report}");
+    assert!(report.contains("over the size cap"), "{report}");
+    assert!(report.contains("generated/big.ts"), "{report}");
+    assert!(report.contains("failed to parse"), "{report}");
+    assert!(report.contains("broken.ts"), "{report}");
+    assert!(report.contains("sizeCap"), "{report}");
+    // Precision, not overclaim: line-scan rules DID run on both files.
+    assert!(report.contains("line-scan"), "{report}");
+    // Exactly one aggregate entry, never one per file.
+    assert_eq!(
+        out.warnings
+            .iter()
+            .filter(|w| w.contains("got NO STRUCTURAL PROJECTION from"))
+            .count(),
+        1
+    );
+}
+
+/// The cause is DERIVED on the warm path (`pipeline::artifact::cached_degrade_cause`) rather than
+/// stored in the cached slice, so the two runs agreeing is the whole load-bearing claim of that choice:
+/// a warm run must not downgrade an oversized file to "failed to parse" just because the parser verdict
+/// is the only thing the cache remembers.
+#[test]
+fn the_degraded_cause_report_is_identical_cold_and_warm() {
+    let dir = fixture_tree();
+    let cache_dir = TempDir::new("zzop-engine-degraded-cause-cache");
+    let cfg = EngineConfig {
+        cache_dir: Some(cache_dir.path().to_path_buf()),
+        ..config(500)
+    };
+    let report = |out: &AnalyzeOutput| {
+        out.warnings
+            .iter()
+            .find(|w| w.contains("got NO STRUCTURAL PROJECTION from"))
+            .cloned()
+            .unwrap_or_else(|| panic!("no degraded-cause report: {:?}", out.warnings))
+    };
+
+    let cold = analyze_tree(dir.path(), &cfg);
+    let warm = analyze_tree(dir.path(), &cfg);
+    let stats = warm
+        .cache
+        .as_ref()
+        .expect("expected cache stats on warm run");
+    assert_eq!(
+        stats.hits, warm.file_count,
+        "expected every file to hit on the warm rerun"
+    );
+    let cold_report = report(&cold);
+    assert!(cold_report.contains("over the size cap"), "{cold_report}");
+    assert!(cold_report.contains("failed to parse"), "{cold_report}");
+    assert_eq!(cold_report, report(&warm));
+}
+
+/// A tree with no degraded file must not carry the report at all — a self-report that fires on a clean
+/// run is the noise the aggregate convention exists to prevent.
+#[test]
+fn a_tree_with_no_degraded_file_gets_no_degraded_cause_report() {
+    let dir = TempDir::new("zzop-engine-clean");
+    dir.write("a.ts", "export const a = 1;\n");
+    let out = analyze_tree(dir.path(), &config(DEFAULT_SIZE_CAP));
+    assert!(out.degraded.is_empty());
+    assert!(
+        !out.warnings
+            .iter()
+            .any(|w| w.contains("got NO STRUCTURAL PROJECTION from")),
+        "{:?}",
+        out.warnings
+    );
+}
+
 #[test]
 fn dangling_import_resolves_to_no_edge_without_panicking() {
     let dir = fixture_tree();
@@ -243,8 +339,10 @@ fn disabling_circular_removes_the_circular_finding() {
 #[test]
 fn dsl_finding_message_carries_the_config_disable_hint_for_its_own_id() {
     // D13①: every DSL finding's message must end with `zzop_core::disable_hint`'s fragment for that
-    // finding's OWN `rule_id` — appended by `pipeline::findings::append_disable_hints` after the pack's
-    // own suppress-marker sentence (already present in the raw pack message).
+    // finding's OWN `rule_id`. `pipeline::findings::append_hints` appends TWO sentences and the ORDER is
+    // what this test pins the tail of: the suppress-marker sentence first, the disable hint last. Both are
+    // appended now — the marker sentence used to be written into the pack message by hand, and 110 packs
+    // carried a byte-identical copy of it before the fold.
     let dir = fixture_tree();
     let out = analyze_tree(dir.path(), &config(DEFAULT_SIZE_CAP));
     let hit = out

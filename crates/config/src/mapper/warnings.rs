@@ -68,6 +68,32 @@ pub(super) fn collect_config_warnings(config: &serde_json::Value) -> Vec<String>
         &mut warnings,
     );
     warn_unknown_keys(config.get("git"), &known("git"), "git.", &mut warnings);
+    // `vocabulary` and its one nested scope. Wired 2026-08-07, when `vocabulary.fsd` was renamed to
+    // `vocabulary.featureSlicedDesign` and it turned out the old spelling would have been accepted in
+    // TOTAL SILENCE — this scope was the only declared one the walk never descended into, though
+    // `config-surface.json` has listed its keys all along. That silence costs in the expensive
+    // direction: an undeclared vocabulary key is NOT JUDGED. `FeatureSlicedDesignConfig::default()` does
+    // hold the built-in layer names, but the facade never reaches it — `config/declared.rs` builds the
+    // matcher by CLONING the request's own values, so a key that stopped arriving arrives EMPTY and the
+    // axis goes SILENT rather than falling back. (This comment said "keeps scoring against zzop's
+    // built-in layout" until 2026-08-09, which is the more comforting of the two readings and the wrong
+    // one: a fallback would still score, and a reader who believed it would rank this warning as
+    // cosmetic.) Measured when the corpus config's own `fsd` typo was found: every declared FSD list
+    // arrived empty on all four probes, and nothing anywhere said so except this warning. The nested scope is walked separately because it has its own key list; stopping
+    // one level up would still swallow `featureSlicedDesign.entrY`.
+    let vocabulary = config.get("vocabulary");
+    warn_unknown_keys(
+        vocabulary,
+        &known("vocabulary"),
+        "vocabulary.",
+        &mut warnings,
+    );
+    warn_unknown_keys(
+        vocabulary.and_then(|v| v.get("featureSlicedDesign")),
+        &known("featureSlicedDesign"),
+        "vocabulary.featureSlicedDesign.",
+        &mut warnings,
+    );
     // No `report` scope walk: `report` itself is retired (see `RETIRED_KEYS`), so it is caught by the
     // top-level pass above with the retirement notice. Walking INTO it would bury that one honest
     // sentence under three "unknown config key report.dir" lines whose known-keys list is empty.
@@ -137,7 +163,61 @@ pub(super) fn collect_config_warnings(config: &serde_json::Value) -> Vec<String>
         }
     }
 
+    warn_unmatchable_vocabulary_entries(config.get("vocabulary"), &mut warnings);
+
     warnings
+}
+
+/// A declared `vocabulary.*` entry that CANNOT MATCH ANYTHING, because the rule that reads that key
+/// normalizes its input first and the entry does not survive the same normalization.
+///
+/// This is the one warning here that is not about a key being unrecognized — the key is real, the value
+/// is a well-formed string, and the run accepts it. It is about a value that is inert. Declaring
+/// `sensitiveResponseFieldExactNames: ["sessionToken"]` reads as switching a protection ON, and until
+/// 2026-08-05 it silently switched nothing: the rule normalized the field name it read to
+/// `sessiontoken`, compared it against the verbatim `sessionToken`, and never matched. No lane said so.
+/// That is this repo's first-ranked failure mode — believing a check is on while it is off — and it is
+/// why "just document the normalization" was rejected as the fix.
+///
+/// The transform per key comes from [`zzop_engine::NORMALIZED_VOCABULARY_KEYS`], and the transforms
+/// themselves are the same `zzop_core::vocab_norm` functions the consuming rules call, so this warning
+/// cannot drift away from the comparison it predicts.
+///
+/// **Not every key is checked, deliberately.** Most vocabulary keys are compared verbatim and any
+/// spelling can match; and even among the checked ones a blanket fold would be wrong —
+/// `secretParamNames` legitimately carries both `api_key` and `api-key`, so only CASE is corrected there.
+/// The message names the spelling that would work rather than only reporting a problem, because the
+/// author's next action is always the same edit.
+///
+/// Message style note: no backticks, same reason [`RETIRED_KEYS`] gives — this file is inside the
+/// reference-validation contract's CHECK B scan set.
+fn warn_unmatchable_vocabulary_entries(
+    vocabulary: Option<&serde_json::Value>,
+    warnings: &mut Vec<String>,
+) {
+    let Some(object) = vocabulary.and_then(serde_json::Value::as_object) else {
+        return;
+    };
+    for (key, value) in object {
+        let Some(normalize) = zzop_engine::normalizer_for(key) else {
+            continue;
+        };
+        let Some(entries) = value.as_array() else {
+            continue;
+        };
+        for entry in entries.iter().filter_map(serde_json::Value::as_str) {
+            let normalized = normalize(entry);
+            if normalized == entry {
+                continue;
+            }
+            warnings.push(format!(
+                "vocabulary.{key} entry \"{entry}\" can never match: the rule that reads this key \
+                 normalizes the name it finds before comparing, so no input can ever equal this \
+                 spelling. Declare it as \"{normalized}\" instead — the entry is accepted today and \
+                 does nothing."
+            ));
+        }
+    }
 }
 
 /// One scope of `collectConfigWarnings`'s walk: for every key in `obj` (a no-op if `obj` is absent or

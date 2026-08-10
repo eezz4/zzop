@@ -112,7 +112,8 @@ again.
 
 If what you want is one subject area rather than "everything except", say it the other way round —
 `packs.only` is the same gate read as an allowlist, so you name what you want instead of enumerating
-eleven packs you don't:
+every pack you don't (how many that is depends on how many shipped in your build and how many you
+wanted — `packsLoaded[]` in any run's own output is the honest denominator):
 
 ```jsonc
 { "packs": { "only": ["security", "sql"] } }
@@ -129,9 +130,19 @@ zzop never does this for you, and that is deliberate. Which stacks a repo has is
 an engine that inferred it from a `package.json` would sometimes infer wrong, and the failure mode of a
 wrong inference is security rules that silently do not run.
 
-`zzop init` writes a starter `zzop.config.jsonc` into the current directory: every optional key with a
-comment saying what it means, each already set to zzop's own value, so the file documents the defaults
-rather than changing them. It refuses to overwrite an existing config unless you pass `--force`.
+`zzop init [<dir>]` writes a starter `zzop.config.jsonc` into `<dir>` (default: the current
+directory): every optional key with a comment saying what it means, each already set to zzop's own
+value, so the file documents the defaults rather than changing them. It refuses to overwrite an
+existing config unless you pass `--force`, and `<dir>` must already exist — `init` writes a config
+INTO a tree, never creates one.
+
+It also adds the anchored `**/.zzop/` line to that directory's `.gitignore` when it is missing, so the
+derived cache directory is ignored without anyone having to type the glob the section above warns
+about. Re-running `init` never stacks a duplicate line.
+
+**Run it once per tree.** `zzop cross ./fe ./be` needs a config in each of them —
+`zzop init ./fe && zzop init ./be` — because a single config in the parent declares ONE tree and
+`cross` refuses that.
 
 **A config is required.** Every analysis lane refuses a tree that has none, on both the CLI and the MCP
 surface, and says so with a pointer to that same document. This is not ceremony: the `vocabulary` block
@@ -228,20 +239,17 @@ to the cross-layer join. Per-rule conditions are spelled out in
 | Code | Meaning |
 | --- | --- |
 | `0` | Ran successfully (regardless of what was found). |
-| `1` | Analysis/runtime error. |
-| `2` | Usage or config error. |
+| `1` | Runtime failure — an unreadable path, an invalid or missing config, a refused request. **Every config error lands here**, not on `2`. |
+| `2` | Argument-shape mistake only — an unknown flag, a missing or extra positional, an unknown subcommand. |
 
 The binary does **not** gate its exit code on finding severity: it is an analysis + summary surface, not
 a CI linter. To gate CI, read the JSON counts yourself (e.g. fail the job when `bySeverity.critical > 0`).
 `@zzop/cli` (see [`packages/cli/README.md`](../packages/cli/README.md)) is the identical native binary,
 not a separate presentation layer, so there is no other output surface to switch to.
 
-There used to be three config keys pointing at surfaces like these — `failOn` (a severity gate), `format`
-(an output selector) and `report.*` (report files) — left over from a CLI removed in 2026-07. They were
-accepted and then ignored: writing one produced no warning, no error and no behavior. As of 2026-07-26
-they are **removed from the recognized key set**, so writing one now produces a `configWarnings` entry
-saying it was removed and what to do instead. Deleting such a key from your config changes nothing about
-a run; it only removes the warning.
+Three keys that once pointed at surfaces like these — `failOn`, `format` and `report.*` — are **not in
+the recognized key set**. Writing one produces a `configWarnings` entry saying so and what to do
+instead; deleting it from your config changes nothing about a run, it only removes the warning.
 
 ## Suppressing findings
 
@@ -249,16 +257,28 @@ There are three mechanisms, at three different scopes, plus one caveat about whe
 This section is the one place they're all listed together — each links to its authoritative doc.
 
 **(a) Inline suppress marker (in code, per line).** Every DSL rule whose matcher anchors at a source line
-— `line-scan`, `method-scan`, `io-scan` — has an inline marker derived from its id — `zzop-<rule-id>-ok`;
+has an inline marker derived from its id — `zzop-<rule-id>-ok`. That is every matcher except one, so the
+exception is what this page names rather than the roster: a list of honoring matchers goes stale the day
+a matcher is added, and this sentence had already gone stale that way (it named three of the five);
 `symbol-scan` findings have no line to anchor a comment against and honor no marker (no shipped rule uses
 that matcher today, and `zzop explain <rule-id>` says so per rule). A comment carrying that marker on the
-finding's own line, or the line directly above it, silences that one finding; each rule's `message` states
-the exact marker. Which comment leader is
-recognized depends on the matcher, not on the file: `line-scan`/`method-scan` rules read `//` (plus `--`
-in a `.sql` file), while `io-scan` rules — whose anchor line can come from any language that registers an
-HTTP route — read `//` **or** `#`, so `# zzop-protected-path-no-auth-evidence-ok` on a FastAPI route
-works exactly like `// zzop-protected-path-no-auth-evidence-ok` on an Express one. Those `io-scan`
-markers are NATIVE-analysis only: a full-envelope
+finding's own line, or the line directly above it, silences that one finding; every finding's rendered
+`message` states the exact marker, because the engine appends that sentence rather than each pack
+authoring its own copy (`zzop explain <rule-id>` prints the RAW pack text, which is why the marker shows
+up there on its own `suppress marker:` line instead of inside the message). Which comment leader is
+recognized depends on the matcher AND on the file, and the two axes are asked separately. By matcher: one
+that scans a file in its own language reads `//`; one whose anchor line can come from any language at
+once — an HTTP route, a call site, a literal — reads `//` **or** `#` instead, and never `--`, because no
+`.sql` file produces the anchors those channels match. By file, for the first group only, two additive
+widenings: `--` in a `.sql` file, and `#` in a config file (`.env`, `.yml`, `.toml`, `.ini`, `.conf`,
+`.cfg`, `.properties`) — where `//` is not a comment at all, so without it those files would have no
+writable marker. `//` keeps working everywhere regardless. So `# zzop-protected-path-no-auth-evidence-ok` on a FastAPI route works exactly
+like `// zzop-protected-path-no-auth-evidence-ok` on an Express one. Which matcher falls on which
+side is NOT listed here on purpose: that roster lives in exactly one place
+(`crates/core/src/dsl/markers/`) and `zzop explain <rule-id>` prints your own rule's leaders
+verbatim, so a copy on this page could only go stale — as the copy that used to be here had.
+
+Inline markers are NATIVE-analysis only: a full-envelope
 run (`zzop analyze-envelope`, Mode A) carries no source text, so there is no anchor line to read and the
 marker is inert there. It fails toward firing, not toward silence — a matching finding reports
 unsuppressed rather than being guessed away. `dev-path-no-guard-hint`'s guard-hint carve-out reads that

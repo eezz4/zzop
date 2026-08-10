@@ -9,27 +9,26 @@ fn find<'a>(symbols: &'a [zzop_core::SourceSymbol], name: &str) -> &'a zzop_core
         .unwrap_or_else(|| panic!("expected a symbol named {name}, got: {symbols:?}"))
 }
 
-// --- METHOD-SCAN PARITY: the old lexical crate's `class_and_method_spans_match_the_dvja_pingaction_shape`
-// fixture (`parser-java/src/scan/tests.rs`) — same source, direct body-span comparison. ---
+// --- BODY SPANS: a class span covers its header through its closing brace; a method span covers
+// only its own `{...}`. These are the coordinates every span-consuming rule reads. ---
 
 #[test]
-fn body_spans_match_the_old_lexical_crate_on_the_shared_dvja_pingaction_fixture() {
+fn class_and_method_body_spans_cover_header_through_closing_brace() {
     let src = "public class C {\n  private void run() {\n    String[] cmd = { \"/bin/bash\", \"-c\", \"ping \" + getAddress() };\n    Runtime.getRuntime().exec(cmd);\n  }\n}\n";
     let symbols = parse_symbols("C.java", src);
     let class = find(&symbols, "C");
     assert_eq!(class.kind, SourceSymbolKind::Class);
     assert_eq!(class.line, 1);
-    // Old crate: body_start = Some(1), body_end = Some(6) — exact match.
+    // Class: declaration line 1 .. closing `}` on line 6 (module doc's `body_start`/`body_end`).
     assert_eq!(class.body_start, Some(1));
     assert_eq!(class.body_end, Some(6));
     let run = find(&symbols, "C.run");
     assert_eq!(run.kind, SourceSymbolKind::Function);
     assert_eq!(run.line, 2);
-    // Old crate: body_start = Some(2), body_end = Some(5) — exact match.
+    // Method: the `body` block's own lines only — 2 .. 5, NOT the enclosing class's 1 .. 6.
     assert_eq!(run.body_start, Some(2));
     assert_eq!(run.body_end, Some(5));
-    // Documented naming deviation: the old lexical crate names the method "run" (no qualifier); this
-    // crate names it "C.run" (task-pinned `Type.method` convention).
+    // Names are qualified `Type.method` (module doc's "Qualified naming") — a bare "run" never appears.
     assert!(symbols.iter().all(|s| s.name != "run"));
 }
 
@@ -194,7 +193,7 @@ fn pattern_matching_switch_inside_a_method_body_does_not_break_extraction() {
     assert_eq!(describe.body_end, Some(10));
 }
 
-// --- record component fixture from the old crate's own tests (bonus continuity) ---
+// --- a record is a TYPE, not a method (kind mapping, module doc) ---
 
 #[test]
 fn a_record_declaration_is_classified_as_a_class_not_a_method() {
@@ -230,6 +229,84 @@ fn a_broken_member_amid_an_otherwise_valid_class_does_not_blank_the_whole_file()
 #[test]
 fn empty_file_yields_no_symbols() {
     assert!(parse_symbols("E.java", "").is_empty());
+}
+
+// --- THE SPAN CONTRACT: `body_start` is the DECLARATION's line, annotations included ---
+
+/// `zzop_core::SourceSymbol`'s "Body span contract". Both halves of the pin are the halves that were
+/// wrong before 2026-08-10, and neither is visible in a one-line-header fixture: the span must begin at
+/// the FIRST ANNOTATION (not at `public`, not at the `{`), and a signature wrapped onto extra lines
+/// must not push the span past it. `@Transactional`-, `@GetMapping`- and `async`-anchored method-scan
+/// concepts are exactly the ones that need this, and under the old block-`{` reading every one of them
+/// was a formatting coincidence away from being unwritable.
+#[test]
+fn method_body_span_starts_at_the_first_annotation_not_at_the_opening_brace() {
+    let src = concat!(
+        "class C {\n",
+        "  @Override\n",
+        "  @Deprecated\n",
+        "  public void run(\n",
+        "      int a\n",
+        "  ) {\n",
+        "    go(a);\n",
+        "  }\n",
+        "}\n",
+    );
+    let symbols = parse_symbols("C.java", src);
+    let run = find(&symbols, "C.run");
+    assert_eq!(run.line, 2);
+    assert_eq!(run.body_start, Some(2));
+    assert_eq!(run.body_end, Some(8));
+    // Containment still holds, which is what keeps `drop_outer_spans` innermost-wins correct.
+    let class = find(&symbols, "C");
+    assert!(class.body_start.unwrap() <= run.body_start.unwrap());
+    assert!(class.body_end.unwrap() >= run.body_end.unwrap());
+}
+
+// --- LEAF COMPLETENESS: initializer blocks are scannable regions and must project their own leaf ---
+
+/// The canonical XXE-hardening shape lives in a `static { … }` block. Until 2026-08-10 that block
+/// contributed no symbol, so in any class with one ordinary method `drop_outer_spans` discarded the
+/// class-wide span in favour of that method's leaf and the whole static block became unreachable to
+/// every `.java` method-scan rule — `security/xxe-no-guard` among them. Naming mirrors
+/// `zzop_parser_typescript`'s `STATIC_BLOCK`: a `-` cannot appear in a Java identifier, and the 2nd and
+/// later blocks take a 1-based ordinal so several blocks cannot collapse onto one name.
+#[test]
+fn static_initializer_blocks_each_project_their_own_leaf_span() {
+    let src = concat!(
+        "class C {\n",
+        "  static {\n",
+        "    FACTORY = DocumentBuilderFactory.newInstance();\n",
+        "  }\n",
+        "\n",
+        "  static { second(); }\n",
+        "\n",
+        "  void ordinary() {\n",
+        "    use();\n",
+        "  }\n",
+        "}\n",
+    );
+    let symbols = parse_symbols("C.java", src);
+    let first = find(&symbols, "C.static-block");
+    assert_eq!(first.kind, SourceSymbolKind::Function);
+    assert!(!first.exported);
+    assert_eq!(first.body_start, Some(2));
+    assert_eq!(first.body_end, Some(4));
+    let second = find(&symbols, "C.static-block-2");
+    assert_eq!(second.body_start, Some(6));
+    assert_eq!(second.body_end, Some(6));
+}
+
+/// An instance initializer (`{ … }` directly in a class body) is the same hole with the same cause —
+/// real statements in a region no member declaration covers.
+#[test]
+fn instance_initializer_blocks_each_project_their_own_leaf_span() {
+    let src = "class C {\n  {\n    init();\n  }\n\n  void ordinary() {}\n}\n";
+    let symbols = parse_symbols("C.java", src);
+    let block = find(&symbols, "C.instance-block");
+    assert_eq!(block.kind, SourceSymbolKind::Function);
+    assert_eq!(block.body_start, Some(2));
+    assert_eq!(block.body_end, Some(4));
 }
 
 // --- annotation-type element declarations and record components are out of v1 scope ---

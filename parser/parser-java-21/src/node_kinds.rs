@@ -37,6 +37,10 @@ pub(crate) const PINNED_NODE_KINDS: &[&str] = &[
     "field_declaration",
     "constant_declaration",
     "modifiers",
+    // Initializer blocks — the two anonymous members that owe a leaf (`lang::symbols::member`).
+    // `block` is the bare `{ … }` instance-initializer form; `static_initializer` is `static { … }`.
+    "static_initializer",
+    "block",
     // Identifiers/types (`util`, `lang::symbols`, `lang::used_names`, `project::collect`)
     "identifier",
     "type_identifier",

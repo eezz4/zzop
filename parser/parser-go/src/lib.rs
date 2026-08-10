@@ -1,18 +1,23 @@
 //! `zzop-parser-go` — a `tree-sitter-go`-based Go parser frontend -> Common IR projection, mirroring
 //! `zzop-parser-rust`'s (itself mirroring `zzop-parser-python-3`'s) crate shape and discipline: grammar
 //! AST types stay inside this crate (a `tree-sitter-go` upgrade should never leak into the public IR);
-//! only `zzop_core` types cross the crate boundary — enforced by the same isolation discipline
-//! `scripts/check-syn-isolation.sh` pins for `syn` (a future `check-tree-sitter-isolation.sh` sibling
-//! script covers this crate; see this crate's own public API below for the enforced surface).
+//! only `zzop_core` types cross the crate boundary — enforced by
+//! `scripts/check-tree-sitter-isolation.sh`'s allowlist (the tree-sitter-side sibling of the
+//! `scripts/check-syn-isolation.sh` discipline `zzop-parser-rust` follows for `syn`).
 //!
 //! ## Layout
 //! - `lang` — CST -> Common-IR LANGUAGE projection: `SourceSymbol` extraction (`symbols`), `ImportMap`
 //!   extraction (`imports`), identifier-reference collection (`used_names`), and the pure
 //!   import-path -> package-directory resolver (`resolve`).
-//! - `adapters` — framework-vocabulary producers emitting cross-layer IO facts: `net/http` (raw
-//!   `DefaultServeMux`/`http.NewServeMux`) and `gin` router PROVIDES as router-mount fragments
-//!   (`adapters::net_http`, `adapters::gin`, combined by `extract_go_router_fragments`), and `net/http`
-//!   client literal HTTP egress CONSUMES (`adapters::http_clients`).
+//! - `adapters` — framework-vocabulary producers emitting cross-layer IO facts: router PROVIDES as
+//!   router-mount fragments (the per-framework producers are combined by `extract_go_router_fragments`),
+//!   client literal HTTP egress CONSUMES, and ORM `db-table` facts. WHICH frameworks is deliberately not
+//!   listed here: [`FRAMEWORK_RECOGNIZERS`] below is the machine-verified answer (aggregated by
+//!   `zzop_engine::framework_recognizers`, checked by the engine's `rule_contracts::recognizer_channels` test). A
+//!   prose copy of that list is a second count that nothing verifies, and this one had already drifted:
+//!   it went silent on an adapter the crate root re-exported two screens below. WHICH adapter is
+//!   recorded once, in `scripts/check-framework-prose-enumeration.sh` — naming it here would put the
+//!   name back in the paragraph that must not carry names.
 //!
 //! ## Tree-sitter discipline (this is the first tree-sitter-based parser in the workspace — this
 //! crate sets the pattern every future one follows)
@@ -90,9 +95,10 @@ pub use lang::symbols::parse_symbols;
 pub use lang::used_names::parse_local_identifier_refs;
 
 /// Cache-bust token for `zzop-cache`: `parser-id/pinned-toolchain/last-change-version`. The
-/// `tree-sitter-go` segment must match this crate's `Cargo.toml` pin (a grammar upgrade changes
-/// extraction → restamp); the trailing `CARGO_PKG_VERSION` is restamped when this crate's projected IR
-/// shape changes, else kept so warm Go caches survive the upgrade (2026-07-22 version reform).
+/// `tree-sitter-go` segment names this crate's REAL exact pin (`tree-sitter-go = "=0.25.0"` in
+/// `Cargo.toml`), so it stays accurate for whoever reads it — unlike
+/// `zzop_parser_typescript`'s caret-range label. Keeping the two in step is a courtesy to that
+/// reader, not a correctness duty.
 ///
 /// **This string is an ID, not a version — it no longer has to be bumped.** `crates/engine/build.rs`
 /// hashes this crate's whole dependency closure into the cache key beside it, so a change to any

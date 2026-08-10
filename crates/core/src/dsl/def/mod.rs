@@ -46,6 +46,10 @@ pub struct RulePackDef {
     #[serde(default)]
     pub fragments: BTreeMap<String, String>,
     pub rules: Vec<RuleDef>,
+    /// PACK-SCOPED compiled-regex memo — never deserialized, never part of a pack's identity. See
+    /// [`crate::dsl::RegexCache`] for why the evaluator needs one and why its lifetime is the pack's.
+    #[serde(skip)]
+    pub regex_cache: crate::dsl::RegexCache,
 }
 
 fn any_framework() -> String {
@@ -142,6 +146,46 @@ impl RulePackDef {
         self.fragments.clear();
         Ok(())
     }
+
+    /// ADDS `extra` (one already-validated regex source) to every rule in this pack whose
+    /// `file_exclude_pattern` is the shared `${test-paths…}` vocabulary, rewriting it to
+    /// `(?:<shared>)|(?:<extra>)`. Returns how many rules were rewritten, so a caller can self-report a
+    /// declaration that moved nothing. Call it AFTER [`expand_fragments`] — before expansion the value
+    /// is still a `${NAME}` reference and nothing matches.
+    ///
+    /// ## Why this is ADDITIVE, when every other declared vocabulary REPLACES
+    /// `zzop_engine::VocabularyConfig`'s standing contract is per-key whole replacement, and its default
+    /// for an absent key is "the judgment is NOT MADE" — an under-report the caller chose. Test paths
+    /// invert both halves, and the reason is the direction of the failure, not a preference:
+    /// * A test convention is fixed by the LANGUAGE, not chosen by the project. `_test.go` is what the
+    ///   Go toolchain compiles as a test; asking a Go user to declare it is asking them to restate the
+    ///   toolchain, and it breaks zero-config for every language whose convention we already know.
+    /// * With no default, an undeclared vocabulary means the engine judges test code as production.
+    ///   That is a WRONG CLAIM, not an abstention — the opposite failure direction from every other key
+    ///   here, where silence merely means we say less. Different direction, different policy.
+    /// * Replacement would be a trap: a project adding `it/` for its integration tests would silently
+    ///   lose `_test.go`, `test_*.py` and `*Tests.cs` in the same edit, and the loss would show up as
+    ///   findings rather than as an error.
+    ///
+    /// So the built-in conventions are floor, never ceiling, and a declaration can only widen what is
+    /// declined. Narrowing is deliberately not expressible here: `rules: { "<id>": "off" }` turns a rule
+    /// off, and that is the knob for "I want to be judged on this path after all".
+    pub fn extend_test_path_exclusions(&mut self, extra: &str) -> usize {
+        let mut extended = 0usize;
+        for rule in &mut self.rules {
+            let _ =
+                for_each_pattern_field::<std::convert::Infallible>(rule, &mut |field, value| {
+                    if field == "file_exclude_pattern"
+                        && crate::dsl::fragments::is_shared_test_path_vocabulary(value)
+                    {
+                        *value = format!("(?:{value})|(?:{extra})");
+                        extended += 1;
+                    }
+                    Ok(())
+                });
+        }
+        extended
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -184,7 +228,7 @@ impl RuleDef {
     /// `LineScan` and `MethodScan` findings: a finding is suppressed when its own line, or the line
     /// directly above it (`MARKER_LOOKBACK_LINES`), carries a `//`-comment naming this marker
     /// (`// zzop-<id>-ok` or `// zzop-<id>-ok: reason` both suppress). For a file whose extension is
-    /// `.sql` (case-insensitive, see `is_sql_file`), a `--`-comment naming the marker suppresses
+    /// `.sql` (case-insensitive, see `markers::leaders_for_path`), a `--`-comment naming the marker suppresses
     /// identically (`-- zzop-<id>-ok`) — `--` is a line comment in SQL but not in JS/TS (`--x` is a
     /// decrement there), so that recognition is gated to `.sql` files only. Deriving (vs storing a
     /// per-rule string) means the marker is always predictable from the id and can never drift out of the

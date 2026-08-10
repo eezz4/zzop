@@ -60,12 +60,18 @@ jobs:
         run: bash scripts/check-syn-isolation.sh
       - name: tree-sitter isolation guard
         run: bash scripts/check-tree-sitter-isolation.sh
+      - name: git spawn isolation guard
+        run: bash scripts/check-git-spawn-isolation.sh
       - name: guards-wired meta-guard
         run: bash scripts/check-guards-wired.sh
       - name: rules catalog ↔ site sync guard
         run: bash scripts/check-rules-catalog-sync.sh
       - name: rule description ↔ matcher token guard
         run: bash scripts/check-rule-desc-tokens.sh
+      - name: pack message ↔ engine-appended suppress sentence guard
+        run: bash scripts/check-pack-suppress-sentence.sh
+      - name: matcher glossary ↔ Matcher enum guard
+        run: bash scripts/check-matcher-glossary-sync.sh
       - name: docs rule-id ↔ catalog sync guard
         run: bash scripts/check-docs-rule-ids.sh
       - name: docs link-graph guard
@@ -99,6 +105,8 @@ jobs:
         run: bash scripts/check-shell-pipe-sigpipe.sh
       - name: version-string parser-completeness guard
         run: bash scripts/check-version-lists-parsers.sh
+      - name: framework recognizer ↔ parser prose guard
+        run: bash scripts/check-framework-prose-enumeration.sh
       - name: release-asset name prose drift guard
         run: bash scripts/check-asset-name-prose.sh
       - name: deployment/inventory count prose drift guard
@@ -212,7 +220,7 @@ jobs:
         # packages/cli, no debug fallback), so this needs --release, not a debug build.
         run: cargo build -p zzop-cli-bin --release
       - name: site graph is regenerated from the tree it claims to draw
-        # `site/graph.html` carries a COMMITTED data block — 1,088 nodes of this repo, plus two prose
+        # `site/graph.html` carries a COMMITTED data block — every node of this repo, plus two prose
         # totals — and `site/architecture.html` carries a third copy of those totals. All four are
         # written by scripts/site-graph-data.mjs, and until 2026-07-29 NOTHING ran that script: measured,
         # it had zero callers anywhere in the tree outside itself. A generator nobody runs and an output

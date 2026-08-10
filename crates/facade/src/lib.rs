@@ -80,6 +80,11 @@ pub use request::{
 };
 pub use rule_pack::validate_rule_pack_json;
 pub use version::{version, version_string};
+/// The DSL shared test-paths fragment, compiled — re-exported for zzop-summary, whose layering
+/// (no shipped dependency below this crate) is deliberate, and whose first-screen ordering of
+/// test-path findings (2026-08-09 U78 ruling) must read the SAME pattern the packs expand as
+/// their test-path exclusions. One string, one owner, two consumers that cannot disagree.
+pub use zzop_core::dsl::test_path_re;
 /// The dep graph's membership rule, in one sentence with ONE owner (`zzop_core::ir`). Re-exported for
 /// the same layering reason as the disclosure views below: `zzop-summary` publishes dep-graph-derived
 /// numbers (`fanIn`/`fanOut`/`degree` on the cosmograph points table) and must be able to disclose what

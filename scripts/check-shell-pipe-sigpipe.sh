@@ -38,9 +38,20 @@
 # that no `| grep -q` can exist there, not that looking would be inconvenient:
 #   * `*.mjs` / `*.js` (JavaScript — no shell pipelines, and Node has no `set -o pipefail` semantics
 #     to invert).
-#   * `.github/workflows/*.yml` — `run:` blocks are shell, but a line-based scan there would read YAML
-#     strings, folded scalars and comments as code; the guards those blocks invoke are themselves
-#     scanned, which is where the pipelines actually live.
+#   * ~~`.github/workflows/*.yml`~~ — IN SCOPE since 2026-08-08. The old exclusion rested on a factual
+#     claim — "the guards those blocks invoke are themselves scanned, which is where the pipelines
+#     actually live" — and that claim was false when written. `prebuild.yml`'s MCP-registry publish
+#     step ran `printf '%s' "$out" | grep -q 'cannot publish duplicate version'` two lines under its
+#     own `set -uo pipefail`: the sealed pattern, in a `run:` block, invoking no guard. Its failure
+#     mode is this class at its worst — a chatty publisher makes the pipeline report failure on a REAL
+#     match, so the duplicate-version forgiveness (added so a re-run could succeed) would refuse to
+#     forgive exactly when re-run matters. Fixed to a herestring in the same commit that widened this.
+#     The old exclusion's OTHER half — that a line scan reads YAML strings and folded scalars as code —
+#     is still true, and is accepted deliberately: those misreads are FALSE POSITIVES, which are loud
+#     and take one edit to resolve, whereas the blind spot they were avoiding is a silent inversion in
+#     the exact class this guard exists to seal. Measured before widening: zero hits repo-wide, so the
+#     trade cost nothing today. Comment lines are skipped as everywhere else, and YAML shares `#` with
+#     shell, so a documented example in a workflow comment does not trip it (verified by planting one).
 #   * `target/` and `node_modules/` path segments, matching scripts/lib/tracked-grep.sh's standard
 #     exclusions: build output and vendored dependencies are not this repo's shell.
 # A shell script with neither a `.sh` name nor a home in `.githooks/` is the one residual (a bare
@@ -66,8 +77,10 @@ self="scripts/$(basename "${BASH_SOURCE[0]}")"
 # scripts/lib/tracked-grep.sh's standard exclusions).
 files="$(
   {
-    git ls-files -- '*.sh' '.githooks/*'
-    git ls-files --others --exclude-standard -- '*.sh' '.githooks/*'
+    # BOTH workflow extensions: GitHub Actions loads `*.yml` and `*.yaml` alike (check-guards-wired.sh
+    # enumerates both), so a `.yaml`-spelled workflow must not fall out of this scan silently.
+    git ls-files -- '*.sh' '.githooks/*' '.github/workflows/*.yml' '.github/workflows/*.yaml'
+    git ls-files --others --exclude-standard -- '*.sh' '.githooks/*' '.github/workflows/*.yml' '.github/workflows/*.yaml'
   } | sort -u | grep -vE '(^|/)(target|node_modules)/' || true
 )"
 
@@ -113,4 +126,4 @@ if [ "$fail" -ne 0 ]; then
   echo "  or '| grep ... >/dev/null' (grep then consumes all input). See this script's header." >&2
   exit 1
 fi
-echo "check-shell-pipe-sigpipe: OK (no '| grep -q' pipelines in $scanned shell files: every git-known *.sh plus .githooks/*)"
+echo "check-shell-pipe-sigpipe: OK (no '| grep -q' pipelines in $scanned files: every git-known *.sh, .githooks/*, and .github/workflows/*.{yml,yaml})"

@@ -1,3 +1,6 @@
+crates/cache/src/evict.rs:EVICT_TO_RATIO_DEN cap # hysteresis denominator — see EVICT_TO_RATIO_NUM
+crates/cache/src/evict.rs:EVICT_TO_RATIO_NUM cap # hysteresis numerator — one eviction pass reclaims to 3/4 of the cap rather than exactly to it, so the directory does not sit AT the budget and pay for a full pass every run. Paired with EVICT_TO_RATIO_DEN; neither is meaningful alone
+crates/cache/src/evict.rs:MAX_CACHE_BYTES cap # disk budget for one cache directory. A threshold, not a name — and the ONLY thing bounding growth since the schema version stopped carrying the release number (before that, every upgrade wiped and that wipe was the reclamation). 256 MiB is ~44k entries at this repo's measured ~6 KB/entry, far above any single tree's LIVE set, so in practice the evictor only reaches entries already orphaned by an edit. Deliberately not a config key yet: the trigger for making it declarable is a user who actually hits it
 crates/cache/src/hash.rs:FNV_OFFSET_A internal # FNV-1a basis; changing it re-addresses every cache entry filename
 crates/cache/src/hash.rs:FNV_OFFSET_B internal # FNV-1a basis; changing it re-addresses every cache entry filename
 crates/cache/src/hash.rs:FNV_PRIME_A internal # FNV-1a basis; changing it re-addresses every cache entry filename
@@ -8,10 +11,12 @@ crates/cache/src/store.rs:FINDINGS_DIR internal # cache-directory layout zzop de
 crates/cache/src/store.rs:FORMAT_VERSION internal # on-disk entry format version
 crates/cache/src/store.rs:IR_DIR internal # cache-directory layout zzop defines
 crates/cache/src/store.rs:SCHEMA_VERSION_FILE internal # cache-directory layout zzop defines
+crates/cache/src/store/tests.rs:VERSIONS test # the schema-version strings the equality-vs-ordering matrix test opens a cache under. Fixture inputs, not policy: shaped like real values (a bare hash, plus one legacy release+hash spelling so the transition off that format stays covered)
 crates/config/src/lib.rs:CONFIG_SURFACE_JSON internal
 crates/config/src/lib.rs:DEFAULT_AUTHORED_PACKS_DIR internal # zzop's own on-disk layout; already overridable via packs.extraDirs
 crates/config/src/lib.rs:DEFAULT_CONFIG_FILENAME internal
 crates/config/src/lib_tests.rs:TREES_LESS_CONFIG test # fixture config body for the single-tree-over-a-workspace disclosure tests
+crates/config/src/load.rs:MISSING_CONFIG_MARKER internal # the stable head of zzop's own refusal message, matched by its own hosts to append their prescription — not a user-tunable knob
 crates/config/src/mapper/options.rs:FRONT_END_ONLY_VOCABULARY_KEYS internal # zzop's own config keys the front end consumes rather than forwards
 crates/config/src/mapper/severity.rs:SEVERITY_ALIASES internal # zzop's own accepted severity tokens (off/critical/warn/...)
 crates/config/src/mapper/warnings.rs:RETIRED_KEYS internal # config keys zzop itself retired
@@ -23,6 +28,7 @@ crates/core/src/call_sites.rs:CALL_KIND_HASH_CALL internal # sibling of the othe
 crates/core/src/call_sites.rs:CALL_KIND_PROCESS_EXEC internal # sibling of CALL_KIND_CONSOLE_WRITE/ENV_READ, same reasoning — zzop own wire spelling for a call-site family; what the family CONTAINS per language is each producer judgment
 crates/core/src/call_sites.rs:RULE_READ_CALL_KINDS internal # the call kinds this build's RULES read — the call-side twin of RULE_READ_IO_KINDS below, same axis for the same reason (a description of OUR wiring, not a name a project picks). Filled in W1 with console-write and env-read as the three consuming rules landed, and bound to them by crates/engine/tests/rule_contracts/call_kind_readers.rs, which reads the loaded packs' CallScan::kind rather than grepping source because a call kind is named declaratively where an io kind is compared in Rust
 crates/core/src/dsl/fragments.rs:SHARED_FRAGMENTS_JSON internal # embedded DSL bundle; fragment NAMES are censused separately in Rust
+crates/core/src/dsl/fragments.rs:TEST_PATH_FRAGMENT_PREFIX internal # the NAME of zzop's own shared fragment family (`${test-paths}` and its `test-paths-*` extensions), not a name any project picks -- a project's own test paths are `vocabulary.extraTestPathPatterns`
 crates/core/src/dsl/inline_census_tests.rs:AXES test # the inline-value census axis vocabulary + its legend; a guard vocabulary, not shipped policy
 crates/core/src/dsl/inline_census_tests.rs:CENSUS_FILE test # path of the committed inline-value census snapshot
 crates/core/src/dsl/inline_census_tests.rs:CONVENTION_CEILING test # ratchet on the inline-value census convention axis (lower only) — each row is a config key that does not exist yet or one the pack is not wired to read
@@ -30,10 +36,11 @@ crates/core/src/dsl/inline_census_tests.rs:SUBJECT_FLOOR test # vacuous-green fl
 crates/core/src/dsl/inline_census_tests.rs:UNREVIEWED_CEILING test # ratchet on the inline-value census unreviewed axis (lower only)
 crates/core/src/dsl/inline_census_tests.rs:UPDATE_CMD test # the regeneration command, spelled once so every failure message can print it
 crates/core/src/dsl/inline_census_tests.rs:UPDATE_ENV test # env var that switches the inline-value census from check to regenerate
-crates/core/src/dsl/markers.rs:MARKER_LOOKBACK_LINES cap
-crates/core/src/dsl/markers.rs:NEAR_MISS_MARKER_TOKEN_PATTERN internal # grammar of zzop's own <id>-ok suppression marker
-crates/core/src/dsl/source.rs:BLOB_LINE cap
-crates/core/src/dsl/source.rs:LONG_LINE cap
+crates/core/src/dsl/markers/mod.rs:MARKER_LOOKBACK_LINES cap
+crates/core/src/dsl/markers/mod.rs:NEAR_MISS_MARKER_TOKEN_PATTERN internal # grammar of zzop's own <id>-ok suppression marker
+crates/core/src/dsl/markers/path.rs:HASH_COMMENT_EXTENSIONS fact # file formats whose line comment is # and in which // is not a comment at all (dotenv/YAML/TOML/INI/properties) — fixed by each format, not a name a project picks, so a suppress marker written there must use #
+crates/core/src/dsl/source/line_shape.rs:BLOB_LINE cap
+crates/core/src/dsl/source/line_shape.rs:LONG_LINE cap
 crates/core/src/dsl/tests_call_scan.rs:SRC test # the fixture source text the call-scan interpreter tests hand-place sites against
 crates/core/src/dsl/tests_fragments/name_census.rs:CENSUSED_FRAGMENTS test
 crates/core/src/dsl/tests_fragments/name_census.rs:SHARED_BUNDLE test
@@ -66,6 +73,14 @@ crates/core/src/recognizer.rs:CONSUMES internal # wire spelling of one cross-lay
 crates/core/src/recognizer.rs:DB internal # wire spelling of one cross-layer channel, the closed vocabulary a FrameworkRecognizer declaration may name. NOT `convention`: a convention is a name the PROJECT picks and declares in config, while this one is fixed by our own producer/consumer channel and no user may rename it
 crates/core/src/recognizer.rs:PROVIDES internal # wire spelling of one cross-layer channel, the closed vocabulary a FrameworkRecognizer declaration may name. NOT `convention`: a convention is a name the PROJECT picks and declares in config, while this one is fixed by our own producer/consumer channel and no user may rename it
 crates/core/src/registry/redact.rs:REDACTED internal # the marker an excluded evidence path is replaced with; zzop's own output vocabulary, not a tunable
+crates/core/src/rule_channels.rs:ALL internal # the closed set of the six channel spellings above, asserted equal to the side-by-kind cross product of RULE_READ_IO_KINDS by that module's own test — a channel missing here is one no rule can declare and no disclosure can group by
+crates/core/src/rule_channels.rs:DB_TABLE_CONSUMES internal # wire spelling of one native-rule io channel (a cross-layer side paired with an io kind), the closed vocabulary a NATIVE_ANALYSES row may name. Same axis and same argument as the recognizer.rs PROVIDES/CONSUMES spellings it is composed from: fixed by our own producer/consumer channel, and no user may rename it
+crates/core/src/rule_channels.rs:DB_TABLE_PROVIDES internal # wire spelling of one native-rule io channel (a cross-layer side paired with an io kind), the closed vocabulary a NATIVE_ANALYSES row may name. Same axis and same argument as the recognizer.rs PROVIDES/CONSUMES spellings it is composed from: fixed by our own producer/consumer channel, and no user may rename it
+crates/core/src/rule_channels.rs:HTTP_CONSUMES internal # wire spelling of one native-rule io channel (a cross-layer side paired with an io kind), the closed vocabulary a NATIVE_ANALYSES row may name. Same axis and same argument as the recognizer.rs PROVIDES/CONSUMES spellings it is composed from: fixed by our own producer/consumer channel, and no user may rename it
+crates/core/src/rule_channels.rs:HTTP_PROVIDES internal # wire spelling of one native-rule io channel (a cross-layer side paired with an io kind), the closed vocabulary a NATIVE_ANALYSES row may name. Same axis and same argument as the recognizer.rs PROVIDES/CONSUMES spellings it is composed from: fixed by our own producer/consumer channel, and no user may rename it
+crates/core/src/rule_channels.rs:NO_IO internal # the empty channel set, named once so a rule whose evidence is not io at all states that rather than defaulting to it. Holds no vocabulary by construction; censused because it is the shape every rules-graph/rules-schema row points at, and rule_contracts::rule_channels checks the claim crate-wide
+crates/core/src/rule_channels.rs:TRPC_CONSUMES internal # wire spelling of one native-rule io channel (a cross-layer side paired with an io kind), the closed vocabulary a NATIVE_ANALYSES row may name. Same axis and same argument as the recognizer.rs PROVIDES/CONSUMES spellings it is composed from: fixed by our own producer/consumer channel, and no user may rename it
+crates/core/src/rule_channels.rs:TRPC_PROVIDES internal # wire spelling of one native-rule io channel (a cross-layer side paired with an io kind), the closed vocabulary a NATIVE_ANALYSES row may name. Same axis and same argument as the recognizer.rs PROVIDES/CONSUMES spellings it is composed from: fixed by our own producer/consumer channel, and no user may rename it
 crates/core/src/string_literals.rs:FNV_OFFSET internal # FNV-1a 64 basis for BoundStringLiteral::value_hash; changing it invalidates every cached value_hash and the rule-side value==name comparison, never a tunable
 crates/core/src/string_literals.rs:FNV_PRIME internal # FNV-1a 64 prime, same contract as FNV_OFFSET directly above
 crates/core/src/string_literals.rs:HIGH_ENTROPY_SECRET_MIN_BITS cap # measured entropy floor (T2, 2026-08-03) for security/high-entropy-secret; the pack ships the evaluated copy and rule_contracts/literal_scan_threshold.rs pins the two equal
@@ -84,12 +99,12 @@ crates/engine/src/cache.rs:DSL_INTERPRETER_FINGERPRINT internal
 crates/engine/src/cache.rs:LEXICAL_FALLBACK_ID internal # names which projector produced an entry; the version half is a source hash (build.rs)
 crates/engine/src/cross_layer_findings/diagnosed.rs:DIAGNOSING_RULE_IDS internal # zzop rule ids, not user vocabulary — which of our own rules count as a specific diagnosis
 crates/engine/src/dead_exports.rs:NON_TS_CALL_GRAPH_EXTENSIONS fact # file extensions fixed by the languages
-crates/engine/src/disclosure.rs:ANALYSIS_DARK internal
 crates/engine/src/disclosure.rs:BLINDNESS_REGISTRY internal # zzop's own disclosure-class registry (ids, groups, prose)
-crates/engine/src/disclosure.rs:EXTRACTION_BLIND internal
-crates/engine/src/disclosure.rs:INPUT_CONFIG internal
-crates/engine/src/disclosure.rs:TRUST_CALIBRATION internal
 crates/engine/src/disclosure/tests.rs:EXPECTED test
+crates/engine/src/disclosure/types.rs:ANALYSIS_DARK internal
+crates/engine/src/disclosure/types.rs:EXTRACTION_BLIND internal
+crates/engine/src/disclosure/types.rs:INPUT_CONFIG internal
+crates/engine/src/disclosure/types.rs:TRUST_CALIBRATION internal
 crates/engine/src/dispatch.rs:DEFAULT_SKIP_DIRS convention -> vocabulary.skipDirs # dist/build/.next/target are build-output names a project picks; decides what is never analyzed at all
 crates/engine/src/dispatch.rs:NON_SOURCE_EXTENSIONS fact # extensions fixed by the file formats
 crates/engine/src/dispatch/tests.rs:EXPECTED test
@@ -121,6 +136,7 @@ crates/engine/src/framework_silence/fetch_wrapper.rs:WRAPPER_FUNNEL_TAIL interna
 crates/engine/src/framework_silence/gateway_declaration.rs:GATEWAY_DECLARATIONS fact # deployment-declaration filenames and the constructs inside them that can move a route path (Vercel rewrites, Next basePath, nginx proxy_pass) — spelled by those tools, not by us. The markers are what keep the S12 report from being a filename census: the file must actually declare a rewrite, because warning on mere presence would train the reader to skip the line
 crates/engine/src/framework_silence/orm_schema_silence.rs:MAX_EXAMPLES cap
 crates/engine/src/framework_silence/orm_schema_silence.rs:ORM_SCHEMA_SPECIFIERS fact # published package names
+crates/engine/src/framework_silence/orm_schema_silence.rs:SILENCED_RULE_ID internal # zzop rule id
 crates/engine/src/framework_silence/python_mount_prefix.rs:MAX_CALL_SPAN cap # bytes S14 will scan forward for an include_router call closing paren. Not a judgement about Python: a mount call is a few lines, and the bound keeps one unbalanced paren in a generated file from becoming a whole-file scan
 crates/engine/src/framework_silence/python_mount_prefix.rs:MAX_EXAMPLES cap # mount sites named per S14 warning. The COUNT stays exact; only the example list is bounded
 crates/engine/src/framework_silence/rust_router_layer.rs:AFFECTED_RULE_ID internal # zzop rule id
@@ -134,8 +150,10 @@ crates/engine/src/io.rs:DEFAULT_ROUTER_NAMES convention -> vocabulary.routerName
 crates/engine/src/lib.rs:DEFAULT_SIZE_CAP cap
 crates/engine/src/pipeline/rust_workspace.rs:TARGET_SECTIONS fact # Cargo.toml section headers fixed by Cargo
 crates/engine/src/tests.rs:DERIVED_SCHEMA_GATE test
+crates/engine/src/trees/cross_tree_imports.rs:MAX_EXAMPLES cap # specifiers named per cross-tree-import disclosure. Same shape as every framework_silence MAX_EXAMPLES: the COUNT is always exact and only the example list is bounded, and the message says out loud that it truncated (a silent cut would read as "that was all of them")
 crates/engine/src/trees/parallel_impl.rs:MIN_PARALLEL_IMPL_SIGNALS cap
 crates/engine/src/vocabulary.rs:DEFAULT_JAVA_SOURCE_ROOT convention -> vocabulary.javaSourceRoot # the Maven/Gradle layout is a source root a project can relocate (moved here from decorator_gate.rs SRC_ROOT, whose one reader now takes it as an argument)
+crates/engine/src/vocabulary/normalizers.rs:NORMALIZED_VOCABULARY_KEYS internal # zzop's own config-key spellings paired with the transform each key's consuming rule applies before comparison — a description of OUR wiring, same axis as the CALL_KIND_* wire spellings. A project cannot rename these keys. The census matters here because a key silently MISSING from this table restores exactly the silent failure the table was built to end (a declared entry that can never match, with no warning), and nothing else notices the omission
 crates/git/src/parse.rs:MS_PER_DAY internal # unit arithmetic (24*60*60*1000), neither a name nor a threshold
 crates/git/src/process.rs:COMMIT_MARKER internal # in-band marker in zzop's own git-log --format string
 crates/git/src/tests.rs:FAR_FUTURE_NOW_MS test
@@ -143,30 +161,33 @@ crates/git/src/tests.rs:LATIN1_SUBJECT test
 crates/metrics/src/report_excludes/tests.rs:DROP test # fixture path excluded by the test's own glob; the paired KEEP is the control. No shipped counterpart — the exclude globs users write are config data, never a const here
 crates/metrics/src/report_excludes/tests.rs:KEEP test # fixture path the test's exclude glob must NOT match; paired with DROP so a filter that empties a list fails as loudly as one that filters nothing
 crates/metrics/src/scores/config.rs:DEFAULT_HIERARCHY_SHARED_DIRS convention -> vocabulary.hierarchySharedDirs # cross-cutting dirs exempted from layering violations
-crates/metrics/src/scores/config/fsd.rs:DEFAULT_FSD_BASE_DIRS convention -> vocabulary.fsd.baseDirs # FSD base-layer dir name
-crates/metrics/src/scores/config/fsd.rs:DEFAULT_FSD_ENTRY convention -> vocabulary.fsd.entry # FSD entry-layer dir names; a project using views/screens scores against a layout it never adopted
-crates/metrics/src/scores/config/fsd.rs:DEFAULT_FSD_SHARED convention -> vocabulary.fsd.shared # FSD shared-layer dir names
-crates/metrics/src/scores/config/fsd.rs:DEFAULT_FSD_SLICE_CONTAINERS convention -> vocabulary.fsd.sliceContainers # modules is as common as features and would score as cross-slice
-crates/metrics/src/scores/config/fsd.rs:NEVER internal # unsatisfiable regex used when an FSD layer list is empty; parsing mechanics, not a name
+crates/metrics/src/scores/config/feature_sliced_design.rs:DEFAULT_FSD_BASE_DIRS convention -> vocabulary.featureSlicedDesign.baseDirs # FSD base-layer dir name
+crates/metrics/src/scores/config/feature_sliced_design.rs:DEFAULT_FSD_ENTRY convention -> vocabulary.featureSlicedDesign.entry # FSD entry-layer dir names; a project using views/screens scores against a layout it never adopted
+crates/metrics/src/scores/config/feature_sliced_design.rs:DEFAULT_FSD_SHARED convention -> vocabulary.featureSlicedDesign.shared # FSD shared-layer dir names
+crates/metrics/src/scores/config/feature_sliced_design.rs:DEFAULT_FSD_SLICE_CONTAINERS convention -> vocabulary.featureSlicedDesign.sliceContainers # modules is as common as features and would score as cross-slice
+crates/metrics/src/scores/config/feature_sliced_design.rs:NEVER internal # unsatisfiable regex used when an FSD layer list is empty; parsing mechanics, not a name
 crates/metrics/src/scores/meanings.rs:SCORE_MEANINGS internal # zzop's own disclosure prose — one sentence per score key, shipped as `scoreMeanings` (same axis as `output/timings.rs:MEANING` for the same reason: warning/legend prose is not a name any project picks, and no external spec fixes it). NOT `convention`: the KEYS are zzop's own wire spellings, so nothing here is declarable. The values are the one owner of what each score means — a documentation table would be the second owner, which is exactly why this is a const and not a doc
+crates/metrics/src/scores/meanings/tests.rs:POPULATION_FIELD test # the population field each score key must ship (`featureSlicedDesign`->`totalImports`, `busFactor`->`total`, ...). `test`, not `convention`: nothing here is declarable and no project picks these names — they are zzop's own wire spellings, asserted against serde's own output so no score can ship a number without the denominator that says what it measured. The prose owner of the same table is `scores/types/reports/aggregate.rs`; this is the executable half
 crates/summary/src/analyze/tests.rs:CONDITIONAL_UNDER_ITS_OWN_NAME test # which surface-parity carry-conditional rows ride under their own reply key; fail-closed whitelist for a derived pin
 crates/summary/src/analyze/tests.rs:EXAMPLE_ENVELOPE test
 crates/summary/src/analyze/tests.rs:SHAPER_INVENTED_KEYS test # reply keys the shaper invents (no AnalyzeOutputView row); fail-closed whitelist for a derived pin
 crates/summary/src/contracts.rs:CONFIG_TEMPLATE_FILENAME internal
 crates/summary/src/contracts.rs:CONFIG_TEMPLATE_NAME internal
 crates/summary/src/contracts.rs:DISCLOSURE_CONTRACT_NAME internal # zzop's own contract-document name, not a name a project picks; T1 - the ONE symbol the reply's disclosure pointer and the table row answering it both read, so the pointer cannot rot on one surface while the other stays green
+crates/summary/src/contracts.rs:MISSING_CONFIG_MARKER internal # re-export of the config crate's marker (one owner)
 crates/summary/src/contracts.rs:URI_PREFIX internal # zzop's own resource URI space (zzop://contract/), not a name a project picks; T1 - moved here from packages/mcp/src/resources.rs, which now imports it, so the MCP resources lane and the reply pointer spell one prefix
+crates/summary/src/graph/cochange.rs:DEFAULT_COCHANGE_TOP cap # edge cap for the co-change diagram; readability threshold, overridable with --top
 crates/summary/src/graph/cosmograph/tests.rs:EMITTER test # workspace-relative path of this lane's emitter, used test-only to locate its owning _cliOnlyLanes entry in surface-parity.json by `sources` rather than by lane name; not a name any project spells
 crates/summary/src/graph/dep.rs:DEFAULT_DEP_TOP cap # node cap for the dep diagram; readability threshold, overridable with --top
 crates/summary/src/graph/dep/window.rs:HISTORY_COLUMNS internal # the git-derived column names this lane actually emits. Not a tunable but a description of what is emitted, and a column added without adding it here makes the disclosure sentence understate what the window governs
 crates/summary/src/graph/mermaid.rs:CLASS_DEFS internal # mermaid classDef names and colours zzop emits
 crates/summary/src/graph/mod.rs:DEFAULT_GRAPH_TOP cap
-crates/summary/src/graph/mod.rs:WIRE_NAMES internal # zzop's own --domain spellings, not names a project picks
 crates/summary/src/graph/model.rs:CONSUME internal # zzop graph edge label
 crates/summary/src/graph/model.rs:PROVIDE internal # zzop graph edge label
 crates/summary/src/graph/posture.rs:DEFAULT_POSTURE_TOP cap # per-tree route cap for the posture diagram; readability threshold, overridable with --top
 crates/summary/src/graph/posture.rs:WRITE_METHODS fact # HTTP method TOKENS fixed by RFC, mirroring http_scan.rs WRITE_HTTP_METHODS - not names a project picks
 crates/summary/src/graph/risk.rs:DEFAULT_RISK_TOP cap # per-kind node cap for the risk diagram; readability threshold, overridable with --top
+crates/summary/src/graph/vocabulary.rs:WIRE_NAMES internal # zzop's own --domain/--format spellings, not names a project picks
 crates/summary/src/manifest/mod.rs:RELATIONS internal # zzop manifest relation names
 crates/summary/src/output/bucket_keys.rs:KEY_BUCKETS internal # zzop's own output bucket names
 crates/summary/src/output/mod.rs:DEFAULT_DEGRADED_LIMIT cap
@@ -232,6 +253,8 @@ parser/parser-java-21/src/lang/call_sites.rs:PROCESS_BUILDER_TYPE fact # java.la
 parser/parser-java-21/src/lang/call_sites.rs:SYSTEM_STREAM_FIELDS fact # java.lang.System's own out/err stream-field names — the field rides in the callee verbatim rather than in a folded stream field (the channel's false-fold rule)
 parser/parser-java-21/src/lang/call_sites/hash_call.rs:MESSAGE_DIGEST_TYPE fact # java.security.MessageDigest's own type name, fixed by the JDK
 parser/parser-java-21/src/lang/loop_spans.rs:LOOP_STATEMENT_KINDS fact # tree-sitter node kinds
+parser/parser-java-21/src/lang/symbols/member.rs:INSTANCE_BLOCK internal # the member name zzop gives a Java instance initializer, which the language leaves unnamed — STATIC_BLOCK's twin, same axis and same reasoning
+parser/parser-java-21/src/lang/symbols/member.rs:STATIC_BLOCK internal # the member name zzop gives a Java `static { … }` initializer, which the language leaves unnamed. Same axis as parser-typescript's STATIC_BLOCK and deliberately the same spelling: it is not a name any project writes or could declare in config, it is zzop's own symbol spelling and half of the `{file}#Class.static-block` id its own consumers read. The `-` is load-bearing (no Java identifier contains one), which is what makes it collision-proof against a real member name
 parser/parser-java-21/src/lang/used_names.rs:DECLARES_NAME_FIELD fact # tree-sitter node kinds
 parser/parser-java-21/src/lib.rs:FRAMEWORK_RECOGNIZERS fact # which frameworks this parser recognizes, named as their OWN ecosystems spell them and keyed by the extensions those ecosystems use — fixed externally, not a knob. The row set is bound to the adapter modules on disk by rule_contracts::recognizer_drift, so it cannot drift into a claim about a recognizer that does not ship
 parser/parser-java-21/src/lib.rs:PARSER_FINGERPRINT internal
@@ -286,6 +309,8 @@ parser/parser-rust/src/lang/call_sites.rs:ENV_READ_CALLEES fact # Rust stdlib pa
 parser/parser-rust/src/lang/call_sites.rs:HASH_CALLEES fact # the (spelling, algorithm) pairs of the digest crates Rust actually hashes with — the ONE place a sibling third-party surface is claimed, because Rust std ships no digest and the platform-API rule would leave the family empty; argued at the declaration and in the module doc
 parser/parser-rust/src/lang/call_sites.rs:PROCESS_EXEC_CALLEES fact # std::process::Command::new in each of its three spellings — the platform own path, kept per spelling for the same original-spelling reason ENV_READ_CALLEES is
 parser/parser-rust/src/lang/extractor_guards.rs:RUST_OPTIONAL_EXTRACTOR_PREFIXES convention -> vocabulary.rustOptionalExtractorPrefixes # how a project spells its own OPTIONAL request extractor (MaybeAuthUser, OptionalUser) - the Rust twin of pythonGuardAnonymousVetoSubstrings
+parser/parser-rust/src/lang/resolve.rs:PATH_ATTR_HEAD internal # zzop's own encoding for "this mod declaration carries #[path]", chosen non-identifier-shaped (leading #) so it cannot collide with a real Rust specifier; a project cannot rename it and no external spec fixes it. Same axis and same reasoning as the CALL_KIND_* wire spellings — it is a description of OUR wiring. Two engine sites read it as a SYMBOL rather than re-spelling it (assemble::helpers::rust, assemble::collect::candidates), which is the T1 answer to the drift this census exists to notice
+parser/parser-rust/src/lang/resolve.rs:PATH_ATTR_PREFIX internal # PATH_ATTR_HEAD plus its separator, defined beside it so the head and the separator cannot drift apart; pinned to its head by lang::resolve::tests
 parser/parser-rust/src/lib.rs:FRAMEWORK_RECOGNIZERS fact # which frameworks this parser recognizes, named as their OWN ecosystems spell them and keyed by the extensions those ecosystems use — fixed externally, not a knob. The row set is bound to the adapter modules on disk by rule_contracts::recognizer_drift, so it cannot drift into a claim about a recognizer that does not ship
 parser/parser-rust/src/lib.rs:PARSER_FINGERPRINT internal
 parser/parser-sql/src/extract.rs:SEGMENT fact # SQL identifier-quoting syntax fixed by the dialects
@@ -331,6 +356,7 @@ parser/parser-typescript/src/lib.rs:ARRAY_ITERATION_METHODS fact # ECMAScript Ar
 parser/parser-typescript/src/lib.rs:FRAMEWORK_RECOGNIZERS fact # which frameworks this parser recognizes, named as their OWN ecosystems spell them and keyed by the extensions those ecosystems use — fixed externally, not a knob. The row set is bound to the adapter modules on disk by rule_contracts::recognizer_drift, so it cannot drift into a claim about a recognizer that does not ship
 parser/parser-typescript/src/lib.rs:PARSER_FINGERPRINT internal
 parser/parser-typescript/src/lib.rs:PROMISE_CONTINUATION_METHODS fact # ECMAScript Promise method names
+parser/parser-typescript/src/symbol_shapes/class.rs:STATIC_BLOCK internal # the member name zzop gives a class static initialization block, which the language leaves unnamed. NOT `convention`: it is not a name any project writes or could declare in config — it is zzop's own symbol spelling, half of the `{file}#Class.static-block` id its own consumers read, the same axis as the CALL_KIND_*/sentinel-kind spellings above. The `-` is load-bearing (no JS identifier contains one), which is what makes it collision-proof against a real member name
 rules/native/rules-cross-layer/src/cross_layer/all_consumes_unjoined.rs:MAX_SAMPLE_KEYS cap
 rules/native/rules-cross-layer/src/cross_layer/all_consumes_unjoined.rs:MIN_UNJOINED_CONSUMES cap
 rules/native/rules-cross-layer/src/cross_layer/all_consumes_unjoined/subsume.rs:REPLACED internal # zzop rule ids this fold replaces, not user vocabulary
@@ -355,10 +381,12 @@ rules/native/rules-cross-layer/src/cross_layer/unconsumed_endpoint.rs:MAX_LISTED
 rules/native/rules-cross-layer/src/cross_layer/unconsumed_endpoint.rs:WELL_KNOWN_PREFIX fact # /.well-known/ is fixed by RFC 8615
 rules/native/rules-cross-layer/src/cross_layer/unconsumed_mutation_endpoint.rs:RULE_ID internal # zzop rule id
 rules/native/rules-cross-layer/src/cross_layer/write_methods.rs:CROSS_LAYER_WRITE_METHODS fact # HTTP method TOKENS fixed by RFC, not names a project picks. T2 - pinned equal to rules-http WRITE_HTTP_METHODS in engine policy_pins.rs (this crate depends on zzop-core alone)
+rules/native/rules-cross-layer/src/lib.rs:NATIVE_ANALYSES internal # zzop's own native analysis IDS paired with the io channels each rule reads — one table, read by this crate's register_native_analyses AND its native_rule_channels, so an id cannot be registered without a channel statement. A row silently dropped unregisters the rule and un-declares it in one edit; rule_contracts::rule_channels binds each row's channels to the io its module actually compares
 rules/native/rules-graph/src/cache_lane_file_read.rs:DEFAULT_FILE_READ_CALLEES convention -> vocabulary.fileReadCallees # stdlib read spellings, not names a project picks - declarable so a tree whose read_to_string means something else can narrow it
 rules/native/rules-graph/src/cache_lane_file_read/tests.rs:ANCHOR test
 rules/native/rules-graph/src/cache_lane_file_read/tests.rs:READS test
 rules/native/rules-graph/src/dead_candidates.rs:DEAD_MAX_CHANGES cap
+rules/native/rules-graph/src/lib.rs:NATIVE_ANALYSES internal # zzop's own native analysis IDS paired with the io channels each rule reads — one table, read by this crate's register_native_analyses AND its native_rule_channels, so an id cannot be registered without a channel statement. A row silently dropped unregisters the rule and un-declares it in one edit; rule_contracts::rule_channels binds each row's channels to the io its module actually compares
 rules/native/rules-http/src/http_scan.rs:NEAR_MISS_STEM_PATTERN internal # grammar of zzop's own marker
 rules/native/rules-http/src/http_scan.rs:OK_MARKER_LOOKBACK_ABOVE cap
 rules/native/rules-http/src/http_scan.rs:OK_MARKER_LOOKBACK_LINES cap
@@ -368,6 +396,7 @@ rules/native/rules-http/src/http_scan.rs:WRITE_HTTP_METHODS fact # read the decl
 rules/native/rules-http/src/http_scan.rs:WRITE_SITE_COVERED_EXTENSIONS fact # file extensions fixed by the languages
 rules/native/rules-http/src/http_scan/tests.rs:MARKER_WINDOW_PROSE_PAGES test
 rules/native/rules-http/src/http_scan/tests.rs:SIGHTLINE_PROSE_PAGES test
+rules/native/rules-http/src/lib.rs:NATIVE_ANALYSES internal # zzop's own native analysis IDS paired with the io channels each rule reads — one table, read by this crate's register_native_analyses AND its native_rule_channels, so an id cannot be registered without a channel statement. A row silently dropped unregisters the rule and un-declares it in one edit; rule_contracts::rule_channels binds each row's channels to the io its module actually compares
 rules/native/rules-http/src/mutating_route_no_auth.rs:AUTH_GUARDED_ATTR internal # zzop producer/consumer attribute key
 rules/native/rules-http/src/mutating_route_no_auth.rs:CALL_GRAPH_COVERED_EXTENSIONS fact # file extensions fixed by the languages
 rules/native/rules-http/src/mutating_route_no_auth.rs:DEFAULT_AUTH_GUARD_PATTERN convention -> vocabulary.authGuardPattern # how a project spells its own guard functions - the headline case of the vocabulary decision; DEFAULT_ already concedes it
@@ -380,6 +409,7 @@ rules/native/rules-http/src/unprovided_consume.rs:ALWAYS_VETO_EXTENSION_PATTERN 
 rules/native/rules-http/src/unprovided_consume.rs:ASSET_DIR_GATED_EXTENSION_PATTERN fact # file extensions fixed by the formats
 rules/native/rules-http/src/unprovided_consume.rs:MIN_FOREIGN_UNPROVIDED_GROUP cap
 rules/native/rules-http/src/unprovided_consume/vocab.rs:API_SEGMENT_PATTERN convention -> vocabulary.apiSegmentPattern # /api, /rpc, /v1 are URL segment names each project chooses
+rules/native/rules-schema/src/lib.rs:NATIVE_ANALYSES internal # zzop's own native analysis IDS paired with the io channels each rule reads — one table, read by this crate's register_native_analyses AND its native_rule_channels, so an id cannot be registered without a channel statement. A row silently dropped unregisters the rule and un-declares it in one edit; rule_contracts::rule_channels binds each row's channels to the io its module actually compares
 rules/native/rules-schema/src/lib.rs:SCHEMA_ISSUE_NAMESPACE internal # zzop rule-id namespace
 rules/native/rules-schema/src/lib.rs:SCHEMA_STRUCTURAL_ISSUE_LABELS internal # zzop issue labels
 rules/native/rules-schema/src/lib.rs:SCHEMA_USAGE_ISSUE_LABELS internal # zzop issue labels

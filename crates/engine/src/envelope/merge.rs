@@ -6,6 +6,10 @@ use zzop_core::IoFacts;
 
 use super::overlay::normalize_io_file_field;
 
+mod collisions;
+
+pub(super) use collisions::{record_fragment_collisions, FragmentCollision, MergeLosses};
+
 /// One native fact an overlay DISPLACED via a declared `overrides` entry, carried back to
 /// `apply_adapter_overlays` so the run can say so.
 ///
@@ -67,15 +71,18 @@ pub(super) struct DroppedOverlayBinding {
 /// (only the latter is a dep-graph edge).
 ///
 /// A DECLARED override (`FileProjection::overrides`) is the single exception to native-first, and it
-/// runs BEFORE the additive pass — see the loop's own comment for why the order is load-bearing. Both
-/// directions of loss are reported out: displacements into `tombstones`, and overlay bindings the
-/// native side outranked into `dropped`.
+/// runs BEFORE the additive pass — see the loop's own comment for why the order is load-bearing. Every
+/// direction of loss is reported out through `losses`: displacements, overlay bindings the native side
+/// outranked, and — the one loss additive merging can cause all by itself — files whose router-composition
+/// fragments now come from two producers at once (see [`collisions`]).
 pub(super) fn merge_projection_onto_artifact(
     artifact: &mut crate::pipeline::FileArtifact,
     projection: &zzop_core::FileProjection,
-    tombstones: &mut Vec<Tombstone>,
-    dropped: &mut Vec<DroppedOverlayBinding>,
+    losses: &mut MergeLosses,
 ) {
+    // Split up front so the two dep-graph passes below read as they always did; both borrows end
+    // before `record_fragment_collisions` needs `losses` whole again.
+    let (tombstones, dropped) = (&mut losses.tombstones, &mut losses.dropped);
     // DISPLACEMENT first. The additive pass below is native-first (`or_insert_with`), so a declared
     // override must remove the native binding here or the replacement would lose its own collision.
     // Every removal is recorded; validation (`zzop_core`'s structural pass) guarantees a declaration
@@ -167,6 +174,10 @@ pub(super) fn merge_projection_onto_artifact(
         }
     }
 
+    // BEFORE the three `extend`s below — they are the exact point at which "which producer said this"
+    // stops being answerable, and the by-name composers two phases later can subtract because of it.
+    record_fragment_collisions(artifact, projection, losses);
+
     artifact
         .procedure_router_fragments
         .extend(projection.procedure_router_fragments.iter().cloned());
@@ -240,7 +251,9 @@ pub(super) fn synthetic_artifact_from_projection(
         asset_refs: Vec::new(),
         loc: projection.loc,
         findings: Vec::new(),
-        degraded: false,
+        // Never degraded, and unchanged by the cause split: the three causes are all verdicts about a
+        // read/parse this lane never performs — the facts here came from the overlay, already extracted.
+        degrade_cause: None,
         minified_or_generated: false,
         io,
         rule_timings: Vec::new(),

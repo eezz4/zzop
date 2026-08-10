@@ -16,6 +16,74 @@ fn top_level_function_is_a_function_symbol() {
     assert_eq!(s.id, "a.py#foo");
 }
 
+// --- THE SPAN CONTRACT: `body_start` is the DECLARATION's line, decorators included ---
+
+/// `zzop_core::SourceSymbol`'s "Body span contract". `@app.route`/`@task`-anchored concepts, and the
+/// `async def` header itself, are only writable as method-scan rules when the decorators and the `def`
+/// line are inside the span. Under the first-statement reading none of them ever was — which is the
+/// direct reason the shipped `async`-handler concept exists for TypeScript and has no `.py` twin.
+#[test]
+fn function_body_span_starts_at_the_first_decorator() {
+    let src = "@app.get('/x')\n@audited\nasync def handler(\n    a: int,\n):\n    await go(a)\n";
+    let out = parse_symbols("a.py", src);
+    let s = sym(&out, "handler");
+    assert_eq!(s.body_start, Some(1));
+    assert_eq!(s.body_end, Some(6));
+}
+
+#[test]
+fn class_body_span_starts_at_the_class_declaration() {
+    let src = "@register\nclass Foo:\n    X = 1\n\n    def bar(self):\n        return 1\n";
+    let out = parse_symbols("a.py", src);
+    let c = sym(&out, "Foo");
+    assert_eq!(c.body_start, Some(1));
+    assert_eq!(c.body_end, Some(6));
+    let bar = sym(&out, "Foo.bar");
+    assert_eq!(bar.body_start, Some(5));
+    // Containment: the class span must still cover every leaf, or `drop_outer_spans` stops nesting.
+    assert!(c.body_start.unwrap() <= bar.body_start.unwrap());
+    assert!(c.body_end.unwrap() >= bar.body_end.unwrap());
+}
+
+// --- LEAF COMPLETENESS: a class body is a STATEMENT list, and those statements need a leaf ---
+
+/// A Python class body executes at class-creation time — it is the exact analogue of a Java
+/// `static { … }` block, and it had the exact same hole: only `Stmt::FunctionDef` projected anything,
+/// so the moment a class held one method `drop_outer_spans` discarded the class-wide span and every
+/// class-body statement became unreachable to `.py` method-scan rules. Each maximal RUN of consecutive
+/// non-declaration statements now projects one leaf, ordinal-suffixed from the second on, mirroring
+/// `zzop_parser_typescript`'s `STATIC_BLOCK` naming (a `-` cannot appear in a Python identifier).
+#[test]
+fn class_body_statement_runs_each_project_their_own_leaf_span() {
+    let src = concat!(
+        "class Foo:\n",
+        "    parser = make_parser()\n",
+        "    parser.setFeature('x')\n",
+        "\n",
+        "    def bar(self):\n",
+        "        return 1\n",
+        "\n",
+        "    LIMIT = 3\n",
+    );
+    let out = parse_symbols("a.py", src);
+    let first = sym(&out, "Foo.class-body");
+    assert_eq!(first.kind, SourceSymbolKind::Function);
+    assert_eq!(first.body_start, Some(2));
+    assert_eq!(first.body_end, Some(3));
+    let second = sym(&out, "Foo.class-body-2");
+    assert_eq!(second.body_start, Some(8));
+    assert_eq!(second.body_end, Some(8));
+}
+
+/// A class whose body is only `def`s (or only a docstring-free `pass`) must not grow phantom leaves —
+/// the run leaf exists to cover statements, so no statements means no leaf.
+#[test]
+fn a_class_of_only_methods_projects_no_class_body_leaf() {
+    let src = "class Foo:\n    def bar(self):\n        return 1\n";
+    let out = parse_symbols("a.py", src);
+    assert!(out.iter().all(|s| !s.name.contains("class-body")));
+}
+
 #[test]
 fn async_function_is_still_a_function_symbol() {
     let out = parse_symbols("a.py", "async def foo():\n    return 1\n");
@@ -182,16 +250,17 @@ fn empty_all_dunder_exports_nothing() {
     assert!(!sym(&out, "a").exported);
 }
 
-/// Same-defect-class audit pin (see `zzop_parser_go::lang::symbols`'s leading-comment `body_line_range`
-/// bug this mirrors the check for): ruff's AST (`StmtFunctionDef::body: Vec<Stmt>`) never represents a
-/// standalone `#` comment as a statement at all — comments are discarded during tokenization, not
-/// retained as body nodes the way tree-sitter's `comment` "extra" is — so a function body opening with a
-/// comment line cannot shift `body_start` onto the comment. This proves that rather than assuming it.
+/// Same-defect-class audit pin (see `zzop_parser_go::lang::symbols`'s comment pins): ruff's AST
+/// (`StmtFunctionDef::body: Vec<Stmt>`) never represents a standalone `#` comment as a statement at all
+/// — comments are discarded during tokenization, not retained as body nodes the way tree-sitter's
+/// `comment` "extra" is. `body_start` no longer reads the body at all, and `body_end` reads only the
+/// last statement, so a comment cannot move either boundary in any position. This proves that rather
+/// than assuming it.
 #[test]
 fn function_body_opening_with_comment_is_unaffected() {
     let src = "def f():\n    # leading comment\n    x = 1\n    return x\n";
     let out = parse_symbols("a.py", src);
     let s = sym(&out, "f");
-    assert_eq!(s.body_start, Some(3));
+    assert_eq!(s.body_start, Some(1));
     assert_eq!(s.body_end, Some(4));
 }

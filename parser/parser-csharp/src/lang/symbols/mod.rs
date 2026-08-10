@@ -37,14 +37,19 @@
 //! top-level type with no modifier (C#'s default: `internal`) is likewise NOT exported.
 //!
 //! ## `body_start`/`body_end`
-//! For a Class/Interface-kind symbol (`class`/`struct`/`interface`/`record` with a `declaration_list`
-//! body): `body_start` = the declaration's own START line (== `line`, including any leading
-//! attributes), `body_end` = the `declaration_list`'s own END line (closing `}`) — mirrors
-//! `zzop_parser_java_21::lang::symbols`'s identical type-level body-span convention. A body-less type
-//! (a positional-record's compact form `record Point(int X, int Y);`, or a `delegate`, which has no
-//! body concept at all) carries `None`/`None`. For a method/constructor: `body_start`/`body_end` = the
-//! `block`/`arrow_expression_clause` body's own start/end line, `None`/`None` when no body exists at
-//! all (an abstract/interface method declared with `;`).
+//! `zzop_core::SourceSymbol`'s "Body span contract" owns the rule and this crate does not restate it:
+//! `body_start` = the declaration's own START line (attribute lists included, == `line`), `body_end` =
+//! the last line of what that declaration encloses. A body-less type (a positional record's compact
+//! form `record Point(int X, int Y);`, or a `delegate`, which has no body concept at all) carries
+//! `None`/`None`, as does an abstract/interface member declared with `;`. An `enum` body is an
+//! `enum_member_declaration_list`, not a `declaration_list`, so it stays `None`/`None` too — a list of
+//! named constants is not a statement region.
+//!
+//! What this crate owes ON TOP of the rule is the contract's LEAF-COMPLETENESS half, because a type
+//! here does carry a span: every scannable region of a type body must project its own leaf, or
+//! `drop_outer_spans` discards the type span in favour of some sibling's leaf and that region becomes
+//! unreachable. Members that still project none are named in the "out of v1 scope" section below, and
+//! that list is now a disclosure of unreachable code, not merely of missing names.
 //!
 //! ## Fields and properties (`lang::symbols::member`)
 //! `field_declaration` -> `Const` ONLY when the field carries `const`, OR BOTH `static` AND `readonly`
@@ -58,9 +63,14 @@
 //! `zzop_parser_go`/`zzop_parser_java_21`'s identical "one symbol per NAME within a spec" rule.
 //!
 //! ## Out of v1 scope (documented, not attempted)
-//! Indexers, operator overloads (`operator`/conversion operators), destructors, events, and static
-//! constructors contribute no symbol — none maps cleanly onto an existing `SourceSymbolKind`, and none
-//! is common enough in the extracted-API-surface census to justify a "nearest kind" guess. Record
+//! Indexers, operator overloads (`operator`/conversion operators), destructors, and events contribute
+//! no symbol — none maps cleanly onto an existing `SourceSymbolKind`, and none is common enough in the
+//! extracted-API-surface census to justify a "nearest kind" guess. Each one that carries a BODY is
+//! therefore also a leaf-completeness hole (see the span section above): its statements sit in no span
+//! once any sibling member projects a leaf. A STATIC CONSTRUCTOR is NOT in this list and never was —
+//! `tree-sitter-c-sharp` spells it `constructor_declaration` like any other, so it has always emitted
+//! a symbol with a span; this doc claimed otherwise until 2026-08-10 and
+//! `tests::static_constructor_projects_a_span` now pins the truth. Record
 //! primary-constructor PARAMETERS (the implicit property/field pair a positional `record Point(int X,
 //! int Y)` generates) are likewise not extracted — invisible in source as a written member declaration,
 //! the same "not written, not extracted" principle `zzop_parser_java_21::lang::symbols`'s doc pins for

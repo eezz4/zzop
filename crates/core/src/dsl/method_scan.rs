@@ -5,8 +5,8 @@ use crate::finding::Finding;
 use super::def::{MethodScan, RuleDef};
 use super::diagnostics::RuleDiag;
 use super::markers::{
-    compile_marker, compile_marker_sql, is_sql_file, marker_suppresses, message_with_near_miss,
-    Leaders,
+    compile_markers, is_comment_line, leaders_for_path, marker_leaders_for_path,
+    message_with_near_miss,
 };
 use super::source::RuleContext;
 
@@ -21,9 +21,11 @@ pub(super) fn eval_method_scan(
     // Rule-skip sink — see `diagnostics`'s module doc. Same contract as `line_scan`: skip, never fail,
     // but say so.
     diagnostics: &mut Vec<String>,
+    // The owning pack's compiled-regex memo — see `crate::dsl::RegexCache`.
+    cache: &crate::dsl::RegexCache,
 ) {
     let rule_id = format!("{}/{}", pack_id, rule.id);
-    let mut diag = RuleDiag::new(&rule_id, diagnostics);
+    let mut diag = RuleDiag::new(&rule_id, diagnostics, cache);
     let Some(file_re) = diag.compile("file_pattern", &m.file_pattern) else {
         return;
     };
@@ -88,16 +90,13 @@ pub(super) fn eval_method_scan(
     };
     let marker = rule.suppress_marker();
     // Derived from the rule id (escaped) — a failure here is structural, see `line_scan`'s twin note.
-    let Some(marker_re) = compile_marker(&marker) else {
+    // All three leader forms at once — `markers::MarkerRegexes` owns which one a given file licenses,
+    // so this matcher and its twin cannot disagree about it.
+    let Some(marker_res) = compile_markers(&marker, diag.cache()) else {
         diag.malformed("its derived suppress marker does not compile as a regex");
         return;
     };
-    // SQL-comment counterpart of `marker_re`, only ever consulted below when `is_sql_file(&f.rel)` — see
-    // `compile_marker_sql`'s doc.
-    let Some(marker_re_sql) = compile_marker_sql(&marker) else {
-        diag.malformed("its derived suppress marker does not compile as a regex");
-        return;
-    };
+
     let Some(require_all) = diag.compile_all("require_file_all", &m.require_file_all) else {
         return;
     };
@@ -108,6 +107,15 @@ pub(super) fn eval_method_scan(
     };
 
     for f in ctx.files {
+        // Substrate-emptiness pre-skip, first so no regex touches this file's path or text. Sound by
+        // CONSTRUCTION, not by argument: this matcher's only `out.push` sits inside the `f.symbols` loop
+        // below, so a file that projected no symbols cannot produce a finding here. Completes the
+        // convention its siblings already followed (`call_scan`'s `call_sites`, `literal_scan`'s
+        // `string_literals`). ⚠ NOT a measured speedup — a 17-tree A/B came back inside the noise with
+        // byte-identical output; see `1.architecture/engine/performance.md` for what it does buy.
+        if f.symbols.is_empty() {
+            continue;
+        }
         if !file_re.is_match(&f.rel) {
             continue;
         }
@@ -133,7 +141,9 @@ pub(super) fn eval_method_scan(
             continue;
         }
         let lines: Vec<&str> = f.text.lines().collect();
-        let is_sql = is_sql_file(&f.rel);
+        // TWO axes, not one lookup (`markers::path` says why): SKIP vs MARKER.
+        let leaders = leaders_for_path(&f.rel);
+        let marker_leaders = marker_leaders_for_path(&f.rel);
         // Innermost-span priority — see `gates::drop_outer_spans`.
         let drop_symbol = gates::drop_outer_spans(f);
 
@@ -172,11 +182,9 @@ pub(super) fn eval_method_scan(
             // ordering exactly as before.
             let mut last_after_line: Option<u32> = None;
             for (i, line) in span.iter().enumerate() {
-                if m.skip_comment_lines {
-                    let t = line.trim_start();
-                    if t.starts_with("//") || t.starts_with('*') || t.starts_with("/*") {
-                        continue;
-                    }
+                // Comment-line gate over the file's OWN leader set — see `line_scan`'s twin.
+                if m.skip_comment_lines && is_comment_line(leaders, line) {
+                    continue;
                 }
                 // Pattern/absent regexes test `scan` (string interiors masked when opted in); the ORIGINAL
                 // `line` still supplies the finding's snippet and `marker_suppresses` context below.
@@ -257,21 +265,13 @@ pub(super) fn eval_method_scan(
             let Some((i, line)) = trigger_hit else {
                 continue; // unreachable: satisfied[trigger_idx] implies trigger_hit is Some
             };
-            if marker_suppresses(&marker_re, &lines, start_idx + i) {
+            if marker_res.suppresses(marker_leaders, &lines, start_idx + i) {
                 continue;
             }
-            if is_sql && marker_suppresses(&marker_re_sql, &lines, start_idx + i) {
-                continue;
-            }
-            // Marker-shaped comment that is NOT this rule's marker -> disclose it in the message (the
-            // finding still fires; see `message_with_near_miss`). Message-only: no gate above changes.
-            let leaders = if is_sql {
-                Leaders::SlashOrSql
-            } else {
-                Leaders::Slash
-            };
+            // Near-miss disclosure (message-only). MARKER leaders — see `line_scan`'s twin note.
+            let at = start_idx + i;
             let message =
-                message_with_near_miss(leaders, &marker, &lines, start_idx + i, &rule.message);
+                message_with_near_miss(marker_leaders, &marker, &lines, at, &rule.message);
             let snippet: String = line.trim().chars().take(m.snippet_max).collect();
             out.push(Finding {
                 rule_id: rule_id.clone(),

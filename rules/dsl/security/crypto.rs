@@ -89,8 +89,10 @@ fn a_dynamic_algorithm_is_silent_rather_than_guessed() {
 #[test]
 fn a_weak_digest_with_no_credential_word_on_its_line_is_not_this_rule() {
     // The lexical residual, pinned: the co-occurrence half survived the migration unchanged, so a
-    // file-checksum md5 is still out of scope here (`security/weak-crypto` is where a Java digest is
-    // judged without a credential word).
+    // file-checksum md5 is out of scope HERE — and since 2026-08-09 it is exactly what
+    // `security/weak-crypto` judges (the general rule, six languages on the same `hash-call`
+    // channel). The two rules split on the credential word: this fixture must fire under
+    // weak-crypto and stay silent under weak-password-hash — the split, pinned from both sides.
     let dir = TempDir::new("zzop-be-sec");
     dir.write(
         "api/auth.ts",
@@ -102,10 +104,13 @@ fn a_weak_digest_with_no_credential_word_on_its_line_is_not_this_rule() {
         "{:?}",
         out.findings
     );
+    assert_eq!(hits(&out, "weak-crypto").len(), 1, "{:?}", out.findings);
 }
 
 #[test]
 fn sha256_is_not_flagged() {
+    // Silent under BOTH hash rules: a strong algorithm is the negative that keeps either rule from
+    // being satisfiable by "fires on every digest call".
     let dir = TempDir::new("zzop-be-sec");
     dir.write(
         "api/auth.ts",
@@ -117,6 +122,7 @@ fn sha256_is_not_flagged() {
         "{:?}",
         out.findings
     );
+    assert!(hits(&out, "weak-crypto").is_empty(), "{:?}", out.findings);
 }
 
 #[test]
@@ -208,26 +214,34 @@ fn bcrypt_with_double_digit_cost_is_not_flagged() {
 }
 
 #[test]
-fn the_salt_first_bcrypt_family_is_silent_and_the_message_says_so() {
-    // The gap this rule's message now discloses, pinned from the silent side so the disclosure cannot
-    // drift away from the behavior (a sentence about a check is not the check — working-agreements
-    // §4.5). The `line_pattern` requires the digit to sit after another argument, so every call whose
-    // cost is the FIRST argument is structurally unmatchable — POSITION decides, not argument count
-    // (`genSaltSync(saltRounds, 4)` fires; `genSalt(4, cb)` does not). bcryptjs's documented two-step
-    // API and its nested one-liner both live on the silent side. A future batch that widens the pattern
-    // should delete this test and the message clause together — that is the point of pinning them as a
-    // pair.
+fn the_salt_first_bcrypt_family_now_fires() {
+    // This test used to assert the OPPOSITE, and it was right to: the single `line_pattern` required
+    // the digit to sit after another argument, so every call whose cost was the FIRST argument was
+    // structurally unmatchable, and the rule's message disclosed that silence by name. The old test
+    // pinned the silence and the disclosure together so neither could drift from the other, and its own
+    // comment said a batch that widened the pattern must delete both — this is that batch, so the pin
+    // is INVERTED rather than deleted: the three forms the message used to apologize for are now the
+    // three the pattern must catch.
+    //
+    // All three are one shape, `cost-as-first-argument`, added as a second alternation branch beside the
+    // original cost-after-a-value branch: bcryptjs's two-step `genSalt`/`genSaltSync` API and the nested
+    // one-liner its README documents.
     let dir = TempDir::new("zzop-be-sec");
     dir.write(
         "api/auth.ts",
         "declare const bcrypt: any;\ndeclare const password: string;\ndeclare const cb: any;\nexport const s = bcrypt.genSaltSync(4);\nexport const s2 = bcrypt.genSalt(4, cb);\nexport const h = bcrypt.hashSync(password, bcrypt.genSaltSync(4));\n",
     );
     let out = scan(&dir);
-    assert!(
-        hits(&out, "bcrypt-cost-too-low").is_empty(),
-        "{:?}",
+    assert_eq!(
+        hits(&out, "bcrypt-cost-too-low").len(),
+        3,
+        "every salt-first form must fire — genSaltSync(4), genSalt(4, cb), and the nested \
+         hashSync(pw, genSaltSync(4)): {:?}",
         out.findings
     );
+    // And the message must no longer apologize for a silence that ended. A disclosure outliving the
+    // gap it disclosed is the same defect as a gap with no disclosure — it teaches a reader to distrust
+    // a number that is now correct.
     let msg = crate::security_pack()
         .rules
         .iter()
@@ -235,13 +249,28 @@ fn the_salt_first_bcrypt_family_is_silent_and_the_message_says_so() {
         .expect("bcrypt-cost-too-low is a shipped security rule")
         .message
         .clone();
-    for form in ["genSalt(4, cb)", "genSaltSync(4)"] {
-        assert!(
-            msg.contains(form),
-            "the message must name the silent form `{form}` it cannot match — it is the only way a \
-             reader learns this rule's 0 findings are not a clean bill of health"
-        );
-    }
+    assert!(
+        !msg.contains("stays silent"),
+        "the salt-first silence clause must go with the silence: {msg}"
+    );
+}
+
+#[test]
+fn a_two_digit_cost_in_the_salt_first_position_is_not_flagged() {
+    // The widened branch must keep the rule's one numeric claim: SINGLE digit only. `genSalt(10)` is
+    // the recommended floor, and a pattern that fired on it would turn the correct call into noise —
+    // the fastest way to get a security rule switched off.
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/auth.ts",
+        "declare const bcrypt: any;\nexport const s = bcrypt.genSaltSync(10);\nexport const s2 = bcrypt.genSalt(12, () => {});\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "bcrypt-cost-too-low").is_empty(),
+        "{:?}",
+        out.findings
+    );
 }
 
 #[test]

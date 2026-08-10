@@ -9,18 +9,51 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-/// Crate name (raw AND `-`->`_` normalized) -> ordered file-path candidates (`src/lib.rs` before
-/// `src/main.rs`) for that manifest's own directory — mirrors `resolve_python_import`'s "candidates,
-/// first-present-in-known-paths wins" convention; existence against the tree's own known-path set is
-/// checked by the caller, not here (same split `rust_import_candidates` itself upholds).
-pub(crate) type RustWorkspaceMap = BTreeMap<String, Vec<String>>;
+/// Everything one pass over the tree's `Cargo.toml` files yields. The two products travel together
+/// because they are read from the SAME manifests in the same walk, and because import resolution needs
+/// both at once: [`Self::crate_roots`] answers "which file is crate `foo`", [`Self::target_roots`]
+/// answers "is THIS file a crate root". Splitting them cost two identical directory walks and two reads
+/// of every manifest until 2026-08-06, and — worse — let the second product reach only one of the four
+/// consumers of the first.
+#[derive(Debug, Default)]
+pub(crate) struct RustWorkspaceMap {
+    crates: BTreeMap<String, Vec<String>>,
+    target_roots: BTreeSet<String>,
+}
+
+impl RustWorkspaceMap {
+    /// Ordered root-file candidates (`src/lib.rs` before `src/main.rs`) for a `use` head naming a
+    /// same-workspace crate — both the manifest's own (possibly hyphenated) `[package] name` and its
+    /// underscore-normalized `use`-path spelling are keys. Mirrors `resolve_python_import`'s
+    /// "candidates, first-present-in-known-paths wins" convention; existence against the tree's own
+    /// known-path set is checked by the caller, not here (the split `rust_import_candidates` upholds).
+    pub(crate) fn crate_roots(&self, head: &str) -> Option<&Vec<String>> {
+        self.crates.get(head)
+    }
+
+    /// Files a manifest declares as explicit build targets — `path = "..."` under `[lib]`, `[[bin]]`,
+    /// `[[test]]`, `[[example]]`, `[[bench]]` — resolved tree-relative. Two consumers, and they want it
+    /// for the same underlying reason (cargo loads these directly, so they are crate ROOTS that nothing
+    /// imports): `rust_import_candidates` anchors their child modules as SIBLINGS rather than by
+    /// basename convention, and `unreachable_findings` takes them as `extra_entries` so a positive
+    /// `fan_in` on one does not read as island signal.
+    ///
+    /// Auto-discovered targets (`src/bin/`, `tests/`, `examples/`, `benches/`) are deliberately absent:
+    /// path convention already identifies those, and this handles only the explicit-`path` escape hatch
+    /// convention cannot see.
+    pub(crate) fn target_roots(&self) -> &BTreeSet<String> {
+        &self.target_roots
+    }
+}
 
 /// Scans every distinct ancestor directory (deduplicated, deterministic via `BTreeSet`) of
-/// `walked_rust_files` for a `Cargo.toml`, extracts its `[package]` `name`, and maps both spellings to
-/// that manifest directory's `src/lib.rs`/`src/main.rs` candidates. A directory with no `Cargo.toml`, or
-/// whose `Cargo.toml` has no `[package] name` (a virtual workspace root, a non-package manifest), and any
-/// I/O failure all degrade to "contributes nothing" — never panics, same discipline
+/// `walked_rust_files` for a `Cargo.toml` and reads both products out of it. A directory with no
+/// `Cargo.toml`, and any I/O failure, degrade to "contributes nothing" — never panics, same discipline
 /// `package_json_entries` upholds for its own manifest reads.
+///
+/// A manifest with no `[package] name` (a virtual workspace root) contributes no crate mapping but can
+/// still contribute target roots, so the two extractions are independent rather than sharing an early
+/// return.
 pub(crate) fn scan_rust_workspace<'a>(
     root: &Path,
     walked_rust_files: impl Iterator<Item = &'a str>,
@@ -31,53 +64,22 @@ pub(crate) fn scan_rust_workspace<'a>(
             dirs.insert(ancestor);
         }
     }
-    let mut map = RustWorkspaceMap::new();
-    for dir in dirs {
-        let manifest_rel = join(&dir, "Cargo.toml");
-        let Ok(text) = std::fs::read_to_string(root.join(&manifest_rel)) else {
-            continue;
-        };
-        let Some(name) = parse_package_name(&text) else {
-            continue;
-        };
-        let candidates = vec![join(&dir, "src/lib.rs"), join(&dir, "src/main.rs")];
-        let normalized = name.replace('-', "_");
-        map.entry(name).or_insert_with(|| candidates.clone());
-        map.entry(normalized).or_insert(candidates);
-    }
-    map
-}
-
-/// Paths a `Cargo.toml` declares as explicit build-target files — `path = "..."` keys inside `[lib]`,
-/// `[[bin]]`, `[[test]]`, `[[example]]`, and `[[bench]]` sections — resolved tree-relative against the
-/// manifest's own directory. Cargo loads these files directly (they are target ROOTS, never imported via
-/// `use`/`mod` from anywhere), so a positive `fan_in` on one — e.g. a co-located helper module both the
-/// target and a sibling reference — must not read as an unreachable-island signal; the engine feeds this
-/// set to `unreachable_findings`' `extra_entries` (found by the first self-analysis dogfood run: every
-/// DSL pack's co-located `<pack>.rs` test target was flagged). Auto-discovered targets (`src/bin/`,
-/// `tests/`, `examples/`, `benches/` dirs) need no entry here — the rule's own path conventions already
-/// cover those; this handles only the explicit-`path` escape hatch those conventions can't see. Same
-/// degrade-to-nothing discipline as [`scan_rust_workspace`] (missing/unreadable manifests contribute
-/// nothing, never panic).
-pub(crate) fn declared_rust_target_paths<'a>(
-    root: &Path,
-    walked_rust_files: impl Iterator<Item = &'a str>,
-) -> BTreeSet<String> {
-    let mut dirs: BTreeSet<String> = BTreeSet::new();
-    for rel in walked_rust_files {
-        for ancestor in ancestor_dirs(rel) {
-            dirs.insert(ancestor);
-        }
-    }
-    let mut out = BTreeSet::new();
+    let mut out = RustWorkspaceMap::default();
     for dir in dirs {
         let manifest_rel = join(&dir, "Cargo.toml");
         let Ok(text) = std::fs::read_to_string(root.join(&manifest_rel)) else {
             continue;
         };
         for target_path in parse_target_paths(&text) {
-            out.insert(join(&dir, &target_path));
+            out.target_roots.insert(join(&dir, &target_path));
         }
+        let Some(name) = parse_package_name(&text) else {
+            continue;
+        };
+        let candidates = vec![join(&dir, "src/lib.rs"), join(&dir, "src/main.rs")];
+        let normalized = name.replace('-', "_");
+        out.crates.entry(name).or_insert_with(|| candidates.clone());
+        out.crates.entry(normalized).or_insert(candidates);
     }
     out
 }

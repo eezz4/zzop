@@ -2,7 +2,7 @@
 //! split from `vocabulary.rs` purely for the repo per-file line cap (the parent module doc owns the
 //! contract prose; every entry here names the constant its consumer already owns — no second copy).
 
-use super::{FsdVocab, VocabularyConfig, DEFAULT_JAVA_SOURCE_ROOT};
+use super::{FeatureSlicedDesignVocab, VocabularyConfig, DEFAULT_JAVA_SOURCE_ROOT};
 impl VocabularyConfig {
     /// zzop's own suggested value for every convention vocabulary, each one naming the constant its
     /// consumer already owns — no second copy anywhere in the workspace.
@@ -35,6 +35,12 @@ impl VocabularyConfig {
             // project's Python packages live beyond the two roots the resolver already tries as facts.
             python_package_roots: Vec::new(),
             skip_dirs: owned(crate::dispatch::DEFAULT_SKIP_DIRS),
+            // Empty on purpose, and NOT for the reason `python_package_roots` above is empty. That one
+            // has no honest default; this one's defaults are real, and they live in the shared
+            // `${test-paths}` fragment (`zzop_core::dsl::test_path_re`), which applies whether or not
+            // the author writes anything. An entry here is a project's own EXTRA spelling — see the
+            // field doc for why this key is the struct's one additive member.
+            extra_test_path_patterns: Vec::new(),
             prisma_client_getter: Some(zzop_parser_typescript::PRISMA_CLIENT_GETTER.to_string()),
             retry_wrappers: owned(&zzop_parser_typescript::RETRY_WRAPPERS),
             middleware_guard_callees: owned(router.middleware_guard_callees),
@@ -76,7 +82,7 @@ impl VocabularyConfig {
             schema_usage_skip_fields: owned(zzop_rules_schema::SKIP_FIELD_NAMES),
             router_names: owned(crate::io::DEFAULT_ROUTER_NAMES),
             hierarchy_shared_dirs: owned(zzop_metrics::DEFAULT_HIERARCHY_SHARED_DIRS),
-            fsd: FsdVocab {
+            feature_sliced_design: FeatureSlicedDesignVocab {
                 slice_containers: owned(zzop_metrics::DEFAULT_FSD_SLICE_CONTAINERS),
                 entry: owned(zzop_metrics::DEFAULT_FSD_ENTRY),
                 shared: owned(zzop_metrics::DEFAULT_FSD_SHARED),

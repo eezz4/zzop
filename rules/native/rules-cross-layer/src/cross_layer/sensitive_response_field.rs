@@ -115,12 +115,11 @@ pub struct ResponseProvideSite {
 }
 
 /// Lowercase + strip `_`/`-` so `password_hash`, `PASSWORD-HASH` and `passwordHash` all normalize
-/// to `passwordhash` — one spelling for the vocabulary to judge.
+/// to `passwordhash` — one spelling for the vocabulary to judge. The transform lives in
+/// `zzop_core::vocab_norm` because the config front end applies the SAME one to warn that a declared
+/// entry can never match; see that module's doc.
 fn normalize(name: &str) -> String {
-    name.chars()
-        .filter(|c| *c != '_' && *c != '-')
-        .flat_map(char::to_lowercase)
-        .collect()
+    zzop_core::vocab_norm::unicode_lowercase_without_separators(name)
 }
 
 /// The run's declared sensitive-name vocabulary (three matching axes over one normalized name) —

@@ -53,7 +53,15 @@ impl Drop for TempDir {
 /// changes; never adjust it to make a red test green without knowing which extractor moved.
 /// 36 -> 37 (2026-08-03): the A17 `string_literals` extractor joined `pipeline::fresh` — one more
 /// whole-file swc parse per pass, the same one-parse-per-extractor pattern as its 36 siblings.
-const PARSES_PER_TS_FILE: u64 = 37;
+///
+/// 37 -> 1 (2026-08-08): `parse_with_cm` gained a one-entry thread-local memo, so the ~37 extractors
+/// that each handed swc the SAME `(rel, text)` now share one parse. The number stopped being
+/// "one per extractor" and became **one per file**, which is why this constant is no longer expected
+/// to move when an extractor is added — a new extractor in `pipeline::fresh` should keep it at 1, and
+/// a rise means the memo stopped hitting (the likely cause is a caller that re-reads or rewrites the
+/// text between extractors, which breaks the key). Falling to 0 means the file was not parsed at all;
+/// the fixture assertion below catches that separately.
+const PARSES_PER_TS_FILE: u64 = 1;
 
 #[test]
 fn one_analyze_pass_parses_one_ts_file_this_many_times() {
@@ -85,7 +93,10 @@ fn one_analyze_pass_parses_one_ts_file_this_many_times() {
     assert_eq!(
         parses, PARSES_PER_TS_FILE,
         "swc parses per .ts file per pass changed ({PARSES_PER_TS_FILE} -> {parses}). \
-         That is the cold-run cost of every TypeScript file in every repo zzop analyzes — find which \
-         extractor was added or removed in `pipeline::fresh`/`pipeline::io`, then update the constant."
+         That is the cold-run cost of every TypeScript file in every repo zzop analyzes. Since \
+         2026-08-08 the expected value is ONE PER FILE, not one per extractor: a rise means \
+         `parse_with_cm`'s one-entry memo stopped hitting (look for a caller that re-reads or \
+         rewrites the file text between extractors, which changes the key), not that an extractor \
+         was added."
     );
 }

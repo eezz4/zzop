@@ -1,4 +1,4 @@
-//! God file — detects files exceeding twice the SFC LOC limit. Where `sfc` flags any file over the
+//! God file — detects files exceeding twice the file-size-compliance LOC limit. Where `file_size_compliance` flags any file over the
 //! per-role convention, `god_file` flags the more severe case of a file at 2x that limit — a stronger
 //! single-responsibility violation signal, penalized more steeply per offending file.
 //!
@@ -24,8 +24,9 @@ pub fn compute_god_file<F>(
 where
     F: Fn(&str) -> bool,
 {
-    let sfc_limit = cfg.thresholds.loc_limit(target);
-    let limit = (sfc_limit as f64 * cfg.thresholds.god_file.loc_multiplier).round() as u32;
+    let file_size_compliance_limit = cfg.thresholds.loc_limit(target);
+    let limit =
+        (file_size_compliance_limit as f64 * cfg.thresholds.god_file.loc_multiplier).round() as u32;
     let live: Vec<&FileNode> = nodes
         .iter()
         .filter(|n| n.loc > 0 && is_source(&n.id) && is_scored(&n.id))
@@ -49,6 +50,9 @@ where
     GodFileScore {
         score: score.round(),
         limit,
+        // POPULATION: the `live` set the `gods/live` ratio divided by — already computed for the score
+        // and, until now, never published, so `files: []` could not be read against anything.
+        total: live.len() as u32,
         files: gods,
         files_truncated,
     }
@@ -80,7 +84,7 @@ mod tests {
 
     #[test]
     fn no_live_files_score_100_default_limit_300() {
-        // no target -> sfcLimit 150 -> limit 300
+        // no target -> LOC limit 150 -> god-file limit 300
         let r = compute_god_file(&[], None, &ScoresConfig::default(), |_| true, &|_| true);
         assert_eq!(r.score, 100.0);
         assert_eq!(r.limit, 300);
@@ -126,7 +130,7 @@ mod tests {
 
     #[test]
     fn target_fe_lowers_the_limit_100_to_200() {
-        // target fe -> sfcLimit 100 -> limit 200; loc 250 > 200 is a god file
+        // target fe -> LOC limit 100 -> god-file limit 200; loc 250 > 200 is a god file
         let nodes = [node("big", 250)];
         let r = compute_god_file(
             &nodes,

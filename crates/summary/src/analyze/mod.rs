@@ -5,6 +5,7 @@
 
 use crate::output::{FindingFilters, RunKnobs};
 
+mod adjacent_config;
 mod shape;
 #[cfg(test)]
 mod tests;
@@ -179,11 +180,16 @@ pub fn analyze_summary_with(
 /// the SAME `AnalyzeOutputView`-shaped output `analyze_json`/`analyze_trees_json` produce, so it goes
 /// through the identical [`shape_analyze_output`] this module's tree-mode path uses: a shaping fix
 /// (a cap, a warning merge) lands for both entry points at once instead of drifting per host.
+///
+/// The LOCATIONLESS form: a caller holding envelope TEXT and no path. Nothing is adjacent to a string,
+/// so no config is discovered and the product's built-in convention vocabulary governs the run — see
+/// [`analyze_envelope_summary_with`] for the located form and `adjacent_config` for why the asymmetry
+/// is real rather than an omission.
 pub fn analyze_envelope_summary(
     envelope_json: &str,
     filters: &FindingFilters,
 ) -> Result<String, String> {
-    analyze_envelope_summary_with(envelope_json, filters, RunKnobs::default())
+    analyze_envelope_summary_with(envelope_json, None, filters, RunKnobs::default())
 }
 
 /// [`analyze_envelope_summary`] plus the per-invocation [`RunKnobs`] — the envelope-lane twin of
@@ -193,8 +199,13 @@ pub fn analyze_envelope_summary(
 /// accumulator), so the CLI refused `--profile-rules` on this lane by name rather than accept a knob
 /// nothing reads. Mode A's pack evaluation now feeds the same accumulator the native path does
 /// (`crates/engine/src/envelope/file_pass.rs`/`ingest.rs`), so the knob is real here too.
+///
+/// `envelope_path` is where the envelope document CAME FROM, when the caller knows: the file's own
+/// path, whose directory is searched for a `zzop.config.jsonc` exactly as a tree root is
+/// (`adjacent_config`). `None` means the caller holds text alone and nothing is discovered.
 pub fn analyze_envelope_summary_with(
     envelope_json: &str,
+    envelope_path: Option<&str>,
     filters: &FindingFilters,
     knobs: RunKnobs,
 ) -> Result<String, String> {
@@ -206,31 +217,46 @@ pub fn analyze_envelope_summary_with(
                 .to_string(),
         );
     }
-    // Envelope mode has no filesystem root/config file to auto-discover (unlike `analyze_summary`'s
-    // `zzop_config::load_for_root`) — an envelope carries no location the engine can re-read
-    // (`docs/NORMALIZED_AST.md`). `"{}"` is the SAME "an empty config still means full analysis" default
-    // `analyze_envelope_json` itself documents at the facade layer (bundled packs injected as inline
-    // seeds, no disabledRules/severityOverrides/suppressions/mounts) — the MCP surface takes
-    // `envelopeJson` only, so this is the minimal valid `EnvelopeAnalyzeRequest` construction, not a
-    // shortcut around it. `profileRules` is the one per-invocation addition, written only when asked
-    // for — an unprofiled request stays byte-identical to the pre-knob `"{}"`. Declaring no
-    // `vocabulary` here is likewise deliberate: the facade assigns the product default
-    // (`VocabularyConfig::built_in()`) to an undeclared envelope request, so both hosts run the same
-    // built-in convention vocabulary — declaring one is a facade-request capability neither host
-    // exposes as a knob today (`EnvelopeAnalyzeRequest::vocabulary`).
-    let config = if knobs.profile_rules {
-        r#"{"profileRules":true}"#
-    } else {
-        "{}"
-    };
-    let out = zzop_facade::analyze_envelope_json(envelope_json, config)?;
+    // An envelope carries no location INSIDE it (`docs/NORMALIZED_AST.md`), so a config can only come
+    // from a caller that says where the document was read from — that, and nothing else, is what
+    // `envelope_path` supplies. The empty map is the same "an empty config still means full analysis"
+    // default `analyze_envelope_json` documents at the facade layer (bundled packs injected as inline
+    // seeds, no disabledRules/severityOverrides/suppressions/mounts); every key below is written only
+    // when something asked for it, so an unlocated, unprofiled request still serializes to exactly the
+    // `{}` this lane sent before either knob existed.
+    //
+    // `vocabulary` is the one thing a discovered config contributes (see `adjacent_config` for why it
+    // is only that one). Absent it, the facade assigns the product default
+    // (`VocabularyConfig::built_in()`) — this was, until 2026-08-06, a facade-request capability no
+    // host could reach, while zzop's own findings told their readers to declare `vocabulary` keys.
+    let mut config = serde_json::Map::new();
+    if knobs.profile_rules {
+        config.insert("profileRules".to_string(), serde_json::Value::Bool(true));
+    }
+    let mut config_warnings: Vec<serde_json::Value> = Vec::new();
+    if let Some(found) = envelope_path
+        .map(adjacent_config::discover)
+        .transpose()?
+        .flatten()
+    {
+        config.insert("vocabulary".to_string(), found.vocabulary);
+        // NEVER SILENT: the applied-disclosure first, then the loader's own notes about that same file
+        // (unknown keys, retired keys) — the identical channel and ordering the tree lane uses, so a
+        // typo'd vocabulary key is reported on both lanes by the same code.
+        config_warnings.push(serde_json::Value::String(found.disclosure));
+        config_warnings.extend(found.warnings.into_iter().map(serde_json::Value::String));
+    }
+    let out = zzop_facade::analyze_envelope_json(
+        envelope_json,
+        &serde_json::Value::Object(config).to_string(),
+    )?;
     let output_view: serde_json::Value = serde_json::from_str(&out).map_err(|e| e.to_string())?;
     let disclosure = output_view["disclosure"].clone();
     let summary = shape_analyze_output(
         serde_json::Map::new(),
         &output_view,
         disclosure,
-        Vec::new(),
+        config_warnings,
         filters,
     );
     serde_json::to_string_pretty(&summary).map_err(|e| e.to_string())

@@ -55,7 +55,7 @@ use super::url_resolve::resolve_url_variants;
 /// purpose — a value and a function of the same name are different bindings, and one map would let
 /// either answer for the other.
 #[derive(Default)]
-pub(super) struct LocalConsts {
+pub(crate) struct LocalConsts {
     /// Bare name -> plain string literal, for the LEADING slot only.
     heads: HashMap<String, String>,
     /// Bare name -> the URL variants its initializer resolves to, for the WHOLE-ARGUMENT position.
@@ -69,7 +69,7 @@ pub(super) struct LocalConsts {
 impl LocalConsts {
     /// Build all four maps from one file's AST. `consts` is the project-wide DOTTED map, consulted while
     /// resolving an initializer exactly as it is at a call site (so `const u = ControlKey.A.b` resolves).
-    pub(super) fn build(module: &Module, consts: &HashMap<String, String>, cm: &SourceMap) -> Self {
+    pub(crate) fn build(module: &Module, consts: &HashMap<String, String>, cm: &SourceMap) -> Self {
         let gated = unambiguous_bindings(module);
         if gated.consts.is_empty() && gated.fn_returns.is_empty() {
             return Self::default();
@@ -143,6 +143,23 @@ impl LocalConsts {
     /// from the helper map instead (`same-file-fn-url-v1`). Same gate, same refusals, same reason: the
     /// head is the one slot where `{}` is a LOSS rather than a normalization, and a helper returning
     /// `https://api.vendor.com` left the call filed as the internal route `GET /charges`.
+    /// A bare NAME's plain string-literal value, if this file binds it exactly once to one.
+    ///
+    /// `pub(crate)` for [`crate::adapters::client_base`], which faces the same question in a
+    /// different position: `axios.defaults.baseURL = API_BASE` needs the value behind `API_BASE`, and
+    /// the gates that make that readable — bound once in this file, never reassigned, no parameter
+    /// shadow, plain literal initializer — are exactly the ones this map already enforces. Sharing
+    /// the map rather than re-collecting is deliberate: this crate had grown two other top-level
+    /// const walks by 2026-08-08, and a third with its own slightly-different gates is how the
+    /// "reads the value" and "proves the value is readable" halves drift apart.
+    ///
+    /// Takes a NAME rather than an `Expr` because the caller's position has no `rest` to gate on —
+    /// [`Self::head_literal_for`] refuses an empty `rest` since a head with nothing after it is not a
+    /// head, which is a rule about URL slots and says nothing about a base-URL assignment.
+    pub(crate) fn literal_for_name(&self, name: &str) -> Option<&str> {
+        self.heads.get(name).map(String::as_str)
+    }
+
     pub(super) fn head_literal_for(&self, e: &Expr, rest: &str) -> Option<&str> {
         if rest.is_empty() {
             return None;

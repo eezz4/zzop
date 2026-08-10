@@ -28,7 +28,7 @@
 //! channel should call the `_into` twin.
 //!
 //! Module layout: `def` (serde rule-pack types), `fragments` (the `${NAME}` shared/reference mechanism
-//! `RulePackDef::expand_fragments` uses), `source` (interpreter input + minified detection), `eval` (pack
+//! `RulePackDef::expand_fragments` uses), `source` (interpreter input + the minified-line-shape check), `eval` (pack
 //! evaluation entry points), `diagnostics` (rule-skip warning sink), `prefilter` (RegexSet line-scan
 //! pre-filter), `markers`
 //! (suppress-marker/require-file helpers), and one module per matcher family (`line_scan`,
@@ -46,6 +46,7 @@ mod literal_scan;
 mod markers;
 mod method_scan;
 mod prefilter;
+mod regex_cache;
 mod source;
 mod string_mask;
 
@@ -88,7 +89,13 @@ pub use def::{
     RuleDef, RulePackDef, SymbolScan,
 };
 pub use eval::{eval_pack, eval_pack_into, eval_pack_profiled, eval_pack_profiled_into};
-pub use fragments::FragmentError;
+pub use fragments::{test_path_re, FragmentError};
 pub use ir_scan::{eval_pack_io_scan, eval_pack_io_scan_into, IoScanTreeContext};
-pub use markers::NEAR_MISS_MARKER_TOKEN_PATTERN;
-pub use source::{is_minified_or_generated, RuleContext, RuleTiming, SourceFile};
+// The comment-leader table is public because `zzop-engine`'s generated-banner detector reads the same
+// knowledge and must not keep a second copy of it — see `markers::Leaders`.
+pub use markers::{
+    leaders_for_path, marker_channel, marker_widening_prose, strip_comment_leader, suppress_hint,
+    Leaders, MarkerChannel, NEAR_MISS_MARKER_TOKEN_PATTERN,
+};
+pub use regex_cache::RegexCache;
+pub use source::{has_minified_line_shape, RuleContext, RuleTiming, SourceFile};

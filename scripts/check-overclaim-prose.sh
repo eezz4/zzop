@@ -52,7 +52,17 @@
 # Scan surface
 # ---------------------------------------------------------------------------------------------------
 # TRACKED `*.md` and `*.html` — the published prose surface (README.md, VERSIONING.md, SECURITY.md and
-# every docs/ page come in through the `*.md` glob; the marketing site through `*.html`). `.github/**`
+# every docs/ page come in through the `*.md` glob; the marketing site through `*.html`) — PLUS three
+# named JSON files whose `description` string is published prose in every sense that matters:
+#   server.json                     -> the MCP Registry listing
+#   .claude-plugin/plugin.json      -> the Claude Code plugin marketplace listing
+#   packages/mcpb/manifest.json     -> the Claude Desktop bundle listing
+# Added 2026-08-08. These three are, by reach, the most widely READ sentences this repo publishes —
+# they are what someone sees BEFORE deciding to install, which is exactly the moment an absolute claim
+# does its damage — and until then a "never misses" in any of them left all 27 guards green. They are
+# named individually rather than swept in as `*.json`, because the repo's other JSON is data (rule
+# packs, fixtures, lockfiles) where these words carry no promise. Verified by planting "never misses"
+# into server.json's description: reported by file and line. `.github/**`
 # is excluded: PR/issue templates are contributor instructions, not product claims. `*.rs` is
 # deliberately OUT of scope, unlike check-deploy-facts-prose.sh's surface — a doc comment's "guarantees
 # a non-empty pack set" is a statement about an internal invariant addressed to a maintainer reading
@@ -119,7 +129,7 @@ ALLOWLIST=(
   "README.md|every finding carries a rule id"
 
   # The disable hint is appended to every DSL finding by crates/engine/src/pipeline/findings.rs's
-  # `append_disable_hints` (pinned by crates/engine/src/tests.rs's
+  # `append_hints` (pinned by crates/engine/src/tests.rs's
   # `dsl_finding_message_carries_the_config_disable_hint_for_its_own_id`), and every native rule file
   # that builds a Finding is required to name `disabled_rules` or call `zzop_core::disable_hint` by
   # crates/engine/tests/rule_contracts/native_messages.rs. That test documents itself as a file-level
@@ -166,7 +176,7 @@ prefilter="$prefilter|(every|each|all) (findings?|rules?)"
 
 negators="no|not|never|n't|without|cannot|nothing|neither|nor|rather than|instead of"
 
-candidate_files="$(tracked_files_matching "$prefilter" '*.md' '*.html' ':!:.github/**')" \
+candidate_files="$(tracked_files_matching "$prefilter" '*.md' '*.html' 'server.json' '.claude-plugin/plugin.json' 'packages/mcpb/manifest.json' ':!:.github/**')" \
   || { echo "$SELF: file enumeration failed" >&2; exit 1; }
 
 # Counted in bash rather than by a `grep -c .` on the end of the pipe (2026-07-29): on this box any
@@ -176,7 +186,7 @@ candidate_files="$(tracked_files_matching "$prefilter" '*.md' '*.html' ':!:.gith
 total_files=0
 while IFS= read -r _p; do
   [ -n "$_p" ] && total_files=$((total_files + 1))
-done < <(git ls-files -- '*.md' '*.html' ':!:.github/**')
+done < <(git ls-files -- '*.md' '*.html' 'server.json' '.claude-plugin/plugin.json' 'packages/mcpb/manifest.json' ':!:.github/**')
 
 # ## Subject-set floor (2026-07-29) — added even though the collapse is currently caught elsewhere
 # This guard was reported as printing "clean (0 files scanned)" on an empty scan surface. Measured, and

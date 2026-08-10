@@ -1,7 +1,7 @@
-//! Class-scoped constant-reference resolution for class-level `@RequestMapping` prefixes — ported
-//! near-verbatim from `zzop_parser_java::project::resolve` (this text-based `+`-concatenation resolver
-//! operates on already-AST-extracted raw expression text, so the algorithm itself needs no AST-native
-//! rewrite — see the parent module doc's "AST-native design change" section for what DID change).
+//! Class-scoped constant-reference resolution for class-level `@RequestMapping` prefixes. This is a
+//! TEXT-based `+`-concatenation resolver by design: it runs on raw expression text already extracted
+//! from the CST (`collect::collect_constant` stores the declarator's `value` node verbatim), so the
+//! concatenation itself is re-parsed here rather than walked as a `binary_expression`.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;

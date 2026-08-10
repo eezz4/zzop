@@ -209,6 +209,17 @@ fn read_workspace_manifest(base_dir: &Path) -> Option<(Vec<String>, &'static str
 /// is the output of the SAME `resolve_workspace_dirs` expansion `trees: "auto"` would perform, so
 /// the number is exact and the suggested remedy is known to produce it.
 ///
+/// The recommended remedy states its own COST (2026-08-06), because a half-prescription is its own
+/// defect class here: `trees: "auto"` gives each workspace package its own tree, and a dependency graph
+/// is built PER tree, so every import that crosses a package boundary stops being a dep edge and is
+/// censused as an external package instead. Measured on the 22-package monorepo this whole disclosure
+/// came from: `trees: "auto"` yielded 5,262 dep links with ZERO crossing a package boundary, where the
+/// same repo as one tree yielded 6,651 with 1,364 crossing one. A user who followed the old wording
+/// exactly read the result as "22 independent islands". The opposite direction is disclosed by
+/// `zzop_engine`'s own per-tree cross-tree-import warning (`trees::cross_tree_imports`), which names
+/// the one-tree remedy AND the cross-layer join it costs — the two messages are mirrors, and
+/// `lib_tests.rs`' `both_tree_shape_disclosures_name_the_cost_of_the_remedy_they_recommend` pins that.
+///
 /// Silent (returns `None`) when there is no manifest at all — an ordinary single-package repo must
 /// never be nagged — and equally when the manifest resolves to fewer than 2 packages, because then
 /// `{"trees": "auto"}` could not deliver the join either and the advice would be false.
@@ -235,7 +246,9 @@ pub fn single_tree_workspace_warning(
         "the config at {} declares no \"trees\" — {source} at {} resolves to {package_count} \
          workspace packages, but this run analyzed a SINGLE tree: the cross-layer join needs >= 2 \
          trees with distinct sourceIds to fire, so it did not run. Add \"trees\": \"auto\" to that \
-         config to analyze those {package_count} packages as separate trees.",
+         config to analyze those {package_count} packages as separate trees — at the cost of the \
+         dependency graph, which is built per tree: an import crossing a package boundary then stops \
+         being a dep edge and is censused as an external package instead.",
         config_path.display(),
         base_dir.display()
     ))

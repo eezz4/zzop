@@ -1,9 +1,10 @@
 use super::*;
+use std::sync::atomic::{AtomicU64, Ordering};
 use zzop_core::Severity;
 
 /// A fresh, unique scratch directory under the OS temp dir — no `tempfile` crate dependency (this
 /// crate's dependency budget is `zzop-core` + `serde` + `serde_json` only), so tests roll their own via
-/// the same pid+counter+nanos uniqueness scheme as `temp_sibling`.
+/// the same pid+counter+nanos uniqueness scheme as `atomic::temp_sibling`.
 fn scratch_dir(tag: &str) -> PathBuf {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -90,6 +91,127 @@ fn sample_findings() -> Vec<Finding> {
 // sidesteps the fact that `SourceSymbol` (and therefore `FileIrSlice`) does not derive `PartialEq`.
 fn json_eq<T: Serialize>(a: &T, b: &T) -> bool {
     serde_json::to_value(a).unwrap() == serde_json::to_value(b).unwrap()
+}
+
+/// `open` must actually RUN the eviction pass — the one thing `evict`'s own tests cannot show, because
+/// they call `evict_to_cap` directly. Deleting the call site left this whole suite green until this test
+/// existed (measured 2026-08-05), so the assertion is deliberately about the WIRING and not the policy:
+/// entries written under a budget of zero must not survive the next open.
+#[test]
+fn open_runs_the_eviction_pass_and_not_only_the_schema_wipe() {
+    let dir = scratch_dir("evict-wiring");
+    let cache = AnalysisCache::open(&dir, "v1").unwrap();
+    for i in 0..8 {
+        cache
+            .put_ir(
+                &scoped_key("content", "p1", &format!("f{i}.ts"), "pack@1"),
+                &sample_ir(i),
+            )
+            .unwrap();
+    }
+    let count = |d: &str| fs::read_dir(dir.join(d)).unwrap().count();
+    assert_eq!(
+        count(IR_DIR),
+        8,
+        "setup: the entries must be on disk to be evictable"
+    );
+
+    // A cap of 0 makes every entry over budget. The SAME schema version, so nothing here is the wipe —
+    // if this passed with the eviction call removed, the wipe would be doing the work and the test lying.
+    AnalysisCache::open_with_cap(&dir, "v1", 0).unwrap();
+    assert_eq!(
+        count(IR_DIR),
+        0,
+        "open did not evict — the housekeeping step is unwired, not merely idle"
+    );
+}
+
+/// Eviction must not be SILENT: the count `evict_to_cap` returns has to reach the handle, because the
+/// engine's only way to tell a user why the next run got slower is to read it back off the cache.
+///
+/// Driven through the real path (`open_with_cap` -> `evict::evict_to_cap`) rather than asserting on a
+/// hand-set field: the defect being sealed is exactly that the call site DISCARDED the return value, so
+/// a test that constructs the count itself would skip the line that produces the defect. The budget is
+/// injected because the real one is ~256 MiB (~137,000 entries), which no test can reach honestly.
+#[test]
+fn open_reports_how_many_entries_its_eviction_pass_deleted() {
+    let dir = scratch_dir("evict-count");
+    let cache = AnalysisCache::open(&dir, "v1").unwrap();
+    assert_eq!(
+        cache.evicted_entries(),
+        0,
+        "setup: a fresh under-budget cache evicts nothing"
+    );
+    for i in 0..5 {
+        cache
+            .put_ir(
+                &scoped_key("content", "p1", &format!("f{i}.ts"), "pack@1"),
+                &sample_ir(i),
+            )
+            .unwrap();
+    }
+
+    // Same schema version, so the wipe cannot be what deletes these; a budget of 0 makes every entry
+    // over cap. Five entries in, five entries must be reported out.
+    let reopened = AnalysisCache::open_with_cap(&dir, "v1", 0).unwrap();
+    assert_eq!(
+        reopened.evicted_entries(),
+        5,
+        "the evicted count never left `evict_to_cap` — the open path throws it away"
+    );
+}
+
+/// The disclosure itself. Zero must produce NOTHING (a line on every run trains readers to ignore the
+/// channel), and a real eviction must produce a line that says what happened, that it is housekeeping
+/// rather than a failure, and what it costs the next run.
+#[test]
+fn the_eviction_warning_is_emitted_only_when_something_was_actually_evicted() {
+    let dir = scratch_dir("evict-warning");
+    let cache = AnalysisCache::open(&dir, "v1").unwrap();
+    assert_eq!(
+        cache.eviction_warning(),
+        None,
+        "an ordinary open must disclose nothing — 0 evicted is not news"
+    );
+    cache
+        .put_ir(
+            &scoped_key("content", "p1", "a.ts", "pack@1"),
+            &sample_ir(1),
+        )
+        .unwrap();
+
+    let warning = AnalysisCache::open_with_cap(&dir, "v1", 0)
+        .unwrap()
+        .eviction_warning()
+        .expect("an open that evicted must disclose it");
+    assert!(
+        warning.contains("1 entry evicted"),
+        "the warning must state how many entries went: {warning}"
+    );
+    assert!(
+        warning.contains("Not an error"),
+        "the warning must say this is cap enforcement, not a failure: {warning}"
+    );
+    assert!(
+        warning.contains("recomputes"),
+        "the warning must state the re-analysis cost the next run pays: {warning}"
+    );
+}
+
+/// The other half: a normal open must NOT evict. Without this, the test above would still pass if `open`
+/// deleted entries unconditionally, which is the failure that would actually hurt a user.
+#[test]
+fn a_normal_open_evicts_nothing_because_the_cache_is_under_budget() {
+    let dir = scratch_dir("evict-no-op");
+    let cache = AnalysisCache::open(&dir, "v1").unwrap();
+    let k = scoped_key("content", "p1", "a.ts", "pack@1");
+    cache.put_ir(&k, &sample_ir(1)).unwrap();
+
+    let reopened = AnalysisCache::open(&dir, "v1").unwrap();
+    assert!(
+        reopened.get_ir(&k).is_some(),
+        "an under-budget entry was evicted by an ordinary open"
+    );
 }
 
 #[test]
@@ -532,4 +654,47 @@ fn concurrent_puts_to_the_same_key_are_harmless() {
         .get_ir(&k)
         .expect("entry must exist after concurrent puts");
     assert_eq!(ir.loc, 99);
+}
+
+/// The wipe rule as ONE property instead of sampled cases: for any stored version A and any opening
+/// version B, entries survive **iff A == B**. Direction and distance are both irrelevant, and stating
+/// it as a table is what makes that irrelevance testable — two named cases (`v1 -> v2`, `v1 -> v1`)
+/// could not distinguish equality from ordering, which is exactly the substitution this pins against.
+///
+/// A `stored < mine` "improvement" fails the cells below the diagonal: it would let an OLDER binary
+/// serve entries written by a NEWER one, which is a stale HIT rather than a miss — the one outcome
+/// this cache must never produce. Adding a version to the list widens coverage for free.
+#[test]
+fn entries_survive_a_reopen_exactly_when_the_schema_version_is_unchanged() {
+    // Shaped like the real value: a hash, with one legacy `{release}+{hash}` spelling so the
+    // transition off that format is covered too.
+    const VERSIONS: &[&str] = &[
+        "42f0dc253ae9e705",
+        "aa11bb22cc33dd44",
+        "0.29.1+42f0dc253ae9e705",
+    ];
+    let k = key("content", "parser1", "ruleset1");
+
+    for stored in VERSIONS {
+        for opening in VERSIONS {
+            let dir = scratch_dir("schema-matrix");
+            {
+                let cache = AnalysisCache::open(&dir, stored).unwrap();
+                cache.put_ir(&k, &sample_ir(1)).unwrap();
+                cache.put_findings(&k, &sample_findings()).unwrap();
+            }
+            let cache = AnalysisCache::open(&dir, opening).unwrap();
+            let survived = cache.get_ir(&k).is_some();
+            assert_eq!(
+                survived,
+                stored == opening,
+                "stored={stored} opening={opening}: survival must track EQUALITY, not order"
+            );
+            assert_eq!(
+                cache.get_findings(&k).is_some(),
+                stored == opening,
+                "stored={stored} opening={opening}: findings must follow ir"
+            );
+        }
+    }
 }

@@ -10,22 +10,31 @@
 //!   findings/<digest>.json one FindingsEntry per (… the same four, plus ruleset_fingerprint)
 //! ```
 //!
-//! ## No eviction, by design — and what that costs when a key gains a field
+//! ## Two reclamation mechanisms, doing two different jobs (2026-08-05)
 //!
-//! Nothing in this crate deletes an entry except [`AnalysisCache::open`]'s schema-version wipe. Entries
-//! are pure derived state, immutable once written, and addressed by a digest of their own key, so a key
-//! that stops being asked for simply stops being read: it is never stale, only orphaned. That is the
-//! deliberate trade — a background GC would have to decide "still reachable?" from outside the run that
-//! knows, and getting that wrong deletes a live entry. Editing a source file already orphans its old
-//! `content_hash` entry, so the directory has always grown monotonically and `docs/ARCHITECTURE.md`
-//! documents it as safe to delete at any time.
+//! Entries are pure derived state, immutable once written, and addressed by a digest of their own key,
+//! so a key that stops being asked for simply stops being read: it is never stale, only orphaned.
+//! Editing a source file orphans its old `content_hash` entry, so without reclamation the directory
+//! grows monotonically. Two things reclaim, and conflating them was the defect this split fixes:
 //!
-//! The consequence for key CHANGES: adding a field to `CacheKey`/`IrKey` orphans EVERY existing entry at
-//! once (every digest moves), so the reclamation lever is the one that already exists — a
-//! `CACHE_SCHEMA_VERSION` bump, whose bulk wipe turns "the old generation lives on disk forever" into
-//! "one cold run". A key change needs no bump for CORRECTNESS (see
-//! the key contract's own note on `key.rs`: every key mutation degrades to a MISS,
-//! never a stale hit); it needs one for HOUSEKEEPING.
+//! 1. **[`AnalysisCache::open`]'s schema-version wipe** — CONTRACT invalidation. The stored version
+//!    differs from the caller's, so every entry was written under a shape or meaning this binary does
+//!    not speak. Bulk, immediate, all of it.
+//! 2. **[`crate::evict`]'s size cap** — HOUSEKEEPING. The contract is fine; the directory is just
+//!    bigger than its budget, so the oldest-written entries go until it is back under. See that
+//!    module's doc for why deleting a live entry here is safe (a miss, never a wrong answer).
+//!
+//! **Until 2026-08-05 mechanism 2 did not exist and mechanism 1 did both jobs**, because
+//! `CACHE_SCHEMA_VERSION` carried the release version — so every upgrade wiped, whether or not any
+//! analysis contract had moved. That made a release touching zero analysis code cost every user a full
+//! cold run, and it is why the release half is gone: the hash half now decides invalidation alone, and
+//! the cap decides housekeeping alone.
+//!
+//! The consequence for key CHANGES is unchanged: adding a field to `CacheKey`/`IrKey` orphans EVERY
+//! existing entry at once (every digest moves). That needs no version bump for CORRECTNESS (see the key
+//! contract's own note on `key.rs`: every key mutation degrades to a MISS, never a stale hit) — and it
+//! no longer needs one for HOUSEKEEPING either, because the cap collects the orphans on its own
+//! schedule instead of requiring someone to notice.
 //!
 //! `<digest>` is `hash::digest128` of `CacheKey::digest_input`/`IrKey::digest_input` — the key type's own
 //! field list, NUL-joined, generated from the declaration (see `key.rs`) rather than hand-listed here, so
@@ -45,38 +54,23 @@
 //!
 //! ## Concurrency / atomicity
 //!
-//! Writers (this crate expects concurrent same-process writers via `rayon`, one per file) write to a
-//! uniquely-named temp file sibling to the target path, then `fs::rename` it into place. On POSIX this is
-//! a well-known atomic-replace idiom. On Windows, `std::fs::rename` also replaces an existing destination
-//! (it is implemented via `MoveFileExW` with `MOVEFILE_REPLACE_EXISTING`), but unlike POSIX it can fail
-//! with a sharing violation if some other process/handle holds the destination open without
-//! `FILE_SHARE_DELETE`. Losing that race to a concurrent writer that already produced the file is
-//! therefore treated as success rather than propagated as an error (see `write_atomic`).
-//!
-//! What makes that safe is that both racers wrote an EQUIVALENT entry, not an identical one. The target
-//! path is a deterministic function of the cache key, which is itself a deterministic function of file
-//! content + fingerprints, so two writers landing on the same path derived their entry from the same
-//! inputs and it deserializes to the same value either way; combined with rename's atomicity (a reader
-//! sees one complete entry, never a blend) whichever writer wins is a correct entry for that key.
-//!
-//! It does NOT mean the two writers produced identical BYTES, and this doc claimed that until 2026-07-29.
-//! Stored entries carry map fields typed `std::collections::HashMap`, whose serde_json object-key order
-//! follows a per-instance randomized hash seed — `grep -n 'HashMap' crates/cache/src/ir_slice.rs` names
-//! them (`const_map_fragment` is the standing example). Nothing here reads a stored entry byte-wise, so
-//! the difference has never had a consequence; it is corrected because the benign-race argument above was
-//! resting on it, and an argument resting on a false premise cannot be re-checked by whoever comes next.
+//! Every write here lands through [`atomic::write_atomic`] (temp file + rename). Its contract — why a
+//! lost rename race on Windows is success rather than an error, and what "equivalent, not identical"
+//! means for two racing writers — lives in that module's own doc, beside the code it constrains.
 
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 use zzop_core::Finding;
 
-use crate::hash::digest128;
 use crate::ir_slice::FileIrSlice;
 use crate::key::{CacheKey, IrKey};
+
+mod atomic;
+mod entries;
+use atomic::write_atomic;
 
 const SCHEMA_VERSION_FILE: &str = "schema_version";
 const IR_DIR: &str = "ir";
@@ -111,101 +105,94 @@ struct FindingsEntry {
 /// separate on-disk entries. See the crate doc for the layout and format.
 pub struct AnalysisCache {
     root: PathBuf,
+    /// How many entries [`Self::open`]'s housekeeping pass deleted on the way in (see
+    /// [`Self::evicted_entries`]). Recorded at open and never mutated afterwards — this counts the cap
+    /// enforcement that already happened, not a running total of anything this handle does later.
+    evicted: usize,
 }
 
 impl AnalysisCache {
     /// Opens (creating if absent) the cache directory at `dir`. `schema_version` identifies the Common IR
-    /// / entry-format contract this caller speaks; if the directory's stored schema version differs (or
-    /// there isn't one yet), every existing entry is wiped before the new version is recorded — a bulk
-    /// invalidation for "the IR contract changed", not a per-entry decision.
+    /// / entry-format contract this caller speaks; if the directory's stored version differs (or there is
+    /// none yet), every entry is wiped before the new one is recorded — a bulk invalidation for "the IR
+    /// contract changed", not a per-entry decision.
+    ///
+    /// **The comparison is EQUALITY, never an ordering, and that is load-bearing.** A stored version
+    /// that is "newer" is just as much a mismatch as one that is older, so a DOWNGRADE wipes exactly
+    /// like an upgrade, and skipping any number of generations is indistinguishable from stepping one.
+    /// Replacing this with a `stored < mine` test would leave an older binary reading entries written
+    /// under a contract it does not speak — a stale HIT, the one outcome this cache must never produce.
+    ///
+    /// Then housekeeping: [`crate::evict::evict_to_cap`] brings the directory back under its size
+    /// budget, on every open — the only moment this crate is guaranteed to be entered. What it deleted
+    /// is kept, not discarded: see [`Self::evicted_entries`] / [`Self::eviction_warning`].
     pub fn open(dir: &Path, schema_version: &str) -> io::Result<AnalysisCache> {
+        Self::open_with_cap(dir, schema_version, crate::evict::MAX_CACHE_BYTES)
+    }
+
+    /// [`Self::open`] with the disk budget injected, so a test can OBSERVE the eviction step with a few
+    /// small entries rather than 256 MiB of them. Before this seam, deleting the `evict_to_cap` call
+    /// below left the whole workspace suite green (measured 2026-08-05): `evict`'s own tests call that
+    /// function directly, and nothing watched `open` calling it.
+    pub(crate) fn open_with_cap(dir: &Path, version: &str, cap: u64) -> io::Result<AnalysisCache> {
         fs::create_dir_all(dir)?;
         let version_path = dir.join(SCHEMA_VERSION_FILE);
         let existing = fs::read_to_string(&version_path).ok();
-        if existing.as_deref() != Some(schema_version) {
+        if existing.as_deref() != Some(version) {
             wipe_entries(dir)?;
-            write_atomic(&version_path, schema_version.as_bytes())?;
+            write_atomic(&version_path, version.as_bytes())?;
         }
         fs::create_dir_all(dir.join(IR_DIR))?;
         fs::create_dir_all(dir.join(FINDINGS_DIR))?;
+        let evicted = crate::evict::evict_to_cap(
+            &crate::evict::entry_dirs(dir, &[IR_DIR, FINDINGS_DIR]),
+            cap,
+        );
         Ok(AnalysisCache {
             root: dir.to_path_buf(),
+            evicted,
         })
     }
 
-    /// Content-addressing hash of raw file bytes — the `content_hash` half of a `CacheKey`. Not
-    /// cryptographic; see `hash.rs` for the collision tradeoff.
-    pub fn content_hash(bytes: &[u8]) -> String {
-        digest128(bytes)
+    /// How many entries the housekeeping pass deleted during [`Self::open`] — 0 on the overwhelmingly
+    /// common path where the cache was already under budget.
+    ///
+    /// Exposed because eviction is otherwise a SILENT state change: the next run pays a re-analysis
+    /// cost for every dropped entry, and without this the user has no way to learn why it got slower.
+    /// A caller that wants the ready-made disclosure sentence should use [`Self::eviction_warning`]
+    /// rather than re-deriving one from this number.
+    pub fn evicted_entries(&self) -> usize {
+        self.evicted
     }
 
-    /// Looks up a file's cached Common IR slice by `(content_hash, parser_fingerprint, scope,
-    /// vocabulary_fingerprint)` —
-    /// ruleset-independent, per the spec's IR/findings split, but NOT scope-independent: `scope`
-    /// disambiguates "which file" (see `CacheKey::scope`'s doc) since a `FileIrSlice`'s `symbols`/`io`
-    /// embed their own originating path. Returns `None` on a miss, a stored-key mismatch (see module
-    /// doc), or any I/O / deserialization failure — this method never panics or errors on a corrupted or
-    /// missing entry, it simply reports "not cached".
-    pub fn get_ir(&self, key: &CacheKey) -> Option<FileIrSlice> {
-        let ir_key = IrKey::from(key);
-        let bytes = fs::read(self.ir_path(&ir_key)).ok()?;
-        let entry: IrEntry = serde_json::from_slice(&bytes).ok()?;
-        if entry.format_version != FORMAT_VERSION || entry.key != ir_key {
+    /// The user-facing disclosure for [`Self::evicted_entries`], or `None` when nothing was evicted.
+    ///
+    /// **`None` at zero is the contract, not an optimization.** Eviction is rare by design (the budget
+    /// is far larger than any single tree's live set — see [`crate::evict::MAX_CACHE_BYTES`]), so a line
+    /// emitted on every run would be noise on ~every run and would train readers to ignore the channel
+    /// it arrives on, which is where the failures that DO matter are reported.
+    ///
+    /// The sentence lives here rather than at the call site because this is the only place the fact can
+    /// be exercised: the cap is a private constant, and only this crate can drive an eviction (via
+    /// `open_with_cap`) to check what the message actually says. Its closing clause — that the cap is
+    /// not a config key — is owned by [`crate::evict::MAX_CACHE_BYTES`], not restated here.
+    pub fn eviction_warning(&self) -> Option<String> {
+        if self.evicted == 0 {
             return None;
         }
-        Some(entry.ir)
-    }
-
-    /// Stores `ir` under `(content_hash, parser_fingerprint, scope, vocabulary_fingerprint)`, independent of
-    /// `key.ruleset_fingerprint` — a later `put_ir` for the same content + parser + scope but a different
-    /// ruleset overwrites the same entry (harmlessly: the IR itself does not vary with the ruleset).
-    pub fn put_ir(&self, key: &CacheKey, ir: &FileIrSlice) -> io::Result<()> {
-        let entry = IrEntry {
-            format_version: FORMAT_VERSION,
-            key: IrKey::from(key),
-            ir: ir.clone(),
+        let noun = if self.evicted == 1 {
+            "entry"
+        } else {
+            "entries"
         };
-        let bytes = serde_json::to_vec(&entry).map_err(to_io_err)?;
-        write_atomic(&self.ir_path(&entry.key), &bytes)
-    }
-
-    /// Looks up a file's cached per-file rule findings by the full `(content_hash, parser_fingerprint,
-    /// scope, vocabulary_fingerprint, ruleset_fingerprint)` key. Same never-panics-on-corruption
-    /// contract as `get_ir`.
-    pub fn get_findings(&self, key: &CacheKey) -> Option<Vec<Finding>> {
-        let bytes = fs::read(self.findings_path(key)).ok()?;
-        let entry: FindingsEntry = serde_json::from_slice(&bytes).ok()?;
-        if entry.format_version != FORMAT_VERSION || entry.key != *key {
-            return None;
-        }
-        Some(entry.findings)
-    }
-
-    /// Stores `findings` under the full five-field key.
-    pub fn put_findings(&self, key: &CacheKey, findings: &[Finding]) -> io::Result<()> {
-        let entry = FindingsEntry {
-            format_version: FORMAT_VERSION,
-            key: key.clone(),
-            findings: findings.to_vec(),
-        };
-        let bytes = serde_json::to_vec(&entry).map_err(to_io_err)?;
-        write_atomic(&self.findings_path(key), &bytes)
-    }
-
-    fn ir_path(&self, key: &IrKey) -> PathBuf {
-        self.entry_path(IR_DIR, &key.digest_input())
-    }
-
-    fn findings_path(&self, key: &CacheKey) -> PathBuf {
-        self.entry_path(FINDINGS_DIR, &key.digest_input())
-    }
-
-    /// The one place a key digest becomes a filename. Takes the key's OWN `digest_input` (see `key.rs`)
-    /// rather than a field list, so neither path function can drift from the key it shards.
-    fn entry_path(&self, sub_dir: &str, digest_input: &str) -> PathBuf {
-        self.root
-            .join(sub_dir)
-            .join(format!("{}.json", digest128(digest_input.as_bytes())))
+        Some(format!(
+            "cache housekeeping: {} {noun} evicted to bring the cache back under its size cap. Not an \
+             error — cache entries are derived state and the oldest-written go first, so no analysis \
+             result is lost. The cost is one slower run: the next analysis recomputes the files those \
+             entries covered instead of reading them back, and runs after it are warm again. The cap is \
+             a fixed budget in this build, not a config key.",
+            self.evicted
+        ))
     }
 }
 
@@ -218,53 +205,6 @@ fn wipe_entries(dir: &Path) -> io::Result<()> {
         }
     }
     Ok(())
-}
-
-fn to_io_err(e: serde_json::Error) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, e)
-}
-
-/// Writes `bytes` to `path` via a temp-file-then-rename, so concurrent readers of `path` (this crate's
-/// own `get_ir`/`get_findings`, or an external tool) never observe a partially-written file. See the
-/// module doc for the Windows rename caveat this function absorbs.
-fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let tmp_path = temp_sibling(path);
-    fs::write(&tmp_path, bytes)?;
-    match fs::rename(&tmp_path, path) {
-        Ok(()) => Ok(()),
-        Err(e) => {
-            // Every writer for this exact `path` derived its entry from the same cache key, so the
-            // entries are equivalent even where their bytes differ (see module doc) — a concurrent
-            // writer finishing first and leaving `path` in place is a benign race, not a failure.
-            // Clean up our now-redundant temp file and report success; only propagate the error if
-            // `path` genuinely never got written (a real I/O problem).
-            let _ = fs::remove_file(&tmp_path);
-            if path.exists() {
-                Ok(())
-            } else {
-                Err(e)
-            }
-        }
-    }
-}
-
-/// A sibling path of `path` guaranteed unique within this process (pid + monotonic counter + wall-clock
-/// nanos) so concurrent `rayon` writers targeting the same eventual `path` never step on each other's
-/// temp file.
-fn temp_sibling(path: &Path) -> PathBuf {
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let pid = std::process::id();
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let mut tmp = path.to_path_buf();
-    tmp.set_extension(format!("tmp-{pid}-{nanos}-{n}"));
-    tmp
 }
 
 #[cfg(test)]

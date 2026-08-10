@@ -11,10 +11,15 @@
 //!   `RawCall` call-site attribution (`calls`, the substrate for the engine's whole-repo `SymbolGraph`),
 //!   plus the `CallSite` API-family projection (`call_sites`, `Matcher::CallScan`'s substrate — a
 //!   different fact from `calls`, see that module's doc for the boundary).
-//! - `adapters` — framework-vocabulary producers emitting cross-layer IO facts: FastAPI route PROVIDES
-//!   as router-mount fragments (`adapters::fastapi`) and `requests`/`httpx` literal egress CONSUMES
-//!   (`adapters::http_clients`), plus the two AUTH-GUARD evidence producers (`adapters::fastapi::guard`,
-//!   `adapters::django_routes::guard`) feeding the framework-neutral `auth-guarded` channel.
+//! - `adapters` — framework-vocabulary producers emitting cross-layer IO facts (route PROVIDES as
+//!   router-mount fragments, literal egress CONSUMES, `db-table` facts, and AUTH-GUARD evidence feeding
+//!   the framework-neutral `auth-guarded` channel). WHICH frameworks is deliberately not listed here:
+//!   [`FRAMEWORK_RECOGNIZERS`] below is the machine-verified answer (aggregated by
+//!   `zzop_engine::framework_recognizers`, checked by the engine's `rule_contracts::recognizer_channels` test). A
+//!   prose copy of that list is a second count that nothing verifies, and this one had already drifted.
+//!   Which rows it went silent on is recorded once, in `scripts/check-framework-prose-enumeration.sh`
+//!   (the guard that now refuses a partial list here) — naming them again in this paragraph would be
+//!   the very second copy the sentence above argues against.
 //!
 //! ## Line numbers
 //! ruff gives every node a `TextRange` of UTF-8 BYTE offsets, not line/column positions (unlike swc's
@@ -52,9 +57,10 @@ pub use lang::symbols::parse_symbols;
 pub use lang::used_names::parse_local_identifier_refs;
 
 /// Cache-bust token for `zzop-cache`: `parser-id/pinned-toolchain/last-change-version`. The `ruff-0.0.4`
-/// segment must match this crate's `Cargo.toml` `ruff_python_parser`/`ruff_python_ast` pin (a ruff upgrade
-/// changes extraction → restamp); the trailing `CARGO_PKG_VERSION` is restamped when this crate's projected
-/// IR shape changes, else kept so warm Python caches survive the upgrade (2026-07-22 version reform).
+/// segment names this crate's REAL exact pin (`ruff_python_parser`/`ruff_python_ast` are both `"=0.0.4"`
+/// in `Cargo.toml`), so it stays accurate for whoever reads it — unlike
+/// `zzop_parser_typescript`'s caret-range label. Keeping the two in step is a courtesy to that
+/// reader, not a correctness duty.
 ///
 /// **This string is an ID, not a version — it no longer has to be bumped.** `crates/engine/build.rs`
 /// hashes this crate's whole dependency closure into the cache key beside it, so a change to any

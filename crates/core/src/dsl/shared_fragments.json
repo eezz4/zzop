@@ -1,5 +1,5 @@
 {
-  "test-paths": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)",
-  "test-paths-migrations": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.|(^|/)(migrations?|migrate|db/migrations?)/)",
-  "test-paths-stories": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)"
+  "test-paths": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing|cypress|playwright)/|\\.tests?/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.|_test\\.go$|(^|/)test_[^/]*\\.py$|_test\\.py$|(?-i:Tests?\\.java$)|(?-i:(^|/)Test[A-Z][^/]*\\.java$)|(?-i:Tests?\\.cs$))",
+  "test-paths-migrations": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing|cypress|playwright)/|\\.tests?/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.|_test\\.go$|(^|/)test_[^/]*\\.py$|_test\\.py$|(?-i:Tests?\\.java$)|(?-i:(^|/)Test[A-Z][^/]*\\.java$)|(?-i:Tests?\\.cs$)|(^|/)(migrations?|migrate|db/migrations?|alembic/versions?)/)",
+  "test-paths-stories": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing|cypress|playwright)/|\\.tests?/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.|_test\\.go$|(^|/)test_[^/]*\\.py$|_test\\.py$|(?-i:Tests?\\.java$)|(?-i:(^|/)Test[A-Z][^/]*\\.java$)|(?-i:Tests?\\.cs$))"
 }

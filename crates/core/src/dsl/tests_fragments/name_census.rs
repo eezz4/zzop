@@ -76,6 +76,15 @@ const CENSUSED_FRAGMENTS: &[&str] = &[
     "crates/core/src/dsl/shared_fragments.json:test-paths-stories",
     "rules/dsl/browser/browser.json:html-sink-sanitized",
     "rules/dsl/redis/redis.json:string-denylist-literal",
+    // 2026-08-10. NOT a new vocabulary — a rescue. `reliability/sync-fs-in-handler` carried this exact
+    // body as an ANONYMOUS `file_exclude_pattern`: a hand-copy of the shared stories vocabulary with a
+    // `scripts?|tools|bin` arm added, under no name, so `superset` (which reads the `test-paths-*`
+    // family by name) never saw it and it was free to rot. It did — when the shared body gained the
+    // Go/Python/C# conventions, this copy kept the TypeScript-only arms and the rule went on judging
+    // `handler_test.go`. Naming it is what puts it back under the pin. T1, extension tier: same
+    // standing as the two `test-paths-*` rows above, and a strict superset of `test-paths` for the same
+    // reason they are.
+    "rules/dsl/reliability/reliability.json:test-paths-stories-scripts",
     "rules/dsl/sql/sql.json:sql-bootstrap-drop-create",
     "rules/dsl/sql/sql.json:sql-where-veto",
 ];

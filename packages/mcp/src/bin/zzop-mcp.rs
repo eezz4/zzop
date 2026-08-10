@@ -20,7 +20,7 @@
 #![allow(clippy::print_stdout, clippy::print_stderr)]
 
 const USAGE: &str =
-    "usage: zzop-mcp [mcp | version [--verbose] | help]  — serve MCP over stdio (JSON-RPC 2.0). Run the 'zzop' binary for CLI subcommands.";
+    "usage: zzop-mcp [mcp | version [--verbose] | help]  — serve MCP over stdio (JSON-RPC 2.0). `version` also answers to `--version` and `-V`; `help` to `--help` and `-h`. Run the 'zzop' binary for CLI subcommands.";
 
 fn main() {
     match std::env::args().nth(1).as_deref() {
@@ -53,25 +53,30 @@ fn main() {
         // The bare version stays the default (a one-token line scripts parse); `--verbose` adds every
         // parser's fingerprint — the same string `zzop version --verbose` prints, from the same owner,
         // so the fingerprint is reachable from BOTH products rather than the CLI alone.
-        Some("version") | Some("--version") => match std::env::args().nth(2).as_deref() {
-            None => println!("zzop-mcp {}", zzop_mcp::server::version()),
-            // A help request is ANSWERED, never turned into an error — the same contract the `zzop`
-            // CLI's per-subcommand help gate enforces. Without this arm the two hosts disagreed about
-            // what `version --help` means (0 and a usage line vs 2 and an error), so a wrapper probing
-            // which binary it holds read `zzop-mcp` as broken.
-            Some("-h") | Some("--help") => println!("{USAGE}"),
-            Some("--verbose") if std::env::args().count() == 3 => {
-                println!("{}", zzop_mcp::server::version_string());
+        // `-V` alongside them for the same reason the CLI carries it: this binary already answers `-h`,
+        // and accepting one conventional short flag while rejecting the other reads as an oversight to
+        // anyone probing which binary they hold. The two products keep the same spelling set on purpose.
+        Some("version") | Some("--version") | Some("-V") => {
+            match std::env::args().nth(2).as_deref() {
+                None => println!("zzop-mcp {}", zzop_mcp::server::version()),
+                // A help request is ANSWERED, never turned into an error — the same contract the `zzop`
+                // CLI's per-subcommand help gate enforces. Without this arm the two hosts disagreed about
+                // what `version --help` means (0 and a usage line vs 2 and an error), so a wrapper probing
+                // which binary it holds read `zzop-mcp` as broken.
+                Some("-h") | Some("--help") => println!("{USAGE}"),
+                Some("--verbose") if std::env::args().count() == 3 => {
+                    println!("{}", zzop_mcp::server::version_string());
+                }
+                // Names the first argument that is NOT `--verbose`: the arm above falls through here on
+                // `version --verbose extra`, and reporting `"--verbose"` would name the correct one.
+                Some(_) => {
+                    let args: Vec<String> = std::env::args().skip(2).collect();
+                    let bad = args.iter().find(|a| *a != "--verbose");
+                    eprintln!("usage: zzop-mcp version [--verbose] (unexpected argument {bad:?})");
+                    std::process::exit(2);
+                }
             }
-            // Names the first argument that is NOT `--verbose`: the arm above falls through here on
-            // `version --verbose extra`, and reporting `"--verbose"` would name the correct one.
-            Some(_) => {
-                let args: Vec<String> = std::env::args().skip(2).collect();
-                let bad = args.iter().find(|a| *a != "--verbose");
-                eprintln!("usage: zzop-mcp version [--verbose] (unexpected argument {bad:?})");
-                std::process::exit(2);
-            }
-        },
+        }
         Some("help") | Some("--help") | Some("-h") => println!("{USAGE}"),
         _ => {
             eprintln!("{USAGE}");

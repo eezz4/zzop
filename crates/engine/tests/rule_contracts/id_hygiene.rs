@@ -198,7 +198,8 @@ fn labeled_pattern_sites(rule: &zzop_core::RuleDef) -> Vec<(&'static str, &str)>
 ///   source text and cannot serve as a key. A consumer groups/filters on it, so it must be greppable and
 ///   quote-free. This is the layer contract 10 cannot reach: it walks rule IDS, and no id enumeration ever
 ///   visits a label. The defect that motivated this test was three labels that were English SENTENCES
-///   (`"ECB mode (no diffusion)"` and two siblings, all in `security/weak-crypto`) going out on the wire.
+///   (`"ECB mode (no diffusion)"` and two siblings — then in `security/weak-crypto`; those cipher arms
+///   live in `security/weak-cipher` since the 2026-08-09 split) going out on the wire.
 /// - `MethodScan::patterns[].label`/`absent[].label` never reach the wire (that matcher emits
 ///   `{"snippet", "method", "triggerLines"}`), but `trigger`/`after` REFERENCE `patterns[].label` by exact string, so those
 ///   labels are identifiers and get identifier hygiene for the ordinary reason.

@@ -221,12 +221,12 @@ fn callee_dotted(call: &CallExpr) -> Option<String> {
 /// The judged name: the segment after the last `.`, lowercased. The OBJECT half of a dotted chain is
 /// deliberately never judged — it names WHERE the function lives, not what it does, so
 /// `admin.list`/`auth.handlers` must not read as guards.
+///
+/// The lowercasing is the SHARED transform: `zzop_engine::NORMALIZED_VOCABULARY_KEYS` registers this
+/// producer's three vocabulary keys against the same function, so the config front end can warn about a
+/// declared entry that could never match here. A local twin would make that agreement a convention.
 fn name_tail(dotted: &str) -> String {
-    dotted
-        .rsplit('.')
-        .next()
-        .unwrap_or(dotted)
-        .to_ascii_lowercase()
+    zzop_core::vocab_norm::ascii_lowercase(dotted.rsplit('.').next().unwrap_or(dotted))
 }
 
 /// [`is_guard_name`] applied to `dotted`'s tail, vetoed first by the run's veto-suffix vocabulary.

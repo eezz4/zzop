@@ -185,7 +185,19 @@ census_file="scripts/policy-census.txt"
 #            test fixture and censuses as `test`.
 # f32 joined 2026-08-03 (A17): `HIGH_ENTROPY_SECRET_MIN_BITS` — an entropy threshold is exactly the
 # "shape family as the usize/…/f64 already read, and consequential" case the note above describes.
-type_alternation='&str|&\[&str\]|&\[u8\]|&\[\(&str,[[:space:]]*&str\)\]|\[&str;[[:space:]]*[0-9]+\]|\[\(&str,[[:space:]]*&str\);[[:space:]]*[0-9]+\]|&\[\(&str,[[:space:]]*&\[&str\]\)\]|&\[\(&str,[[:space:]]*&\[&str\],[[:space:]]*&str\)\]|&\[\(&str,[[:space:]]*SeverityValue\)\]|&\[BlindnessClass\]|&\[FrameworkRecognizer\]|RiskWeights|usize|u32|u64|i32|i64|f64|f32'
+# &[NormalizedKey] joined 2026-08-05: `NORMALIZED_VOCABULARY_KEYS`, whose left column is a list of
+# `vocabulary.*` KEY SPELLINGS — a name vocabulary wearing a type alias. The alias hid `&str` from the
+# shape filter, which is the same "invisible AND silent" pair the note above describes, arriving through
+# a new door (a type alias rather than a new tuple shape). Read it: the key half is policy, and a key
+# silently dropped from this table restores the exact silent-failure the table was built to end.
+# RuleIoChannel, &[RuleIoChannel] and &[(&str, &[RuleIoChannel])] joined 2026-08-10, all three read, all
+# three the `&[NormalizedKey]` case again — a name vocabulary wearing a struct type. The struct's two
+# fields ARE string spellings (an `io.provides`/`io.consumes` side and an io kind), so the six named
+# channel constants and the `ALL` set are string vocabulary the shape filter would otherwise not see;
+# and the per-crate `NATIVE_ANALYSES` tables pair zzop's own rule IDS with them. A rule id silently
+# dropped from such a table stops being registered AND stops being declared in one edit, which is the
+# widest silent hole any of these shapes can open.
+type_alternation='&str|&\[&str\]|&\[u8\]|&\[\(&str,[[:space:]]*&str\)\]|\[&str;[[:space:]]*[0-9]+\]|\[\(&str,[[:space:]]*&str\);[[:space:]]*[0-9]+\]|&\[\(&str,[[:space:]]*&\[&str\]\)\]|&\[\(&str,[[:space:]]*&\[&str\],[[:space:]]*&str\)\]|&\[\(&str,[[:space:]]*SeverityValue\)\]|&\[\(&str,[[:space:]]*&\[RuleIoChannel\]\)\]|&\[BlindnessClass\]|&\[FrameworkRecognizer\]|&\[NormalizedKey\]|&\[RuleIoChannel\]|RuleIoChannel|RiskWeights|usize|u32|u64|i32|i64|f64|f32'
 pattern="^[[:space:]]*(pub(\\((crate|super|in [^)]+)\\))? )?const [A-Z_][A-Z0-9_]*: ($type_alternation)"
 
 # Const types the census DELIBERATELY does not read, one line per type with its reason. Nothing is

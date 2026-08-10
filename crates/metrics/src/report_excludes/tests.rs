@@ -24,17 +24,19 @@ fn excludes() -> Vec<GlobalExclude> {
 /// module never reads them, which is exactly what `scores_and_counts_are_untouched` pins.
 fn sample_scores() -> Scores {
     Scores {
-        fsd: FsdScore {
+        feature_sliced_design: FeatureSlicedDesignScore {
             score: 50.0,
             total_imports: 4,
+            layer_classified_imports: 4,
             violations: vec![
-                fsd_violation(DROP, KEEP),
-                fsd_violation(KEEP, DROP),
-                fsd_violation(KEEP, "src/other.ts"),
+                feature_sliced_design_violation(DROP, KEEP),
+                feature_sliced_design_violation(KEEP, DROP),
+                feature_sliced_design_violation(KEEP, "src/other.ts"),
             ],
         },
         cohesion: CohesionScore {
             score: 60.0,
+            slice_count: 2,
             slices: vec![SliceCohesion {
                 slice: "core".to_string(),
                 file_count: 2,
@@ -48,6 +50,7 @@ fn sample_scores() -> Scores {
         coupling: CouplingScore {
             score: 70.0,
             avg_fan_out_among_importers: 1.0,
+            importer_count: 12,
             max_fan_out: 2.0,
             circular_count: 1,
         },
@@ -96,18 +99,18 @@ fn sample_scores() -> Scores {
             ],
             deep_imports_truncated: 0,
         },
-        sfc: SfcScore {
+        file_size_compliance: FileSizeComplianceScore {
             score: 74.0,
             limit: 150,
             compliant: 1,
             total: 3,
             violations: vec![
-                SfcViolation {
+                FileSizeComplianceViolation {
                     path: DROP.to_string(),
                     loc: 400,
                     limit: 150,
                 },
-                SfcViolation {
+                FileSizeComplianceViolation {
                     path: KEEP.to_string(),
                     loc: 400,
                     limit: 150,
@@ -117,6 +120,7 @@ fn sample_scores() -> Scores {
         },
         main_sequence: MainSequenceScore {
             score: 75.0,
+            classified_files: 5,
             avg_distance: 0.3,
             modules: vec![ModuleMainSeq {
                 module: "core".to_string(),
@@ -135,6 +139,7 @@ fn sample_scores() -> Scores {
         god_file: GodFileScore {
             score: 77.0,
             limit: 300,
+            total: 9,
             files: vec![
                 GodFile {
                     path: DROP.to_string(),
@@ -170,6 +175,7 @@ fn sample_scores() -> Scores {
         },
         diamond: DiamondScore {
             score: 79.0,
+            roots_examined: 7,
             pairs: vec![
                 // Excluded only in the MIDDLE of the path — `through` is as much a named path as the
                 // endpoints are.
@@ -204,6 +210,7 @@ fn sample_scores() -> Scores {
         },
         bus_factor: BusFactorScore {
             score: 81.0,
+            total: 11,
             risky: 2,
             files: vec![
                 BusFactorFile {
@@ -225,57 +232,14 @@ fn sample_scores() -> Scores {
             tagged_file_touches: 4,
             fix_share_of_tagged_touches: 0.25,
         },
-        type_safety: TypeSafetyScore {
-            score: 83.0,
-            total_as_cast: 2,
-            total_any_type: 2,
-            violations: vec![
-                TypeSafetyViolation {
-                    path: DROP.to_string(),
-                    as_cast: 1,
-                    any_type: 1,
-                    loc: 400,
-                    density: 0.005,
-                },
-                TypeSafetyViolation {
-                    path: KEEP.to_string(),
-                    as_cast: 1,
-                    any_type: 1,
-                    loc: 400,
-                    density: 0.005,
-                },
-            ],
-            violations_truncated: 0,
-        },
-        lod: LodScore {
-            score: 84.0,
-            total_violations: 2,
-            violations: vec![
-                LodFileSummary {
-                    path: DROP.to_string(),
-                    count: 1,
-                    max_depth: 3,
-                    loc: 400,
-                    density: 0.0025,
-                },
-                LodFileSummary {
-                    path: KEEP.to_string(),
-                    count: 1,
-                    max_depth: 3,
-                    loc: 400,
-                    density: 0.0025,
-                },
-            ],
-            violations_truncated: 0,
-        },
     }
 }
 
-fn fsd_violation(from: &str, to: &str) -> FsdViolation {
-    FsdViolation {
+fn feature_sliced_design_violation(from: &str, to: &str) -> FeatureSlicedDesignViolation {
+    FeatureSlicedDesignViolation {
         from: from.to_string(),
         to: to.to_string(),
-        kind: FsdViolationKind::LayerReverse,
+        kind: FeatureSlicedDesignViolationKind::LayerReverse,
         from_layer: 3,
         to_layer: 1,
         from_slice: None,
@@ -289,7 +253,7 @@ fn every_single_file_list_drops_the_excluded_row_and_keeps_the_other() {
     apply_excludes_to_scores(&mut s, &excludes());
 
     assert_eq!(
-        s.sfc
+        s.file_size_compliance
             .violations
             .iter()
             .map(|v| v.path.as_str())
@@ -320,22 +284,6 @@ fn every_single_file_list_drops_the_excluded_row_and_keeps_the_other() {
             .collect::<Vec<_>>(),
         vec![KEEP]
     );
-    assert_eq!(
-        s.type_safety
-            .violations
-            .iter()
-            .map(|v| v.path.as_str())
-            .collect::<Vec<_>>(),
-        vec![KEEP]
-    );
-    assert_eq!(
-        s.lod
-            .violations
-            .iter()
-            .map(|v| v.path.as_str())
-            .collect::<Vec<_>>(),
-        vec![KEEP]
-    );
 }
 
 /// An edge row names TWO files and the two sides are not symmetric. The `from`/`root` side is the judged
@@ -354,23 +302,37 @@ fn an_edge_row_drops_on_its_subject_and_redacts_its_far_side() {
     let mut s = sample_scores();
     apply_excludes_to_scores(&mut s, &excludes());
 
-    // The fixture's fsd list is (DROP -> KEEP), (KEEP -> DROP), (KEEP -> src/other.ts). The first loses its
+    // The fixture's feature_sliced_design list is (DROP -> KEEP), (KEEP -> DROP), (KEEP -> src/other.ts). The first loses its
     // subject and goes; the second keeps its subject and only its target is masked.
-    assert_eq!(s.fsd.violations.len(), 2, "{:?}", s.fsd.violations);
+    assert_eq!(
+        s.feature_sliced_design.violations.len(),
+        2,
+        "{:?}",
+        s.feature_sliced_design.violations
+    );
     assert!(
-        s.fsd.violations.iter().all(|v| v.from == KEEP),
+        s.feature_sliced_design
+            .violations
+            .iter()
+            .all(|v| v.from == KEEP),
         "no row may survive with an excluded subject: {:?}",
-        s.fsd.violations
+        s.feature_sliced_design.violations
     );
     assert!(
-        s.fsd.violations.iter().any(|v| v.to == zzop_core::REDACTED),
+        s.feature_sliced_design
+            .violations
+            .iter()
+            .any(|v| v.to == zzop_core::REDACTED),
         "the excluded target must be redacted, not deleted with its row: {:?}",
-        s.fsd.violations
+        s.feature_sliced_design.violations
     );
     assert!(
-        s.fsd.violations.iter().any(|v| v.to == "src/other.ts"),
+        s.feature_sliced_design
+            .violations
+            .iter()
+            .any(|v| v.to == "src/other.ts"),
         "an untouched row must stay untouched: {:?}",
-        s.fsd.violations
+        s.feature_sliced_design.violations
     );
 
     assert_eq!(

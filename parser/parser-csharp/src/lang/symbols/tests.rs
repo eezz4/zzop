@@ -157,6 +157,65 @@ fn constructor_is_extracted() {
     assert!(ns.contains(&"C.C".to_string()));
 }
 
+// --- THE SPAN CONTRACT: `body_start` is the DECLARATION's line, attribute lists included ---
+
+/// `zzop_core::SourceSymbol`'s "Body span contract". A `[HttpGet]`/`[Authorize]`-anchored method-scan
+/// concept needs the attribute list inside the span, and a wrapped signature must not push the span
+/// past the declaration — neither holds under the old "`body` node's own line" reading, and neither is
+/// visible in a one-line-header fixture.
+#[test]
+fn method_body_span_starts_at_the_first_attribute_not_at_the_opening_brace() {
+    let src = concat!(
+        "public class C {\n",
+        "    [HttpGet]\n",
+        "    public int M(\n",
+        "        int a\n",
+        "    ) {\n",
+        "        return a;\n",
+        "    }\n",
+        "}\n",
+    );
+    let syms = parse_symbols("f.cs", src);
+    let m = syms.iter().find(|s| s.name == "C.M").unwrap();
+    assert_eq!(m.line, 2);
+    assert_eq!(m.body_start, Some(2));
+    assert_eq!(m.body_end, Some(7));
+}
+
+/// An expression-bodied PROPERTY (`int P => Compute();`) carried `None`/`None` — "kept simple, out of
+/// v1 span scope", which under `drop_outer_spans` is not simplicity but invisibility: the enclosing
+/// type's span is discarded as soon as any sibling member projects a leaf, so the property's own
+/// expression became unreachable to every `.cs` method-scan rule. An expression-bodied METHOD was
+/// never in this hole (`arrow_expression_clause` IS the `body` field there), which is exactly what made
+/// the property gap easy to miss.
+#[test]
+fn expression_bodied_property_projects_a_span_like_every_other_member() {
+    let src = concat!(
+        "public class C {\n",
+        "    public int P =>\n",
+        "        Compute();\n",
+        "\n",
+        "    public void Sibling() {}\n",
+        "}\n",
+    );
+    let syms = parse_symbols("f.cs", src);
+    let p = syms.iter().find(|s| s.name == "C.P").unwrap();
+    assert_eq!(p.body_start, Some(2));
+    assert_eq!(p.body_end, Some(3));
+}
+
+/// A static constructor DOES project a symbol with a span — `tree-sitter-c-sharp` spells it
+/// `constructor_declaration` like any other, so it never needed the special handling this module's doc
+/// claimed for years that it lacked. Pinned so the doc and the behaviour cannot drift apart again.
+#[test]
+fn static_constructor_projects_a_span() {
+    let src = "public class C {\n    static C() {\n        Boot();\n    }\n}\n";
+    let syms = parse_symbols("f.cs", src);
+    let ctor = syms.iter().find(|s| s.name == "C.C").unwrap();
+    assert_eq!(ctor.body_start, Some(2));
+    assert_eq!(ctor.body_end, Some(4));
+}
+
 #[test]
 fn parse_symbols_empty_on_parse_failure() {
     assert!(parse_symbols("f.cs", "\u{0}\u{1}not csharp{{{{").is_empty());

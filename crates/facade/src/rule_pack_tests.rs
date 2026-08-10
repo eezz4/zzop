@@ -484,11 +484,11 @@ fn every_struct_in_the_matcher_source_is_covered_by_the_parity_pin() {
     assert_eq!(
         declared,
         [
-            "LineScan",
             "LabeledPattern",
             "SymbolScan",
             "IoScan",
             "CallScan",
+            "LineScan",
             "LiteralScan",
             "MethodScan"
         ],

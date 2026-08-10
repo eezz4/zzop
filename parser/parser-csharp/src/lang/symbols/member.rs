@@ -34,9 +34,13 @@ fn emit_method(rel: &str, node: Node, src: &str, path: &[String], out: &mut Vec<
         return;
     };
     let method_name = node_text(name_node, src);
+    // `body_start` is the DECLARATION's own line — attribute lists and modifiers included, since
+    // `node` is the whole `*_declaration` — never the body's own opening line. See
+    // `zzop_core::SourceSymbol`'s "Body span contract". No `body` at all (an abstract/interface/partial
+    // method declared with `;`) keeps `None`/`None`.
     let (body_start, body_end) = node
         .child_by_field_name("body")
-        .map(|b| (Some(line_of(b)), Some(end_line_of(b))))
+        .map(|b| (Some(line_of(node)), Some(end_line_of(b))))
         .unwrap_or((None, None));
     push(
         rel,
@@ -56,9 +60,13 @@ fn emit_ctor(rel: &str, node: Node, src: &str, path: &[String], out: &mut Vec<So
         return;
     };
     let ctor_name = node_text(name_node, src);
+    // `body_start` is the DECLARATION's own line — attribute lists and modifiers included, since
+    // `node` is the whole `*_declaration` — never the body's own opening line. See
+    // `zzop_core::SourceSymbol`'s "Body span contract". No `body` at all (an abstract/interface/partial
+    // method declared with `;`) keeps `None`/`None`.
     let (body_start, body_end) = node
         .child_by_field_name("body")
-        .map(|b| (Some(line_of(b)), Some(end_line_of(b))))
+        .map(|b| (Some(line_of(node)), Some(end_line_of(b))))
         .unwrap_or((None, None));
     push(
         rel,
@@ -73,16 +81,26 @@ fn emit_ctor(rel: &str, node: Node, src: &str, path: &[String], out: &mut Vec<So
     );
 }
 
-/// `property_declaration` -> `Const` unconditionally (module doc). Body span comes from the
-/// `accessors` field (`accessor_list`, `{ get; set; }`) when present; an expression-bodied property
-/// (`int X => 5;`, `value` field instead) carries `None`/`None` — kept simple, out of v1 span scope.
+/// `property_declaration` -> `Const` unconditionally (module doc). The span runs from the declaration's
+/// own line to the end of whichever body form it carries: an `accessor_list` (`{ get; set; }`, or
+/// accessors with real bodies) or an expression body (`int X => Compute();`, the `value` field).
+///
+/// The expression-bodied form used to carry `None`/`None` — "kept simple, out of v1 span scope", which
+/// under `drop_outer_spans` was not simplicity but invisibility: the enclosing type's span is discarded
+/// the moment any sibling member projects a leaf, so the property's own expression was unreachable to
+/// every `.cs` method-scan rule. An expression-bodied METHOD was never in that hole, because
+/// `arrow_expression_clause` IS the `body` field there — which is exactly what made this one easy to
+/// miss. Both accessors of an accessor list still share ONE span rather than projecting a leaf each; a
+/// getter and a setter can therefore still pair patterns across each other, disclosed here rather than
+/// fixed, because splitting them needs a naming decision (`C.P.get`) that changes call-graph ids.
 fn emit_property(rel: &str, node: Node, src: &str, path: &[String], out: &mut Vec<SourceSymbol>) {
     let Some(name_node) = node.child_by_field_name("name") else {
         return;
     };
     let (body_start, body_end) = node
         .child_by_field_name("accessors")
-        .map(|a| (Some(line_of(a)), Some(end_line_of(a))))
+        .or_else(|| node.child_by_field_name("value"))
+        .map(|a| (Some(line_of(node)), Some(end_line_of(a))))
         .unwrap_or((None, None));
     push(
         rel,

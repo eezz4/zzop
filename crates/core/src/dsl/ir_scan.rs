@@ -28,9 +28,11 @@ pub(super) fn eval_symbol_scan(
     out: &mut Vec<Finding>,
     // Rule-skip sink — see `diagnostics`'s module doc.
     diagnostics: &mut Vec<String>,
+    // The owning pack's compiled-regex memo — see `crate::dsl::RegexCache`.
+    cache: &crate::dsl::RegexCache,
 ) {
     let rule_id = format!("{}/{}", pack_id, rule.id);
-    let mut diag = RuleDiag::new(&rule_id, diagnostics);
+    let mut diag = RuleDiag::new(&rule_id, diagnostics, cache);
     let Some(file_re) = diag.compile("file_pattern", &m.file_pattern) else {
         return;
     };
@@ -135,7 +137,7 @@ pub fn eval_pack_io_scan_into(
         let Matcher::IoScan(m) = &rule.matcher else {
             continue;
         };
-        eval_io_scan_rule(&pack.id, rule, m, ctx, out, diagnostics);
+        eval_io_scan_rule(&pack.id, rule, m, ctx, out, diagnostics, &pack.regex_cache);
     }
 }
 
@@ -158,9 +160,11 @@ fn eval_io_scan_rule(
     // Rule-skip sink — see `diagnostics`'s module doc. Same contract as every other DSL matcher: a rule
     // whose regex does not compile is skipped, not fatal, and never silent.
     diagnostics: &mut Vec<String>,
+    // The owning pack's compiled-regex memo — see `crate::dsl::RegexCache`.
+    cache: &crate::dsl::RegexCache,
 ) {
     let rule_id = format!("{}/{}", pack_id, rule.id);
-    let mut diag = RuleDiag::new(&rule_id, diagnostics);
+    let mut diag = RuleDiag::new(&rule_id, diagnostics, cache);
     // Every pattern compiled up front, or this rule is skipped with a diagnostic — see `patterns`.
     let Some(pat) = patterns::IoScanPatterns::compile(rule, m, &mut diag) else {
         return;

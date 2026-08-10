@@ -240,9 +240,20 @@ pub fn handle_message(msg: &serde_json::Value) -> Option<serde_json::Value> {
             // needs: the `.mcpb` lane has no delivery-layer notifier, so the notice has to arrive
             // somewhere a reader actually looks. `serverInfo` could not carry it (it is a spec-shaped
             // `{name, version}` object), and stderr alone is a log file nobody opens unprompted.
+            //
+            // Since 2026-08-08 the slot ALWAYS carries orientation, with the staleness notice
+            // appended when there is one. Before that it was staleness-only, and measured absent in
+            // the shipped build — so a client's entire briefing was seven tool descriptions. Those
+            // descriptions are this repo's most honest surface (each names what it cannot do first),
+            // but none of them can state a fact that is true BEFORE any tool runs: that a config must
+            // exist at all. The agent learned it by failing, which is the one thing this server can
+            // cheaply prevent.
+            let mut instructions = orientation::ORIENTATION.to_string();
             if let Some(notice) = crate::staleness::notice() {
-                result["instructions"] = serde_json::Value::String(notice);
+                instructions.push_str("\n\n");
+                instructions.push_str(&notice);
             }
+            result["instructions"] = serde_json::Value::String(instructions);
             ok(id, result)
         }
         "tools/list" => ok(id, crate::tools::list()),
@@ -265,6 +276,8 @@ pub fn handle_message(msg: &serde_json::Value) -> Option<serde_json::Value> {
 fn ok(id: serde_json::Value, result: serde_json::Value) -> serde_json::Value {
     serde_json::json!({ "jsonrpc": "2.0", "id": id, "result": result })
 }
+
+mod orientation;
 
 #[cfg(test)]
 mod tests;

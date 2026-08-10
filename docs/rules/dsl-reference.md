@@ -90,24 +90,38 @@ factored out the duplication, it never changed which files any rule scans.
 |---|---|---|---|
 | `id` | string | — | Rule id within the pack. |
 | `severity` | `"critical"` \| `"warning"` \| `"info"` | — | Default severity (overridable per-id via `RuleConfig::severity_overrides`). |
-| `message` | string | — | Human-facing cause/fix-hint, copied verbatim into every finding — but NOT the whole of what ships: the engine auto-appends a disable hint at runtime (see the note right below this table). |
+| `message` | string | — | Human-facing cause/fix-hint, copied verbatim into every finding — but NOT the whole of what ships: the engine auto-appends TWO sentences at runtime, the suppress-marker line and the disable hint (see the note right below this table). |
 | `matcher` | `Matcher` | — | One of the matcher shapes below (`type` tag, kebab-case). |
 
 There is **no `suppress_marker` field** — the inline ok-marker is DERIVED as `zzop-<id>-ok`
 (`RuleDef::suppress_marker()`), so it is never authored or stored. See
 [Suppress-marker semantics](#suppress-marker-semantics).
 
-**Do not hand-write a disable hint in `message`.** At runtime the engine appends one more sentence to
-every DSL finding's `message`, after whatever you write: `` Disable via config `rules: { "<pack>/<rule>": "off" }` (embedders: `disabledRules`) `` (`zzop_core::disable_hint`, appended by
-`crates/engine/src/pipeline/findings.rs::append_disable_hints`) — the exact same fragment native findings
-carry, built from the one shared helper. Write the cause, the fix, and your rule's own derived `zzop-<id>-ok`
-marker in `message`; a hand-written "disable via config ..." sentence renders TWICE. See
+**Write the cause and the fix. Write neither of the two sentences the engine appends.** At runtime
+`crates/engine/src/pipeline/findings.rs::append_hints` adds them to every DSL finding's `message`, after
+whatever you wrote, in this order:
+
+1. the **suppress-marker** sentence — your rule's derived `zzop-<id>-ok` marker, spelled with the comment
+   leaders THIS matcher kind actually honours (`zzop_core::dsl::suppress_hint`). It is omitted where it
+   would be a lie: a `symbol-scan` finding has no line to anchor a comment against, and an `io-scan`
+   marker is inert under a full envelope, which carries no source text.
+2. the **disable hint** — `` Disable via config `rules: { "<pack>/<rule>": "off" }` (embedders: `disabledRules`) ``
+   (`zzop_core::disable_hint`), the exact same fragment native findings carry, from the one shared helper.
+
+Hand-writing either one renders it TWICE, and the marker sentence is the more dangerous of the two: a
+hand-written one goes stale the moment the matcher kind changes, because it names leaders the engine no
+longer honours. `scripts/check-pack-suppress-sentence.sh` fails a pack that carries the canonical
+sentence. A rule whose message genuinely needs to say something MORE about its marker (a limitation
+the flat sentence cannot express) still may — the engine's opt-out skips any message that already names
+its own marker, so what you write replaces the generated line rather than doubling it. See
 [authoring-guide.md](authoring-guide.md#the-auto-appended-disable-hint) for the full contract.
 
 ## Matchers
 
-`Matcher` is tagged on `"type"` (kebab-case): `line-scan`, `method-scan`, `symbol-scan`, `io-scan`,
-`call-scan`, `literal-scan`.
+`Matcher` is tagged on `"type"` (kebab-case). The shapes are not re-listed in this sentence — the
+`###` sections below are the list, one per shape, and that set is machine-checked against the
+`Matcher` enum in both directions. A sentence naming them all would be a second copy nothing checks,
+which is how a shipped shape goes unmentioned.
 Whole-graph / cross-file queries are out of scope for all of them — see
 [authoring-guide.md#when-a-rule-does-not-fit-the-dsl](authoring-guide.md#when-a-rule-does-not-fit-the-dsl).
 
@@ -122,10 +136,11 @@ Per-line regex scan over a file's raw text — the DSL's lexical matcher.
 | `require_file` | regex \| null | `null` | Cheap pre-skip: the rule only scans a file whose full text matches this regex. Absent = always scan. |
 | `require_file_all` | regex[] | `[]` | Additional pre-skip regexes, **all** of which must match the file text, evaluated in order, short-circuiting on the first miss. Order rare-token-first — see the [authoring guide's performance section](authoring-guide.md#performance-require_filerequire_file_all-rare-token-first). |
 | `require_file_absent` | regex[] | `[]` | Negated mirror of `require_file_all`, evaluated right after it: if **any** of these regexes matches the whole file text, the rule skips that file entirely. Encodes "flag X only when there is no Y anywhere in the file" (e.g. `setInterval` with no `clearInterval` anywhere in the same file) — a shape `exclude_pattern` cannot express, since that field only vetoes the matching *line*, not the whole file. |
-| `skip_comment_lines` | bool | `false` | Skip lines whose `trim_start()` begins with `//`, `*`, or `/*`. |
+| `skip_comment_lines` | bool | `false` | Skip lines whose `trim_start()` opens a comment **in that file's own syntax** — `//`, `*`, `/*` for every extension, plus `--` in a `.sql` file. The leader set is keyed by extension in one place (`markers::leaders_for_path`), not a fixed triple; reading it as a fixed triple is what let a commented-out `-- DROP TABLE` fire as a destructive migration. |
 | `line_pattern` | regex \| null | `null` | Single flag regex — mutually exclusive with `any` (see below). |
 | `any` | `LabeledPattern[]` \| null | `null` | Labeled alternatives; **first match per line wins**, its `label` becomes `data.label`. Takes precedence over `line_pattern` when both are present. |
 | `exclude_pattern` | regex \| null | `null` | A line that matches the main pattern is skipped entirely when it **also** matches this regex (e.g. excluding `^\s*import` lines from an `as`-cast scan). |
+| `prev_line_exclude_pattern` | regex \| null | `null` | One-line-lookback veto: a matched line is skipped when the **immediately preceding** line matches this regex. For statement continuations a per-line matcher cannot otherwise see — a formatter-wrapped concise arrow body (`const f = (x) =>` / `  db.create(...)`) carries the evidence that the promise is returned on the line *above* the match. Typically an end-of-line-anchored continuation shape (`(=>\|=)\s*$`), **not** a copy of `exclude_pattern` (a `return` on the previous line usually ends a complete statement there). Exactly one line, never a window — same lookback as marker suppression; a rule leaning on it should disclose the window in its message. Tested under the same `strip_string_literals` masking as every other line regex. |
 | `line_call_kind` | string \| null | `null` | Structural gate — a call **kind** (plain string, not a regex, not fragment-expanded). A matched line fires only when the file's projected `call_sites` carry an entry of that kind **on that same line**: the regex says the shape is there, this asks the parser whether the line really *calls* the named API family. Degrades to **silence** (`call-scan`'s direction, not `after_in_same_function`'s no-op): a file with no projected call sites — degraded parse, an environment with no producer, or a callee spelling the producer cannot resolve — can never fire a gated rule where the bare regex used to, so a rule setting it must disclose that trade in its own message. Kind spellings are bound by `zzop_core::RULE_READ_CALL_KINDS`. |
 | `attr_present` | string \| null | `null` | Attribute gate — plain attribute name, **not** a regex and **not** fragment-expanded. Keeps a finding only when this file carries a truthy attribute of that name. See [Attribute gates](#attribute-gates-consuming-a-declaration). |
 | `attr_absent` | string \| null | `null` | Same lookup, inverted: keeps a finding only when the file carries **no** truthy value for the attribute. |
@@ -159,7 +174,7 @@ one function" matcher (e.g. `Runtime.exec` + string concatenation in the same me
 | `require_file` | regex \| null | `null` | Same cheap pre-skip as line-scan. |
 | `require_file_all` | regex[] | `[]` | Same AND pre-skip as line-scan. |
 | `require_file_absent` | regex[] | `[]` | Negated mirror of `require_file_all` — same semantics as line-scan's `require_file_absent`: if **any** of these regexes matches the whole file text, the rule skips that file entirely (e.g. skip a `process.exit(...)` finding in a file that also registers a `process.on('SIG...` signal handler, since a dedicated signal-handling module legitimately calls `process.exit`). |
-| `skip_comment_lines` | bool | `false` | Skip comment lines when testing patterns (span-scoped). |
+| `skip_comment_lines` | bool | `false` | Skip comment lines when testing patterns (span-scoped) — same extension-keyed leader set as line-scan. |
 | `patterns` | `LabeledPattern[]` | required | **All** must each match at least one line inside a symbol's span (lines don't need to share a line — "co-occurrence", not "one regex"). |
 | `trigger` | string | required | Must equal one `patterns[].label`; that pattern's first (top-down) match anchors the finding's `line`/snippet. A `trigger` naming no real label makes the rule malformed → skipped. |
 | `trigger_in_loop` | bool | `false` | Structural containment gate on the trigger pattern only: when `true`, a trigger-pattern line match counts (for both satisfaction and the finding's line) only if that line falls within one of the file's projected `loop_spans` (see below) — i.e. the call is textually INSIDE a loop statement or an array-iteration callback body, not merely co-occurring with loop tokens somewhere in the same function. Non-trigger `patterns`/`absent` entries are unaffected. A file with no projected loop spans can never satisfy the trigger, so the rule is silent there — same graceful-degrade policy as a file with no symbol spans. |
@@ -451,13 +466,58 @@ per-line or per-symbol scan — a match skips the file entirely for that rule. L
 in the DSL, a `file_exclude_pattern` that fails to compile skips the whole rule (zero findings), not just
 the exclusion.
 
+### The `${test-paths}` vocabulary, and the one key that widens it
+
+Almost every bundled rule spells its path exclusion as the shared fragment `${test-paths}` (or its
+`${test-paths-stories}` / `${test-paths-migrations}` extensions). That fragment is the single owner of
+"what does zzop consider a test path" — `zzop_core::is_test_file`, the native/cross-layer "not deployed"
+predicate, reads the same string, so the rule layer and the join layer cannot disagree.
+
+It covers each language's own convention, not one language's convention applied to all of them:
+
+| convention | example |
+|---|---|
+| Go | `api/handler_test.go` |
+| Python | `app/test_login.py`, `app/login_test.py` |
+| C# | `Api.Tests/UserTests.cs`, `src/UserServiceTest.cs` |
+| Java | `src/FooTest.java`, `src/TestFoo.java` |
+| TypeScript/JS | `src/user.test.ts`, `src/user-spec.js` |
+| directory | `tests/`, `spec/`, `__tests__/`, `e2e/`, `fixtures/`, `cypress/`, `playwright/`, `MyApp.Tests/` |
+| runner config | `vitest.config.ts`, `playwright.config.ts`, `jest.config.js` |
+
+Until 2026-08-10 it covered only the TypeScript rows — the directory names and the `.test.`/`.spec.`
+dot-infix — while `is_test_file` separately knew the Go/Python/C#/Java spellings and no rule consulted it.
+Measured on a tree containing nothing but `services/handler_test.go`, `services/test_login.py` and
+`Api.Tests/UserTests.cs`: **14 findings, every one a false positive**, against **1** for the identical
+bytes moved under `tests/`.
+
+To add a path convention of your own, declare `vocabulary.extraTestPathPatterns` in `zzop.config.jsonc`:
+
+```jsonc
+"vocabulary": {
+  // ADDS to the built-in language conventions above — it never replaces them.
+  "extraTestPathPatterns": ["(^|/)it/", "(^|/)acceptance/"]
+}
+```
+
+This is the only **additive** key under `vocabulary`, and the only one that applies a built-in default
+when you declare nothing. Both exceptions have the same cause: a test convention is fixed by the
+LANGUAGE, not chosen by your project, so requiring you to declare `_test.go` would be asking you to
+restate the Go toolchain — and with no default, zzop would judge test code as production and every
+finding on it would be a wrong claim rather than the quiet under-report the rest of that block degrades
+to. A pattern that is not a valid regex is dropped with a `warnings` entry naming it; the rest of the
+list still applies. To be judged on a path after all, turn the rule off (`rules: { "<id>": "off" }`) —
+narrowing is deliberately not expressible.
+
+Each declared arm is applied per TREE: in a multi-repo run, one root's declaration never reaches
+another's.
+
 ## Test-region exclusion (the default for every rule, with one declared opt-out)
 
-`file_exclude_pattern` can only ask about a PATH. That is enough for TypeScript, Python, Go, Java and C#,
-whose tests live in a file the path names (`*.test.ts`, `tests/test_x.py`, `src/test/java/...`) — which is
-what the shared `${test-paths-stories}` fragment matches. It is not enough for Rust, whose dominant
-convention puts unit tests **inside the shipping file** as `#[cfg(test)] mod tests { ... }`; no path regex
-can see that.
+`file_exclude_pattern` can only ask about a PATH. For every language whose tests live in a file the path
+names, that is the whole story — see the table above for what the shared fragment matches, per language.
+It is not enough for Rust, whose dominant convention puts unit tests **inside the shipping file** as
+`#[cfg(test)] mod tests { ... }`; no path regex can see that.
 
 So the exclusion has a second form of evidence, and unlike `file_exclude_pattern` it is **not a matcher
 field**: a parser may project TEST-ONLY LINE SPANS for a file (`FileProjection::test_spans` in the
@@ -528,13 +588,14 @@ suppression comment in a codebase greppable as one class and tells a reader whos
 Note that a finding carries the
 PACK-QUALIFIED id, and the marker strips that prefix: `security/hardcoded-secret` suppresses on
 `// zzop-hardcoded-secret-ok`, never `// security/zzop-hardcoded-secret-ok` (the marker regex anchors right after
-`//`, so the prefixed form silently matches nothing). It applies to
-`line-scan`, `method-scan`, AND `io-scan` findings (not `symbol-scan`, which still has no source-line
-concept to anchor a comment against):
+`//`, so the prefixed form silently matches nothing). It applies to every matcher whose findings HAVE a
+source line to anchor a comment against — that is, all of them except `symbol-scan`, which still has no
+source-line concept. State the exception, not the roster: a matcher added later inherits the marker by
+having an anchor line, and a hand-kept list of honoring matchers would be wrong the day it was added.
 
-- A `line-scan`/`method-scan` finding is suppressed when a `//`-comment naming the marker appears on the
-  finding's **own line, or the single line directly above it** — a fixed 1-line lookback window used
-  uniformly across every pack. A wider lookback window over-suppresses: a marker aimed at one call can
+- A finding is suppressed when a comment naming the marker appears on the finding's **own line, or the
+  single line directly above it** — a fixed 1-line lookback window (`markers::MARKER_LOOKBACK_LINES`) used
+  uniformly across every matcher and pack. A wider lookback window over-suppresses: a marker aimed at one call can
   silently suppress unrelated, unvetted findings on the lines below it. Place the marker on the finding's
   own line, or directly above it — nowhere further back.
 - A comment SHAPED like a marker but not THIS rule's marker suppresses nothing — and is now NAMED in the
@@ -546,10 +607,13 @@ concept to anchor a comment against):
   only, with `+` in the alphabet so `n+1`-style ids are recognized — standing as the FIRST token of a line
   comment (only whitespace between the leader and the token) and terminated by an ATTACHED `:` or by the
   end of the line (`// as-ok: reason`, `// as-ok`). "Line comment" means exactly the leaders that could
-  have SUPPRESSED this finding in the first place: `//` for `line-scan`/`method-scan`, `--` only in a
-  `.sql` file, and `//` or `#` for `io-scan` (see the three bullets below) — a leader that never had
-  suppression power is never blamed for failing to use it, so a Python `# foo-ok` above a `line-scan`
-  finding is silent, exactly as it is for suppression. A `-ok` word inside a sentence is never accused
+  have SUPPRESSED this finding in the first place: `//` for the per-file matchers, plus `--` in a `.sql`
+  file and `#` in a config file, and `//` or `#` for the multi-language channels, whose anchor lines can
+  come from any language at once (`markers::marker_leaders_for_path` and `markers::marker_channel` are
+  the two owners of that split — the file axis and the matcher axis, and neither answers for the other)
+  — a leader that never had suppression power is never blamed for failing to use it, so a Python
+  `# foo-ok` above a `line-scan` finding is silent, exactly as it is for suppression. Python is not in
+  the config-file family; that gap is deliberate and recorded at the table. A `-ok` word inside a sentence is never accused
   (`// half-ok for now, revisit`, `// TODO: not-ok yet`, `// NOT-ok:`), but a comment that is ONLY a
   hyphenated lowercase `-ok` word (`// half-ok`) IS reported — by shape it is indistinguishable from a
   bare marker, and a bare marker is a legal spelling, so there is nothing left to discriminate on.
@@ -558,10 +622,19 @@ concept to anchor a comment against):
 - Matches `// <marker>` or `// <marker>: <reason>` — the marker text is regex-escaped before compiling
   (`//\s*{escaped-marker}\b`). Derived markers are always `zzop-<kebab-id>-ok` (no regex metacharacters), so the
   escaping is defensive; it stays correct even if an id ever carried a regex-special character.
-- For a file whose extension is `.sql` (case-insensitive), a `--`-comment naming the marker suppresses
-  identically (`-- <marker>` or `-- <marker>: <reason>`), same lookback window and escaping rules. This is
-  gated to `.sql` files only, and to `line-scan`/`method-scan` only: `--` is a line comment in SQL but not
-  in JS/TS (`--x` is a decrement there), so no other extension's or matcher's suppression behavior changes.
+- The marker leader set is **per file**, and `//` always works. Two additive widenings, both on
+  `line-scan`/`method-scan` only:
+  - `.sql` (case-insensitive) also honors `-- <marker>` / `-- <marker>: <reason>`, same lookback window and
+    escaping rules. Gated to `.sql` because `--` is a line comment in SQL but a decrement in JS/TS.
+  - the **config-file family** (`.properties`, `.yaml`, `.yml`, `.toml`, `.ini`, `.conf`, `.cfg`, `.env`)
+    also honors `# <marker>`. This landed because a rule that matches those files was telling its readers
+    to write `# zzop-<id>-ok` while the engine read `//` only — and `//` is not a comment in any of those
+    formats, so a dotenv reader or YAML parser sees a stray line. `.py`/`.sh`/`.rb` are deliberately NOT
+    in the family (a recorded gap, not an oversight — see `marker_leaders_for_path`).
+
+  Both widenings are additive, so no marker that suppressed before stops suppressing. They are the MARKER
+  axis only: `skip_comment_lines` reads a **different** table that does not include `#`, because a
+  commented-out secret is still a committed secret.
 - An `io-scan` finding anchors at the matched provide/consume's own `file:line` — not a line the matcher
   scanned itself, but the entry's own source location. The marker is honored on that anchor line, or the
   single line directly above it, same 1-line lookback window as `line-scan`/`method-scan`. Recognition

@@ -267,3 +267,65 @@ fn a_rule_filter_that_actually_matches_gets_no_note() {
     assert_eq!(shaped["shown"].as_array().unwrap().len(), 1);
     assert!(shaped.get("note").is_none());
 }
+
+#[test]
+fn test_path_findings_sort_after_production_findings_of_the_same_severity_and_are_counted() {
+    // The 2026-08-09 U78 ruling: the credential rules keep scanning test paths (a committed secret is
+    // a leak wherever it sits — the catalog states that policy), but the FIRST SCREEN should not be a
+    // wall of `password123` fixtures. Shaping-only: within a severity tier, findings whose file is a
+    // test path sort after production findings; a `testPaths` disclosure carries the full-set count so
+    // the demotion is announced, never silent. Detection does not move — `total`/`bySeverity`/`byRule`
+    // are identical with or without this.
+    let findings = vec![
+        serde_json::json!({ "ruleId": "security/hardcoded-secret", "severity": "warning",
+            "file": "src/app/__tests__/login.spec.ts", "line": 3 }),
+        serde_json::json!({ "ruleId": "security/hardcoded-secret", "severity": "warning",
+            "file": "src/app/config.ts", "line": 9 }),
+        serde_json::json!({ "ruleId": "db/nplus1", "severity": "critical",
+            "file": "e2e/seed.ts", "line": 1 }),
+    ];
+    let filters = FindingFilters {
+        min_severity: None,
+        rule: None,
+        limit: None,
+    };
+    let shaped = shape_findings(&findings, &filters);
+
+    let shown = shaped["shown"].as_array().unwrap();
+    // Severity still ranks first: the critical stays on top even though it sits in a test path.
+    assert_eq!(shown[0]["severity"], "critical", "{shaped}");
+    // Within the warning tier: production file before test-path file, though engine order said otherwise.
+    assert_eq!(shown[1]["file"], "src/app/config.ts", "{shaped}");
+    assert_eq!(
+        shown[2]["file"], "src/app/__tests__/login.spec.ts",
+        "{shaped}"
+    );
+
+    // The demotion is disclosed, with the FULL-set count (2: the spec.ts warning and the e2e critical).
+    assert_eq!(shaped["testPaths"]["count"], 2, "{shaped}");
+    let meaning = shaped["testPaths"]["meaning"].as_str().unwrap();
+    assert!(
+        meaning.contains("still"),
+        "meaning must say the findings are still real leaks: {meaning}"
+    );
+
+    // Counts never moved.
+    assert_eq!(shaped["total"], 3);
+    assert_eq!(shaped["bySeverity"]["warning"], 2);
+}
+
+#[test]
+fn a_run_with_no_test_path_findings_carries_no_test_paths_key() {
+    // Additive-only, like `truncated`: the key exists exactly when it has something to say. A constant
+    // `testPaths: {count: 0}` on every reply would be noise the primary reader (an agent) must skip.
+    let findings = vec![
+        serde_json::json!({ "ruleId": "a", "severity": "info", "file": "src/a.ts", "line": 1 }),
+    ];
+    let filters = FindingFilters {
+        min_severity: None,
+        rule: None,
+        limit: None,
+    };
+    let shaped = shape_findings(&findings, &filters);
+    assert!(shaped.get("testPaths").is_none(), "{shaped}");
+}

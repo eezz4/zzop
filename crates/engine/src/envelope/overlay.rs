@@ -56,10 +56,16 @@ pub(crate) struct OverlayApplication {
 ///   "no native parser" disclosure (`analyze::assemble`'s overlay-exclusion set) — a bad/empty adapter
 ///   masked the very loss disclosure it should have triggered. This warning names that emptiness
 ///   directly; `analyze::assemble` separately stops excluding such a file from the disclosure.
+/// - **Merge losses** (G9/G10/G11): everything the per-file merge below dropped — declared displacements,
+///   overlay bindings the native side outranked, and files whose router-composition fragments two
+///   producers now both describe. Collected into one `merge::MergeLosses` and emitted by
+///   `reports::loss_warnings`; see `merge::collisions` for why the third one is a LOSS at all.
 ///
 /// Per `FileProjection`: if `path` matches an existing artifact's `rel`, it's merged in place — `io`
 /// entries appended minus exact-duplicate `(kind, key, file, line)` tuples (`file` normalized to
-/// `projection.path` first), fragments appended with no dedup (composition dedups later), and
+/// `projection.path` first), fragments appended with no dedup — a fragment has no key to dedup ON, and
+/// for the two by-name-composed channels that append can SUBTRACT, which is why it is disclosed (G11,
+/// `merge::collisions`) rather than silently trusted to "compose later" — and
 /// `const_map_fragment` native-first (existing key wins), and the three dep-graph channels
 /// (`imports`/`re_exports`/`dynamic_imports`) additive under the same native-first rule — a local name
 /// the native pass already bound keeps its native binding, names it never bound are added, and
@@ -180,12 +186,11 @@ pub(crate) fn apply_adapter_overlays(
         let mut fact_carrying = 0usize;
         let mut synthetic_count = 0usize;
         let mut synthetic_samples: Vec<String> = Vec::new();
-        // G9 — every native fact this overlay DISPLACED (`FileProjection::overrides`). Collected per
-        // overlay and disclosed in full below; see the warning's own comment for why this list is not
-        // capped and why it names values rather than counting them.
-        let mut tombstones: Vec<super::merge::Tombstone> = Vec::new();
-        // G10 — the mirror: overlay bindings the native side outranked. Same loss, opposite direction.
-        let mut dropped_bindings: Vec<super::merge::DroppedOverlayBinding> = Vec::new();
+        // G9/G10/G11 — every direction in which this overlay's merge loses a fact: displacements it
+        // declared, bindings the native side outranked, and files whose router-composition fragments it
+        // describes on top of a producer that already did. Collected per overlay in one place so that
+        // reporting them cannot fall out of step with collecting them; see `merge::MergeLosses`.
+        let mut losses = super::merge::MergeLosses::default();
         for projection in &overlay.files {
             let (cleaned, dropped) = drop_reserved_io(projection);
             reserved_dropped += dropped;
@@ -205,12 +210,7 @@ pub(crate) fn apply_adapter_overlays(
                 applied.entry_paths.insert(cleaned.path.clone());
             }
             if let Some(artifact) = artifacts.iter_mut().find(|a| a.rel == cleaned.path) {
-                merge_projection_onto_artifact(
-                    artifact,
-                    &cleaned,
-                    &mut tombstones,
-                    &mut dropped_bindings,
-                );
+                merge_projection_onto_artifact(artifact, &cleaned, &mut losses);
             } else {
                 synthetic_count += 1;
                 if synthetic_samples.len() < 3 {
@@ -240,16 +240,7 @@ pub(crate) fn apply_adapter_overlays(
                 overlay.source, overlay.parser
             ));
         }
-        if let Some(w) =
-            reports::displacement_warning(&overlay.source, &overlay.parser, &tombstones)
-        {
-            warnings.push(w);
-        }
-        if let Some(w) =
-            reports::overruled_warning(&overlay.source, &overlay.parser, &dropped_bindings)
-        {
-            warnings.push(w);
-        }
+        reports::loss_warnings(&overlay.source, &overlay.parser, &losses, warnings);
         // The `calls` channel (call-graph edges) has NO Mode B consumer today: the native call-graph
         // pass re-parses this tree's dispatched sources itself, and no overlay-merge branch folds
         // envelope edges into that re-parse's graph. An overlay carrying it would otherwise no-op in

@@ -40,6 +40,67 @@ pub(crate) fn shared_fragments() -> &'static BTreeMap<String, String> {
     })
 }
 
+/// The shared `test-paths` fragment, compiled once — the ONE owner of "is this path a test path"
+/// for consumers OUTSIDE pattern expansion. Reading the fragment rather than spelling a
+/// second regex is the point: the DSL packs' `${test-paths}` exclusions and every other layer's
+/// classification can never disagree about what a test path is, because there is one string.
+///
+/// Two consumers today, and the second one is why the arms are what they are:
+/// * the summary layer's first-screen ordering of test-path findings (the 2026-08-09 U78 ruling), and
+/// * [`crate::paths::is_test_file`] — the native/cross-layer "not deployed" predicate, which carried a
+///   SECOND arm table until 2026-08-10. That table knew `_test.go` / `test_*.py` / `*Tests.cs` /
+///   `FooTest.java` and this fragment did not, so the 132 bundled rules that exclude a shared `${test-paths…}` name (measured 2026-08-10; 144 rules ship)
+///   judged idiomatic Go, Python and C# test files as production code. `is_test_file`'s doc carries the
+///   measurement and the two case-sensitivity conflicts the merge had to settle.
+pub fn test_path_re() -> &'static regex::Regex {
+    static RE: OnceLock<regex::Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        regex::Regex::new(&shared_fragments()["test-paths"]).expect(
+            "the shared test-paths fragment must be a valid regex (committed-file invariant)",
+        )
+    })
+}
+
+/// The name prefix of every shared fragment that IS the "decline test code" vocabulary — `test-paths`
+/// plus its `test-paths-stories` / `test-paths-migrations` extensions.
+pub(crate) const TEST_PATH_FRAGMENT_PREFIX: &str = "test-paths";
+
+/// True when `value` is, byte for byte, one of the shared `test-paths*` fragment bodies — i.e. this
+/// pattern got here by a rule writing `"file_exclude_pattern": "${test-paths…}"` and the expansion pass
+/// substituting it.
+///
+/// ## Why a VALUE comparison and not a flag recorded during expansion
+/// A `bool` on `RuleDef` would be the direct encoding, and it was the first shape tried. It is worse in
+/// two concrete ways. It changes `{pack:?}`, which is the cache-fingerprint input and the thing
+/// `tests_fragments::byte_identity` pins — an already-expanded pack (every `*_pre_migration.json`
+/// fixture, and any embedder that spells the pattern out) would carry `false` where the identical
+/// live pack carried `true`, so two packs that behave identically would stop being identical. And it
+/// would be a field on the public `RuleDef` that no pack author may write, which is a wire surface
+/// created for an internal bookkeeping need. The value comparison has neither problem and answers the
+/// same question: is what this rule excludes the shared vocabulary, or something of its own?
+///
+/// ## Residual, stated plainly, with the one shipped instance named
+/// A pack-local `test-paths-*` fragment is NOT recognized here, and cannot be: `expand_fragments`
+/// clears `RulePackDef::fragments` once it has substituted, so by the time a run reaches this the
+/// pack-local body is a string with no name attached and no way back to one. Exactly ONE bundled rule is
+/// in that position today — `reliability/sync-fs-in-handler`, whose `${test-paths-stories-scripts}` is
+/// the shared stories body plus a `scripts?|tools|bin` arm. It keeps every built-in language convention
+/// (that is what `tests_fragments::superset` pins), and it alone does not pick up a project's
+/// `vocabulary.extraTestPathPatterns` tail.
+///
+/// An under-reach, never a wrong exclusion: the failure is that ONE info-level rule still judges a
+/// directory the project declared as test surface, not that anything is silently skipped. Both
+/// `superset` and `tests_fragments::name_census` are triage moments where a new such fragment has to be
+/// looked at, so the set cannot grow unnoticed. Closing it properly means carrying the resolved NAME
+/// forward from expansion, and the cheap encoding of that — a `bool` on `RuleDef` — is what the section
+/// above rejects; the honest fix is a fragment mechanism that can express "base plus one arm" by
+/// reference, which is the same missing feature `superset`'s header opens with.
+pub(crate) fn is_shared_test_path_vocabulary(value: &str) -> bool {
+    shared_fragments()
+        .iter()
+        .any(|(name, body)| name.starts_with(TEST_PATH_FRAGMENT_PREFIX) && body == value)
+}
+
 /// If `value` is EXACTLY `${NAME}` (the whole string, no other characters), returns `NAME`. This is the
 /// one collision-safe reference shape this pass supports — no inline substring composition (`"foo ${bar}
 /// baz"` is left untouched, a literal regex, never treated as a ref).

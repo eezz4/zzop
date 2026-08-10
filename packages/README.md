@@ -26,6 +26,7 @@ The binaries land at `target/release/zzop` and `target/release/zzop-mcp` (`.exe`
 ## Use as a CLI
 
 ```sh
+zzop init                                     # REQUIRED once per tree: every analyze lane refuses a tree with no config
 zzop analyze ./my-repo
 zzop analyze --config ./ci/zzop.config.jsonc  # same analysis, the ONE tree a config elsewhere names
 zzop analyze ./my-repo --severity warning --rule sql/nplus1 --limit 20  # narrow the findings LIST only
@@ -66,15 +67,17 @@ zzop graph . --domain dep --format cosmograph-nodes  # or the SAME dep graph as 
 zzop graph . --domain dep --format cosmograph-links  # interactive viewer — one JSON object per line, census on
                               # stderr so stdout stays parseable. --format defaults to mermaid.
                               # The one subcommand whose product is not a JSON document.
-zzop init                     # write the annotated starter zzop.config.jsonc into the current directory
-zzop init --force             # …overwriting an existing one (without --force it refuses, exit 1)
+zzop init                     # write the annotated starter zzop.config.jsonc into the current directory,
+                              # and append the anchored `**/.zzop/` cache-ignore line to its .gitignore
+zzop init ./api               # …or into another existing directory (`zzop init fe && zzop init be`)
+zzop init --force             # …overwriting an existing config (without --force it refuses, exit 1)
 zzop contract                 # list the embedded authoring contracts
 zzop contract config-surface  # print one to stdout (raw bytes, pipe-safe)
 zzop explain sql/nplus1       # print one bundled DSL rule's compiled-in data (id/pack/severity/message/…)
                               # Also answers for the bare form of a namespaced native id (e.g. god-model)
                               # by naming the full schema/cross-layer id config matches; an io-scan rule's
                               # marker is printed with its native-parse-only condition.
-zzop version | --version      # this binary's version (equals the MCP serverInfo.version)
+zzop version | --version | -V # this binary's version (equals the MCP serverInfo.version)
 zzop version --verbose        # …plus every parser's fingerprint: which parser FRONTEND read the files (an ID,
                               # not a per-build hash — see docs/ARCHITECTURE.md)
 zzop help | --help | -h       # the usage line plus one elaboration per subcommand (exit 0)
@@ -117,7 +120,7 @@ an MCP `tools/call`:
 ```sh
 zzop-mcp                      # serve MCP over stdio (the bare form; a plain zzop-mcp on PATH IS the server)
 zzop-mcp mcp                  # same, explicitly — the form every registered config below passes in `args`
-zzop-mcp version | --version  # this binary's version (equals the MCP serverInfo.version)
+zzop-mcp version | --version | -V  # this binary's version (equals the MCP serverInfo.version)
 zzop-mcp version --verbose    # …plus every parser's fingerprint — the SAME string `zzop version --verbose` prints
 zzop-mcp help | --help | -h   # the usage line (exit 0)
 ```

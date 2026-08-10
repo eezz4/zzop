@@ -142,7 +142,7 @@ pub fn build_diagnostics(i: DiagnosticsInput) -> AnalysisDiagnostics {
     // parse failure still surfaces via the 0-symbols warning below.
     if i.files > 1 && i.dep_edges == 0 {
         warnings.push(format!(
-            "0 internal dependency edges across {} files — EITHER the code genuinely has few internal imports (a tiny/entry package, or framework wiring that isn't an ESM import edge — e.g. Angular `@NgModule`/decorator DI), OR the parser could not resolve this module system. Dep graph, circular, fan-in/out, coupling are empty either way; check whether these files really import each other before assuming a parser gap.",
+            "0 internal dependency edges across {} files — three causes produce this, and they are not distinguishable from here. (1) The code genuinely has few internal imports (a tiny/entry package, or framework wiring that isn't an ESM import edge — e.g. Angular `@NgModule`/decorator DI). (2) The parser could not resolve this module system. (3) The imports resolved fine but point OUT of this tree: a dependency graph holds in-tree edges only, so in a multi-tree run an import naming a sibling tree is censused as an external package instead of becoming an edge — if that is what happened, this same tree's warnings carry a `cross-tree package imports:` line naming the specifiers, and THAT line is the answer rather than this one. Dep graph, circular, fan-in/out, coupling are empty in all three cases; read the package-import census and check whether these files really import each other before assuming a parser gap.",
             i.files
         ));
     } else if i.files >= MIN_FILES_FOR_EDGE_CHECK

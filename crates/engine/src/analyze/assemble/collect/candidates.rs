@@ -109,7 +109,13 @@ pub(super) fn stage_package_import_candidate(
         python_candidates.push((specifier.to_string(), orig, rel.to_string()));
     } else if is_rust {
         let head = rust_head(specifier);
-        if !matches!(head, "crate" | "super" | "self") && !RUST_STD_CRATE_FAMILY.contains(&head) {
+        // `#path` is a `#[path = "..."]` module declaration, not a crate name. It is excluded for the
+        // same reason the three keyword heads are: this census stages EXTERNAL crate names for the
+        // framework-silence tripwires, and staging `#path` would hand them a crate that cannot exist.
+        if !matches!(head, "crate" | "super" | "self")
+            && head != zzop_parser_rust::PATH_ATTR_HEAD
+            && !RUST_STD_CRATE_FAMILY.contains(&head)
+        {
             rust_candidates.push((head.to_string(), rel.to_string()));
         }
     } else if is_go {

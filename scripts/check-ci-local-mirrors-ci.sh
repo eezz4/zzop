@@ -44,12 +44,32 @@ normalize() { sed -E 's/^[[:space:]]*-?[[:space:]]*run:[[:space:]]*//; s/[[:spac
 # `site-graph-data.mjs` is excluded: it is an internal of the site-regeneration step, and the two files
 # legitimately spell it with different temp paths (`/tmp/n.ndjson` vs a `mktemp -d`), so comparing the
 # line would compare a path rather than a step.
+#
+# `npx` joined the needle on 2026-08-08. It was absent, so ci.yml's playwright-install line was not
+# excluded — it was INVISIBLE, and the reason it need not be mirrored was written in the OTHER file
+# (`ci-local.sh`'s comment), which is the guard's scope being justified outside the guard. The live
+# cost of that was not this one line but the shape: a future `npx <new check>` in CI would have had no
+# local counterpart and this script would still have reported "mirrored both ways". Now the whole `npx`
+# family is seen and exactly ONE line is exempted, by its full text, with the liveness assert below.
+PLAYWRIGHT_INSTALL="npx --prefix scripts/site-render-check playwright install --with-deps chromium"
+
+# Stale-exemption assert: an exemption that outlives its subject silently absolves whatever takes the
+# same shape next. Sibling guards (overclaim, rule-desc, tree-sitter, committed-config, english) all
+# make a dead exemption RED; this one used to be the odd fleet member with a bare pass-through.
+if ! grep -qF "$PLAYWRIGHT_INSTALL" "$CI"; then
+  echo "check-ci-local-mirrors-ci: the exempted line is gone from $CI:" >&2
+  echo "  $PLAYWRIGHT_INSTALL" >&2
+  echo "  A stale exemption absolves the next command that happens to match it. Delete it here." >&2
+  exit 1
+fi
+
 extract() {
   grep -vE '^[[:space:]]*#' "$1" \
-    | grep -hoE '^[[:space:]]*-?[[:space:]]*(run: )?(\$CARGO|cargo|node scripts/[^ ]+|node --test|npm ci|bash scripts/measure/[^ ]+)([^|>&#"]*)?' \
+    | grep -hoE '^[[:space:]]*-?[[:space:]]*(run: )?(\$CARGO|cargo|node scripts/[^ ]+|node --test|npm ci|npx |bash scripts/measure/[^ ]+)([^|>&#"]*)?' \
     | sed -E 's/\$CARGO/cargo/' \
     | normalize \
     | grep -vE '^bash scripts/check-|site-graph-data' \
+    | grep -vFx "$PLAYWRIGHT_INSTALL" \
     | sort -u || true
 }
 

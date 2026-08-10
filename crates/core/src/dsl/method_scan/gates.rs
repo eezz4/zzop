@@ -15,6 +15,18 @@ use crate::dsl::source::SourceFile;
 /// the outer one is dropped so one violation is not counted twice — the leaf is what a rule means by
 /// "in this method". Returns a per-symbol flag vector indexed exactly like `f.symbols`, so the caller
 /// can keep iterating symbols in projection order.
+///
+/// # The producer obligation this creates
+/// Dropping the container makes its regions reachable ONLY through the leaves the producer emitted, so
+/// any region a producer does not name becomes invisible to every method-scan rule the moment one
+/// sibling member projects a leaf — silently, since nothing here can tell "no leaf was owed" from "a
+/// leaf was owed and missing". This function CANNOT close that gap: it sees projected symbols, never
+/// the container's source, so it cannot know a member exists that projected nothing. The obligation
+/// therefore lives with the producers, and it is written down at its owner — `zzop_core::SourceSymbol`'s
+/// "Body span contract", leaf-completeness section. Making the discard conditional instead was measured
+/// and rejected (`zzop_parser_typescript`'s `symbol_shapes::class::emit_class` carries the numbers: a
+/// retained class span re-reports every leaf-covered defect at its class, `TP 259 FN 0 FP 0` ->
+/// `FP 10`).
 pub(super) fn drop_outer_spans(f: &SourceFile) -> Vec<bool> {
     let spans: Vec<(usize, u32, u32)> = f
         .symbols

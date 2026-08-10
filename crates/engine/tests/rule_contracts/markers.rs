@@ -15,6 +15,150 @@ use zzop_core::Matcher;
 use crate::{load_all_packs, native_ids};
 
 // ---------------------------------------------------------------------------------------------
+// 0. The ENGINE-APPENDED suppress sentence — end to end
+// ---------------------------------------------------------------------------------------------
+
+/// A throwaway tree, same shape every `crates/engine/tests/analyze_*.rs` file builds (there is no shared
+/// test-support crate — each `#[test]` binary is independent).
+struct TempTree(PathBuf);
+
+impl TempTree {
+    fn new() -> Self {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let dir =
+            std::env::temp_dir().join(format!("zzop-marker-append-{}-{nanos}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create temp tree");
+        TempTree(dir)
+    }
+    fn write(&self, rel: &str, content: &str) {
+        let full = self.0.join(rel);
+        if let Some(parent) = full.parent() {
+            std::fs::create_dir_all(parent).expect("create parent");
+        }
+        std::fs::write(full, content).expect("write fixture");
+    }
+}
+
+impl Drop for TempTree {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// The engine — not the pack author — puts the suppress sentence into a line-scan finding's message.
+///
+/// The pack here deliberately says NOTHING about suppression, which is what makes this test a real one:
+/// until the append existed, this rule's finding told a reader the problem and how to disable the rule
+/// wholesale, and never that a one-line comment would do. 106 shipped rules used to buy that sentence by
+/// typing it, byte-identically, into their own `message`.
+///
+/// The ORDER is asserted, not just the presence: the marker sentence goes in BEFORE
+/// `zzop_core::disable_hint`'s fragment, because that is the order the 106 hand-written copies produced
+/// and the append is pre-cache — a swap would rewrite every one of those messages and cold every warm
+/// cache. `crates/engine/src/tests.rs`'s `dsl_finding_message_carries_the_config_disable_hint_for_its_own_id`
+/// pins the disable hint's `ends_with` from the other side.
+#[test]
+fn the_engine_appends_the_suppress_sentence_to_a_line_scan_finding() {
+    let pack: zzop_core::RulePackDef = serde_json::from_str(
+        r#"{"id":"appendfix","rules":[{"id":"as-cast-probe","severity":"info",
+            "message":"An `as` cast defeats the type checker. Prefer a type guard.",
+            "matcher":{"type":"line-scan","file_pattern":"\\.ts$","line_pattern":"\\bas\\b"}}]}"#,
+    )
+    .expect("probe pack parses");
+
+    let tree = TempTree::new();
+    tree.write("src/a.ts", "export const x = y as Foo;\n");
+
+    let out = zzop_engine::analyze_tree(
+        &tree.0,
+        &zzop_engine::EngineConfig {
+            source_id: "marker-append-fixture".to_string(),
+            packs: vec![pack],
+            ..zzop_engine::EngineConfig::default()
+        },
+    );
+
+    let hit = out
+        .findings
+        .iter()
+        .find(|f| f.rule_id == "appendfix/as-cast-probe")
+        .unwrap_or_else(|| {
+            panic!(
+                "the probe rule did not fire, so this test proved nothing about the append — findings: {:?}",
+                out.findings.iter().map(|f| &f.rule_id).collect::<Vec<_>>()
+            )
+        });
+
+    let expected_tail = format!(
+        "Suppress a vetted case with `// zzop-as-cast-probe-ok`. {}",
+        zzop_core::disable_hint("appendfix/as-cast-probe")
+    );
+    assert!(
+        hit.message.ends_with(&expected_tail),
+        "a line-scan finding's message must end with the engine-appended suppress sentence followed by \
+         the disable hint.\n  expected tail: {expected_tail:?}\n  actual message: {:?}",
+        hit.message
+    );
+}
+
+/// The other half of the same contract, and the reason the append had to learn what matcher a rule uses:
+/// io-scan findings must NOT get the sentence. Envelope Mode A carries no source text, so an io-scan
+/// marker has no anchor line to be read off — telling a reader to add the comment would be the engine
+/// lying about its own capability. Excluded by MATCHER KIND (`zzop_core::dsl::marker_channel`), never by
+/// relying on today's two io-scan rules happening to spell the limitation out themselves.
+#[test]
+fn the_engine_appends_no_suppress_sentence_to_an_io_scan_finding() {
+    let pack: zzop_core::RulePackDef = serde_json::from_str(
+        r#"{"id":"appendfix","rules":[{"id":"io-probe","severity":"warning",
+            "message":"An admin route with no auth evidence.",
+            "matcher":{"type":"io-scan","file_pattern":"\\.ts$","direction":"provides","kind":"http","key_pattern":"(?i)/admin"}}]}"#,
+    )
+    .expect("probe pack parses");
+
+    let tree = TempTree::new();
+    tree.write(
+        "src/routes.ts",
+        "import express from 'express';\nconst app = express();\napp.get('/admin/users', (req, res) => res.json([]));\n",
+    );
+
+    let out = zzop_engine::analyze_tree(
+        &tree.0,
+        &zzop_engine::EngineConfig {
+            source_id: "marker-append-fixture".to_string(),
+            packs: vec![pack],
+            ..zzop_engine::EngineConfig::default()
+        },
+    );
+
+    let hit = out
+        .findings
+        .iter()
+        .find(|f| f.rule_id == "appendfix/io-probe")
+        .unwrap_or_else(|| {
+            panic!(
+                "the io-scan probe rule did not fire, so the exclusion below would be vacuous — findings: {:?}",
+                out.findings.iter().map(|f| &f.rule_id).collect::<Vec<_>>()
+            )
+        });
+
+    assert!(
+        !hit.message.contains("Suppress a vetted case"),
+        "an io-scan finding must never be told to add a suppress comment — its anchor line is re-read \
+         through a callback envelope mode answers with None. Message was: {:?}",
+        hit.message
+    );
+    assert!(
+        hit.message
+            .ends_with(&zzop_core::disable_hint("appendfix/io-probe")),
+        "the io-scan exclusion must drop only the marker sentence, never the disable hint: {:?}",
+        hit.message
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
 // 1. Derived-marker global uniqueness
 // ---------------------------------------------------------------------------------------------
 
@@ -86,30 +230,71 @@ fn no_derived_marker_is_a_word_boundary_prefix_of_another() {
 // 2. Message triple — problem + fix + exclude (this leg)
 // ---------------------------------------------------------------------------------------------
 
-/// Every DSL rule's `message` names its own derived suppress marker (`zzop-<id>-ok`) OR the literal
-/// `disabled_rules`/`disabledRules` string somewhere in the text — the "how to exclude" leg of zzop's
-/// finding contract (every finding must tell the reader the problem, the fix, AND how to turn it off; see
-/// docs/rules/authoring-guide.md's quality bar). A rule that legitimately has no per-finding marker still
-/// passes via the `disabled_rules` leg — this test accepts EITHER, not just the marker.
+/// Every DSL rule's message, AS A READER RECEIVES IT, names its own derived suppress marker
+/// (`zzop-<id>-ok`) OR the literal `disabled_rules`/`disabledRules` string — the "how to exclude" leg of
+/// zzop's finding contract (every finding must tell the reader the problem, the fix, AND how to turn it
+/// off; see docs/rules/authoring-guide.md's quality bar). A rule that legitimately has no per-finding
+/// marker still passes via the `disabled_rules` leg — this accepts EITHER, not just the marker.
+///
+/// ## Why this reads the RENDERED message, not `rule.message`
+/// It used to read the pack field, and that was sound only while every author typed the sentence
+/// themselves. 106 of 143 rules did — with the SAME 44 bytes, `Suppress a vetted case with
+/// `// zzop-<id>-ok`.`, carrying nothing a reader could not derive from the rule id. That sentence now
+/// comes from `zzop_core::dsl::suppress_hint` at finding-construction time
+/// (`zzop-engine`'s `pipeline::findings::append_hints`), so judging the pack field alone would fail all
+/// 106 while every emitted finding was perfectly correct — and, worse, the same check on a future rule
+/// would demand an author hand-write text the engine is about to add anyway.
+///
+/// The composition below mirrors the engine's own, minus `disable_hint` (which this contract must not
+/// accept as the marker leg, and which `dsl_messages.rs`'s contract 17 forbids in a pack message
+/// anyway). `append_hints`'s ORDER — suppress sentence, then disable hint — is pinned end-to-end by
+/// [`the_engine_appends_the_suppress_sentence_to_a_line_scan_finding`] instead of here, because this
+/// contract is about presence and that one is about bytes.
+///
+/// The kinds that get NO appended sentence (symbol-scan has no anchor line, io-scan's anchor line is
+/// re-read through a callback envelope mode answers with `None`) are therefore held to the ORIGINAL bar:
+/// their author must still say how to exclude, in their own words. Both shipped io-scan rules do.
 #[test]
 fn every_dsl_rule_message_documents_how_to_exclude_it() {
     let packs = load_all_packs();
     let mut offenders = Vec::new();
+    let mut appended_for = 0usize;
     for pack in &packs {
         for rule in &pack.rules {
             let marker = rule.suppress_marker();
-            let marker_leg = rule.message.contains(&marker);
+            let rendered = match zzop_core::dsl::suppress_hint(rule) {
+                Some(sentence) => {
+                    appended_for += 1;
+                    format!("{} {sentence}", rule.message)
+                }
+                None => rule.message.clone(),
+            };
+            let marker_leg = rendered.contains(&marker);
             let disabled_leg =
-                rule.message.contains("disabled_rules") || rule.message.contains("disabledRules");
+                rendered.contains("disabled_rules") || rendered.contains("disabledRules");
             if !(marker_leg || disabled_leg) {
                 offenders.push(format!(
-                    "{}/{} (derived marker `{marker}`) — message mentions neither its own marker nor \
-                     disabled_rules/disabledRules",
+                    "{}/{} (derived marker `{marker}`) — the message a reader receives mentions neither \
+                     its own marker nor disabled_rules/disabledRules",
                     pack.id, rule.id
                 ));
             }
         }
     }
+    // NON-VACUITY, in the direction this contract just became able to fail silently. If `suppress_hint`
+    // ever returned `None` for everything — a matcher arm flipped, the opt-out widened — every rule
+    // would be judged on its pack text alone and the 106 folded rules would go red LOUDLY, which is
+    // fine. The dangerous direction is the opposite: nothing here would notice the engine having
+    // stopped appending, because the pack text of the 33 self-describing rules would still carry the
+    // marker and mask it. So the count of rules relying on the append is asserted to be non-zero.
+    assert!(
+        appended_for > 0,
+        "not one of the {} loaded rules gets an engine-appended suppress sentence. Either every rule \
+         hand-writes its own again (the duplication this fold removed), or `suppress_hint` stopped \
+         returning one — and in the second case this contract is now passing on pack text while every \
+         finding a user reads has lost its suppress sentence.",
+        packs.iter().map(|p| p.rules.len()).sum::<usize>()
+    );
     assert!(
         offenders.is_empty(),
         "rule messages missing the \"how to exclude\" leg: {offenders:#?}"

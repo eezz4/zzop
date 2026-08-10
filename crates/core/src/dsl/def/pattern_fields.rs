@@ -98,6 +98,7 @@ pub(crate) fn for_each_pattern_field<E>(
             line_pattern,
             any,
             exclude_pattern,
+            prev_line_exclude_pattern,
             file_exclude_pattern,
             // Not patterns — see this module's header. Named individually rather than swallowed by `..`
             // so that adding a field to `LineScan` is a compile error here, not a silent omission.
@@ -119,6 +120,11 @@ pub(crate) fn for_each_pattern_field<E>(
                 labeled("any[].pattern", any, visit)?;
             }
             opt("exclude_pattern", exclude_pattern, visit)?;
+            opt(
+                "prev_line_exclude_pattern",
+                prev_line_exclude_pattern,
+                visit,
+            )?;
             opt("file_exclude_pattern", file_exclude_pattern, visit)?;
         }
         Matcher::MethodScan(MethodScan {

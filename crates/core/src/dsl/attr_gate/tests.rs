@@ -22,6 +22,7 @@ fn pack(matcher: LineScan) -> RulePackDef {
             scan_test_regions: false,
             matcher: Matcher::LineScan(matcher),
         }],
+        regex_cache: Default::default(),
     }
 }
 

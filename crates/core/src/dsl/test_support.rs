@@ -8,13 +8,16 @@ use crate::ir::{SourceSymbol, SourceSymbolKind};
 use super::ir_scan::{eval_pack_io_scan, IoScanTreeContext};
 use super::{eval_pack, RuleContext, RulePackDef, SourceFile};
 
-/// The three Java security-concern rules (`sql-string-concat`/`weak-crypto`/`cmd-injection`) that moved into
-/// `security` when the language-named `java-security` pack was dissolved (v0.15). We load the real
-/// `security.json` and filter to just those three so the fixture stays a small, fully-`.java`-applicable
-/// set. Goes through `crate::parse_dsl_pack` (not a raw `serde_json::from_str`) so this pack's `${NAME}`
-/// fragment refs (its shared test-path `file_exclude_pattern`) resolve exactly like they do at real load
-/// time — a raw struct deserialize would leave the literal `"${test-paths-stories}"`/`"${test-paths}"`
-/// strings in place, which are not valid regexes and would silently no-op every affected rule.
+/// The three Java security-concern LINE-SCAN rules (`sql-string-concat`/`weak-cipher`/`cmd-injection`)
+/// that trace back to the dissolved language-named `java-security` pack (v0.15). `weak-crypto` was in
+/// this set until 2026-08-09, when its hash half became a six-language call-scan rule — a matcher this
+/// module's bare `SourceFile` (no projected call sites) cannot exercise — and its cipher arms split out
+/// as `weak-cipher`, which is what this fixture retains now. We load the real `security.json` and
+/// filter so the fixture stays a small, fully-`.java`-applicable set. Goes through
+/// `crate::parse_dsl_pack` (not a raw `serde_json::from_str`) so this pack's `${NAME}` fragment refs
+/// (its shared test-path `file_exclude_pattern`) resolve exactly like they do at real load time — a
+/// raw struct deserialize would leave the literal `"${test-paths-stories}"`/`"${test-paths}"` strings
+/// in place, which are not valid regexes and would silently no-op every affected rule.
 pub(super) fn pack() -> RulePackDef {
     let mut p: RulePackDef =
         crate::parse_dsl_pack(include_str!("../../../../rules/dsl/security/security.json"))
@@ -22,7 +25,7 @@ pub(super) fn pack() -> RulePackDef {
     p.rules.retain(|r| {
         matches!(
             r.id.as_str(),
-            "sql-string-concat" | "weak-crypto" | "cmd-injection"
+            "sql-string-concat" | "weak-cipher" | "cmd-injection"
         )
     });
     p
@@ -30,15 +33,9 @@ pub(super) fn pack() -> RulePackDef {
 
 pub(super) fn scan(src: &str, rel: &str) -> Vec<Finding> {
     let files = vec![SourceFile {
-        loop_spans: Vec::new(),
-        function_spans: Vec::new(),
-        test_spans: Vec::new(),
-        call_sites: Vec::new(),
-        string_literals: Vec::new(),
         rel: rel.into(),
         text: src.into(),
-        symbols: vec![],
-        io: None,
+        ..Default::default()
     }];
     let ctx = RuleContext { files: &files };
     eval_pack(&pack(), &ctx)

@@ -11,11 +11,30 @@
 // against them. If a row fails, fix this file — never the fixture.
 
 const RE_MULTI_SLASH = /\/+/g;
-const RE_PARAM = /\{[^}]+\}|:[A-Za-z_][A-Za-z0-9_]*/g;
+// Two arms, and the SECOND is position-sensitive on purpose.
+//
+// `\{[^}]+\}` — the brace spelling (`{id}`, Spring's `{id:[0-9]+}`). Unconditional: unambiguous.
+//
+// `([/.-]):[A-Za-z_][A-Za-z0-9_]*` — the colon spelling, admitted ONLY when the character before the
+// `:` is a path or in-segment separator. That separator is CAPTURED and put back (`'$1{}'`) so
+// consecutive params still each match (`:from-:to` — the `-` is not consumed by the first match).
+// The native side has no lookbehind, so it uses this same consume-and-restore shape; keep them
+// identical rather than "improving" this one with a JS lookbehind.
+//
+// Why position: `:` is overloaded. In Express/Rails/NestJS `:id` is a PARAM and it starts a segment
+// (`/users/:id`) or follows an in-segment separator — Express documents `/flights/:from-:to` and
+// `/plantae/:genus.:species`, Rails documents `.:format`, hence `[/.-]` and no wider. In the
+// Google-AIP / gRPC-Gateway / Buf convention `:` is the CUSTOM-METHOD separator and is a SUFFIX on a
+// segment that already has content (`/v1/users/{id}:activate`, `/v1/users:batchGet`), where the token
+// after it is the most identity-bearing part of the path. Collapsing it keyed `:activate` and
+// `:deactivate` identically — a false duplicate-route AND a wrong cross-layer edge.
+const RE_PARAM = /\{[^}]+\}|([/.-]):[A-Za-z_][A-Za-z0-9_]*/g;
 const RE_TRAILING = /(.)\/+$/;
 
 /**
- * The canonical `http` PROVIDE-side interface key. Path params (`{x}` or `:x`) collapse to `{}`;
+ * The canonical `http` PROVIDE-side interface key. Path params (`{x}`, or `:x` where the colon
+ * starts a segment or follows an in-segment separator — see `RE_PARAM`) collapse to `{}`; a
+ * Google-AIP custom-method suffix (`{id}:activate`) is KEPT, since it identifies the endpoint;
  * duplicate slashes collapse; a trailing slash is dropped; the method upper-cases. A `?...` suffix is
  * deliberately NOT stripped here — in a route PATTERN `?` is not always a query separator (e.g. a
  * single-character wildcard), so it is data, not noise. See `normalizeConsumeKey` for the consume-side
@@ -26,7 +45,9 @@ const RE_TRAILING = /(.)\/+$/;
 export function normalizeProvideKey(method, rawPath) {
   const withSlash = `/${rawPath}`;
   const collapsed = withSlash.replace(RE_MULTI_SLASH, '/');
-  const params = collapsed.replace(RE_PARAM, '{}');
+  // `$1` is the separator the colon arm had to consume to express "preceded by"; it expands to the
+  // empty string on the brace arm, which captures nothing.
+  const params = collapsed.replace(RE_PARAM, '$1{}');
   const trimmed = params.replace(RE_TRAILING, '$1');
   return `${method.toUpperCase()} ${trimmed}`;
 }

@@ -21,7 +21,7 @@ fn elaborations() -> Vec<(&'static str, String)> {
         ),
         (
             "analyze-envelope",
-            "analyze-envelope <envelope.json> — Mode A: a Normalized-AST envelope file REPLACES native parsing, print the same JSON findings summary".to_string(),
+            "analyze-envelope <envelope.json> — Mode A: a Normalized-AST envelope file REPLACES native parsing, print the same JSON findings summary. The envelope FILE's own directory is searched for a zzop.config.jsonc, the same discovery `analyze <path>` makes at a tree root, and that config's `vocabulary` block is applied — the only key an envelope run can use, since every other one configures a tree walk this lane never performs. Applying it is reported in the reply's `configWarnings`; with no such file beside the envelope the run judges by zzop's built-in convention vocabulary, which cannot know what THIS project calls its own guards".to_string(),
         ),
         (
             "validate-envelope",
@@ -57,13 +57,18 @@ fn elaborations() -> Vec<(&'static str, String)> {
         ),
         (
             "coverage",
-            "coverage <path>... | coverage --config <path> — the AGGREGATE-VISIBILITY view: \"how much of this tree does zzop actually see?\" Per tree, an extension-by-dispatch table (structural / lexical-only / degraded, plus inDepGraph — files of the extension with at least one RESOLVED outgoing import edge — and declaredImports, the pre-resolution declared-specifier denominator (null = never measured, e.g. a prisma/sql row), so declared-but-unresolved import blindness reads off one row; each field's meaning shipped in the reply as dispatchMeaning), blindSpots — the CAPABILITY axis: per-rule evidence blind spots derived from the compiled-in sightline declarations crossed with the tree's structural extensions, with blindSpotBasis saying what was crossed — the tree's own engine warnings forwarded verbatim (the framework-silence self-reports ride there), the coverage census, and joinVisibility as a sentence. DELIBERATELY NO SINGLE SCORE: axes zzop never measured on your tree (recall) ride in an unmeasured FIELD instead of being folded into a number that would get quoted without them".to_string(),
+            "coverage <path>... | coverage --config <path> — the AGGREGATE-VISIBILITY view: \"how much of this tree does zzop actually see?\" Per tree, an extension-by-dispatch table (structural / lexical-only / degraded, plus inDepGraph — files of the extension with at least one RESOLVED outgoing import edge — and declaredImports, the pre-resolution declared-specifier denominator (null = never measured, e.g. a prisma/sql row), so declared-but-unresolved import blindness reads off one row; each field's meaning shipped in the reply as dispatchMeaning), blindSpots — the CAPABILITY axis: per-rule evidence blind spots derived from the compiled-in sightline declarations crossed with the tree's structural extensions, with blindSpotBasis saying what was crossed — the tree's own engine warnings forwarded verbatim (the framework-silence self-reports ride there), the coverage census, and joinVisibility — the tree's own io contribution as COUNTS (provides, consumesKeyed, consumesUnresolved) plus a meaning saying what a key does and does not prove; no rate is derived for you, because 1-of-1 and 400-of-440 are not the same evidence and a quotient hides which one you hold. DELIBERATELY NO SINGLE SCORE: axes zzop never measured on your tree (recall) ride in an unmeasured FIELD instead of being folded into a number that would get quoted without them".to_string(),
         ),
         (
             "graph",
             format!(
-                "graph <path>... | graph --config <path> [--domain <{}>] [--format <mermaid|cosmograph-nodes|cosmograph-links>] [--scope <prefix>] [--top <n>] — print one PICTURE of the run for an external renderer (zzop draws nothing). --domain picks which picture, and each draws different NODES: join = the cross-layer join over io keys (default), dep = the file import graph with cycles marked, risk = blast-radius hubs and extraction seams, posture = mutating routes and their guard status. --format picks the serialization: mermaid (default) writes a flowchart for ANY domain; cosmograph-nodes/cosmograph-links write two NDJSON tables for an interactive viewer and take --domain dep ONLY, UNCAPPED — they refuse --top rather than ignore it, and put their census on stderr so stdout stays a parseable table. The mermaid lane is SCOPED by design: --top caps what is drawn, and its default is PER DOMAIN because their densities differ ({}) — a join has tens of relations where an import graph has thousands; --scope keeps rows whose source id or site path starts with <prefix>. Every cap/filter is disclosed in the document (a %% census plus a visible note node), nodes AGGREGATE call sites (no file/line — use `facts`), and drift VERDICTS/hostRekeyCounts are not rendered at all",
+                "graph <path>... | graph --config <path> [--domain <{}>] [--format <mermaid|cosmograph-nodes|cosmograph-links>] [--scope <prefix>] [--top <n>] [--fold <n>] — print one PICTURE of the run for an external renderer (zzop draws nothing). --domain picks WHICH RELATION connects two nodes, and each draws different NODES: join = the cross-layer join over io keys (default), dep = the file import graph with cycles marked, risk = blast-radius hubs and extraction seams, posture = mutating routes and their guard status, cochange = files that change together in git history (a SAMPLE of history, not imports — its own picture rather than an overlay on dep because the two edge kinds are true in different ways). --fold <n> answers the OTHER question — what a node IS — by drawing each path's first n segments as one box: `--domain dep --fold 2` turns a thousand-file import graph into the module map it is a picture of, and `--fold 1` into the top-level one. It applies to {} only (the domains whose nodes are paths) and is REFUSED elsewhere rather than ignored: risk/posture nodes are engine verdicts and join nodes are io keys, neither of which has a path granularity. A folded edge is labelled with the number of FILE-LEVEL edges it collapsed, and the fold's own loss is reported separately from --top's. --format picks the serialization: mermaid (default) writes a flowchart for ANY domain; cosmograph-nodes/cosmograph-links write two NDJSON tables for an interactive viewer and take --domain dep ONLY, UNCAPPED — they refuse --top and --fold rather than ignore them (a viewer with zoom does both jobs itself), and put their census on stderr so stdout stays a parseable table. The mermaid lane is SCOPED by design: --top caps what is drawn, and its default is PER DOMAIN because their densities differ ({}) — a join has tens of relations where an import graph has thousands; --scope keeps rows whose source id or site path starts with <prefix>, and is applied BEFORE any fold so it keeps meaning \"which files are in this picture\". Every cap/filter is disclosed in the document (a %% census plus a visible note node), nodes AGGREGATE call sites (no file/line — use `facts`), and drift VERDICTS/hostRekeyCounts are not rendered at all",
                 zzop_summary::GraphDomain::WIRE_NAMES.join("|"),
+                zzop_summary::GraphDomain::fold_capable_names()
+                    .iter()
+                    .map(|n| format!("--domain {n}"))
+                    .collect::<Vec<_>>()
+                    .join(" / "),
                 zzop_summary::GraphDomain::wire_defaults()
                     .iter()
                     .map(|(n, t)| format!("{n} {t}"))
@@ -73,7 +78,7 @@ fn elaborations() -> Vec<(&'static str, String)> {
         ),
         (
             "init",
-            "init [--force] — write the embedded starter zzop.config.jsonc (the same document `zzop contract config-template` prints) into the current directory; refuses to overwrite an existing one without --force".to_string(),
+            "init [<dir>] [--force] — write the embedded starter zzop.config.jsonc (the same document `zzop contract config-template` prints) into <dir> (default: the current directory), and add the anchored `**/.zzop/` line to that directory's .gitignore if it is missing. <dir> must ALREADY EXIST — init writes a config INTO a tree, it never creates one. Run it once per tree: `zzop cross ./fe ./be` needs a config in each, and a single config in the parent declares one tree, which cross refuses. Refuses to overwrite an existing one without --force".to_string(),
         ),
         (
             "contract",
@@ -110,7 +115,7 @@ const FILTERED_SUBCOMMANDS: [&str; 3] = ["analyze", "analyze-envelope", "cross"]
 /// pure output, and `main.rs` is a dispatch table under a 300-line cap) — moving the const too bought
 /// nothing and broke a cross-package pin in a package this change does not own.
 pub fn print_help() {
-    println!("{}", crate::USAGE);
+    println!("{}", crate::usage());
     for (name, text) in elaborations() {
         println!("  {text}");
         if FILTERED_SUBCOMMANDS.contains(&name) {
@@ -125,10 +130,14 @@ pub fn print_help() {
 /// One subcommand's own help text: its elaboration plus, when it takes them, the findings knobs.
 /// `None` for a name this binary does not dispatch, so an unknown subcommand keeps the exit-2 lane.
 fn subcommand_help(name: &str) -> Option<String> {
-    // `main`'s dispatch accepts `--version` as an alias of `version`; the gate has to know that too, or
-    // `zzop --version --help` exits 2 while `zzop version --help` exits 0 — the same subcommand
+    // `main`'s dispatch accepts `--version` and `-V` as aliases of `version`; the gate has to know that
+    // too, or `zzop --version --help` exits 2 while `zzop version --help` exits 0 — the same subcommand
     // answering a help request two different ways depending on which spelling the caller used.
-    let name = if name == "--version" { "version" } else { name };
+    let name = if name == "--version" || name == "-V" {
+        "version"
+    } else {
+        name
+    };
     let text = elaborations()
         .into_iter()
         .find(|(sub, _)| *sub == name)

@@ -31,7 +31,11 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-scan_paths=(packages docs site README.md crates)
+# `server.json` (MCP Registry listing) and `.claude-plugin/` (Claude Code marketplace listing) joined
+# on 2026-08-08. They were the widest-reach prose in the repo and sat outside every prose guard, so a
+# revived "config-free" in an install-time description would have shipped green. Verified by planting
+# one into plugin.json's description: caught, exit 1.
+scan_paths=(packages docs site README.md crates server.json .claude-plugin)
 
 # Each entry has no true present-tense reading. Keep them lowercase; the grep is case-insensitive.
 dead_phrases=(

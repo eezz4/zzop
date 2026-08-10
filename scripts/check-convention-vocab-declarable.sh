@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# Convention-vocabulary declarability guard (ratchet) — fails when a name vocabulary the policy census
+# Convention-vocabulary declarability guard (ratchet) — fails when a name vocabulary EITHER census
 # classifies as `convention` is not declarable from a `zzop.config.jsonc`, unless it is grandfathered in
-# scripts/convention-vocab-baseline.txt.
+# scripts/convention-vocab-baseline.txt. TWO censuses are read — scripts/policy-census.txt (Rust
+# constants, the whole guard until 2026-08-09) and scripts/dsl-inline-census.txt (pattern literals
+# inside rules/dsl/**) — because both carry the same axis and made the same promise while only one of
+# them was ever checked against the config surface. See "SECOND CENSUS" below for the exact split.
 #
 # ## The invariant
 # `scripts/policy-census.txt`'s `convention` axis means "the PROJECT picks this name, not a framework"
@@ -176,6 +179,7 @@ while IFS= read -r k; do
   fi
 done <<< "$undeclarable"
 
+
 # Stale baseline entries: paid off, reclassified, or gone.
 while IFS= read -r k; do
   [ -n "$k" ] || continue
@@ -186,6 +190,100 @@ while IFS= read -r k; do
   fi
 done <<< "$base"
 
+
+# --- SECOND CENSUS: the DSL inline values (2026-08-09) -----------------------------------------------
+# `scripts/dsl-inline-census.txt` carries the SAME `convention` axis over a different population — the
+# pattern literals inside rules/dsl/** rather than Rust constants — and its own legend makes the same
+# promise this guard enforces above: "WE chose it and another project could want it different ->
+# belongs in config; the row`s tail must name its config home: `-> <config-key>` or `-> (none yet)`".
+#
+# Its owner (crates/core/src/dsl/inline_census_tests.rs) enforces two of the three halves: every
+# convention row must CARRY a `-> ...` column, and CONVENTION_CEILING ratchets how many convention rows
+# may exist at all. What it does NOT do is look at the key. `convention_config_key` accepts any
+# space-free token, so `-> vocabulary.ormReceiverPatern` — a typo, a renamed key, a key that was never
+# minted — reads exactly like the real thing, and every convention row in that file can point at a
+# config surface that offers a home to none of them. That is the unfalsifiable claim the `->` column
+# was added to close, still open on one of the two censuses that carry it.
+#
+# So the check is the same one the Rust census gets, on the same two owners (config-surface.json +
+# template.rs), and it is deliberately the ONLY half added here:
+#   * `-> (none yet)` rows are OUT OF SCOPE. That spelling is the debt list, ratcheted by
+#     CONVENTION_CEILING in the Rust owner, and a second ratchet on the same number in a second file
+#     would be exactly the duplicate-owner drift this repo keeps paying for. The OK line prints how
+#     many rows each half covers, so the split is visible rather than assumed.
+#   * The reverse direction (a `(none yet)` row whose vocabulary DID get a config key) is not
+#     checkable from here and is not claimed: the row names no key, so nothing says which one to look
+#     for. It is what CONVENTION_CEILING`s downward-only ratchet is for.
+DSL_CENSUS=scripts/dsl-inline-census.txt
+if [ ! -f "$DSL_CENSUS" ]; then
+  echo "convention-vocab guard: missing $DSL_CENSUS — the DSL half of the declarability contract" >&2
+  echo "  cannot be judged without it." >&2
+  exit 1
+fi
+
+# `<pack:rule:field>\t<config key>` for every convention row that NAMES one. The value column is
+# Rust-debug-quoted and may itself contain ` -> ` (these are regexes), so the closing quote is found
+# with the same escape-aware scan the Rust owner uses in `split_value_and_tail` — a naive "last arrow
+# on the line" would read a pattern as a config key.
+dsl_rows="$(awk '
+  /^#/ { next }
+  /^[[:space:]]*$/ { next }
+  {
+    p = index($0, " "); if (p == 0) next
+    key = substr($0, 1, p - 1); rest = substr($0, p + 1)
+    p = index(rest, " "); if (p == 0) next
+    axis = substr(rest, 1, p - 1); rest = substr(rest, p + 1)
+    if (axis != "convention") next
+    conv++
+    if (substr(rest, 1, 1) != "\"") next
+    i = 2
+    while (i <= length(rest)) {
+      ch = substr(rest, i, 1)
+      if (ch == "\\") { i += 2; continue }
+      if (ch == "\"") break
+      i++
+    }
+    tail = substr(rest, i + 1)
+    sub(/^[[:space:]]+/, "", tail)
+    if (substr(tail, 1, 3) != "-> ") next
+    target = substr(tail, 4)
+    h = index(target, " #"); if (h > 0) target = substr(target, 1, h - 1)
+    sub(/[[:space:]]+$/, "", target)
+    if (target == "" || target == "(none yet)") next
+    print key "\t" target
+  }
+  END { print "#conv\t" conv + 0 }
+' "$DSL_CENSUS")"
+
+dsl_conv=0
+dsl_named=0
+while IFS=$'\t' read -r k p; do
+  [ -n "$k" ] || continue
+  if [ "$k" = "#conv" ]; then dsl_conv="$p"; continue; fi
+  dsl_named=$((dsl_named + 1))
+  if ! path_is_declarable "$p"; then
+    echo "  PHANTOM $k -> $p — the DSL census names a config key that $SURFACE and"
+    echo "          $TEMPLATE do not both offer. The row claims this value has a config"
+    echo "          home; nothing can set it."
+    violations=1
+  fi
+done <<< "$dsl_rows"
+
+# Floors. Both differences above are "did this row name a bad key", and a row set that collapsed to
+# empty answers "no" for every row it never read — the same vacuous green the policy-census half is
+# protected from by its own baseline round-trip.
+if [ "$dsl_conv" -eq 0 ]; then
+  echo "convention-vocab guard: FAILED -- parsed ZERO convention rows from $DSL_CENSUS." >&2
+  echo "  Its line shape (<key> <axis> \"<value>\" -> <config key> # why) changed, so the DSL half of" >&2
+  echo "  this guard judged nothing and would have reported clean for any number of phantom keys." >&2
+  exit 1
+fi
+if [ "$dsl_named" -eq 0 ]; then
+  echo "convention-vocab guard: FAILED -- all $dsl_conv convention rows in $DSL_CENSUS are" >&2
+  echo "  '-> (none yet)', so not one config key was checked. The debt list only ever shrinks toward" >&2
+  echo "  named keys, so a zero here is a broken tail parser rather than a repo that regressed." >&2
+  exit 1
+fi
 if [ "$violations" -ne 0 ]; then
   echo
   echo "convention-vocab guard: a vocabulary the census calls \`convention\` is a name the PROJECT picks,"
@@ -196,4 +294,4 @@ if [ "$violations" -ne 0 ]; then
   exit 1
 fi
 
-echo "convention-vocab guard: clean ($(grep -c . <<< "$base" || true) undeclarable vocabularies remaining in the baseline)."
+echo "convention-vocab guard: clean ($(grep -c . <<< "$base" || true) undeclarable vocabularies remaining in the baseline; $dsl_named of $dsl_conv convention rows in $DSL_CENSUS name a config key and every one of them resolves on both owners)."

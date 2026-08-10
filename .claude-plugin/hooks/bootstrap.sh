@@ -129,6 +129,54 @@ if ! curl -fsSL --max-time 300 -o "$TMP" "$URL" 2>/dev/null; then
   exit 0
 fi
 
+# Integrity check against the release's SHA256SUMS, BEFORE the file is ever made executable.
+#
+# Scope, stated plainly because it is narrow: this catches a truncated or corrupted download, and it
+# is a hook for anyone who obtained the digest through another channel. It does NOT defend against a
+# compromised release origin — an attacker who can swap the binary can swap SHA256SUMS beside it —
+# and TLS already refuses MITM. Closing the origin axis needs a signature rooted outside this release
+# page; that is a separate decision, because verifying one needs more than the bash+curl this file
+# is allowed to assume (see PLATFORMS above).
+#
+# A MISSING SHA256SUMS is accepted: releases up to and including v0.29.1 carry no such asset
+# (VERSIONING.md's phrasing for the same boundary), later releases do, and refusing to install from
+# the old ones would break the hook for every existing release. A PRESENT-but-mismatched digest
+# is refused outright — that is the case this exists for, and it must never degrade to a warning.
+#
+# Every path through this block that does NOT end in a verdict says so out loud. Until 2026-08-10
+# only the no-hasher branch did; a missing SHA256SUMS and a sums file without our asset's entry both
+# skipped the whole check in silence, indistinguishable from "verified" to anyone auditing the
+# install. A non-verdict is not a failure (the install proceeds either way), but it must never be
+# mistaken for a check that ran.
+if sums="$(curl -fsSL --max-time 60 "https://github.com/$REPO/releases/download/$LATEST/SHA256SUMS" 2>/dev/null)"; then
+  asset="zzop-mcp-$PLATFORM$ASSET_EXT"
+  expected="$(printf '%s\n' "$sums" | awk -v a="$asset" '{ n = $2; sub(/^\.\//, "", n); if (n == a) { print $1; exit } }')"
+  if [ -n "$expected" ]; then
+    actual=""
+    if command -v sha256sum >/dev/null 2>&1; then
+      actual="$(sha256sum "$TMP" | awk '{print $1}')"
+    elif command -v shasum >/dev/null 2>&1; then
+      actual="$(shasum -a 256 "$TMP" | awk '{print $1}')"
+    fi
+    # No hasher on this machine is a NON-verdict, not a pass: say so rather than implying a check ran.
+    if [ -z "$actual" ]; then
+      echo "zzop bootstrap: no sha256sum/shasum available; the download was NOT verified." >&2
+    elif [ "$actual" != "$expected" ]; then
+      rm -f "$TMP"
+      echo "zzop bootstrap: REFUSED $URL -- sha256 does not match the release's SHA256SUMS." >&2
+      echo "  expected $expected" >&2
+      echo "  actual   $actual" >&2
+      echo "  Nothing was installed. Re-run to retry, or install by hand from" >&2
+      echo "  https://github.com/$REPO/releases after checking the release page." >&2
+      exit 0
+    fi
+  else
+    echo "zzop bootstrap: checksum entry for $asset not found in $LATEST's SHA256SUMS; the download was NOT verified." >&2
+  fi
+else
+  echo "zzop bootstrap: $LATEST publishes no SHA256SUMS (or fetching it failed); the download was NOT verified." >&2
+fi
+
 chmod +x "$TMP" 2>/dev/null
 
 # Move last, so an interrupted download never leaves a half-written file where the MCP server config
@@ -143,7 +191,7 @@ fi
 # A client fixes its MCP tool list when the session starts, and this hook runs inside that startup:
 # on the session that FIRST downloads the binary, `mcpServers.zzop` is registered correctly and the
 # server is healthy, yet no zzop tool is listed, because the list was settled before this download
-# finished. Measured 2026-07-25 on Windows: the hook ran, fetched the binary, and all six tools
+# finished. Measured 2026-07-25 on Windows: the hook ran, fetched the binary, and every tool
 # answered — but only after a restart. Without this line the honest reading of that session is
 # "I installed the plugin and it does nothing", which is where a first-time user leaves. Every later
 # session takes the already-installed branch above and never prints it.

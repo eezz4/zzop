@@ -35,6 +35,15 @@ const ORM_SCHEMA_SPECIFIERS: &[(&str, &str)] = &[
     ("gorm.io/gorm", "GORM"),
 ];
 
+/// The join rule this dark channel silences by name. Spelled once here rather than inline in the
+/// message for the same reason S8/S9/S10 spell theirs (`call_graph_language`/`unknown_verb_range`/
+/// `rust_router_layer`): `rules-cross-layer` exposes the id only as a literal inside the emitted
+/// `Finding`, so the only thing standing between this disclosure and a ghost id is a pin — and this
+/// message named the rule INLINE, with no pin at all, while all three siblings had one. A rename would
+/// have left the one tripwire that already named its consumer pointing at a rule nobody can look up.
+/// `db_table_rule_id_is_a_real_shipped_rule` below is that pin.
+const SILENCED_RULE_ID: &str = "cross-layer/db-table-name-in-multiple-sources";
+
 /// Cap on example files listed per matched ORM in the warning — same "up to 3 example paths" convention
 /// `server_framework_import_warning`'s sibling tripwires use.
 const MAX_EXAMPLES: usize = 3;
@@ -100,10 +109,42 @@ pub fn orm_schema_silence_warning(
 either this engine has no native db-table extractor for this ORM, or it has one but this tree uses a shape \
 the extractor does not recognize (tables defined via migrations or raw SQL rather than declarative model \
 classes, or a model/query idiom outside the extractor's covered set). Its schema/table facts do not reach \
-the cross-layer join (`cross-layer/db-table-name-in-multiple-sources` and any join finding keyed on a table will be silent \
+the cross-layer join (`{SILENCED_RULE_ID}` and any join finding keyed on a table will be silent \
 for this tree); project this tree's tables with a Mode B overlay adapter (see the adapter examples) to \
 restore visibility: a partial envelope covering just the db-table channel is enough; contract: MCP \
 resource `zzop://contract/envelope-guide` on MCP hosts (`zzop contract envelope-guide` with the CLI \
 binary), docs/NORMALIZED_AST.md in the repo."
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Seals that the id this warning publishes is the id the engine actually ships — the same pin
+    /// S8/S9/S10 each carry for their own named rule, which this tripwire was missing even though it
+    /// has named a rule inline since it shipped. Reads the real registry, never a hand list.
+    #[test]
+    fn db_table_rule_id_is_a_real_shipped_rule() {
+        let mut registry = zzop_core::RuleRegistry::new();
+        crate::register_all_native(&mut registry);
+        let ids = registry.ids();
+        assert!(
+            ids.iter().any(|id| id == SILENCED_RULE_ID),
+            "{SILENCED_RULE_ID} is not a shipped native rule id: {ids:?}"
+        );
+    }
+
+    /// The id must actually REACH the reader — a pinned constant that the message stopped
+    /// interpolating would be a guard over nothing.
+    #[test]
+    fn the_warning_names_the_rule_it_pins() {
+        let mut imports = BTreeMap::new();
+        imports.insert(
+            "typeorm".to_string(),
+            BTreeSet::from(["src/entity/user.ts".to_string()]),
+        );
+        let w = orm_schema_silence_warning(&imports, 0).expect("zero db-table facts must disclose");
+        assert!(w.contains(SILENCED_RULE_ID), "{w}");
+    }
 }

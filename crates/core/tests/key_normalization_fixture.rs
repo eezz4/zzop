@@ -64,6 +64,19 @@ fn rows() -> Vec<FixtureRow> {
     // -- provide-side: mixed {a}/:b params --
     provide("GET", "/users/{id}/posts/:postId");
 
+    // -- provide-side: `:` is a param sigil ONLY when the segment has no content before it. A
+    // Google-AIP / gRPC-Gateway / Buf custom method is a SUFFIX on a segment that already has
+    // content, and it identifies the endpoint — collapsing it made `:activate` and `:deactivate`
+    // the same key (false duplicate-route + a WRONG cross-layer edge). Both spellings, brace-led
+    // and literal-led:
+    provide("POST", "/v1/users/{id}:activate");
+    provide("POST", "/v1/users/{id}:deactivate");
+    provide("POST", "/v1/users:batchGet");
+
+    // -- provide-side: Express's documented in-segment multi-param spelling (`/flights/:from-:to`)
+    // — the second param follows a `-`, not a `/`, and must still collapse.
+    provide("GET", "/flights/:from-:to");
+
     // -- provide-side: method upper-casing --
     provide("get", "/users");
     provide("Get", "/users");
@@ -111,6 +124,11 @@ fn rows() -> Vec<FixtureRow> {
 
     // -- consume-side: method upper-casing + colon param --
     consume("get", "/users/:id");
+
+    // -- consume-side: the AIP custom method must survive to the SAME key the provide produces,
+    // including after upstream `${id}` -> `{}` interpolation normalization (`{}` is not a `{x}`
+    // param, so the suffix is not swallowed there either) and after the query drop.
+    consume("post", "/v1/users/{}:activate?force=1");
 
     // -- consume-side: duplicate-slash collapse + trailing-slash drop --
     consume("GET", "//api//users//");

@@ -4,11 +4,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-mod fsd;
+mod feature_sliced_design;
 
-pub use fsd::{
-    FsdConfig, FsdMatcher, DEFAULT_FSD_BASE_DIRS, DEFAULT_FSD_ENTRY, DEFAULT_FSD_SHARED,
-    DEFAULT_FSD_SLICE_CONTAINERS,
+pub use feature_sliced_design::{
+    FeatureSlicedDesignConfig, FeatureSlicedDesignMatcher, DEFAULT_FSD_BASE_DIRS,
+    DEFAULT_FSD_ENTRY, DEFAULT_FSD_SHARED, DEFAULT_FSD_SLICE_CONTAINERS,
 };
 use serde::{Deserialize, Serialize};
 
@@ -42,31 +42,7 @@ impl Default for FixRatioThresholds {
     }
 }
 
-/// typeSafety: as-cast/any density at which the score reaches 0.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct TypeSafetyThresholds {
-    pub density_cap: f64,
-}
-
-impl Default for TypeSafetyThresholds {
-    fn default() -> Self {
-        TypeSafetyThresholds { density_cap: 0.1 }
-    }
-}
-
-/// lod: avg Law-of-Demeter violations/file at which the score reaches 0.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct LodThresholds {
-    pub count_cap: f64,
-}
-
-impl Default for LodThresholds {
-    fn default() -> Self {
-        LodThresholds { count_cap: 10.0 }
-    }
-}
-
-/// godFile: LOC threshold = SFC limit x locMultiplier; score penalty = (gods/live) x penaltySlope.
+/// godFile: LOC threshold = the file-size-compliance LOC limit x locMultiplier; score penalty = (gods/live) x penaltySlope.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct GodFileThresholds {
     pub loc_multiplier: f64,
@@ -134,10 +110,8 @@ impl Default for DiamondThresholds {
 pub struct ScoreThresholds {
     pub bus_factor: BusFactorThresholds,
     pub fix_ratio: FixRatioThresholds,
-    pub type_safety: TypeSafetyThresholds,
-    pub lod: LodThresholds,
     pub god_file: GodFileThresholds,
-    /// sfc / godFile: per-role Single-File-Component LOC limit table. Open-keyed (roles are config-derived) —
+    /// file_size_compliance / godFile: per-role LOC limit table (the cap `fileSizeCompliance` scores against — NOT Vue's Single-File Component). Open-keyed (roles are config-derived) —
     /// `fe`/`be`/`all` are the universal defaults; a role with no entry falls back to `DEFAULT_LOC_LIMIT`.
     pub loc_limits: BTreeMap<String, u32>,
     pub coupling: CouplingThresholds,
@@ -165,8 +139,6 @@ impl Default for ScoreThresholds {
         ScoreThresholds {
             bus_factor: BusFactorThresholds::default(),
             fix_ratio: FixRatioThresholds::default(),
-            type_safety: TypeSafetyThresholds::default(),
-            lod: LodThresholds::default(),
             god_file: GodFileThresholds::default(),
             loc_limits,
             coupling: CouplingThresholds::default(),
@@ -188,7 +160,7 @@ pub struct ScoresConfig {
     /// (it is shared infra, not a layer).
     pub hierarchy_shared_dirs: BTreeSet<String>,
     /// FSD directory-convention matcher, held here instead of as global state.
-    pub fsd: FsdMatcher,
+    pub feature_sliced_design: FeatureSlicedDesignMatcher,
 }
 
 /// Cross-cutting directory names exempt from layering violations when a project declares none — the
@@ -215,7 +187,7 @@ impl Default for ScoresConfig {
                 .iter()
                 .map(|s| (*s).to_string())
                 .collect(),
-            fsd: FsdMatcher::default(),
+            feature_sliced_design: FeatureSlicedDesignMatcher::default(),
         }
     }
 }

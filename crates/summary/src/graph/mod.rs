@@ -57,17 +57,21 @@
 //! assigned AFTER that sort, which is also what keeps arbitrary key text out of mermaid identifiers.
 //! No `HashMap` iteration reaches this output.
 
+pub mod cochange;
 mod collect;
 mod cosmograph;
 pub mod dep;
+mod fold;
 mod mermaid;
 mod model;
 pub mod posture;
 pub mod risk;
 #[cfg(test)]
 mod tests;
+mod vocabulary;
 
 use model::Graph;
+pub use vocabulary::{GraphDomain, GraphFormat};
 
 /// Default per-bucket row cap. Small on purpose: the deliverable is a picture a human reads at a
 /// glance, and the disclosure tells them exactly how much was left out and how to see more. There is
@@ -83,16 +87,22 @@ pub fn graph_mermaid(
     scope: Option<&str>,
     top: Option<usize>,
     domain: GraphDomain,
+    fold: Option<usize>,
 ) -> Result<String, String> {
     let v = analyze(paths, config_path)?;
     // Each domain owns its own default cap — see `GraphDomain::default_top`, which is also what the
     // help text reads, so the number a caller is told is the number they get.
     let top = top.unwrap_or(domain.default_top());
+    // A judgment domain never reaches a fold: the CLI refuses the flag for it (see
+    // [`GraphDomain::accepts_fold`]), and quietly honouring it here would recreate the silently-ignored
+    // knob that refusal exists to prevent.
+    let fold = fold::Fold::of(fold.filter(|_| domain.accepts_fold()));
     Ok(match domain {
         GraphDomain::Join => project(&v, scope, top),
-        GraphDomain::Dep => dep::project(&v, scope, top),
+        GraphDomain::Dep => dep::project(&v, scope, top, fold),
         GraphDomain::Risk => risk::project(&v, scope, top),
         GraphDomain::Posture => posture::project(&v, scope, top),
+        GraphDomain::CoChange => cochange::project(&v, scope, top, fold),
     })
 }
 
@@ -146,106 +156,6 @@ pub fn graph_cosmograph(
         data,
         census: census.render(),
     })
-}
-
-/// How `zzop graph` serializes. Sealed for the same reason [`GraphDomain`] is: an unknown `--format` is a
-/// usage error, never a silently-different output.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum GraphFormat {
-    /// The default and the only format the four domains all support.
-    Mermaid,
-    /// The dep domain's points table.
-    CosmographNodes,
-    /// The dep domain's links table — the one a viewer actually requires.
-    CosmographLinks,
-}
-
-impl GraphFormat {
-    pub fn from_wire(s: &str) -> Option<Self> {
-        match s {
-            "mermaid" => Some(GraphFormat::Mermaid),
-            "cosmograph-nodes" => Some(GraphFormat::CosmographNodes),
-            "cosmograph-links" => Some(GraphFormat::CosmographLinks),
-            _ => None,
-        }
-    }
-
-    pub const WIRE_NAMES: &[&str] = &["mermaid", "cosmograph-nodes", "cosmograph-links"];
-
-    /// Is this a cosmograph table? One owner for the question, so the CLI's `--domain`/`--top`
-    /// compatibility check cannot drift from the dispatch that follows it.
-    pub fn is_cosmograph(self) -> bool {
-        matches!(
-            self,
-            GraphFormat::CosmographNodes | GraphFormat::CosmographLinks
-        )
-    }
-}
-
-/// Which picture `zzop graph` draws. A sealed enum rather than a free string: an unknown `--domain`
-/// must be a usage error at the CLI edge, never a silently-empty diagram.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum GraphDomain {
-    /// The cross-layer JOIN — nodes are io keys. The original domain; see this module's doc.
-    Join,
-    /// The FILE import graph — nodes are files, cycles drawn distinctly. See [`dep`].
-    Dep,
-    /// Blast-radius hubs + extraction seams. See [`risk`] for why the health SCORES are deliberately
-    /// not drawn here.
-    Risk,
-    /// The mutating attack surface and its guard status. See [`posture`] for why a box means
-    /// GUARDED-OR-EXEMPT rather than guarded.
-    Posture,
-}
-
-impl GraphDomain {
-    /// The wire spelling accepted by `--domain`. `None` for anything else, so the caller reports the
-    /// full accepted set rather than guessing what was meant.
-    pub fn from_wire(s: &str) -> Option<Self> {
-        match s {
-            "join" => Some(GraphDomain::Join),
-            "dep" => Some(GraphDomain::Dep),
-            "risk" => Some(GraphDomain::Risk),
-            "posture" => Some(GraphDomain::Posture),
-            _ => None,
-        }
-    }
-
-    /// Every accepted spelling, for the usage line — one owner, so a new domain cannot ship with a help
-    /// text that does not mention it.
-    pub const WIRE_NAMES: &[&str] = &["join", "dep", "risk", "posture"];
-
-    /// This domain's `--top` default. A join has tens of relations, an import graph has thousands, and
-    /// one shared number would either black out the second or starve the first — so the caps genuinely
-    /// differ, and the number a caller is told must be the number they get.
-    ///
-    /// The mapping lives HERE rather than in `graph_mermaid`'s match because a second reader exists:
-    /// `zzop graph --help`. While the numbers sat in that match, the help text interpolated
-    /// `DEFAULT_GRAPH_TOP` alone and told every caller the cap was 25 — true only for `join`, and
-    /// silently wrong for the three domains D17 added (found by the v0.25.0 release audit). Both readers
-    /// now derive from this one function, so a new domain cannot ship with a help text quoting some
-    /// other domain's cap.
-    pub fn default_top(self) -> usize {
-        match self {
-            GraphDomain::Join => DEFAULT_GRAPH_TOP,
-            GraphDomain::Dep => dep::DEFAULT_DEP_TOP,
-            GraphDomain::Risk => risk::DEFAULT_RISK_TOP,
-            GraphDomain::Posture => posture::DEFAULT_POSTURE_TOP,
-        }
-    }
-
-    /// `(wire name, default cap)` for every domain, in `WIRE_NAMES` order — what a help line needs to
-    /// state the accepted set and each one's cap without copying either.
-    pub fn wire_defaults() -> Vec<(&'static str, usize)> {
-        Self::WIRE_NAMES
-            .iter()
-            .map(|n| {
-                let d = Self::from_wire(n)
-                    .expect("WIRE_NAMES and from_wire are the same vocabulary by construction");
-                (*n, d.default_top())
-            })
-            .collect()
-    }
 }
 
 /// The pure projection `analyzeTrees` output -> mermaid text. Split out from the analysis call so the

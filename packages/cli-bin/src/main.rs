@@ -16,7 +16,7 @@
 //!   zzop facts <path>...             — the run's post-assembly facts (per-tree CommonIr + the whole cross-layer join, uncapped) for your own rule program.
 //!   zzop file <path> <tree>...       — what does zzop know about THIS FILE: its tree, its verdict (analyzed / lexical-only / degraded / not-found), symbols, io, both edge directions, findings.
 //!   zzop graph <path>...             — a picture for an EXTERNAL renderer, never drawn here. `--format mermaid` (default) serializes any `--domain` as a flowchart, scoped (`--top`, `--scope`) with every cap disclosed in the document; `--format cosmograph-nodes|cosmograph-links` serializes `--domain dep` as UNCAPPED NDJSON tables for an interactive viewer, with the census on stderr so stdout stays a parseable table.
-//!   zzop init [--force]              — write the embedded starter zzop.config.jsonc into the current directory.
+//!   zzop init [<dir>] [--force]      — write the embedded starter zzop.config.jsonc into <dir> (default: the current directory).
 //!   zzop contract [<name>]           — list the embedded authoring contracts / print one to stdout.
 //!   zzop explain <rule-id>           — print one bundled DSL rule's compiled-in data to stdout.
 //!   zzop version [--verbose]         — print this binary's version (equals the MCP serverInfo.version); `--verbose` adds every parser's fingerprint.
@@ -46,7 +46,14 @@ mod cli;
 /// invocation (exit 2), so the two surfaces can never drift apart. Stays in THIS file: the `zzop-mcp`
 /// package's `surface_prose` meta-test reads this literal out of `packages/cli-bin/src/main.rs` by
 /// path, to pin that every MCP tool's CLI twin subcommand is named here.
-const USAGE: &str = "usage: zzop <analyze <path> | analyze --config <path> | analyze-envelope <envelope.json> | validate-envelope <envelope.json> | validate-rule-pack <pack.json> | cross <path>... | cross --config <path> | file <path> [--source-id <id>] <tree>... | file <path> [--source-id <id>] --config <path> | endpoint <pattern> <path>... | endpoint <pattern> --config <path> | manifest <path>... | manifest --config <path> | diff <a.json> <b.json> [--allow-tool-drift] | facts <path>... | facts --config <path> | coverage <path>... | coverage --config <path> | graph <path>... | graph --config <path> [--domain <join|dep|risk|posture>] [--format <mermaid|cosmograph-nodes|cosmograph-links>] [--scope <prefix>] [--top <n>] | init [--force] | contract [<name>] | explain <rule-id> | version [--verbose]> (analyze, analyze-envelope and cross also take [--severity <critical|warning|info>] [--rule <id>] [--limit <n>] [--profile-rules]; every subcommand takes --help)";
+/// DERIVED where a set has an owner: the graph domain list comes from `GraphDomain::WIRE_NAMES`, which
+/// documents itself as that set's one owner precisely so a new domain cannot ship with a usage line that
+/// omits it. This line spelled it by hand until 2026-08-06 and did omit one.
+pub(crate) fn usage() -> String {
+    format!("usage: zzop <analyze <path> | analyze --config <path> | analyze-envelope <envelope.json> | validate-envelope <envelope.json> | validate-rule-pack <pack.json> | cross <path>... | cross --config <path> | file <path> [--source-id <id>] <tree>... | file <path> [--source-id <id>] --config <path> | endpoint <pattern> <path>... | endpoint <pattern> --config <path> | manifest <path>... | manifest --config <path> | diff <a.json> <b.json> [--allow-tool-drift] | facts <path>... | facts --config <path> | coverage <path>... | coverage --config <path> | graph <path>... | graph --config <path> [--domain <{}>] [--format <mermaid|cosmograph-nodes|cosmograph-links>] [--scope <prefix>] [--top <n>] [--fold <n>] | init [<dir>] [--force] | contract [<name>] | explain <rule-id> | version [--verbose]> (analyze, analyze-envelope and cross also take [--severity <critical|warning|info>] [--rule <id>] [--limit <n>] [--profile-rules]; every subcommand takes --help)",
+        zzop_summary::GraphDomain::WIRE_NAMES.join("|")
+    )
+}
 
 /// A one-line pointer at the bare-invocation/unknown-subcommand error path (exit 2): a bare `zzop` gives
 /// no hint that `help` exists, or that MCP is the sibling `zzop-mcp` binary (not a `zzop` subcommand).
@@ -69,7 +76,11 @@ fn main() {
         Some("analyze") => run_analyze(&args),
         // Mode A: the file's content REPLACES native parsing entirely for this run (contrast
         // `analyze`, which walks a real tree) — same handler as the `analyze_envelope` MCP tool, so
-        // this CLI form and a tool call give the identical answer.
+        // the ANALYSIS cannot drift between the two. The one thing that differs is what each caller
+        // KNOWS: this form names a file, so the handler discovers the `zzop.config.jsonc` beside it
+        // and applies its declared vocabulary (see `cli::analysis::run_analyze_envelope`), while a
+        // tool call carries envelope text with no location and therefore nothing to discover. Same
+        // envelope plus same config = same answer on both.
         Some("analyze-envelope") => run_analyze_envelope(&args),
         // Offline authoring checks — read a file, print a verdict report, exit by validity. Same
         // `zzop_summary` check the `validate_envelope`/`validate_rule_pack` MCP tools call, so a CLI
@@ -189,7 +200,11 @@ fn main() {
         // stays the default on purpose: it is a one-token line that scripts
         // and this repo's own tests parse, and lengthening it would break them for a diagnostic almost
         // no invocation wants. `zzop-mcp version --verbose` prints the identical string.
-        Some("version") | Some("--version") => match args.get(2).map(String::as_str) {
+        // `-V` sits here for the same reason `-h` sits beside `--help` two arms down: it is the
+        // conventional short spelling, and a binary that answers `-h` but rejects `-V` teaches the
+        // reader that its short flags are arbitrary. It is an alias, not a third form — the help gate
+        // in `cli::help` normalizes it to `version` so every spelling answers `--help` identically.
+        Some("version") | Some("--version") | Some("-V") => match args.get(2).map(String::as_str) {
             None => println!("zzop {}", zzop_summary::version()),
             Some("--verbose") if args.len() == 3 => println!("{}", zzop_summary::version_string()),
             // Names the FIRST argument that is not `--verbose`, never `--verbose` itself: the
@@ -203,22 +218,17 @@ fn main() {
         },
         Some("help") | Some("--help") | Some("-h") => print_help(),
         _ => {
-            eprintln!("{USAGE}");
+            eprintln!("{}", usage());
             eprintln!("{BARE_INVOCATION_HINT}");
             std::process::exit(2);
         }
     }
 }
 
-/// Every non-diverging handler's terminal step: `Ok` to stdout, `Err` as `zzop: <message>` to stderr +
-/// exit 1. (`cli::print_or_exit` is the diverging-return twin for the `run_*` helpers, which never
-/// return to this match at all.)
+/// Every non-diverging handler's terminal step. Delegates to `cli::print_or_exit` — these were two
+/// hand-kept copies of the same match (stdout on `Ok`, `zzop: <e>` + exit 1 on `Err`) until the
+/// missing-config hint landed in one of them and the analyze lane, which routes through the OTHER,
+/// printed nothing. One sink now; the only difference was the return type, and `!` coerces.
 fn print_result(result: Result<String, String>) {
-    match result {
-        Ok(json) => println!("{json}"),
-        Err(e) => {
-            eprintln!("zzop: {e}");
-            std::process::exit(1);
-        }
-    }
+    cli::print_or_exit(result)
 }

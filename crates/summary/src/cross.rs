@@ -52,7 +52,8 @@ pub fn cross_summary_with(
         config_warnings.push(w);
     }
     // Config-loader warnings first, then each tree output's facade-level `configWarnings` entries
-    // (tree order) — merged into the one config-honesty channel, see `crate::config_warnings`.
+    // (tree order) — merged into the one config-honesty channel, see
+    // `crate::warnings::facade_config_warnings` for the absent-field degradation contract.
     let mut config_warnings: Vec<serde_json::Value> = config_warnings
         .into_iter()
         .map(serde_json::Value::String)

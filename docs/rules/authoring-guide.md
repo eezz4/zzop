@@ -40,9 +40,11 @@ one more way the finished JSON reaches the engine.
 ## Worked example
 
 A pack that flags a hardcoded `X-Debug-Token` header value (should come from config/env, not be baked
-into source) — a small but realistic `line-scan` rule. Note there is no `suppress_marker` field: the
-inline marker is derived as `zzop-<id>-ok` (here `zzop-hardcoded-debug-token-ok`), and the `message` names it so a
-reader sees how to silence a vetted case:
+into source) — a small but realistic `line-scan` rule. Note two things the JSON does NOT contain. There
+is no `suppress_marker` field: the inline marker is derived as `zzop-<id>-ok` (here
+`zzop-hardcoded-debug-token-ok`). And the `message` does not name that marker — the engine appends the
+sentence that does, along with the disable hint (see "The auto-appended suppress and disable
+sentences" below). Write the cause and the fix; the two escape hatches are added for you.
 
 ```json
 {
@@ -53,7 +55,7 @@ reader sees how to silence a vetted case:
     {
       "id": "hardcoded-debug-token",
       "severity": "warning",
-      "message": "X-Debug-Token header set to a string literal — this bypasses per-environment config and risks shipping a real token. Read it from env/config instead. Suppress a vetted case with `// zzop-hardcoded-debug-token-ok`.",
+      "message": "X-Debug-Token header set to a string literal — this bypasses per-environment config and risks shipping a real token. Read it from env/config instead.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx)$",
@@ -81,26 +83,55 @@ reader sees how to silence a vetted case:
 `http-conventions` fixture pack there is a full `symbol-scan` + `io-scan` end-to-end demo, kept test-only
 rather than shipped — it exists to demonstrate the matcher shapes, not because it detects anything real).
 
+## The auto-appended suppress sentence
+
+Every DSL finding's `message` gets up to two more sentences appended by the engine at runtime, AFTER
+your own `message` text — you write neither yourself. This section covers the first; [the next
+section](#the-auto-appended-disable-hint) covers the second, which always comes last.
+
+**How to suppress this one finding.** `zzop_core::dsl::suppress_hint`
+(`crates/core/src/dsl/markers/channel.rs`) builds it from your rule's matcher kind:
+
+```
+line-scan / method-scan     Suppress a vetted case with `// zzop-<id>-ok`.
+call-scan / literal-scan    Suppress a vetted case with `// zzop-<id>-ok` (`# zzop-<id>-ok` in Python).
+symbol-scan / io-scan       (nothing — see below)
+```
+
+The leader set differs because the channels differ, and `zzop explain <rule-id>` prints the full answer
+for any rule (`suppress marker:`). Two kinds get NO sentence, and both silences are deliberate:
+`symbol-scan` findings name a symbol rather than a line, so no comment anywhere can suppress them; an
+`io-scan` finding's anchor line is re-read through a callback that envelope mode (`analyze-envelope`)
+answers with nothing, so its marker is inert there. The engine would rather say nothing than tell you to
+write a comment that cannot work. **If you author a `symbol-scan` or `io-scan` rule, say how to exclude
+it in your own `message`** — nothing is appended for you.
+
 ## The auto-appended disable hint
 
-Every DSL finding's `message` gets one more sentence appended by the engine at runtime, AFTER your own
-`message` text — you never write it yourself. `zzop_core::disable_hint` (`crates/core/src/finding.rs`)
-builds:
+**How to turn the rule off wholesale** — the second appended sentence, and always the last thing in the
+message. `zzop_core::disable_hint` (`crates/core/src/finding.rs`) builds:
 
 ```
 Disable via config `rules: { "<pack>/<rule>": "off" }` (embedders: `disabledRules`)
 ```
 
-and `crates/engine/src/pipeline/findings.rs`'s `append_disable_hints` appends this to every finding built
-by `eval_packs` (the engine's fused per-file pass), and `envelope::file_pass`'s direct `eval_pack` call
-(Mode B) appends the identical fragment via the same helper — one shared builder, never a second
-hand-written copy. This happens once, before the finding reaches `AnalysisCache::put_findings`, so the
-hint text is baked into the cached `message` and is not re-appended on a warm cache hit.
+Both appended sentences come from `crates/engine/src/pipeline/findings.rs`'s `append_hints`, which every DSL
+finding-construction site routes through — the fused per-file pass, `envelope::file_pass` (Mode B), and
+the whole-tree io-scan pass — one shared builder, never a second hand-written copy. This happens once,
+before the finding reaches `AnalysisCache::put_findings`, so both sentences are baked into the cached
+`message` and are not re-appended on a warm cache hit.
 
-**What this means for your `message` field**: write the cause, the fix, and (per the "Message triple"
-contract below) your rule's own derived marker `zzop-<id>-ok` — that is the full contract for what you author.
-Do NOT write your own "Disable via config ..." sentence in `message`: the engine adds the hint for you,
-and a hand-written copy renders TWICE in the finding a reader actually sees.
+**What this means for your `message` field**: write the cause and the fix. That is the whole contract
+for what you author. Do NOT hand-write either appended sentence — the engine adds them, and a copy
+renders TWICE in the finding a reader actually sees. Both halves are mechanized:
+`scripts/check-pack-suppress-sentence.sh` rejects a `message` that ends with the suppress sentence the
+append would have added, and contract 17 rejects one naming `disabledRules`/`disabled_rules`.
+
+**When your rule genuinely needs different wording**, write it and name the marker once more anywhere in
+your `message` — the append opts out as soon as the message already names `zzop-<id>-ok`, so your
+sentence stands alone. That is not a loophole, it is the mechanism for the cases the append cannot know
+about: `security/config-file-secret` matches `.env`/`.yml`/`.toml`, where `//` is not a comment at all,
+so it writes its own `` `# zzop-config-file-secret-ok` `` sentence and keeps it.
 
 ## Performance: `require_file`/`require_file_all` rare-token-first
 
@@ -190,7 +221,8 @@ What it checks:
 - **Derived-marker uniqueness** — markers are derived `zzop-<id>-ok`, so presence and the `-ok` shape are
   construction guarantees; what the test still enforces is that no two rules — in any pack — derive the same
   marker (i.e. rule ids are globally unique), since a shared marker would silently co-suppress both.
-- **Message triple** — every DSL rule's `message` names its own derived marker (or, for a disable-only
+- **Message triple** — every DSL rule's message **as a reader receives it** (your `message` plus the
+  engine-appended suppress sentence) names its own derived marker (or, for a disable-only
   rule, the literal `disabledRules` string — `disabledRules` is the wire spelling every embedder
   request surface actually accepts; the contract also still recognizes the retired snake_case
   `disabled_rules`) somewhere in the text — the "how to exclude"
@@ -204,6 +236,11 @@ What it checks:
 - **Id hygiene** — DSL pack ids are unique across packs, rule ids are unique within a pack, and no DSL
   `"pack"` or `"pack/rule"` id collides with a native analysis id (all three id shapes share one
   `disabledRules`/`suppressions` string-match space — see `crates/core/src/registry.rs::is_enabled`).
+- **Public site** — after writing your catalog row, run `node scripts/gen-site-rules.mjs`. It rewrites
+  `site/rules.html`'s rule rows from [catalog.md](catalog.md), which is their only source; hand-editing
+  those rows fails `check-rules-catalog-sync.sh`. Two consequences worth knowing before you write the
+  row: whatever you put in the `Detects` cell is what the public page will say, and a fact you state
+  ONLY on the site is a fact the next generation deletes.
 - **Catalog sync** — [catalog.md](catalog.md)'s totals sentence (`N DSL packs, N DSL rules, N native
   analysis ids`) matches what `load_dsl_packs`/`register_native_analyses` actually load, and every native
   analysis id / DSL pack id appears somewhere in the catalog's text. The sightline surface is pinned as a
@@ -228,7 +265,9 @@ through before it ships:
    itself (no rule in the current packs does this — a hypothetical TODO-marker rule would be the shape of
    exception that qualifies; a Java `@Annotation(...)` pattern does NOT qualify as an exception, since an
    annotation is code, not a comment, and turning the flag on only filters lines that are genuinely
-   comments). `skip_comment_lines` skips a line whose trimmed text starts with `//`, `/*`, or `*` for BOTH
+   comments). `skip_comment_lines` skips a line whose trimmed text opens a comment in that file's own
+   syntax (`//`, `/*`, `*` everywhere, and `--` in a `.sql` file — one extension-keyed table, not a fixed
+   triple) for BOTH
    `line-scan` (whole-line matching) and `method-scan` (per-line within the symbol span, including `absent`
    guard checks) — safe to enable by default because it can only remove comment-only false matches, never a
    real code-line match.
@@ -256,10 +295,22 @@ through before it ships:
    (the tool-config alternation had vitest/jest/playwright/cypress but not vite). The canonical string is
    now:
    ```
-   "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing)/|\\.(test|spec)\\.|\\.stories\\.|[.-]spec\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.)"
+   "file_exclude_pattern": "${test-paths-stories}"
    ```
-   (That exact string ships as the shared `${test-paths-stories}` fragment — reference it rather than
-   pasting a copy, so the next gap closed there closes for every rule at once.)
+   **Reference it; never paste a copy.** The string used to be quoted in full right here, and quoting it
+   is how it rots: a copy cannot pick up the next arm added to the shared body. That is not
+   hypothetical — `reliability/sync-fs-in-handler` shipped exactly such a hand-copy (the same body plus
+   `scripts?|tools|bin`), and when the shared vocabulary gained the Go/Python/C# conventions on
+   2026-08-10 the copy kept the TypeScript-only arms and went on judging `handler_test.go`. If you need
+   "the shared body plus one arm", the mechanism is a pack-local fragment NAMED `test-paths-<something>`:
+   the `test-paths-*` family is what `dsl::tests_fragments::superset` pins as a strict superset of the
+   base, and a name outside that family is a copy nothing guards.
+
+   The shared body is the single owner of "what is a test path" for the whole engine —
+   `zzop_core::is_test_file`, the native/cross-layer predicate, reads the same string — and it covers each
+   language's own convention, not one language's applied to all. `docs/rules/dsl-reference.md`'s
+   "Path-exclusion semantics" section has the per-language table and the `vocabulary.extraTestPathPatterns`
+   key a project uses to add its own.
 3. **Does this rule rest on a fact the source cannot state?** "Which directory is the config module",
    "which tree is generated", "which paths are vendored" are facts about the *project*, not about the
    code — and a basename regex or a whole-file shape heuristic that infers one is a guess, which this

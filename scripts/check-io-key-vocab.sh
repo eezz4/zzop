@@ -30,9 +30,9 @@
 # world while the body checked one. The subject is now every tracked .md/.html (git ls-files), so a
 # new doc is in scope the moment it is tracked, with no list for anyone to remember.
 #
-# WHY THERE IS A DISCRIMINATOR AND NOT AN ALLOWLIST. Widening a whole-file all-or-nothing rule to all
-# 43 docs reports 4 sites, and three of them are legitimate prose that merely happens to contain some
-# of these very ordinary words:
+# WHY THERE IS A DISCRIMINATOR AND NOT AN ALLOWLIST. Widening a whole-file all-or-nothing rule to the
+# full doc set reports 4 sites, and three of them are legitimate prose that merely happens to contain
+# some of these very ordinary words:
 #   - docs/demo/break-a-route.md — "19 HTTP routes + 30 shared DB tables" (measured demo counts)
 #   - site/rules.html            — "the cross-layer IO (HTTP routes, DB tables, ...)" (explicit elision)
 #   - site/usage.html            — "backend routes, shared DB tables, route drift" (prose on `zzop cross`)
@@ -56,7 +56,9 @@
 # case-insensitively: site/reference.html writes "HTTP routes" for the SSOT's "http routes", which is
 # the same kind, and a casing difference is not vocabulary drift.
 #
-# COST. 1.7s wall over 43 docs / 860 KB, which is the two-file version's cost within measurement
+# COST, as measured 2026-07-28. 1.7s wall over the 43 docs / 860 KB the tree held THAT DAY — a
+# benchmark record, not a current inventory (the set is derived and has grown since; recount with
+# `git ls-files -- '*.md' '*.html' | wc -l`). Which is the two-file version's cost within measurement
 # noise (3 runs each: 1.72/1.74/2.38s new, 1.72/2.13/3.19s old). Under msys process creation dominates
 # and the widened scan adds no processes: three total (the SSOT grep, git ls-files, ONE awk over every
 # doc). Two things follow. There is deliberately NO per-file prefilter — check-docs-rule-ids.sh needs

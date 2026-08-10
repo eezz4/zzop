@@ -24,6 +24,12 @@ pub(super) enum BodyStyle {
     /// (`generated-request-object-v1`). Same `body:`-prop reader as [`BodyStyle::OptionsBodyProp`], only
     /// the arg index differs.
     SelfObjectBodyProp,
+    /// No body is ever witnessed at this call shape — the bare `axios(url, config)` idiom. `args[1]`
+    /// there is the CONFIG object (so [`BodyStyle::DirectArg`] would mis-witness the whole config as
+    /// the body), and axios carries its request body at `config.data`, a key no reader here extracts
+    /// today. Evidence-only: no reader means `None`, never a guess; add a `data:`-prop reader if a
+    /// measured need arrives.
+    NoWitness,
 }
 
 /// The body-position HTTP verb set (`body-shape-v1`) — a `BodyStyle::DirectArg` call's `args[1]` is only
@@ -76,6 +82,7 @@ pub(super) fn witnessed_body_shape(call: &CallExpr, hc: &HttpCall<'_>) -> Option
             .args
             .iter()
             .find_map(|a| body_from_object_prop(Some(a))),
+        BodyStyle::NoWitness => None,
     }
 }
 

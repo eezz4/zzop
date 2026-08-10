@@ -49,8 +49,8 @@ pub use aggregates::{
 pub use commit_tags::default_commit_type_patterns;
 
 pub use coupling::{
-    build_coupling, CouplingEntry, CouplingMap, COUPLING_TOP_PER_FILE, MAX_FILES_PER_COMMIT,
-    MIN_FILES_PER_COMMIT,
+    build_coupling, co_change_edges, CoChangeEdge, CouplingEntry, CouplingMap,
+    COUPLING_TOP_PER_FILE, MAX_FILES_PER_COMMIT, MIN_FILES_PER_COMMIT,
 };
 
 pub use criticality::{
@@ -87,8 +87,9 @@ pub use scores::meanings::{score_meaning, SCORE_MEANINGS};
 // can name the symbol instead of re-spelling the values (one definition per vocabulary — the rule
 // `zzop_cache::DEFAULT_CACHE_DIR` set).
 pub use scores::config::{
-    FsdConfig, FsdMatcher, DEFAULT_FSD_BASE_DIRS, DEFAULT_FSD_ENTRY, DEFAULT_FSD_SHARED,
-    DEFAULT_FSD_SLICE_CONTAINERS, DEFAULT_HIERARCHY_SHARED_DIRS,
+    FeatureSlicedDesignConfig, FeatureSlicedDesignMatcher, DEFAULT_FSD_BASE_DIRS,
+    DEFAULT_FSD_ENTRY, DEFAULT_FSD_SHARED, DEFAULT_FSD_SLICE_CONTAINERS,
+    DEFAULT_HIERARCHY_SHARED_DIRS,
 };
 pub use scores::types::Scores;
 

@@ -127,7 +127,7 @@ fn minified_bundle_with_a_giant_single_line_is_not_flagged() {
     // A bundled/minified `.mjs` file collapses onto a few giant physical lines; `MethodScan`'s line-based
     // span extraction then makes every symbol on such a line spuriously "co-occur" with unrelated
     // write/catch patterns elsewhere on the same line. The engine skips the whole file for every DSL rule
-    // pack before any rule runs (`zzop_core::dsl::is_minified_or_generated`). This fixture trips the
+    // pack before any rule runs (`zzop_core::dsl::has_minified_line_shape`). This fixture trips the
     // classifier's RATIO prong: a single ~690-byte line makes up ~96% of the file's bytes (500+ char lines
     // must dominate >= 50% of the file for the file to classify as minified).
     let dir = TempDir::new("zzop-db");

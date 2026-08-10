@@ -499,3 +499,42 @@ fn every_advertised_tool_has_a_call_dispatch_arm() {
          than an absent tool — the client has no way to tell the refusal from a bug in its own request."
     );
 }
+
+#[test]
+fn missing_config_refusal_reaching_an_mcp_client_carries_no_cli_only_prescription() {
+    // The 2026-08-09 ruling split the missing-config answer in two: the SHARED string names only the
+    // `config-template` artifact (host-neutral, guarded in crates/** by host_vocabulary contracts
+    // 15/16), and each HOST appends its own way out at its own display layer — the CLI a
+    // `Run `zzop init`` line, this server the orientation text's resource pointer. This test pins the
+    // half no other test held: the refusal that actually crosses the MCP wire. Before it, packages/mcp
+    // carried ZERO pins on this message, so a later handler wrapping the error into its own words
+    // would have let the two hosts drift apart with CI green.
+    let dir = std::env::temp_dir().join(format!("zzop-mcp-no-config-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let params = serde_json::json!({
+        "name": "analyze_repo",
+        "arguments": { "path": dir.to_string_lossy() }
+    });
+    let reply = super::call(Some(&params));
+    std::fs::remove_dir_all(&dir).ok();
+
+    assert_eq!(
+        reply["isError"], true,
+        "a config-less tree must refuse: {reply}"
+    );
+    let text = reply["content"][0]["text"].as_str().unwrap_or_default();
+    assert!(
+        text.contains(zzop_summary::contracts::MISSING_CONFIG_MARKER),
+        "the refusal must be the shared missing-config message, recognizable by its marker: {text}"
+    );
+    assert!(
+        text.contains("`config-template` contract document"),
+        "the refusal must name the artifact this host can serve: {text}"
+    );
+    // The CLI's appended line must NOT ride the wire to a shell-less client. If this fires, the hint
+    // leaked into the shared string — move it back to the CLI display layer (cli/mod.rs).
+    assert!(
+        !text.contains("zzop init"),
+        "CLI-only prescription leaked into the MCP wire: {text}"
+    );
+}

@@ -37,6 +37,13 @@ pub struct ContractDoc {
 pub const CONFIG_TEMPLATE_NAME: &str = "config-template";
 pub const CONFIG_TEMPLATE_FILENAME: &str = zzop_config::DEFAULT_CONFIG_FILENAME;
 
+/// Re-export of the missing-config refusal's stable head (`zzop_config::MISSING_CONFIG_MARKER`), for
+/// the same reason the filename above rides through here: the products depend on this crate, not on
+/// `zzop-config`, and a display layer that spells the phrase itself is a copy that drifts. The CLI
+/// matches on this to append its host-side `Run \`zzop init\`` line (2026-08-09 ruling — the shared
+/// string stays host-neutral; each host adds its own way out).
+pub const MISSING_CONFIG_MARKER: &str = zzop_config::MISSING_CONFIG_MARKER;
+
 /// The URI space every contract document is addressed in. Owned here, next to the names it prefixes,
 /// because three surfaces now spell it: MCP `resources/list`/`resources/read` (`packages/mcp`), and —
 /// since the disclosure fold — every analyze-shaped reply, which prints the disclosure document's URI
@@ -152,6 +159,14 @@ static EMBEDDED_DOCS: &[ContractDoc] = &[
     },
     ContractDoc {
         name: "dsl-reference",
+        // The matcher names below are DERIVED-CHECKED, not hand-kept: the test
+        // `contracts_tests::every_matcher_kind_appears_in_the_descriptions_that_claim_to_list_them_all`
+        // reads `Matcher`'s own variants and reds when this string — or the `rule-pack-schema` one
+        // further down — omits one. It is pinned in Rust rather than left to a reader because these
+        // bytes FREEZE into every prebuilt binary: a new variant would otherwise keep telling every
+        // client without a source checkout that the shape does not exist. HOW MANY names belong here
+        // is not written in this comment either — that count would be the same second copy one level
+        // out, and the enum plus that test are what make the list complete.
         description: "DSL rule-pack reference: pack/rule fields and every matcher (line-scan, method-scan, symbol-scan, io-scan, call-scan, literal-scan).",
         mime: "text/markdown",
         content: include_str!("../../../docs/rules/dsl-reference.md"),
@@ -164,6 +179,7 @@ static EMBEDDED_DOCS: &[ContractDoc] = &[
     },
     ContractDoc {
         name: "rule-pack-schema",
+        // Second subject of the derived matcher-kind pin described on the `dsl-reference` row above.
         description: "JSON Schema (draft-07) for the DSL rule-pack shape — pack id, rules[], the matcher kinds (line-scan, method-scan, symbol-scan, io-scan, call-scan, literal-scan), severity; every property documented. Machine-check a pack with the rule-pack validator (structure only — the same loader judgments, never rule-quality semantics).",
         mime: "application/json",
         content: include_str!("../../../docs/contracts/rule-pack.schema.json"),
@@ -184,7 +200,7 @@ static EMBEDDED_DOCS: &[ContractDoc] = &[
     },
     ContractDoc {
         name: CONFIG_TEMPLATE_NAME,
-        description: "Annotated starter zzop.config.jsonc: every optional key with a comment saying what it means, set to the value a config-less run already uses (so writing it changes nothing). Usage: save these exact bytes as zzop.config.jsonc at the tree root; the vocabulary it draws from is the config-surface resource.",
+        description: "Annotated starter zzop.config.jsonc: every optional key with a comment saying what it means, filled in with zzop's own suggested value for that key so the reader can see and judge it. A config is REQUIRED — every analysis lane refuses a tree that has none, so this is the file that makes a first run possible, not an optional tuning layer. The values are SUGGESTIONS WRITTEN DOWN, not defaults the engine would apply behind the config: an undeclared vocabulary key makes no judgment at all, so writing this block is what turns those questions on and deleting a key turns one off. Usage: save these exact bytes as zzop.config.jsonc at the tree root; the vocabulary it draws from is the config-surface resource.",
         mime: "application/jsonc",
         // Owned by `zzop-config` (which also machine-checks every key it names against
         // `config-surface.json`), referenced here — the same one-embed-one-truth rule as the

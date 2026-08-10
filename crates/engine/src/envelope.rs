@@ -63,6 +63,7 @@ mod reserved;
 mod resolve;
 mod shapes;
 mod topology_freeze;
+mod warnings_pass;
 
 #[cfg(test)]
 mod tests;

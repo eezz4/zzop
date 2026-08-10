@@ -43,25 +43,45 @@ pub(crate) use package_json::package_json_entries;
 // Re-exported so the pre-split `crate::pipeline::PackageJsonScan` path keeps resolving; `assemble`'s
 // `dep_graph`/`provides`/`rules` all name it through here.
 pub(crate) use package_json::PackageJsonScan;
-pub(crate) use rust_workspace::{
-    declared_rust_target_paths, scan_rust_workspace, RustWorkspaceMap,
-};
+pub(crate) use rust_workspace::{scan_rust_workspace, RustWorkspaceMap};
 pub(crate) use tsconfig::tsconfig_scan;
 
+/// WHY a file fell back to the lexical projection — the three, and only three, ways `FileArtifact`
+/// can be degraded. Each arm is a different LEVER for the caller, which is the whole reason the fact is
+/// carried instead of collapsed into a bool: an oversized file is a `size_cap` decision the caller can
+/// change, an unreadable one is an environment fault, and a parse failure is a bug report or an
+/// unsupported syntax level. `analyze::diagnostics::degraded_files` is the consumer that turns them
+/// back into those three sentences.
+///
+/// The set is closed by construction, not by convention: the ONLY places that build a degraded
+/// `FileArtifact` are the read-error early return in [`artifact::process_file`], the oversized branch and
+/// the parse-verdict tail of [`fresh::compute_fresh_artifact`], and [`artifact::artifact_from_ir`]'s
+/// warm-cache reconstruction — which derives the same verdict from the same predicate rather than
+/// remembering one (see its doc for why that cannot drift).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum DegradeCause {
+    /// `fs::read` failed — a permission error, or a race with a concurrent delete/replace. Nothing ran on
+    /// this file at all: no parse, no rule of any kind, and `loc` is 0.
+    Unreadable,
+    /// The file's byte length exceeded `EngineConfig::size_cap`, so no parser was invoked. `loc` is still
+    /// counted lexically and line-scan DSL rules still ran against the raw text.
+    Oversized,
+    /// A parser was invoked for this file's language and did not produce a usable tree (or panicked, which
+    /// every frontend here catches and treats as the same verdict). Same lexical fallback as `Oversized`.
+    ParseFailure,
+}
+
 /// One file's contribution to the tree-wide assembly (`analyze::assemble`) — plain data only.
-/// `imports` is `Some` for files this engine can place in the shared TS/Python/Rust/Go/Java dep graph
-/// (TypeScript-, Python-, Rust-, Go-, or Java21-dispatched, including degraded ones — an empty
-/// `ImportMap` still gives the file a graph node); `None` for Prisma / lexical-only files, which never
-/// participate in `resolve::build_dep`. `.java` joined this `Some` set only once its dispatch target
-/// became a real structural parser (`Language::Java21`) — the retired lexical brace-matcher never
-/// produced imports at all, so every `imports: None`/"never participates in the TS dep graph" doc
-/// elsewhere describing `.java` predates this and is now stale (updated alongside this one). Below,
-/// several fields share that "`None`/empty for a non-TypeScript/Python/Rust/Go/Java21 or degraded file"
-/// convention; noted once here rather than repeated per field. Python's, Rust's, Go's, and Java's own
-/// dep-graph EDGES each resolve through a separate engine-side pass
-/// (`analyze::assemble::dep_graph::merge_python_dep_edges` / `merge_rust_dep_edges` /
-/// `merge_go_dep_edges` / `merge_java_dep_edges`), not `zzop_parser_typescript`'s resolver — see those
-/// functions' docs for why.
+/// `imports` is `Some` for files this engine can place in the shared dep graph (dispatched to a
+/// structural parser, including degraded ones — an empty `ImportMap` still gives the file a graph
+/// node); `None` for Prisma / lexical-only files, which never
+/// participate in `resolve::build_dep`. Membership is decided in one place — `fresh::ts_slot`'s
+/// `matches!` — and the roster is not restated here or in any sibling field doc. Below,
+/// several fields share that "`None`/empty for a file outside that slot, or a degraded one"
+/// convention; noted once here rather than repeated per field. Every non-TypeScript member's
+/// dep-graph EDGES resolve through a separate engine-side pass of its own
+/// (`analyze::assemble::dep_graph`'s `merge_*_dep_edges` family — that module's call order is the
+/// roster), not `zzop_parser_typescript`'s resolver — see those functions' docs for why.
 pub(crate) struct FileArtifact {
     pub rel: String,
     pub symbols: Vec<SourceSymbol>,
@@ -90,8 +110,11 @@ pub(crate) struct FileArtifact {
     pub asset_refs: Vec<String>,
     pub loc: u32,
     pub findings: Vec<zzop_core::Finding>,
-    pub degraded: bool,
-    /// Minified/generated classification — distinct from `degraded`: a degraded file still runs
+    /// `Some(cause)` exactly when this file fell back to the lexical projection — the degraded flag and
+    /// its reason are ONE field, deliberately, so no code path can report a degrade whose cause is unset
+    /// or a cause on a file that parsed. `is_some()` is the old `degraded: bool`.
+    pub degrade_cause: Option<DegradeCause>,
+    /// Minified/generated classification — distinct from `degrade_cause`: a degraded file still runs
     /// line-scan DSL rules against raw text, but this flag skips ALL DSL rule-pack evaluation.
     /// Structural extraction below is unaffected; this only gates `findings`.
     pub minified_or_generated: bool,
@@ -141,19 +164,22 @@ pub(crate) struct FileArtifact {
     /// `language`/`degraded` — the removed `scan_field_usage` was a raw-text regex scan, never an AST
     /// parse, so it never cared whether swc could parse the file.
     pub field_usage_tokens: Vec<String>,
-    /// Per-file loop-body line spans (`zzop_parser_typescript::extract_loop_spans` /
-    /// `zzop_parser_go::extract_loop_spans`) — feeds `zzop_core::dsl::SourceFile::loop_spans`,
-    /// `Matcher::MethodScan::trigger_in_loop`'s substrate. An AST-derived projection (unlike
-    /// `field_usage_tokens`/`store_bound_models` above), so it follows the `symbols`-style convention:
-    /// real spans only for a well-formed, non-degraded TypeScript/Go file; empty for every other
-    /// language, degraded, oversized, or dispatch-`None` files (graceful degrade, never guessed).
+    /// Per-file loop-body line spans (each producing parser's `extract_loop_spans`) — feeds
+    /// `zzop_core::dsl::SourceFile::loop_spans`, `Matcher::MethodScan::trigger_in_loop`'s substrate. An
+    /// AST-derived projection (unlike `field_usage_tokens`/`store_bound_models` above), so it follows the
+    /// `symbols`-style convention: real spans only from a well-formed, non-degraded parse of a language
+    /// that projects them; empty for degraded, oversized, or dispatch-`None` files (graceful degrade,
+    /// never guessed). WHICH languages project them is deliberately not listed here: the per-language
+    /// table is `pipeline/fresh/spans.rs`, which declares itself ground truth for the `loop_spans` column
+    /// of `crates/engine/tests/rule_contracts/capability_matrix.rs` (the per-environment SSOT), and a
+    /// list copied to this line would go stale on the next arm — it already did.
     pub loop_spans: Vec<(u32, u32)>,
     /// Per-file function line spans with promise-continuation callbacks merged into their call site
     /// (`zzop_parser_typescript::extract_function_spans`) — feeds
     /// `zzop_core::dsl::SourceFile::function_spans`, `Matcher::MethodScan::after_in_same_function`'s
-    /// substrate. Same AST-derived convention as `loop_spans` above, but TypeScript ONLY (no Go
-    /// counterpart yet — the coverage asymmetry is published in `docs/NORMALIZED_AST.md` and
-    /// `FileIrSlice`'s module doc, not hidden).
+    /// substrate. Same AST-derived convention as `loop_spans` above, but TypeScript ONLY — narrower than
+    /// `loop_spans`' producer set, and that asymmetry is published (`docs/NORMALIZED_AST.md`,
+    /// `FileIrSlice`'s module doc, and the table in `pipeline/fresh/spans.rs`), not hidden.
     pub function_spans: Vec<(u32, u32)>,
     /// Per-file TEST-ONLY line spans (`zzop_parser_rust::extract_test_spans`) — feeds
     /// `zzop_core::dsl::SourceFile::test_spans`, the SUBTRACTIVE gate every DSL matcher passes through
@@ -202,7 +228,7 @@ pub(crate) fn run_file_pass(
         .packs
         .iter()
         .filter(|p| registry::is_pack_enabled(&config.rule_config, &p.id))
-        .map(|p| gate_pack_rules(p, &config.rule_config))
+        .map(|p| gate_pack_rules(p, config))
         .collect();
     let enabled_packs: Vec<&RulePackDef> = gated_packs.iter().collect();
     // Computed once per call (constant across every file in this pass), not per file. `None` when the
@@ -236,10 +262,30 @@ pub(crate) fn run_file_pass(
 /// `"{pack.id}/{rule.id}"` id is disabled removed from `rules`. Called once per call (not per file),
 /// shared by both `analyze_tree` and `analyze_envelope`. A pack left with zero rules behaves like an
 /// empty pack downstream (`pack_loader::applies_to` returns `false`).
-pub(crate) fn gate_pack_rules(pack: &RulePackDef, config: &zzop_core::RuleConfig) -> RulePackDef {
+pub(crate) fn gate_pack_rules(pack: &RulePackDef, config: &EngineConfig) -> RulePackDef {
     let mut gated = pack.clone();
-    gated
-        .rules
-        .retain(|rule| registry::is_enabled(config, &format!("{}/{}", pack.id, rule.id)));
+    gated.rules.retain(|rule| {
+        registry::is_enabled(&config.rule_config, &format!("{}/{}", pack.id, rule.id))
+    });
+    // The project's own EXTRA test-path spellings, ADDED to the language conventions the shared
+    // `${test-paths…}` fragment already carries. Applied HERE, on the per-pass clone, rather than in
+    // `zzop-facade` where the config is assembled: this is the one seam every lane funnels through
+    // (fused file pass, whole-tree io-scan, envelope ingest, the decorator-gate predicate), so a direct
+    // Rust embedder that never touches the facade gets the same behavior as a CLI run. Per tree by
+    // construction — `config` is one tree's config and `pack` is one tree's pack.
+    //
+    // It also lands INSIDE the ruleset fingerprint for free: callers hash these gated packs
+    // (`cache::ruleset_fingerprint`), so a changed declaration misses the warm entries written under
+    // the old one instead of being served their answers.
+    if let (Some(extra), _) = crate::vocabulary::extra_test_path_tail(&config.vocabulary) {
+        gated.extend_test_path_exclusions(&extra);
+    }
+    if gated.rules.len() != pack.rules.len() {
+        // The clone's rules vec changed shape, so it must not share the original's POSITIONAL
+        // prefilter state — see `RegexCache::fork_for_mutated_rules` (pattern memo kept, prefilter
+        // rebuilt for this shape). One loaded pack evaluated under two `disabled_rules` configs is
+        // an ordinary embedder flow, and the shared prefilter mis-mapped rule indices there.
+        gated.regex_cache = pack.regex_cache.fork_for_mutated_rules();
+    }
     gated
 }

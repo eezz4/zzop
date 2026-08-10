@@ -9,9 +9,11 @@ use std::collections::BTreeMap;
 /// Runs every framework-silence tripwire and returns each warning that fired, in the push order the
 /// calls below appear in (S6 slotted after S4 at introduction; S8 after S6, before the S3/S5/S7
 /// precheck block, since it needs no precheck; S3/S5 keep their pre-split tail positions; S7 slotted
-/// after S5, sharing S5's precheck block; S9-S13 appended in id order). The count is deliberately not
-/// written here — this doc said "seven, S1-S7" in one sentence and "eight, S1-S8" in the next while
-/// thirteen ran, and `crate::framework_silence`'s module doc owns the roster. Order matters for
+/// after S5, sharing S5's precheck block; everything from S9 on is appended in id order). Neither the
+/// count NOR the id range is written here — this doc said "seven, S1-S7" in one sentence and "eight,
+/// S1-S8" in the next while thirteen ran, and then said "S9-S13" after S14 landed. The roster is
+/// `crate::framework_silence`'s to state, and that module now declines to state it too: each tripwire
+/// file carries its own `//! S<n>` header, which is the only account that cannot drift. Order matters for
 /// `AnalyzeOutput::warnings`' documented stability, not correctness (each tripwire is independent). S5
 /// and S7 are now per-app censuses: each may contribute MULTIPLE entries (one per below-floor app-root,
 /// in sorted `app_roots` order) plus an optional tree-wide fallback, all of S5's before all of S7's.

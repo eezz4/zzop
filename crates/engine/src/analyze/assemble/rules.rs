@@ -108,15 +108,7 @@ pub(super) fn run(
         // `dead_export_findings`' missing parameter.
         let t0 = profile.then(Instant::now);
         let mut unreachable_entries: std::collections::HashSet<String> =
-            crate::pipeline::declared_rust_target_paths(
-                root,
-                ts_paths
-                    .iter()
-                    .map(|s| s.as_str())
-                    .filter(|p| p.ends_with(".rs")),
-            )
-            .into_iter()
-            .collect();
+            rust_workspace.target_roots().iter().cloned().collect();
         // A `.ts` imported ONLY by a `.vue`/`.svelte` SFC has real fan-in (via `merge_sfc_fan_in`) but no
         // `dep` edge points at it (the SFC is not a graph node), so it would read as a false `unreachable`
         // island. A framework-mounted component is effectively an entrypoint, so seed what it imports as

@@ -14,7 +14,6 @@ use crate::analyze::dep_stats_from_dep;
 use crate::{AnalyzeOutput, EngineConfig};
 
 use super::file_pass::{run_file_pass, FilePassState};
-use super::reserved::reserved_drop_warning;
 use super::resolve::{envelope_rule_pack, resolve_envelope_specifier};
 
 /// Ingests one `NormalizedEnvelope` (already validated — see `zzop_core::validate_envelope`) and
@@ -37,7 +36,7 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
         .packs
         .iter()
         .filter(|p| registry::is_pack_enabled(&config.rule_config, &p.id))
-        .map(|p| crate::pipeline::gate_pack_rules(p, &config.rule_config))
+        .map(|p| crate::pipeline::gate_pack_rules(p, config))
         .map(|p| envelope_rule_pack(&p))
         .filter(|p| !p.rules.is_empty())
         .collect();
@@ -114,9 +113,8 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
     // no decorator/annotation producer ever runs and there is no `decorator_guarded` evidence to mint
     // from — `attribute_store` is used as-is. (The envelope call-graph pass below is edge-only for
     // the same reason; injected `auth-guarded` attributes are the envelope-native guard channel.)
-    // `enabled_packs` is
-    // already the same is_enabled/`gate_pack_rules`/`envelope_rule_pack`-gated pack list `run_file_pass`
-    // evaluated per-file above; reused here unchanged for the whole-tree pass.
+    // `enabled_packs` is already the same is_enabled/`gate_pack_rules`/`envelope_rule_pack`-gated pack
+    // list `run_file_pass` evaluated per-file above; reused here unchanged for the whole-tree pass.
     let anchor_line = |_: &str, _: u32| None;
     let io_scan_ctx = zzop_core::IoScanTreeContext {
         provides: &io_provides,
@@ -142,7 +140,9 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
             zzop_core::eval_pack_io_scan(pack, &io_scan_ctx, &mut io_scan_findings);
         }
     }
-    crate::pipeline::findings::append_disable_hints(&mut io_scan_findings);
+    // io-scan only: no suppress sentence, and THIS lane is why — `anchor_line` above is constant-`None`.
+    let packs: Vec<&zzop_core::RulePackDef> = enabled_packs.iter().collect();
+    crate::pipeline::findings::append_hints(&packs, &mut io_scan_findings);
 
     let cycles = circular_from_dep_excluding(&dep, &noncycle_edges);
     let dep_stats = dep_stats_from_dep(&dep);
@@ -158,48 +158,28 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
     );
 
     // `AnalyzeOutput::folders` is not git-gated, so envelope mode gets a real rollup too.
-    // `layer_co_churn` stays `None`: envelope mode never has real commit history.
+    // `layer_co_churn` and `co_change` stay `None`: envelope mode never has real commit history, and
+    // `None` says "not measured" where an empty Vec would claim "measured, nothing co-changed".
     let folders = Some(zzop_metrics::build_folder_aggregates(
         &nodes,
         &dep,
         zzop_metrics::DEFAULT_FOLDER_DEPTH,
     ));
 
-    if let Some(w) = reserved_drop_warning("envelope", &envelope.parser, reserved_dropped) {
-        warnings.push(w);
-    }
-    if let Some(w) = crate::analyze::zero_packs_warning(config) {
-        warnings.push(w);
-    }
-    if config.git.is_some() {
-        warnings.push(
-            "git collection skipped: envelope mode has no filesystem root to collect history from"
-                .to_string(),
-        );
-    }
-    // Config-diagnostics parity with `analyze::assemble` — the envelope path used to skip these, so a
-    // `disabled_rules` typo or a dead suppression/top-level-exclude filter was silently ineffective in
-    // envelope mode only (the "envelope diagnostics asymmetry" gap). `commits` is empty and `git_active`
-    // false: envelope mode never has history, and `build_diagnostics` skips every git-window warning on
-    // that gate, so only the structural coverage-gap + unknown-`disabled_rules` self-reports fire.
-    let diagnostics_report =
-        crate::analyze::run_diagnostics(file_count, &dep, &all_symbols, &[], config, false);
-    warnings.extend(diagnostics_report.warnings);
-    let config_warnings = diagnostics_report.config_warnings;
+    // Every config-derived self-report, in fixed order, plus the shared pack-scope census —
+    // extracted verbatim to `super::warnings_pass` (line cap); the census comes back because
+    // `packs_loaded` below must read the SAME instance the warnings reasoned about.
     let rels: Vec<&str> = loc_by_path.keys().map(String::as_str).collect();
-    warnings.extend(crate::analyze::unmatched_suppression_warnings(
-        config, &rels,
-    ));
-    warnings.extend(crate::analyze::unmatched_global_exclude_warnings(
-        config, &rels,
-    ));
-    // One census, two consumers (see `compute_dsl_scope`): the warning below and `packs_loaded`'s counts.
-    let dsl_scope = crate::analyze::compute_dsl_scope(&config.packs, &rels);
-    // Both of that census's reports are config-derived, so Mode A gets the identical pair Mode B does.
-    warnings.extend(crate::analyze::pack_scope_warnings(config, &dsl_scope));
-    // Same disclosure Mode B's native twin makes (`analyze::assemble`) — an uncompilable rule is dead in
-    // envelope mode too, and a caller who injected the pack inline never ran `validate-rule-pack` on it.
-    warnings.extend(crate::analyze::uncompilable_rule_warnings(&config.packs));
+    let (config_warnings, dsl_scope) = super::warnings_pass::collect_envelope_warnings(
+        envelope,
+        config,
+        file_count,
+        &dep,
+        &all_symbols,
+        &rels,
+        reserved_dropped,
+        &mut warnings,
+    );
 
     // Whole-graph native analyses (`circular`/`unreachable`/`dead-candidates`) — extracted verbatim
     // to `super::native_pass` (line cap); same gates, same timing ids, same order.
@@ -284,7 +264,8 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
         seams: Vec::new(),
         folders,
         layer_co_churn: None,
-        packs_loaded: crate::PackLoaded::from_config(config, &dsl_scope.files_in_scope_by_pack),
+        co_change: None,
+        packs_loaded: crate::PackLoaded::from_config(config, &dsl_scope),
         warnings,
         config_warnings,
         cache: None,

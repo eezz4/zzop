@@ -68,11 +68,24 @@ pub(super) fn resolve_envelope_specifier(
     None
 }
 
-/// `pack`, with every rule whose matcher is not `SymbolScan`/`IoScan` dropped — see the envelope
-/// module doc for why.
+/// Whether envelope mode evaluates a rule with this matcher at all — see the envelope module doc for
+/// why only `SymbolScan`/`IoScan` run. THE single definition of that filter: [`envelope_rule_pack`]
+/// (evaluation) and `ingest`'s `compute_dsl_scope_filtered` call (the `zeroAdmissionRules` census)
+/// both read it, so what the census reports as never-run and what evaluation actually drops cannot
+/// drift apart.
+pub(crate) fn rule_runs_in_envelope_mode(matcher: &Matcher) -> bool {
+    matches!(matcher, Matcher::SymbolScan(_) | Matcher::IoScan(_))
+}
+
+/// `pack`, with every rule [`rule_runs_in_envelope_mode`] rejects dropped — see the envelope module
+/// doc for why.
 pub(super) fn envelope_rule_pack(pack: &RulePackDef) -> RulePackDef {
     let mut p = pack.clone();
-    p.rules
-        .retain(|r| matches!(r.matcher, Matcher::SymbolScan(_) | Matcher::IoScan(_)));
+    p.rules.retain(|r| rule_runs_in_envelope_mode(&r.matcher));
+    if p.rules.len() != pack.rules.len() {
+        // Same seam-hygiene as `gate_pack_rules`: a rules vec of a different shape must not share
+        // the original's positional prefilter state (`RegexCache::fork_for_mutated_rules`).
+        p.regex_cache = pack.regex_cache.fork_for_mutated_rules();
+    }
     p
 }

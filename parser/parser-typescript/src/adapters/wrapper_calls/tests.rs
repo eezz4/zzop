@@ -236,6 +236,147 @@ fn external_host_sink_disqualifies_the_wrapper() {
 }
 
 #[test]
+fn an_external_host_reached_through_a_module_const_disqualifies_the_wrapper_too() {
+    // The same veto, one hop later: the absolute URL is not spelled in the sink body, it is BOUND
+    // above it. This is the common shape in the wild (measured on `corpus/oss/fe-svelte`), and
+    // scanning only the sink's own text let it through — the wrapper then minted `GET /articles`
+    // for a call that leaves the system, and that key joined a same-named internal route. The file
+    // states the host; nothing here is inferred.
+    let src = concat!(
+        "const base = 'https://api.realworld.show/api';\n",
+        "function send(path) {\n",
+        "  return fetch(`${base}/${path}`, { method: 'GET' });\n",
+        "}\n",
+        "export function get(path) {\n",
+        "  return send(path);\n",
+        "}\n"
+    );
+    let (defs, _) = extract_wrapper_fragments("api.js", src);
+    assert!(defs.is_empty(), "{defs:?}");
+}
+
+#[test]
+fn a_module_const_that_is_not_a_url_leaves_the_wrapper_alone() {
+    // The veto keys on the VALUE holding a scheme, not on the mere presence of a module const —
+    // otherwise every wrapper file with a config binding would go silent.
+    let src = concat!(
+        "const prefix = '/api';\n",
+        "function send(path) {\n",
+        "  return fetch(`${prefix}/${path}`, { method: 'GET' });\n",
+        "}\n",
+        "export function get(path) {\n",
+        "  return send(path);\n",
+        "}\n"
+    );
+    let (defs, _) = extract_wrapper_fragments("api.js", src);
+    assert_eq!(def(&defs, "get").fixed_method.as_deref(), Some("GET"));
+}
+
+#[test]
+fn a_namespace_member_call_resolves_to_the_wrapper_and_its_specifier() {
+    // `import * as api from './api'; api.get('/articles')` — measured as 19 of 19 call sites on
+    // `corpus/oss/fe-svelte`, with ZERO named imports. Only bare-identifier callees were in scope, so
+    // the whole file's calls were invisible. `imports.rs` already records the namespace binding with
+    // `original: "*"` and its specifier, so resolving `api.get` needs no new machinery: the member
+    // name IS the wrapper name, and the receiver supplies the specifier.
+    let src = concat!(
+        "import * as api from './client';\n",
+        "api.get('/articles');\n"
+    );
+    let (_, calls) = extract_wrapper_fragments("page.ts", src);
+    let c = calls.iter().find(|c| c.callee == "get").expect("resolved");
+    assert_eq!(c.specifier.as_deref(), Some("./client"));
+    assert_eq!(c.args[0].as_deref(), Some("/articles"));
+}
+
+#[test]
+fn a_member_call_on_an_unimported_receiver_is_not_a_wrapper_call() {
+    // The receiver must be a NAMESPACE import in this file. `this.svc.get(...)` and a plain local
+    // object are not — treating any `x.get('/a')` as a wrapper call would sweep in every helper that
+    // happens to expose a `get`, which is precisely the guess this channel refuses.
+    let src = "const svc = makeSvc();\nsvc.get('/articles');\n";
+    let (_, calls) = extract_wrapper_fragments("page.ts", src);
+    assert!(calls.is_empty(), "{calls:?}");
+}
+
+#[test]
+fn a_verb_literal_in_the_wrapper_body_counts_when_the_sink_states_none() {
+    // Measured shape (`corpus/oss/fe-svelte`): the wrapper builds the options object and the sink is
+    // a generic sender, so `method: 'POST'` sits in the WRAPPER's body while the sink body carries
+    // no verb at all. Scanning only the sink dropped the def entirely — the verb is written down,
+    // one span over.
+    let src = concat!(
+        "function send(path, opts) {\n",
+        "  return fetch(path, opts);\n",
+        "}\n",
+        "export function create(path) {\n",
+        "  return send(path, { method: 'POST' });\n",
+        "}\n"
+    );
+    let (defs, _) = extract_wrapper_fragments("api.js", src);
+    assert_eq!(def(&defs, "create").fixed_method.as_deref(), Some("POST"));
+}
+
+#[test]
+fn the_sink_verb_wins_when_both_spans_state_one() {
+    // The sink is what actually issues the request; the wrapper's own literal may be a default it
+    // then overrides. When the two disagree the sink is the more authoritative span, and this pins
+    // that ordering rather than leaving it to whichever scan ran first.
+    let src = concat!(
+        "function send(path) {\n",
+        "  return fetch(path, { method: 'DELETE' });\n",
+        "}\n",
+        "export function create(path) {\n",
+        "  return send(path, { method: 'POST' });\n",
+        "}\n"
+    );
+    let (defs, _) = extract_wrapper_fragments("api.js", src);
+    assert_eq!(def(&defs, "create").fixed_method.as_deref(), Some("DELETE"));
+}
+
+#[test]
+fn a_client_method_name_carries_the_verb_without_any_method_literal() {
+    // The most common wrapper shape in the wild, and it produced NOTHING: the verb is spelled in the
+    // sink's METHOD NAME (`axios.get`), never as a `method: 'GET'` literal, and only the literal was
+    // read. Reading `get` off `axios.get` is not a guess — it is the client's own API surface, the
+    // same vocabulary `egress/matchers.rs` already keys member calls from.
+    let src = concat!(
+        "export const getThing = (path) => axios.get(path);\n",
+        "export const putThing = (path) => ky.put(path);\n"
+    );
+    let (defs, _) = extract_wrapper_fragments("api.ts", src);
+    assert_eq!(def(&defs, "getThing").fixed_method.as_deref(), Some("GET"));
+    assert_eq!(def(&defs, "putThing").fixed_method.as_deref(), Some("PUT"));
+}
+
+#[test]
+fn two_distinct_client_method_verbs_in_one_sink_disqualify_it() {
+    // Same ambiguity rule the `method:` literal path already enforces — a body that could be either
+    // verb is not a fixed-verb wrapper, and picking one would be the guess this channel refuses.
+    let src = concat!(
+        "export function send(path, write) {\n",
+        "  return write ? axios.post(path) : axios.get(path);\n",
+        "}\n"
+    );
+    let (defs, _) = extract_wrapper_fragments("api.ts", src);
+    assert!(defs.is_empty(), "{defs:?}");
+}
+
+#[test]
+fn a_method_literal_still_wins_over_the_sink_method_name() {
+    // `axios.request({ method: 'DELETE' })` states the verb twice, once structurally (`request` —
+    // not a verb) and once as a literal. The literal is the more specific statement and must not be
+    // shadowed by a name-derived one.
+    let src = concat!(
+        "export function del(path) {\n",
+        "  return axios.request({ url: path, method: 'DELETE' });\n",
+        "}\n"
+    );
+    let (defs, _) = extract_wrapper_fragments("api.ts", src);
+    assert_eq!(def(&defs, "del").fixed_method.as_deref(), Some("DELETE"));
+}
+
+#[test]
 fn ambiguous_fixed_method_two_distinct_verbs_is_not_a_wrapper() {
     let src = concat!(
         "export function poll(url: string, mode: string) {\n",

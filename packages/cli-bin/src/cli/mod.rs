@@ -37,6 +37,9 @@ pub fn read_or_exit(path: &str) -> String {
 }
 
 /// The shared terminal step: `Ok` to stdout + exit 0, `Err` as `zzop: <message>` to stderr + exit 1.
+/// EVERY lane's error lands here (`main::print_result` delegates), which is what makes the hint below
+/// reliable — it used to live in one of two hand-kept copies of this match, and the analyze lane,
+/// routed through the other, printed nothing.
 pub fn print_or_exit(result: Result<String, String>) -> ! {
     match result {
         Ok(text) => {
@@ -45,6 +48,15 @@ pub fn print_or_exit(result: Result<String, String>) -> ! {
         }
         Err(e) => {
             eprintln!("zzop: {e}");
+            // THIS host's spelling of the way out, appended at the display layer — never inside the
+            // shared string, which also reaches MCP clients that have no shell (2026-08-09 ruling;
+            // the MCP host's `orientation` text carries the equivalent in ITS spelling). Matched on
+            // the shared marker so it fires for exactly the missing-config refusal and not for every
+            // exit-1 error; `contains` rather than `starts_with` because a lane may prefix context of
+            // its own before the flattened ConfigError text.
+            if e.contains(zzop_summary::contracts::MISSING_CONFIG_MARKER) {
+                eprintln!("Run `zzop init` in that tree to write the starter config.");
+            }
             std::process::exit(1);
         }
     }

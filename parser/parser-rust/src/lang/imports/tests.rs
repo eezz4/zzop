@@ -122,3 +122,46 @@ fn parse_failure_yields_empty_map() {
 fn empty_file_yields_empty_map() {
     assert!(parse_imports("").is_empty());
 }
+
+// --- `#[path = "..."]` module declarations (see module doc) ---
+
+#[test]
+fn path_attr_mod_carries_the_literal_not_the_module_name() {
+    // The module is named `tests`; its file is not `tests.rs`. Encoding this as `self::tests` would
+    // send the resolver after a file that does not exist — which is what used to happen.
+    let map = parse_imports("#[cfg(test)]\n#[path = \"resolve_tests.rs\"]\nmod tests;\n");
+    let b = map.get("tests").expect("tests binding");
+    assert_eq!(b.specifier, "#path::resolve_tests.rs");
+    assert_eq!(b.original, "tests");
+}
+
+#[test]
+fn a_sibling_cfg_attribute_is_not_mistaken_for_the_path_attribute() {
+    // `#[cfg(test)] #[path = ...]` is the dominant pairing in practice, and the attribute list order
+    // is the author's choice — neither order may change what is read.
+    let reversed = parse_imports("#[path = \"a/b.rs\"]\n#[cfg(test)]\nmod m;\n");
+    assert_eq!(reversed.get("m").expect("m").specifier, "#path::a/b.rs");
+    let cfg_only = parse_imports("#[cfg(test)]\nmod m;\n");
+    assert_eq!(cfg_only.get("m").expect("m").specifier, "self::m");
+}
+
+#[test]
+fn a_mod_with_no_path_attribute_keeps_the_convention_specifier() {
+    let map = parse_imports("mod plain;\n");
+    assert_eq!(map.get("plain").expect("plain").specifier, "self::plain");
+}
+
+#[test]
+fn a_path_attribute_shape_this_parser_does_not_understand_falls_back_to_convention() {
+    // Never-guess: an unrecognized attribute form leaves the declaration on the convention path
+    // rather than inventing a target from it.
+    let map = parse_imports("#[path]\nmod m;\n");
+    assert_eq!(map.get("m").expect("m").specifier, "self::m");
+}
+
+#[test]
+fn a_mod_with_a_body_is_still_not_an_edge_even_with_a_path_attribute() {
+    // An inline body means the contents are in THIS file; there is nothing to resolve. The attribute
+    // does not change that, and this pins that the `content.is_none()` guard still runs first.
+    assert!(parse_imports("#[path = \"x.rs\"]\nmod m { }\n").is_empty());
+}

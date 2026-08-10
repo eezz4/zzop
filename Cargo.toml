@@ -65,7 +65,7 @@ members = [
 # the `0.0.0` placeholder), and a stamp cannot fail the way a verification can. `version_string()`
 # / the binaries report `CARGO_PKG_VERSION` directly (no `ZZOP_RELEASE_VERSION` env). Cache-bust tokens are
 # stamped with this version at their scope's last change — see the cache decision.
-version = "0.29.1"
+version = "0.30.0"
 edition = "2021"
 license = "MIT"
 
@@ -84,6 +84,25 @@ rayon = "1"
 # and spawns a subprocess per case — the no-panic properties here run in-process, so that machinery is
 # dead weight in every parser test binary.
 proptest = { version = "1", default-features = false, features = ["std", "bit-set"] }
+
+# ---------------------------------------------------------------------------------------------------
+# Build profiles (2026-08-07). Before this there was NO [profile.*] here at all, so `dev` used cargo's
+# default `debug = true` — full DWARF/PDB for every one of the ~150 test executables this workspace
+# builds. Measured on this machine: `target/debug` reached 62 GiB, and the separate PDB files were
+# ~79% of it at roughly 78 MB each. That is not a tidiness problem: link.exe fails with LNK1318
+# ("PDB limit") and rustc's LLVM backend fails with "IO failure on output stream" once the disk runs
+# down, and BOTH surface as ordinary-looking test failures that cost hours to attribute.
+#
+# `line-tables-only` keeps what is actually read here — the `file:line` in a panic/backtrace, which is
+# how a failing test gets located — and drops local-variable and type debug info, which is only used by
+# an interactive debugger. Nothing in the gates (cargo test / clippy / the check-*.sh guards) reads it.
+# Raise this to `true` temporarily if you need to step through a crate in a debugger; do not commit that.
+#
+# Only `dev` is set. `release` keeps cargo's defaults deliberately: `target/release` is the msvc-built
+# cache the local CLI runs from (see the toolchain note in the working agreements), and changing its
+# profile would invalidate that cache wholesale on the next build.
+[profile.dev]
+debug = "line-tables-only"
 
 # ---------------------------------------------------------------------------------------------------
 # Lint policy (2026-08-01). Before this, zzop had NO lint configuration at all — no [workspace.lints],
@@ -125,12 +144,18 @@ match_wild_err_arm = "warn"    # `Err(_) => panic!(..)` drops the cause; diagnos
 
 # --- Measured zero in every library `src/`; nonzero ONLY in targets whose job IS to print or exit ---
 # Cargo's lint table is per-PACKAGE, not per-target, so the exemption cannot live here. It is a
-# crate-level `#![allow]` at exactly ten entry points, each of which prints or exits BY DESIGN:
-# packages/cli-bin/src/main.rs (the CLI), packages/mcp/src/bin/zzop-mcp.rs (writes the stdio protocol —
-# that package's LIB stays covered), and the eight crates/engine/examples/ roots (demo binaries whose
-# output is the point). Every other member measured zero, including all eight parser frontends and the
-# four native rule packs. Build scripts need no exemption — clippy does not apply these lints there
-# (the 6 `println!` across crates/engine/build.rs + crates/config/build.rs produced no hits).
+# file-level `#![allow]` on targets whose job IS to print: packages/cli-bin/src/main.rs (the CLI),
+# packages/mcp/src/bin/zzop-mcp.rs (writes the stdio protocol — that package's LIB stays covered), and
+# the crates/engine/examples/ roots (demo binaries whose output is the point). Every library member
+# measured zero, including all eight parser frontends and the four native rule packs. Build scripts need
+# no exemption — clippy does not apply these lints there (the `println!`s in crates/engine/build.rs and
+# crates/config/build.rs produced no hits).
+#
+# The COUNT is deliberately not written here. It said "exactly ten" and stayed right only by luck; what
+# has to hold is not a number but a PREDICATE — an exemption may sit on a target root or on a test
+# module, never on a library module, because there the allow would silently uncover the whole file.
+# `crates/engine/tests/policy_value_pins.rs` asserts exactly that, so a library taking the exemption
+# turns red instead of joining a list nobody recounts.
 print_stdout = "warn" # stdout carries a machine-readable contract: pretty JSON on every lane, and NDJSON on
                       # `zzop graph --format cosmograph-*`. One stray println! in a library corrupts it silently.
 exit = "warn"         # `process::exit` in a library skips destructors and unflushed stdout, truncating that

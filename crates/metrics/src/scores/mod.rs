@@ -6,30 +6,26 @@ pub mod config;
 pub mod coupling;
 mod detail_cap;
 pub mod diamond;
+pub mod feature_sliced_design;
+pub mod file_size_compliance;
 pub mod fix_ratio;
-pub mod fsd;
 pub mod god_file;
 pub mod hierarchy;
-pub mod lod;
 pub mod main_sequence;
 pub mod meanings;
 pub mod modularity;
 pub mod public_api;
 pub mod rename;
 pub mod sdp;
-pub mod sfc;
 pub mod shared;
 pub mod sibling_cross;
-pub mod type_safety;
 pub mod types;
 
 pub use compute::{compute_scores, ScoresInput};
 pub use config::ScoresConfig;
-pub use lod::LodChain;
 pub use meanings::{score_meaning, SCORE_MEANINGS};
-pub use type_safety::TypeSafetyCounts;
 pub use types::{
-    BusFactorScore, CohesionScore, CouplingScore, DiamondScore, FixRatioScore, FsdScore,
-    GodFileScore, HierarchyScore, LodScore, MainSequenceScore, ModularityScore, PublicApiScore,
-    RenameScore, Scores, SdpScore, SfcScore, SiblingCrossScore, TypeSafetyScore,
+    BusFactorScore, CohesionScore, CouplingScore, DiamondScore, FeatureSlicedDesignScore,
+    FileSizeComplianceScore, FixRatioScore, GodFileScore, HierarchyScore, MainSequenceScore,
+    ModularityScore, PublicApiScore, RenameScore, Scores, SdpScore, SiblingCrossScore,
 };

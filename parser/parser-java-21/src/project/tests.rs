@@ -1,4 +1,4 @@
-//! Ported parity fixtures from `zzop_parser_java::project::tests`: cross-file literal `@RequestMapping`,
+//! `extract_http_provides_project`'s whole-corpus fixtures: cross-file literal `@RequestMapping`,
 //! cross-file constant-reference resolution (the `Path.ASSET_PATH` shape), a `+`-concatenated constant
 //! expression, class-scoped resolution surviving an unrelated same-named constant elsewhere in the
 //! corpus, the ambiguous-qualifier-class skip, the CE-split class-hierarchy gate, and the full
@@ -303,8 +303,9 @@ fn a_bare_positional_constant_with_no_named_value_or_path_attribute_still_resolv
 
 #[test]
 fn a_nested_class_field_no_longer_leaks_into_the_enclosing_class_constant_scan() {
-    // AST-native precision gain over the old lexical crate's documented limit (module doc): a nested
-    // class's own `static final String` field must NOT resolve as if it belonged to the outer class.
+    // Constant collection is scoped to a class's OWN direct members (module doc): a nested class's
+    // `static final String` field must NOT resolve as if it belonged to the outer class, even when
+    // the two names collide.
     let files = vec![
         (
             "Path.java".to_string(),

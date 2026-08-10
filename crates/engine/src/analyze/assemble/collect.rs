@@ -18,6 +18,7 @@ mod types;
 
 use candidates::{record_unparsed_extension, stage_package_import_candidate, LangGates};
 pub(super) use types::Collected;
+pub(in crate::analyze) use types::DegradedFile;
 
 /// Runs the fused pass's own accumulation loop over `artifacts`, bucketing every field into a
 /// [`Collected`]. See the pre-split monolithic `assemble`'s history for why each substrate exists —
@@ -49,7 +50,7 @@ pub(super) fn collect(
     let mut ts_dynamic_import_pairs: Vec<(String, Vec<String>)> = Vec::new();
     let mut ts_asset_ref_pairs: Vec<(String, Vec<String>)> = Vec::new();
     let mut ts_paths: HashSet<String> = HashSet::new();
-    let mut degraded: Vec<String> = Vec::new();
+    let mut degraded: Vec<DegradedFile> = Vec::new();
     let mut minified: Vec<String> = Vec::new();
     let mut parser_dispatched: usize = 0;
     let mut io_provides: Vec<IoProvide> = Vec::new();
@@ -120,8 +121,8 @@ pub(super) fn collect(
         if dispatch_lang.is_some() || overlay_covered_paths.contains(&artifact.rel) {
             parser_dispatched += 1;
         }
-        if artifact.degraded {
-            degraded.push(artifact.rel.clone());
+        if let Some(cause) = artifact.degrade_cause {
+            degraded.push(DegradedFile::new(&artifact.rel, cause, dispatch_lang));
         } else if dispatch_lang == Some(crate::dispatch::Language::Prisma) {
             prisma_rels.push(artifact.rel.clone());
         } else if dispatch_lang == Some(crate::dispatch::Language::Java21) {

@@ -87,8 +87,23 @@ cases/
    └─ api-be/
       ├─ index.ts
       ├─ api/<pack>.<rule>.ts    # rules gated to an `api/` path (file_pattern) live here
-      └─ services/<pack>.<rule>.ts
+      ├─ services/<pack>.<rule>.ts
+      └─ spans/<pack>.<rule>.span.ts  # the method-scan SPAN-BOUNDARY axis — see spans/README.md
 ```
+
+**`spans/` is the one directory that is not "one module per rule".** Its modules probe how big a span a
+`Matcher::MethodScan` rule pairs its patterns across, not the rule's own logic, so each holds a
+deliberately innocent **FP probe** (patterns split across two members of a property-only TypeScript
+class, which projects a single class-wide span) next to a **TP control** (the same patterns genuinely
+together in a standalone function, which gets its own leaf span). Several of these rules already have an
+ordinary module elsewhere in the tree; the span module is a second, differently-shaped fixture for the
+same rule and that is intended. The Java arm of the same axis lives in
+`trees/java-svc/.../LambdaRoutes.java`, where the oversized unit is a registration method full of
+handler lambdas rather than a class. `spans/README.md` owns the mechanism and the parser/engine
+citations. The TypeScript projection repair landed 2026-08-09: the FP probes are now permanent
+must-stay-silent tripwires, the FN probes are ordinary expectations, and the only remaining
+known-wrong entries are the two Java-arm lines (a different projection, documented at their block in
+`EXPECTED.jsonc`).
 
 **Module convention.** Each `<pack>.<rule>` module exports a **`bad`** (the violation — must fire) and a
 **`good`** (the correct form — must NOT fire). The good example lives in the same file, so precision is
@@ -266,9 +281,11 @@ upward means a gap closed and must be promoted by hand, downward means an entry 
 floor's third column refuses.
 
 **That is a statement about this fixture set, not about zzop.** It is also a statement about the
-languages the fixtures are written in: this corpus's source files are `.ts`/`.tsx`, `.rs`, `.java` and
-`.prisma`, so a green benchmark says nothing about the health of Python/Go/C#/SQL detection — those are
-proven by the `crates/engine/tests/analyze_*` integration tests instead. These defects were planted here to be
+languages the fixtures are written in: this corpus is overwhelmingly `.ts`/`.tsx`, with `.rs`, `.java`
+and `.prisma` next, and only a handful of `.py`/`.go`/`.cs` modules covering single rules
+(`weak-password-hash`, `console-in-be`, `env-outside-config`, `weak-crypto`'s absent lane). So a green
+benchmark still says almost nothing about the health of Python/Go/C#/SQL detection — those are
+proven by the `crates/engine/tests/integration/analyze_*` tests instead. These defects were planted here to be
 found, by the same people who wrote the rules that find them — so a clean score means "the corpus is
 still an accurate model of what the engine does today", which is what it is for: it turns a rule
 change from an opinion into a before/after set difference. It says nothing about what fraction of

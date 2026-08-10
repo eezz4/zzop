@@ -82,5 +82,8 @@ impl Visit for IdempotencyKeyLiteralFinder<'_> {
 }
 
 fn is_idempotency_header_literal(value: &str, header_names: &[&str]) -> bool {
-    header_names.contains(&value.to_ascii_lowercase().as_str())
+    // Shared with the config front end's "can this entry ever match?" check — see
+    // `zzop_core::vocab_norm`'s module doc. The HTTP convention spells this header `Idempotency-Key`,
+    // so a user who declares it that way declares an entry that can never match; that used to be silent.
+    header_names.contains(&zzop_core::vocab_norm::ascii_lowercase(value).as_str())
 }

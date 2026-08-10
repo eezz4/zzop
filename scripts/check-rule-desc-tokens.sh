@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # check-rule-desc-tokens.sh — guards the ONE column check-rules-catalog-sync.sh reads nothing in:
-# the Detects/description prose of docs/rules/catalog.md and site/rules.html.
+# the Detects/description prose of docs/rules/catalog.md.
 #
 # That guard pins id / severity / matcher-type / `.rs` path between the two surfaces. Neither it nor
 # anything else compares the description against the RULE ITSELF, so a description could name an API
@@ -12,6 +12,29 @@
 #   says `.getMessage()` is deliberately NOT flagged. The claim was false against the matcher for as
 #   long as the row existed, survived every release, and was found by a human reading the two texts
 #   side by side (2026-07-26).
+#
+# ---------------------------------------------------------------------------------------------------
+# THE SUBJECT IS THE CATALOG ONLY NOW — site/rules.html was DROPPED (2026-08-09)
+# ---------------------------------------------------------------------------------------------------
+# This guard used to scan both surfaces. It cannot any more, because there is no longer a second
+# surface to scan: scripts/gen-site-rules.mjs writes every site row from the catalog row
+# (`<td>${r.detects}</td>`, gen-site-rules.mjs:213 — the description cell is copied, not restated) and
+# check-rules-catalog-sync.sh's check 1 asserts the committed page IS that output. So a site
+# description is a pure function of a catalog description, and every finding the site pass could
+# produce was the SAME finding the catalog pass already produced one file earlier. Measured before the
+# cut: 1194 tokens checked, catalog rows 143, site rows 143, zero findings unique to either.
+#
+# Watching a derived value is not free, which is the actual reason it is gone rather than merely
+# redundant. The site row regex pinned GENERATOR-controlled markup (`<tr><td><code>id</code></td>` and
+# a `<code>`-wrapped severity cell). A markup change in the generator would have dropped rows_site
+# below nrules and turned this guard RED over a file it does not own, with the fix living in a
+# generator this guard says nothing about — a failure report pointing at the wrong file. That is the
+# ghost a check over a derived value becomes, and deleting it is the same move check-rules-catalog-sync
+# made on the same day for the same reason.
+#
+# What is NOT lost: the site's own prose (intro paragraphs, matcher glossary, custom-pack example) is
+# still hand-written, and it was never in scope here — this guard only ever read RULE ROWS. The
+# glossary specifically is now covered by check-matcher-glossary-sync.sh.
 #
 # ---------------------------------------------------------------------------------------------------
 # What is checked, and what is deliberately NOT
@@ -88,21 +111,21 @@
 # Individual vetted exceptions live in ALLOWLIST below, which is itself checked for stale entries.
 #
 # ---------------------------------------------------------------------------------------------------
-# Coverage: the three row counts must AGREE, and the OK line prints them
+# Coverage: the two row counts must AGREE, and the OK line prints them
 # ---------------------------------------------------------------------------------------------------
 # Everything above describes what happens to a row that is IN SCOPE. The row regexes (see "pass 2")
-# pin the catalog/site column spellings, and the catalog is GENERATED — so the way this guard fails
-# is not by mis-judging a row, it is by quietly not seeing one. Both the END-block assertion and the
-# success line therefore carry the census: pack rules, catalog rows, site rows. See the END block for
+# pin the catalog column spellings, and the catalog is hand-maintained (the only generator in this
+# chain is scripts/gen-site-rules.mjs, which derives site/rules.html FROM the catalog) — so the way
+# this guard fails is not by mis-judging a row, it is by quietly not seeing one a hand edit respelled. Both the END-block assertion and the
+# success line therefore carry the census: pack rules and catalog rows. See the END block for
 # the measured demonstration (20 rows dropped out of scope while the guard still printed OK).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 CATALOG=docs/rules/catalog.md
-SITE=site/rules.html
 SHARED=crates/core/src/dsl/shared_fragments.json
 
-for f in "$CATALOG" "$SITE" "$SHARED"; do
+for f in "$CATALOG" "$SHARED"; do
   [ -f "$f" ] || { echo "check-rule-desc-tokens: missing $f" >&2; exit 1; }
 done
 
@@ -117,7 +140,7 @@ ALLOWLIST=(
 allow_arg=""
 for e in "${ALLOWLIST[@]}"; do allow_arg="$allow_arg$e"$'\n'; done
 
-awk -v allow="$allow_arg" -v shared="$SHARED" -v catalog="$CATALOG" -v site="$SITE" '
+awk -v allow="$allow_arg" -v shared="$SHARED" -v catalog="$CATALOG" '
 BEGIN {
   NEG_WINDOW = 90
   # A MATCHING-POLARITY denial, not plain English negation: a negator followed, within the same
@@ -137,11 +160,6 @@ BEGIN {
   }
 }
 
-function decode(s) {
-  gsub(/&lt;/, "<", s); gsub(/&gt;/, ">", s); gsub(/&quot;/, "\"", s)
-  gsub(/&#39;/, "\047", s); gsub(/&amp;/, "\\&", s)
-  return s
-}
 
 # The window is clipped at SENTENCE boundaries as well as at NEG_WINDOW characters. Measured need:
 # `always-constant-comparison`\047s message says "use `.length === 0` / `Object.keys(x).length === 0`).
@@ -222,19 +240,6 @@ FILENAME == catalog {
   scan_cell(FILENAME ":" FNR, id, line)
   next
 }
-FILENAME == site {
-  if ($0 !~ /<tr><td><code>[a-z0-9][a-z0-9\/_-]*<\/code><\/td><td><code>[a-z]+<\/code><\/td><td><code>[a-z][a-z-]*[a-z]<\/code><\/td><td>/) next
-  line = $0
-  sub(/^.*<tr><td><code>/, "", line)
-  id = line; sub(/<\/code>.*$/, "", id)
-  sub(/^.*<\/code><\/td><td><code>[a-z]+<\/code><\/td><td><code>[a-z][a-z-]*[a-z]<\/code><\/td><td>/, "", line)
-  sub(/<\/td><\/tr>.*$/, "", line)
-  gsub(/<\/?code>/, "`", line)
-  gsub(/<[^>]*>/, "", line)
-  rows_site++
-  scan_cell(FILENAME ":" FNR, id, decode(line))
-  next
-}
 
 function scan_cell(loc, id, cell,   off, pos, tok, plain) {
   plain = cell
@@ -306,30 +311,29 @@ END {
   # the cheapest way for it to become useless is to keep exiting 0 while parsing nothing at all.
   if (nrules == 0) { print "check-rule-desc-tokens: parsed 0 rules from rules/dsl/*/*.json — the pack layout this guard reads has changed." > "/dev/stderr"; fail = 1 }
   if (rows_catalog == 0) { print "check-rule-desc-tokens: matched 0 DSL rows in the catalog — its table layout has changed." > "/dev/stderr"; fail = 1 }
-  if (rows_site == 0) { print "check-rule-desc-tokens: matched 0 DSL rows on the site — its table layout has changed." > "/dev/stderr"; fail = 1 }
 
   # ...and the cheaper way for it to become PARTLY useless is to keep parsing SOME rows. The three
   # nonzero tests above are all-or-nothing, and the real failure is not all-or-nothing: both row
   # regexes hardcode the column spellings (severity `[a-z]+`, matcher type `[a-z][a-z-]*[a-z]`) of a
-  # GENERATED catalog, so one generator change can drop a subset of rows out of scope while the rest
-  # keep flowing through. Demonstrated 2026-07-26: capitalizing the severity column on the 20 `info`
+  # hand-maintained catalog, so one formatting edit can drop a subset of rows out of scope while the
+  # rest keep flowing through. Demonstrated 2026-07-26: capitalizing the severity column on the 20 `info`
   # rows took rows_catalog from 136 to 116 and the checked-token count from 814 down, and the guard
   # still printed OK. Same class as the 22 zero-byte artifacts that read as total success.
   #
-  # The three counts must AGREE, not merely be nonzero. Equality is free rather than lucky: every DSL
-  # rule declared in a pack is required to have a catalog row (check-docs-rule-ids.sh) and a site row
-  # (check-rules-catalog-sync.sh check 2), so any inequality is a rule that lost its row on one
-  # surface, or a row the regexes here stopped recognizing. Both are the same defect from here:
+  # The two counts must AGREE, not merely be nonzero. Equality is free rather than lucky: every DSL
+  # rule declared in a pack is required to have a catalog row (check-docs-rule-ids.sh), so any
+  # inequality is a rule that lost its catalog row, or a row the regex here stopped recognizing.
+  # Both are the same defect from here:
   # rows outside the count are rows outside the CHECK.
   # (No apostrophes anywhere in this awk program: it is single-quoted in sh -- same constraint the
   # check-guards-wired.sh awk header records.)
-  if (nrules != rows_catalog || nrules != rows_site) {
+  if (nrules != rows_catalog) {
     print "check-rule-desc-tokens: row census disagrees — pack rules=" nrules \
-          ", catalog rows=" rows_catalog ", site rows=" rows_site "." > "/dev/stderr"
-    print "  Every DSL rule must have exactly one row on each surface, so these three are the same" > "/dev/stderr"
-    print "  number. A shortfall means rows silently fell OUT OF SCOPE of this guard (most likely a" > "/dev/stderr"
-    print "  generator change to a column the row regexes pin: severity is matched as [a-z]+ and" > "/dev/stderr"
-    print "  matcher type as [a-z][a-z-]*[a-z], both lowercase). An excess means a surface grew rows" > "/dev/stderr"
+          ", catalog rows=" rows_catalog "." > "/dev/stderr"
+    print "  Every DSL rule must have exactly one catalog row, so these two are the same number. A" > "/dev/stderr"
+    print "  shortfall means rows silently fell OUT OF SCOPE of this guard (most likely a generator" > "/dev/stderr"
+    print "  change to a column the row regex pins: severity is matched as [a-z]+ and matcher type as" > "/dev/stderr"
+    print "  [a-z][a-z-]*[a-z], both lowercase). An excess means the catalog grew rows" > "/dev/stderr"
     print "  the packs do not declare. Either way the descriptions in the missing rows are unchecked," > "/dev/stderr"
     print "  which is exactly the state this guard exists to prevent." > "/dev/stderr"
     fail = 1
@@ -351,11 +355,11 @@ END {
   }
   if (fail) {
     print "" > "/dev/stderr"
-    print "check-rule-desc-tokens: FAILED — a description in docs/rules/catalog.md or site/rules.html" > "/dev/stderr"
+    print "check-rule-desc-tokens: FAILED — a description in docs/rules/catalog.md" > "/dev/stderr"
     print "quotes code the rule does not contain. Fix the prose to match the live rule, or (if the" > "/dev/stderr"
     print "quotation is legitimate and unmatchable by substring) add a vetted ALLOWLIST entry." > "/dev/stderr"
     exit 1
   }
-  printf "check-rule-desc-tokens: OK (%d code-shaped description tokens vouched by their rule across %d DSL rules; rows in scope: catalog %d, site %d; %d vetted exceptions)\n", checked, nrules, rows_catalog, rows_site, length(allowed)
+  printf "check-rule-desc-tokens: OK (%d code-shaped description tokens vouched by their rule across %d DSL rules; rows in scope: catalog %d; %d vetted exceptions)\n", checked, nrules, rows_catalog, length(allowed)
 }
-' "$SHARED" rules/dsl/*/*.json "$CATALOG" "$SITE"
+' "$SHARED" rules/dsl/*/*.json "$CATALOG"

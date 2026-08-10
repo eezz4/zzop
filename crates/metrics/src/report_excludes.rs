@@ -87,7 +87,7 @@ pub fn apply_excludes_to_scores(scores: &mut Scores, excludes: &[GlobalExclude])
     // Edge-shaped rows: both endpoints are dep-graph node ids (file paths). The `from`/`root` side is the
     // judged subject and is already guaranteed scored; the far side is redacted so the violation keeps its
     // evidence without naming a path the config excluded.
-    for v in &mut scores.fsd.violations {
+    for v in &mut scores.feature_sliced_design.violations {
         mask(&mut v.to);
     }
     for v in &mut scores.hierarchy.violations {
@@ -108,17 +108,21 @@ pub fn apply_excludes_to_scores(scores: &mut Scores, excludes: &[GlobalExclude])
 
     // Subject-side rows. Unreachable in practice (the subject gate ran upstream), kept so a future caller
     // that skips `is_scored` still cannot print an excluded path.
-    scores.fsd.violations.retain(|v| keep(&v.from));
+    scores
+        .feature_sliced_design
+        .violations
+        .retain(|v| keep(&v.from));
     scores.hierarchy.violations.retain(|v| keep(&v.from));
     scores.public_api.deep_imports.retain(|v| keep(&v.from));
     scores.sibling_cross.violations.retain(|v| keep(&v.from));
     scores.diamond.pairs.retain(|p| keep(&p.root));
-    scores.sfc.violations.retain(|v| keep(&v.path));
+    scores
+        .file_size_compliance
+        .violations
+        .retain(|v| keep(&v.path));
     scores.god_file.files.retain(|v| keep(&v.path));
     scores.rename_instability.files.retain(|v| keep(&v.path));
     scores.bus_factor.files.retain(|v| keep(&v.path));
-    scores.type_safety.violations.retain(|v| keep(&v.path));
-    scores.lod.violations.retain(|v| keep(&v.path));
 }
 
 #[cfg(test)]

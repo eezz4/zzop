@@ -54,9 +54,20 @@ whether the rule is common or environment-specific).
   [`docs/rules/catalog.md`](../docs/rules/catalog.md).
 
 ### DSL matchers (`core::dsl::Matcher`)
-- Shipped: `line-scan`, `method-scan`, `symbol-scan`, `io-scan`, each with a growing set of v2/v3 fields
-  (`require_file_all`, `exclude_pattern`, `absent`, `file_exclude_pattern`, ...) added as
-  real packs needed them. Full field-by-field semantics: [`docs/rules/dsl-reference.md`](../docs/rules/dsl-reference.md).
+- Shipped shapes: the `Matcher` enum is the source; the reference that explains each one is
+  [`docs/rules/dsl-reference.md`](../docs/rules/dsl-reference.md), which mirrors the `Matcher` enum in
+  `crates/core/src/dsl/def/matcher.rs`. No second copy of that list lives here (a copy goes stale the
+  first time a variant lands). One further copy exists and stays, because the public page has to name
+  the shapes to a reader: `site/rules.html`'s `<section id="matchers">` glossary. Both copies are now
+  bound to the enum by `scripts/check-matcher-glossary-sync.sh`, in both directions and by derived
+  spelling (serde `rename_all = "kebab-case"`, so `LiteralScan` -> `literal-scan` is computed, never
+  typed). `scripts/check-rules-catalog-sync.sh` still cannot see the glossary — its needles require
+  three code cells per row and a glossary row has two — and that gap is what let the table sit at four
+  rows while the enum had six until 2026-08-09. A landing variant still edits the enum, the reference
+  and the glossary by hand, but forgetting either document is now red before the commit rather than
+  visible only to a reader of the public page. Each shape carries a growing set of v2/v3 fields (`require_file_all`,
+  `exclude_pattern`, `absent`, `file_exclude_pattern`, ...) added as real packs needed them; the
+  reference has the field-by-field semantics.
 - Roadmap: a `graph` matcher for structural/whole-IR queries the current scanners can't express.
 - Rules the DSL cannot express -> `rules/native/`.
 
@@ -78,11 +89,18 @@ orchestration logic:
 
 - **A native rule**: implement the body in its owning crate (`rules/native/rules-graph`,
   `rules/native/rules-http`, `rules/native/rules-cross-layer`, or `rules/native/rules-schema` — or a new
-  sibling crate for a new rule family), add its id to that
-  crate's own `register_native_analyses` function (id only — the finding's severity is set where the
-  finding is built, so there is no second copy to drift), and add tests in the same crate. `zzop_engine::register_all_native`
-  (`crates/engine/src/lib.rs`) composes every owning crate's `register_native_analyses` — it already
-  depends on all of them, so a new crate only needs one line added there. `docs/rules/catalog.md`'s totals
+  sibling crate for a new rule family), add a row to that crate's own `NATIVE_ANALYSES` table — the id
+  plus the cross-layer io channels the rule reads (`zzop_core::rule_channels::reads::*`, or `NO_IO` when
+  its evidence is not io at all) — and add tests in the same crate. That one table is what
+  `register_native_analyses` iterates AND what `native_rule_channels` publishes, so a row cannot be
+  registered without a channel statement (it will not compile) and the two cannot drift. Still no
+  severity here: a finding's severity is set where the finding is built. The channel claim is
+  machine-checked against the io the rule's own module compares
+  (`rule_contracts::rule_channels`), so it is a declaration, not a comment.
+  `zzop_engine::register_all_native`
+  (`crates/engine/src/lib.rs`) composes every owning crate's `register_native_analyses`, and
+  `zzop_engine::native_rule_channels` composes their tables the same way — it already depends on all of
+  them, so a new crate only needs one line added to each. `docs/rules/catalog.md`'s totals
   and per-id table need updating too (machine-checked by the `rule_contracts` meta-test's catalog-sync tests).
 - **A DSL rule**: add a rule entry to a pack's `<pack>.json` (or a new pack folder) under `rules/dsl/`, plus
   a co-located `<pack>.rs` end-to-end test. No Rust code changes anywhere — `zzop_core::load_dsl_packs`

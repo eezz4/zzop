@@ -211,6 +211,25 @@ fn captured_promise_create_call_is_not_flagged() {
 }
 
 #[test]
+fn catch_chained_write_call_is_not_flagged() {
+    // The message's remedy list promises attaching `.then()`/`.catch()` clears. The sibling
+    // `unawaited-transaction` has carried the `\.catch\b` exclude arm since its v0.21.0 repair;
+    // this rule's matcher drifted without it, so `.create(...).catch(named)` — a handled promise —
+    // still fired. The fire-and-forget control right above stays flagged.
+    let dir = TempDir::new("zzop-db");
+    dir.write(
+        "src/service.ts",
+        "declare const prisma: any;\nexport async function logEventCaught(id: string) {\n  prisma.event.create({ data: { id } }).catch(reportWriteFailure);\n}\ndeclare function reportWriteFailure(e: unknown): void;\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "unawaited-write").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
 fn unawaited_ok_marker_directly_above_the_write_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-db");
     dir.write(
@@ -300,6 +319,58 @@ fn unawaited_write_with_a_comparison_in_the_payload_is_still_flagged() {
     let h = hits(&out, "unawaited-write");
     assert_eq!(h.len(), 1, "{:?}", out.findings);
     assert_eq!(h[0].line, 3);
+}
+
+#[test]
+fn multi_line_concise_arrow_body_returning_the_write_is_not_flagged() {
+    // Confirmed FP (2026-08-09): a formatter-wrapped concise arrow body DOES return the promise —
+    // callers await it — but the `=>` sits at the end of the PREVIOUS line, where a same-line
+    // exclusion cannot see it. The one-line-lookback exclusion must keep this silent. The must-fire
+    // control for this shape is `fire_and_forget_create_call_is_flagged` above.
+    let dir = TempDir::new("zzop-db");
+    dir.write(
+        "src/service.ts",
+        "declare const prisma: any;\ntype Order = { id: string };\nconst persistOrder = (o: Order) =>\n  prisma.order.create({ data: o });\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "unawaited-write").is_empty(),
+        "a wrapped concise arrow body returns the promise: {:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn multi_line_assignment_continuation_write_is_not_flagged() {
+    // Same continuation class, assignment flavor: `const p =` at end of line, the write on the next
+    // line. The promise is captured (and returned below), not fire-and-forget.
+    let dir = TempDir::new("zzop-db");
+    dir.write(
+        "src/service.ts",
+        "declare const prisma: any;\nexport function persist(id: string) {\n  const p =\n    prisma.event.create({ data: { id } });\n  return p;\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "unawaited-write").is_empty(),
+        "an assignment continuation captures the promise: {:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn fire_and_forget_write_after_a_complete_previous_statement_is_still_flagged() {
+    // The lookback must veto only CONTINUATION shapes (`=>`/`=` ending the previous line). A previous
+    // line that is a complete statement — even one containing `return` — leaves a bare write on the
+    // next line genuinely fire-and-forget.
+    let dir = TempDir::new("zzop-db");
+    dir.write(
+        "src/service.ts",
+        "declare const prisma: any;\nexport function track(id: string, skip: boolean) {\n  if (skip) return;\n  prisma.event.create({ data: { id } });\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "unawaited-write");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 4);
 }
 
 #[test]

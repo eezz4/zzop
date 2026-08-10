@@ -93,7 +93,19 @@ mod tests {
         }
     }
 
-    /// Pins the ninth resource: `rule-pack-schema` serves the exact bytes of the authored
+    /// Pins the `rule-pack-schema` resource — named, not numbered. This test resolves the row by NAME
+    /// (`find(|d| d.name == "rule-pack-schema")`) and asserts nothing whatsoever about where it sits in
+    /// `CONTRACT_DOCS`, so an ordinal in this sentence is unfalsifiable by construction: no assertion
+    /// below it can go red when the table is reordered or appended to.
+    ///
+    /// It had already gone stale. This line used to open "Pins the ninth resource", true when written
+    /// and false by 2026-08-09 — `CONTRACT_DOCS` is appended to freely (it grew again while this very
+    /// comment was being fixed), and nothing anywhere pins the row's index. Deleted rather than
+    /// recounted on purpose: a corrected number would be the same ghost with a later expiry date, and
+    /// no reader of THIS test needs the position to understand what it checks. If a position ever does
+    /// become load-bearing, it needs an assertion, not a comment.
+    ///
+    /// `rule-pack-schema` serves the exact bytes of the authored
     /// `docs/contracts/rule-pack.schema.json`, as JSON that names every matcher kind — the
     /// machine-readable twin of the `validate_rule_pack` tool. The kind list below is DERIVED from
     /// nothing, so it is the one place a new matcher must be added by hand; the compiler-backed twin

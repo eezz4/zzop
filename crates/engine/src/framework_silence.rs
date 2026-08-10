@@ -66,18 +66,31 @@
 //! optional tree-wide FALLBACK (an internal-egress mass that split across packages below every per-app
 //! floor but whose aggregate still clears the call-site floor).
 //!
-//! Module layout — one file per tripwire (S1/S2/S3/S4/S5/S6/S7), `MIN_PROVIDES_FLOOR` defined once in
-//! `controller_silence` (S1) and shared by S2/S3/S4/S5/S7 (S6 uses its own exact-zero gate, no floor):
-//! - [`controller_silence`](self) — S1 + `MIN_PROVIDES_FLOOR`.
-//! - [`server_framework_import`](self) — S2 + [`provide_blind_sources`], the run-wide severity-gate helper
-//!   `cross-layer/unprovided-mutation-call` also reuses.
-//! - [`committed_spec_io_silence`](self) — S3 + `IO_NEAR_ZERO_FLOOR`.
-//! - [`client_library_import`](self) — S4.
-//! - [`builtin_fetch`](self) — S5 + `FETCH_CALL_SITES_MIN` (also reused by S7) + `builtin_fetch_census`.
-//! - [`orm_schema_silence`](self) — S6.
-//! - [`fetch_wrapper`](self) — S7 + `fetch_wrapper_census`.
-//! - [`egress_intent`](self) — internal-intent classifier shared by the S5/S7 censuses.
-//! - [`app_buckets`](self) — per-app-root bucketing (`app_roots`/`nearest_app_root`/`keyed_http_by_root`).
+//! ## Module layout — one file per tripwire, and THE ROSTER IS NOT WRITTEN HERE
+//! Each tripwire module opens with its own `//! S<n>` header, so the set is answered by the `mod`
+//! declarations below plus those headers. **This doc listed the roster by hand until 2026-08-06 and said
+//! `S1/S2/S3/S4/S5/S6/S7` while fourteen tripwires shipped** — and `analyze/assemble/warnings.rs`
+//! DELEGATES to this doc for the count, so the stale list was the answer another module pointed at. The
+//! header there already records the same accident in its own words ("one sentence says seven, the next
+//! says eight, thirteen actually ran"); this is that accident one layer up. Recount, deduplicating
+//! because a module names its own number on more than one line:
+//!
+//! ```sh
+//! awk 'match($0,/^\/\/! S[0-9]+/){s[substr($0,RSTART,RLENGTH)]=1} END{for(k in s)n++; print n}' \
+//!   crates/engine/src/framework_silence/*.rs
+//! ```
+//!
+//! What a file name cannot answer, and so lives here — the SHARED pieces:
+//! - `MIN_PROVIDES_FLOOR` is defined once in [`controller_silence`] and reused by most floor-gated
+//!   tripwires; [`orm_schema_silence`] uses its own exact-zero gate and no floor.
+//! - `IO_NEAR_ZERO_FLOOR` ([`committed_spec_io_silence`]) and `FETCH_CALL_SITES_MIN`
+//!   ([`builtin_fetch`], reused by [`fetch_wrapper`]) are the other two floors.
+//! - [`provide_blind_sources`] ([`server_framework_import`]) is a run-wide severity-gate helper that
+//!   `cross-layer/unprovided-mutation-call` also reuses — the one export here with a consumer OUTSIDE
+//!   this module.
+//! - [`egress_intent`] and [`app_buckets`] are NOT tripwires: an internal-intent classifier and
+//!   per-app-root bucketing (`app_roots`/`nearest_app_root`/`keyed_http_by_root`), shared by the
+//!   per-app censuses.
 
 mod app_buckets;
 mod builtin_fetch;

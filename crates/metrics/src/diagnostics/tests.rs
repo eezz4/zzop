@@ -44,10 +44,22 @@ fn warns_when_there_are_files_but_zero_dependency_edges() {
         dep_edges: 0,
         ..healthy()
     });
-    assert!(d
+    let w = d
         .warnings
         .iter()
-        .any(|w| w.contains("0 internal dependency edges")));
+        .find(|w| w.contains("0 internal dependency edges"))
+        .expect("the zero-edge warning must fire");
+    // The message used to offer a closed `EITHER … OR` over two causes, and in a split-workspace run
+    // BOTH were false: the imports existed and resolved, they just pointed at a sibling tree and were
+    // censused as external packages instead of becoming edges (`trees::cross_tree_imports` says so on
+    // this same tree's warnings). A reader following the old dichotomy went looking for a parser gap
+    // that was not there. Same defect class as a totality quantifier over an incomplete enumeration —
+    // so this pins the third cause and the pointer to the line that actually names it.
+    assert!(
+        w.contains("point OUT of this tree") && w.contains("cross-tree package imports:"),
+        "the zero-edge warning must name the tree-boundary cause and point at the line that \
+         identifies it, not offer a closed two-way choice: {w}"
+    );
 }
 
 #[test]

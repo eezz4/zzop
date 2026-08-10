@@ -19,8 +19,13 @@
 //!    what still needs guarding is that no two rules — in any pack — derive the same marker (that would be a
 //!    cross-rule co-suppression), i.e. rule ids are globally unique.
 //! 2. **Message triple** (`every_dsl_rule_message_documents_how_to_exclude_it`) — every DSL rule's
-//!    `message` names its own derived marker (`zzop-<id>-ok`) OR the literal `disabled_rules`/`disabledRules`
-//!    string — the "how to exclude" leg of the problem+fix+exclude finding contract.
+//!    RENDERED message names its own derived marker (`zzop-<id>-ok`) OR the literal
+//!    `disabled_rules`/`disabledRules` string — the "how to exclude" leg of the problem+fix+exclude finding
+//!    contract. **Rendered, not authored**: the marker sentence is appended by the engine
+//!    (`pipeline::findings::append_hints`), so reading the raw pack `message` would now fail for every rule
+//!    that correctly stops writing its own copy. The paired guard runs the other way —
+//!    `scripts/check-pack-suppress-sentence.sh` fails a pack that DOES write it — so the two together pin
+//!    "exactly one copy, and the engine owns it".
 //! 3. **Native message contract** (`native_rule_files_that_build_findings_mention_disabled_rules`,
 //!    `disable_hint_literal_args_are_known_ids_matching_the_files_own_findings`) — a
 //!    pragmatic grep-based proxy (native findings are built in code, not read from declarative data — see
@@ -89,15 +94,20 @@
 //!     `LabeledPattern::label`, yet `LineScan::any[].label` ships to users verbatim as
 //!     `Finding.data.label` and is the only stable "which arm fired" key a multi-arm rule has. Three
 //!     shipped labels had drifted into English sentences on that wire (`"ECB mode (no diffusion)"` and
-//!     two siblings in `security/weak-crypto`). Same regex as contract 10, deliberately WITHOUT its
+//!     two siblings — then in `security/weak-crypto`, cipher arms that live in `security/weak-cipher`
+//!     since the 2026-08-09 split). Same regex as contract 10, deliberately WITHOUT its
 //!     uniqueness leg — label scope is rule-local and a user never types one. See that test's own doc.
-//! 14. **This suite's own test wiring** (`every_rule_contracts_source_file_is_mod_registered`) — contract
-//!     7 mechanizes "every shipped pack folder is actually wired to a test"; contract 14 is that same
-//!     invariant turned on this file. A `.rs` file dropped into `tests/rule_contracts/` without a `mod`
-//!     line below does not fail to compile and raises no warning — it is simply never compiled, so a
-//!     declared defense runs never, silently, forever. Nothing else in the repo can see it either: these
-//!     meta-tests run only under `cargo test --workspace`, and `scripts/check-guards-wired.sh` enumerates
-//!     `scripts/check-*.sh` alone, so a missing `mod` line is invisible to every other lane.
+//! 14. **Harness-directory test wiring** (`every_registered_flat_test_dir_source_file_is_mod_registered`)
+//!     — contract 7 mechanizes "every shipped pack folder is actually wired to a test"; contract 14 is
+//!     that same invariant turned on this crate's own flat `main.rs`-harness test directories
+//!     (`REGISTERED_FLAT_TEST_DIRS` — this one, and each future fold target). A `.rs` file dropped into
+//!     such a directory without a `mod` line in its `main.rs` does not fail to compile and raises no
+//!     warning — it is simply never compiled, so a declared defense runs never, silently, forever.
+//!     Nothing else in the repo can see it either: these meta-tests run only under
+//!     `cargo test --workspace`, and `scripts/check-guards-wired.sh` enumerates `scripts/check-*.sh`
+//!     alone, so a missing `mod` line is invisible to every other lane. Each registered directory also
+//!     carries a module-count FLOOR — set-equality alone goes vacuously green on a re-rooted or
+//!     mass-emptied directory (0 == 0), which is precisely the failure a wiring guard exists to catch.
 //! 15. **Shared crates name no MCP-only vocabulary** (`host_vocabulary.rs`) — no user-facing message built
 //!     in `crates/summary` or `crates/config` names a tool name or a wire argument the CLI spells
 //!     differently. The same sentence reaches a `zzop` CLI user, who can call no tool and
@@ -111,7 +121,7 @@
 //!     `docs/contracts/surface-parity.json`'s `_cliOnlyLanes[].sources` rather than listed again here.
 //! 17. **No DSL message hand-writes the engine's disable hint** (`dsl_messages.rs`'s
 //!     `no_dsl_pack_message_hand_writes_the_engine_appended_disable_hint`) — the engine appends the
-//!     disable sentence to EVERY DSL finding (`pipeline::findings`'s `append_disable_hints`), so an
+//!     disable sentence to EVERY DSL finding (`pipeline::findings`'s `append_hints`), so an
 //!     author who writes one too ships it TWICE. It shipped once (`perf/sqlalchemy-eager-relationship`),
 //!     and the hand-written copy was the worse of the two — it named only the embedder field, never the
 //!     config-file spelling. Contract 2 above still ACCEPTS `disabled_rules`/`disabledRules` as a "how
@@ -134,6 +144,24 @@
 //!     have found zero literals and gone vacuously green. Second leg: every kind a rule names must be a
 //!     spelling some `zzop_core::CALL_KIND_*` constant fixes, which is what catches a typo the set
 //!     equality alone would happily bless on both sides at once.
+//! 20. **Census binaries stay standalone** (`census_binaries_stay_standalone_and_say_why`) — the
+//!     deliberate exceptions to the harness fold contract 14 guards. `git_spawn_census.rs` and
+//!     `analyze_parse_census.rs` each assert an equality over a PROCESS-WIDE counter, and tests within
+//!     one binary share the process on parallel threads — folding either into a harness silently turns
+//!     its census into a measurement of its neighbors. The pin holds three legs: each file's
+//!     top-level existence, its own written reason for standing alone, and — the fold's completion
+//!     guard — that the pair are the ONLY top-level `.rs` files (everything else lives in a
+//!     registered harness directory; a stray top-level file is a silently re-added per-file binary).
+//! 21. **Native-rule io-CHANNEL binding** (`rule_channels.rs`) — the rule-side twin of contract 18.
+//!     Each rules crate's `NATIVE_ANALYSES` table states, on the row registration reads, which io
+//!     channels the rule's input is drawn from; this contract holds every row to the `kind == "…"`
+//!     comparisons that rule's own module makes, both directions. Contract 19's sibling
+//!     (`io_kind_readers`) greps exactly those literals and deliberately discards the rule
+//!     attribution, which is why "which rules go quiet when route extraction comes up empty" had no
+//!     answer in production code at all. Rules the ENGINE hands a pre-filtered input name no kind
+//!     themselves; each is pinned to the PRODUCING function, whose body is re-scanned by the same
+//!     extractor, so the pin supplies a derived channel rather than a restated one. The two crates
+//!     that declare no io are checked crate-wide instead — see that file's own doc for the boundary.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -162,6 +190,7 @@ mod recognizer_channels;
 mod recognizer_drift;
 mod reference_unit_tests;
 mod reference_validation;
+mod rule_channels;
 mod surface_parity;
 
 // ---------------------------------------------------------------------------------------------
@@ -198,22 +227,39 @@ fn native_ids() -> Vec<String> {
     registry.ids().to_vec()
 }
 
-/// Contract 14 — every `.rs` file in `crates/engine/tests/rule_contracts/` is `mod`-registered in this
-/// file, so no meta-test can sit in this directory silently uncompiled. Reads this file's own text rather
-/// than any generated list: the `mod` lines above ARE the wiring, and re-deriving them from anything else
-/// would just move the drift.
+/// Every flat `main.rs`-harness test directory in this crate, with a FLOOR on its module count.
+///
+/// The floor is deliberately far below today's count: its job is not to track ordinary file
+/// removal (a deliberate act, visible in the diff next to its `mod` line) but to fire on
+/// STRUCTURAL breakage — the walk pointed at a re-rooted/renamed directory, or a mass unhooking
+/// that empties the `mod` list — where the set equality below would go vacuously green (0 == 0).
+const REGISTERED_FLAT_TEST_DIRS: &[(&str, usize)] =
+    &[("tests/rule_contracts", 15), ("tests/integration", 60)];
+
+/// Contract 14 — every `.rs` file in each registered flat test directory is `mod`-registered in that
+/// directory's `main.rs`, so no test can sit in such a directory silently uncompiled. Reads the
+/// harness entry's own text rather than any generated list: the `mod` lines ARE the wiring, and
+/// re-deriving them from anything else would just move the drift.
 ///
 /// Both directions are asserted even though only one can actually rot: a `mod x;` with no `x.rs` is a
 /// compile error (so the test binary would not build and this test could never report it), while a
 /// `x.rs` with no `mod x;` compiles fine and is the real hole. The set equality is one assertion for
-/// both, and its offender lists name the exact fix in each direction.
+/// both, and its offender lists name the exact fix in each direction. A side effect worth naming:
+/// the equality also makes it impossible to `mod`-declare a file that lives OUTSIDE the directory
+/// (e.g. a top-level census binary) — the declared name would have no file in the walk.
 ///
 /// Nested subdirectories are rejected outright rather than half-handled: none exist today, and a
 /// `mod`-path scheme for them would be untested machinery guarding nothing.
 #[test]
-fn every_rule_contracts_source_file_is_mod_registered() {
-    let this_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/rule_contracts");
-    let main_rs = this_dir.join("main.rs");
+fn every_registered_flat_test_dir_source_file_is_mod_registered() {
+    for &(dir_rel, floor) in REGISTERED_FLAT_TEST_DIRS {
+        assert_flat_test_dir_fully_mod_registered(dir_rel, floor);
+    }
+}
+
+fn assert_flat_test_dir_fully_mod_registered(dir_rel: &str, floor: usize) {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(dir_rel);
+    let main_rs = dir.join("main.rs");
     let text = fs::read_to_string(&main_rs)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", main_rs.display()));
 
@@ -224,13 +270,13 @@ fn every_rule_contracts_source_file_is_mod_registered() {
         .collect();
 
     let mut present = std::collections::BTreeSet::new();
-    let entries = fs::read_dir(&this_dir)
-        .unwrap_or_else(|e| panic!("failed to read {}: {e}", this_dir.display()));
+    let entries =
+        fs::read_dir(&dir).unwrap_or_else(|e| panic!("failed to read {}: {e}", dir.display()));
     for entry in entries.filter_map(Result::ok) {
         let path = entry.path();
         assert!(
             !path.is_dir(),
-            "{} is a subdirectory of tests/rule_contracts — this contract only understands a FLAT \
+            "{} is a subdirectory of {dir_rel} — this contract only understands a FLAT \
              directory of `mod <file>;` siblings. Flatten it, or extend this test to walk nested module \
              paths before adding one.",
             path.display()
@@ -244,12 +290,72 @@ fn every_rule_contracts_source_file_is_mod_registered() {
     }
 
     assert_eq!(
-        present, declared,
-        "tests/rule_contracts/ and this file's `mod` list disagree.\nfiles with NO `mod` line (they are \
-         never compiled — no error, no warning, and every contract in them runs never): {:?}\n`mod` \
+        present,
+        declared,
+        "{dir_rel}/ and its main.rs `mod` list disagree.\nfiles with NO `mod` line (they are \
+         never compiled — no error, no warning, and every test in them runs never): {:?}\n`mod` \
          lines with no file: {:?}",
         present.difference(&declared).collect::<Vec<_>>(),
         declared.difference(&present).collect::<Vec<_>>(),
+    );
+    assert!(
+        declared.len() >= floor,
+        "{dir_rel}/ registers only {} modules but its floor is {floor} — either the directory was \
+         re-rooted (this walk is no longer looking at the real tests) or its population was mass-moved \
+         without updating REGISTERED_FLAT_TEST_DIRS. If the shrink is deliberate, lower the floor in \
+         the same commit.",
+        declared.len()
+    );
+}
+
+/// Contract 20 — the two census binaries stay STANDALONE top-level `tests/*.rs` files, each keeps
+/// its own written reason for that, and — since the 2026-08-09 fold — they are the ONLY top-level
+/// `.rs` files left. Both are process-wide-counter censuses (`zzop_git::spawn_log`,
+/// `zzop_parser_typescript::parse_count`): cargo runs each `tests/*.rs` as its own process, but tests
+/// WITHIN a binary share the process on parallel threads, so folding either file into a shared harness
+/// makes its counter equality silently meaningless — the count would include every neighbor's spawns.
+///
+/// The strict top-level leg is the fold's completion guard in the OTHER direction: 73 binaries were
+/// folded into `tests/integration/` for one link instead of 73, and a new top-level `.rs` quietly
+/// reintroduces a per-file binary (cargo auto-discovers it — no manifest edit, no warning). A new
+/// standalone binary is allowed exactly when it has a census-shaped reason to be alone; adding it to
+/// the allowlist here is the act that writes that reason down.
+#[test]
+fn census_binaries_stay_standalone_and_say_why() {
+    let tests_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+    let allowed = ["analyze_parse_census.rs", "git_spawn_census.rs"];
+    for name in allowed {
+        let path = tests_dir.join(name);
+        let text = fs::read_to_string(&path).unwrap_or_else(|e| {
+            panic!(
+                "{} must exist as its OWN top-level test binary — its census counter is \
+                 process-wide, and a harness fold would make the counted number include every \
+                 neighbor test's activity: {e}",
+                path.display()
+            )
+        });
+        assert!(
+            text.contains("process-global") || text.contains("process-wide"),
+            "{name} no longer says WHY it must stay a standalone binary (expected the words \
+             \"process-global\" or \"process-wide\" in its doc) — restore the reason before anything \
+             else; a lone file with no written reason is one refactor away from being folded."
+        );
+    }
+
+    let mut top_level: Vec<String> = fs::read_dir(&tests_dir)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", tests_dir.display()))
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("rs"))
+        .filter_map(|p| p.file_name().and_then(|n| n.to_str()).map(str::to_string))
+        .collect();
+    top_level.sort();
+    assert_eq!(
+        top_level, allowed,
+        "top-level crates/engine/tests/*.rs must be exactly the census pair. Every other test \
+         belongs in a registered harness directory (tests/integration/, tests/rule_contracts/ — one \
+         link each instead of one per file). If the new file genuinely needs its own process, add it \
+         to this allowlist WITH its reason written in the file, like the census pair."
     );
 }
 

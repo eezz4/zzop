@@ -14,6 +14,21 @@
 //! module falls back to the same convention Python tooling (linters, `pydoc`, wildcard-import) already
 //! applies: a name NOT starting with `_` is `exported: true`.
 //!
+//! ## `body_start`/`body_end`
+//! `zzop_core::SourceSymbol`'s "Body span contract" owns the rule and this crate does not restate it.
+//! Two things ARE local to Python: ruff's `range` for a `def`/`class` already starts at the first
+//! DECORATOR, so `body_start` and `line` coincide; and there is no closing token, so `body_end` is the
+//! last body statement's own END line (a decorated, empty-bodied declaration is impossible in Python,
+//! so no totality gap follows from that).
+//!
+//! A Python class body IS a statement list — the one container in this crate that carries a span — so
+//! this crate owes the contract's LEAF-COMPLETENESS half. Every maximal RUN of consecutive class-body
+//! statements that are neither `def` nor `class` projects its own `Class.class-body[-n]` leaf; those
+//! statements run at class-creation time and are the direct analogue of a Java `static { … }` block.
+//! Without them, one method in the class was enough for `drop_outer_spans` to discard the class span
+//! and make every such statement unreachable to `.py` method-scan rules. A NESTED class's own body
+//! remains the pre-existing v1-scope hole (runs break at it rather than swallowing it).
+//!
 //! `Class.method` sub-symbols do NOT run either check against their own (possibly underscore-prefixed)
 //! name — a method is never independently public/private in Python's own object model the way a
 //! module-level name is, so each method INHERITS its enclosing class's `exported` value verbatim
@@ -113,9 +128,12 @@ fn function_symbol(
     idx: &crate::LineIndex,
     exported: bool,
 ) -> SourceSymbol {
+    // `body_start` is the DECLARATION's own line — ruff's `StmtFunctionDef::range` starts at the first
+    // DECORATOR, which is exactly what the contract asks for, so `line` and `body_start` coincide here.
+    // See `zzop_core::SourceSymbol`'s "Body span contract".
     let line = idx.line_of(f.range.start());
-    let body_start = f.body.first().map(|s| idx.line_of(s.start()));
-    let body_end = f.body.last().map(|s| idx.line_of(s.end()));
+    let body_start = Some(line);
+    let body_end = f.body.last().map(|s| idx.line_of(s.end())).or(Some(line));
     SourceSymbol {
         id: format!("{rel}#{name}"),
         file: rel.to_string(),
@@ -145,8 +163,11 @@ fn emit_class(
 ) {
     let class_name = c.name.to_string();
     let class_line = idx.line_of(c.range.start());
-    let body_start = c.body.first().map(|s| idx.line_of(s.start()));
-    let body_end = c.body.last().map(|s| idx.line_of(s.end()));
+    let body_end = c
+        .body
+        .last()
+        .map(|s| idx.line_of(s.end()))
+        .unwrap_or(class_line);
     let class_exported = is_exported(&class_name, all);
     out.push(SourceSymbol {
         id: format!("{rel}#{class_name}"),
@@ -156,16 +177,69 @@ fn emit_class(
         kind: SourceSymbolKind::Class,
         line: class_line,
         is_default: false,
-        body_start,
-        body_end,
+        body_start: Some(class_line),
+        body_end: Some(body_end),
         write_sites: Vec::new(),
     });
+    // Every SCANNABLE region of this class body needs its own leaf, or `drop_outer_spans` discards the
+    // class span in favour of whichever member has one and the rest becomes unreachable — the
+    // contract's leaf-completeness half. `def`s carry their own; everything else is class-creation-time
+    // code, the direct analogue of a Java `static { … }` block, and is grouped into runs below.
+    let mut run: Option<(u32, u32)> = None;
+    let mut runs = 0usize;
     for stmt in &c.body {
-        if let Stmt::FunctionDef(f) = stmt {
-            let method_name = format!("{class_name}.{}", f.name.as_str());
-            out.push(function_symbol(rel, &method_name, f, idx, class_exported));
+        match stmt {
+            Stmt::FunctionDef(f) => {
+                flush_class_body_run(rel, &class_name, &mut run, &mut runs, out);
+                let method_name = format!("{class_name}.{}", f.name.as_str());
+                out.push(function_symbol(rel, &method_name, f, idx, class_exported));
+            }
+            // A nested `class` has a body of its own that this crate's v1 scope does not walk (module
+            // doc). Breaking the run at it keeps a run leaf from silently claiming to cover members it
+            // never names — the nested body stays the pre-existing, disclosed hole it already was.
+            Stmt::ClassDef(_) => flush_class_body_run(rel, &class_name, &mut run, &mut runs, out),
+            other => {
+                let (s, e) = (idx.line_of(other.start()), idx.line_of(other.end()));
+                run = Some(match run {
+                    Some((rs, _)) => (rs, e),
+                    None => (s, e),
+                });
+            }
         }
     }
+    flush_class_body_run(rel, &class_name, &mut run, &mut runs, out);
+}
+
+/// Emits one leaf for a completed run of class-body statements, ordinal-suffixed from the second on —
+/// the naming (and the reason for the ordinal) `zzop_parser_typescript`'s `STATIC_BLOCK` states. A `-`
+/// cannot appear in a Python identifier, so the name cannot collide with a real member.
+fn flush_class_body_run(
+    rel: &str,
+    class_name: &str,
+    run: &mut Option<(u32, u32)>,
+    runs: &mut usize,
+    out: &mut Vec<SourceSymbol>,
+) {
+    let Some((start, end)) = run.take() else {
+        return;
+    };
+    *runs += 1;
+    let name = match *runs {
+        1 => format!("{class_name}.class-body"),
+        n => format!("{class_name}.class-body-{n}"),
+    };
+    out.push(SourceSymbol {
+        id: format!("{rel}#{name}"),
+        file: rel.to_string(),
+        exported: false,
+        name,
+        kind: SourceSymbolKind::Function,
+        line: start,
+        is_default: false,
+        body_start: Some(start),
+        body_end: Some(end),
+        write_sites: Vec::new(),
+    });
 }
 
 /// A single bare-`Name` target whose value is a literal expression (string/number/boolean/`None`) — the

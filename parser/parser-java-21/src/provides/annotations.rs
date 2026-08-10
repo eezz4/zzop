@@ -1,23 +1,19 @@
 //! Annotation-shape classification for the Spring provides pass — see the parent module doc
-//! (`provides/mod.rs`) for the recognized annotation vocabulary and never-guess rules. AST-grade
-//! REIMPLEMENTATION of the old lexical `zzop_parser_java::provides::annotations` module: each
-//! `annotation`/`marker_annotation` is read directly off `util::annotations_of` (already segmented and
-//! balanced by the real grammar) instead of a regex-scanned raw text block, so the old crate's TWO
-//! documented lexical limits no longer apply here — a PRECISION GAIN over the old crate, not a parity
-//! requirement:
-//! - An annotation argument containing a literal `)` inside a string (`@GetMapping("/x)y")`) no longer
-//!   defeats extraction — the grammar already balanced the parens for us.
-//! - A comment/blank line between an annotation and its declaration no longer ends the "annotation
-//!   block" early — there is no lexical block scan to end; each annotation is its own AST node.
+//! (`provides/mod.rs`) for the recognized annotation vocabulary and never-guess rules.
 //!
-//! Once isolated to ONE annotation's own raw argument text, this module still reuses the OLD crate's
-//! plain-regex verb extraction (`request_method_verbs`, extended to the multi-verb array form), but the
-//! path-literal extraction is NO LONGER a bare "first quoted string" scan: `route_path_arg` is
-//! ATTRIBUTE-AWARE — a named `value=`/`path=` string wins over any other string-valued attribute
-//! (`produces`, `headers`, ...) that happens to appear earlier in the argument list, falling back to
-//! "first quoted string" only for the genuinely-positional single-arg form (`@GetMapping("/x")`). This is
-//! a CORRECTNESS FIX over the old crate's first-quoted-string keying (which mis-keyed on
-//! `@GetMapping(produces = "application/json", value = "/users")`), not a parity requirement — see
+//! Each `annotation`/`marker_annotation` arrives here already isolated by `util::annotations_of` — the
+//! grammar segmented it and balanced its parens, so no scan in this module ever has to find where one
+//! annotation ends. Two shapes that defeat a text scan therefore cost nothing here, both pinned in
+//! `provides::tests`: a literal `)` inside an argument string (`@GetMapping("/x)y")`), and a
+//! comment/blank line sitting between an annotation and the declaration it decorates.
+//!
+//! WITHIN one annotation's own raw argument text the reads are plain regexes (`request_method_verbs`),
+//! with one exception: path-literal extraction is ATTRIBUTE-AWARE rather than "first quoted string".
+//! A named `value=`/`path=` string wins over any other string-valued attribute (`produces`, `headers`,
+//! ...) appearing earlier in the argument list; the bare first-quoted-string read is the fallback for
+//! the genuinely-positional single-arg form (`@GetMapping("/x")`) only. Without that split,
+//! `@GetMapping(produces = "application/json", value = "/users")` keys on the media type — pinned by
+//! `provides::tests::a_string_attribute_preceding_value_no_longer_wins_the_path_at_method_level`; see
 //! `route_path_arg`'s own doc. `project::resolve`'s constant-concatenation resolver reuses this same
 //! `route_path_arg` for its literal-vs-constant-reference gate (module doc there).
 
@@ -28,8 +24,7 @@ use tree_sitter::Node;
 
 use crate::util::{annotation_name, annotation_raw_args, annotations_of};
 
-/// Method-level mapping annotation name -> the HTTP verb it implies — verbatim port of
-/// `zzop_parser_java::provides::annotations::METHOD_ANNOTATIONS`. The verb column is pinned to
+/// Method-level mapping annotation name -> the HTTP verb it implies. The verb column is pinned to
 /// `zzop_core::HTTP_KEY_VERBS` by `provides::tests::method_annotation_verbs_are_pinned_to_the_core_verb_set`.
 pub(crate) const METHOD_ANNOTATIONS: &[(&str, &str)] = &[
     ("GetMapping", "GET"),
@@ -39,8 +34,7 @@ pub(crate) const METHOD_ANNOTATIONS: &[(&str, &str)] = &[
     ("PatchMapping", "PATCH"),
 ];
 
-/// `RequestMethod` enum constant names — verbatim port of
-/// `zzop_parser_java::provides::annotations::REQUEST_METHOD_NAMES`. Deliberately WIDER than
+/// `RequestMethod` enum constant names. Deliberately WIDER than
 /// `zzop_core::HTTP_KEY_VERBS` (pinned divergence, see
 /// `provides::tests::bare_request_method_names_are_a_deliberate_superset_of_the_core_verb_set`): this
 /// mirrors Spring's own enum, and an explicit `method = RequestMethod.HEAD` attribute is a visible fact
@@ -216,9 +210,8 @@ pub(crate) fn route_path_arg(args: &str) -> Option<String> {
     None
 }
 
-/// The first `"..."` literal found in `args` — verbatim port of
-/// `zzop_parser_java::provides::annotations::first_quoted_string`. Only reached today via
-/// `route_path_arg`'s positional-form fallback.
+/// The first `"..."` literal found in `args`. Only reached via `route_path_arg`'s positional-form
+/// fallback — a named `value=`/`path=` attribute is resolved before this ever runs (module doc).
 fn first_quoted_string(args: &str) -> Option<String> {
     quoted_string_re().captures(args).map(|c| c[1].to_string())
 }
@@ -226,8 +219,7 @@ fn first_quoted_string(args: &str) -> Option<String> {
 /// Every verb named by a `RequestMethod.X` token in `args` (dedup'd, first-appearance order — the
 /// `method = {RequestMethod.GET, RequestMethod.POST}` array-literal shape), or — only when no
 /// `RequestMethod.X` token appears at all — a single statically-imported bare constant (`method = POST`)
-/// accepted only when it is exactly one of `REQUEST_METHOD_NAMES`. Extends the old crate's single-verb
-/// `request_method_verb` to the multi-verb array form.
+/// accepted only when it is exactly one of `REQUEST_METHOD_NAMES`.
 fn request_method_verbs(args: &str) -> Vec<String> {
     let mut verbs = Vec::new();
     for c in request_method_re().captures_iter(args) {

@@ -85,7 +85,7 @@ pub(super) fn packs_read_io_scan_attrs(config: &EngineConfig) -> bool {
         .packs
         .iter()
         .filter(|p| is_pack_enabled(&config.rule_config, &p.id))
-        .map(|p| crate::pipeline::gate_pack_rules(p, &config.rule_config))
+        .map(|p| crate::pipeline::gate_pack_rules(p, config))
         .any(|gated| {
             gated.rules.iter().any(|r| {
                 matches!(&r.matcher, Matcher::IoScan(m) if m.attr_present.is_some() || m.attr_absent.is_some())

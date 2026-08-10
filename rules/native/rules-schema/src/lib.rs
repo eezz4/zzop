@@ -36,7 +36,11 @@ pub mod message;
 pub mod structural;
 pub mod usage;
 
-use zzop_core::{register_native_analysis_stub, RuleRegistry};
+use zzop_core::rule_channels::reads::NO_IO;
+use zzop_core::{
+    declare_native_rule_channels, register_native_analysis_stub, NativeRuleChannels, RuleIoChannel,
+    RuleRegistry,
+};
 
 /// The namespace a `SchemaIssue`'s label wears inside a finding's `ruleId`. The engine's
 /// `schema_issue_to_finding` composes exactly `<namespace><label>`, and [`schema_issue_rule_id`] is the one
@@ -89,21 +93,46 @@ pub fn schema_issue_rule_id(label: &str) -> String {
 /// that then did nothing, and — worse — an "unknown severity override" warning about an override
 /// `apply_severity_override` was in fact honoring (it matches `Finding::rule_id` exactly).
 pub fn register_native_analyses(registry: &mut RuleRegistry) {
-    for id in [
-        "schema-structural",
-        "schema-usage",
-        "soft-delete-bypass",
-        "orderby-unindexed",
-        "enum-string-drift",
-    ] {
-        register_native_analysis_stub(registry, id);
+    for row in native_rule_channels() {
+        register_native_analysis_stub(registry, &row.rule_id);
     }
-    for label in SCHEMA_STRUCTURAL_ISSUE_LABELS
-        .iter()
-        .chain(SCHEMA_USAGE_ISSUE_LABELS.iter())
-    {
-        register_native_analysis_stub(registry, &schema_issue_rule_id(label));
-    }
+}
+
+/// The two family gates and the three join rules, each on one row with the cross-layer io channels its
+/// rule body reads (`zzop_core::rule_channels`' mechanism doc holds the contract). ONE table, two
+/// readers — [`register_native_analyses`] and [`native_rule_channels`] — so an id cannot be registered
+/// without a channel statement, and the statement cannot drift from the id it describes.
+const NATIVE_ANALYSES: &[(&str, &[RuleIoChannel])] = &[
+    ("schema-structural", NO_IO),
+    ("schema-usage", NO_IO),
+    ("soft-delete-bypass", NO_IO),
+    ("orderby-unindexed", NO_IO),
+    ("enum-string-drift", NO_IO),
+];
+
+/// This crate's half of the rule→io-channel declaration, composed with the other crates' own by
+/// `zzop_engine::native_rule_channels` — the same aggregator shape as [`register_native_analyses`].
+///
+/// The 12 per-issue ids are derived rather than tabled, from the SAME two label lists
+/// [`register_native_analyses`] has always registered them from — spelling them again here would create
+/// the second id list this mechanism exists to prevent. Their channel set is stated once for the family
+/// because it is a property of the family: a schema rule's evidence is the Prisma model IR and the
+/// per-file usage tokens, neither of which enters the cross-layer io join. `rule_contracts::rule_channels`
+/// checks that claim the only way it can be checked — this crate's own source names no io kind and
+/// constructs no `IoProvide`/`IoConsume` — so a future label whose rule DID read io would fail there
+/// rather than inherit an empty declaration in silence.
+pub fn native_rule_channels() -> Vec<NativeRuleChannels> {
+    let mut out = declare_native_rule_channels(NATIVE_ANALYSES);
+    out.extend(
+        SCHEMA_STRUCTURAL_ISSUE_LABELS
+            .iter()
+            .chain(SCHEMA_USAGE_ISSUE_LABELS.iter())
+            .map(|label| NativeRuleChannels {
+                rule_id: schema_issue_rule_id(label),
+                reads: NO_IO,
+            }),
+    );
+    out
 }
 
 pub use join::{

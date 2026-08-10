@@ -13,8 +13,7 @@ fn method_that_execs_and_concatenates_a_string_is_flagged_the_dvja_pingaction_pa
     let found = hits(&out, "cmd-injection");
     assert_eq!(found.len(), 1, "{:?}", out.findings);
     // `C.run`, not bare `run`: parser-java-21 type-qualifies every method symbol (`Type.method`),
-    // matching the workspace-wide TS/Python/Rust convention — the old lexical crate's unqualified
-    // names were the deviation, retired with it.
+    // matching the workspace-wide convention every structural frontend follows.
     assert_eq!(
         found[0]
             .data
@@ -133,14 +132,19 @@ fn prose_strings_containing_the_word_update_are_not_sql_taint() {
 }
 
 #[test]
-fn weak_crypto_still_fires_on_md5_and_des() {
+fn weak_crypto_still_fires_on_md5_and_the_cipher_arm_reports_under_weak_cipher() {
+    // Valid Java on purpose: the hash half rides the parser's `hash-call` channel since the
+    // 2026-08-09 migration, and a bare statement outside a class projects no call site. The DES
+    // line reports under `weak-cipher` — the split half — and must NOT also report under
+    // `weak-crypto` (one line, one rule per concept).
     let dir = TempDir::new("zzop-be-sec");
     dir.write(
         "D.java",
-        "MessageDigest md = MessageDigest.getInstance(\"MD5\");\nCipher.getInstance(\"DES/CBC/PKCS5Padding\");\n",
+        "import java.security.MessageDigest;\nimport javax.crypto.Cipher;\npublic class D {\n  byte[] run(byte[] b) throws Exception {\n    Cipher.getInstance(\"DES/CBC/PKCS5Padding\");\n    return MessageDigest.getInstance(\"MD5\").digest(b);\n  }\n}\n",
     );
     let out = scan(&dir);
-    assert_eq!(hits(&out, "weak-crypto").len(), 2, "{:?}", out.findings);
+    assert_eq!(hits(&out, "weak-crypto").len(), 1, "{:?}", out.findings);
+    assert_eq!(hits(&out, "weak-cipher").len(), 1, "{:?}", out.findings);
 }
 
 // --- suppress_marker coverage for the moved Java rules ---
@@ -162,13 +166,33 @@ fn sql_taint_ok_marker_on_the_same_line_suppresses_the_finding() {
 
 #[test]
 fn weak_crypto_ok_marker_on_the_same_line_suppresses_the_finding() {
+    // Valid Java for the same channel reason as above — and the marker must keep working across the
+    // matcher change (call-scan reads the same suppress-marker window line-scan did).
     let dir = TempDir::new("zzop-be-sec");
     dir.write(
         "D.java",
-        "MessageDigest md = MessageDigest.getInstance(\"MD5\"); // zzop-weak-crypto-ok: non-security checksum only\n",
+        "import java.security.MessageDigest;\npublic class D {\n  byte[] run(byte[] b) throws Exception {\n    return MessageDigest.getInstance(\"MD5\").digest(b); // zzop-weak-crypto-ok: non-security checksum only\n  }\n}\n",
     );
     let out = scan(&dir);
     assert!(hits(&out, "weak-crypto").is_empty(), "{:?}", out.findings);
+}
+
+#[test]
+fn weak_cipher_ok_marker_on_the_same_line_suppresses_the_finding() {
+    // The split half derives its OWN marker — the old `zzop-weak-crypto-ok` spelling must NOT keep
+    // suppressing a cipher line (its message says so; this pins it from both directions).
+    // The stale-marker line sits ABOVE the vetted one on purpose: markers suppress with a LOOKBACK
+    // window, so the reverse order would let the genuine `weak-cipher-ok` on the earlier line excuse
+    // the later finding too and this test would prove nothing.
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "D.java",
+        "import javax.crypto.Cipher;\npublic class D {\n  void run() throws Exception {\n    Cipher.getInstance(\"AES/ECB/PKCS5Padding\"); // zzop-weak-crypto-ok: stale pre-split marker\n    Cipher.getInstance(\"DES/CBC/PKCS5Padding\"); // zzop-weak-cipher-ok: legacy interop, vetted\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "weak-cipher");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 4, "{:?}", out.findings);
 }
 
 #[test]

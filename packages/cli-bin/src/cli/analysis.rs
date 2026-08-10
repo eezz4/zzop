@@ -64,6 +64,15 @@ pub fn run_analyze(args: &[String]) -> ! {
 /// the `analyze_envelope` MCP tool, so this CLI form and a tool call give the identical answer.
 /// `--profile-rules` works on this lane too (it used to be an exit-2 refusal by name, back when the
 /// envelope path ran outside the engine's timing accumulator and the flag would have produced nothing).
+///
+/// # Why the PATH is passed on, not just the text it holds
+/// A terminal caller names a FILE, so this lane knows where the envelope came from — and the directory
+/// a file sits in is the same place `zzop analyze <path>` looks for a `zzop.config.jsonc`. Passing the
+/// path lets the shared handler discover that config and apply its convention vocabulary, which until
+/// 2026-08-06 no host could declare on this lane at all (findings told the user to declare
+/// `vocabulary` keys an envelope run then could not read). The tool twin passes envelope TEXT and has
+/// no location, so it discovers nothing and says so in its own description — the asymmetry is in the
+/// callers, not in the analysis.
 pub fn run_analyze_envelope(args: &[String]) -> ! {
     const USAGE: &str = "usage: zzop analyze-envelope <envelope.json> [--severity <critical|warning|info>] [--rule <id>] [--limit <n>] [--profile-rules]";
     let (rest, knobs) = extract_run_knobs(args);
@@ -80,6 +89,7 @@ pub fn run_analyze_envelope(args: &[String]) -> ! {
     let envelope_json = read_or_exit(path);
     print_or_exit(zzop_summary::analyze_envelope_summary_with(
         &envelope_json,
+        Some(path.as_str()),
         &filters,
         knobs,
     ));

@@ -30,9 +30,11 @@ pub(super) fn eval_literal_scan(
     // Rule-skip sink — same contract as every sibling matcher: a rule whose regex does not compile is
     // skipped, never fatal, and never silent.
     diagnostics: &mut Vec<String>,
+    // The owning pack's compiled-regex memo — see `crate::dsl::RegexCache`.
+    cache: &crate::dsl::RegexCache,
 ) {
     let rule_id = format!("{}/{}", pack_id, rule.id);
-    let mut diag = RuleDiag::new(&rule_id, diagnostics);
+    let mut diag = RuleDiag::new(&rule_id, diagnostics, cache);
     let Some(file_re) = diag.compile("file_pattern", &m.file_pattern) else {
         return;
     };
@@ -53,7 +55,7 @@ pub(super) fn eval_literal_scan(
     // `//` OR `#` leaders, matching call-scan (not line-scan's `//`-only): this channel is
     // multi-language from its first wave — a Python `# zzop-<id>-ok` must suppress exactly like a
     // TypeScript `// zzop-<id>-ok`. Same `--` omission, same derived-marker note as `call_scan`'s twin.
-    let Some(marker_re) = compile_marker_line_comment(&marker) else {
+    let Some(marker_re) = compile_marker_line_comment(&marker, diag.cache()) else {
         diag.malformed("its derived suppress marker does not compile as a regex");
         return;
     };

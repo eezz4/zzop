@@ -7,9 +7,16 @@
 //! The census is also `AnalyzeOutput::packs_loaded`'s `files_in_scope` source, so the number a consumer
 //! reads on the wire and the number these warnings reason about can never be two different computations.
 
+mod rule_admission;
+mod scope_warnings;
 mod uncovered_extension;
+mod vetoed_files;
+#[cfg(test)]
+mod vetoed_files_tests;
 
+use scope_warnings::{no_applicable_dsl_rule_warning, zero_scope_packs_warning};
 use uncovered_extension::uncovered_extension_warning;
+use vetoed_files::rule_vetoed_files_warning;
 
 use crate::EngineConfig;
 
@@ -31,6 +38,16 @@ use crate::EngineConfig;
 pub(crate) struct DslScope {
     /// Files matching >=1 rule `file_pattern` of the pack, one entry per `packs` element, same order.
     pub(crate) files_in_scope_by_pack: Vec<usize>,
+    /// Per pack (same order): the SORTED ids of rules whose own path gates admit zero analyzed files —
+    /// the RULE-granularity half of this census, and `PackLoaded::zero_admission_rules`' one source.
+    /// What "admitted" means (path gates only, exclude consulted, compile failures mirror evaluation)
+    /// is owned by [`rule_admission`]'s module doc. Deliberately EMPTY for a pack whose own
+    /// `files_in_scope` is 0: admission is a subset of pattern candidacy, so every rule of such a pack
+    /// is trivially zero and the ids would repeat the pack-level fact in up to a whole pack's worth of
+    /// wire (a single-language tree has most bundled packs out of scope). That also silences the
+    /// zero-analyzed-files tree, where every count is trivially zero and the "root produced 0
+    /// analyzable files" self-report owns the story.
+    pub(crate) zero_admission_rules_by_pack: Vec<Vec<String>>,
     /// How many files the census ran over (`analyzed_rels.len()`). Kept because a per-pack zero means
     /// two different things depending on it: over a real file list it is "these patterns matched
     /// nothing here"; over an EMPTY file list every pack is trivially zero and the count carries no
@@ -46,6 +63,23 @@ pub(crate) struct DslScope {
     /// away from this one. Its consumer is `minified_files_warning`: a minified file that no rule would
     /// have matched anyway lost no DSL coverage, so reporting it as "skipped" would be a false claim.
     pub(crate) in_scope_rels: std::collections::BTreeSet<String>,
+    /// The FILE-granularity hole in [`Self::in_scope_rels`], SORTED: every rel in that union which not
+    /// one loaded rule's path gates ADMITTED — i.e. every rule whose `file_pattern` matches it also
+    /// vetoes it with its own `file_exclude_pattern` (or has an uncompilable exclude, which makes
+    /// evaluation skip the rule entirely). A strict subset of `in_scope_rels`, so an out-of-scope
+    /// `.png` can never enter it. [`vetoed_files::rule_vetoed_files_warning`] is its only consumer.
+    ///
+    /// It exists because the two counts above are each other's blind spot. `files_in_scope` is
+    /// deliberately pattern-only (an UPPER bound — see [`compute_dsl_scope`]), and
+    /// `zero_admission_rules_by_pack` is keyed on RULES, so a file every targeting rule vetoes appears
+    /// in no rule's zero-admission list (those rules admitted other files) while still inflating the
+    /// `filesInScope` a consumer reads. Nothing joined the two, and the file read as covered.
+    ///
+    /// Computed from PATH GATES ONLY — the `rule_runs` mode filter is deliberately not applied. This
+    /// set states a fact about patterns ("every rule that targets this path declines this path") that
+    /// is true in native and envelope mode alike; the mode axis stays owned by
+    /// `zero_admission_rules_by_pack`, whose own doc records the envelope-mode inversion.
+    pub(crate) rule_vetoed_rels: Vec<String>,
     /// `extension -> (analyzed files with it, of which in scope of >=1 loaded rule)`, over the
     /// extensions a native frontend claims ([`crate::dispatch::dispatch_by_extension`]) — the LANGUAGE
     /// axis of the same census, and [`uncovered_extension_warning`]'s only input. Extension-keyed and
@@ -66,42 +100,74 @@ pub(crate) struct DslScope {
 /// which deliberately treats a `SymbolScan`/`IoScan` rule's `file_pattern` as "always matches". A rule
 /// whose `file_pattern` fails to compile counts as non-matching, mirroring `applies_to`'s treatment.
 ///
-/// `file_exclude_pattern` is deliberately NOT consulted: it is a per-rule veto applied at evaluation
-/// time, so folding it in here would make the census depend on which rule vetoed what. The count is
-/// therefore an UPPER bound on candidacy — which keeps the only claim built on top of it
-/// ([`zero_scope_packs_warning`]) safe in the honest direction: a zero really is "nothing matched".
+/// `file_exclude_pattern` is deliberately NOT consulted by the PACK-level counts: it is a per-rule
+/// veto, so folding it into a pack-level number would make the census depend on which rule vetoed
+/// what. The pack count is therefore an UPPER bound on candidacy — which keeps the claims built on
+/// top of it ([`zero_scope_packs_warning`]) safe in the honest direction: a zero really is "nothing
+/// matched". The RULE-level admission lists ([`DslScope::zero_admission_rules_by_pack`]) are the
+/// opposite case — per rule there is exactly one exclude and it MUST be consulted, or an all-vetoed
+/// rule would read as covered; [`rule_admission`]'s module doc owns that definition.
 pub(crate) fn compute_dsl_scope(
     packs: &[zzop_core::RulePackDef],
     analyzed_rels: &[&str],
 ) -> DslScope {
+    compute_dsl_scope_filtered(packs, analyzed_rels, |_| true)
+}
+
+/// [`compute_dsl_scope`] with a mode filter: `rule_runs` says whether THIS analysis mode evaluates a
+/// rule with that matcher at all. Envelope mode passes `envelope::rule_runs_in_envelope_mode`
+/// (evaluation there retains only `SymbolScan`/`IoScan` rules); native mode runs everything, which is
+/// what the unfiltered wrapper above says. A rule the mode never evaluates is counted ZERO-ADMISSION
+/// regardless of what its path gates match — it read nothing, so its green is vacuous, which is
+/// exactly the fact `zeroAdmissionRules` exists to disclose (measured before this filter existed: in
+/// envelope mode the census INVERTED — the only unlisted security rules were two line-scan rules
+/// that never ran, while dozens of merely-out-of-path-scope rules were listed). The PACK-level
+/// `files_in_scope` deliberately still counts a non-running rule's `file_pattern`: that field claims
+/// path candidacy ("a file matching at least one rule `file_pattern`"), which is a fact of the paths
+/// whatever the mode runs, and per-rule admission stays a subset of it.
+pub(crate) fn compute_dsl_scope_filtered(
+    packs: &[zzop_core::RulePackDef],
+    analyzed_rels: &[&str],
+    rule_runs: impl Fn(&zzop_core::Matcher) -> bool,
+) -> DslScope {
     // pattern string -> per-file match mask; `None` = pattern failed to compile (counts as matching
-    // nothing). Computed lazily, once per unique pattern.
-    let mut masks: std::collections::HashMap<&str, Option<Vec<bool>>> =
-        std::collections::HashMap::new();
+    // nothing). Computed lazily, once per unique pattern, and SHARED with the rule-level admission
+    // counts below so the two granularities read one set of match facts.
+    let mut masks: rule_admission::MaskMemo<'_> = std::collections::HashMap::new();
     let mut files_in_scope_by_pack = Vec::with_capacity(packs.len());
+    let mut zero_admission_rules_by_pack = Vec::with_capacity(packs.len());
     let mut any_rule_applies = false;
     // Per-file union across every pack, accumulated from the same masks the per-pack counts use.
     let mut in_scope_mask = vec![false; analyzed_rels.len()];
+    // Its exclude-aware twin: files at least one rule's path gates ADMITTED. Folded across every pack
+    // by the same `fold_admitted` call that produces the per-rule admission counts, so the file-axis
+    // and rule-axis halves of this census cannot disagree.
+    let mut admitted_mask = vec![false; analyzed_rels.len()];
     for pack in packs {
         let mut pack_mask = vec![false; analyzed_rels.len()];
+        let mut zero_admitted: Vec<String> = Vec::new();
         for rule in &pack.rules {
-            let pattern = match &rule.matcher {
-                zzop_core::Matcher::LineScan(m) => &m.file_pattern,
-                zzop_core::Matcher::MethodScan(m) => &m.file_pattern,
-                zzop_core::Matcher::SymbolScan(m) => &m.file_pattern,
-                zzop_core::Matcher::IoScan(m) => &m.file_pattern,
-                zzop_core::Matcher::CallScan(m) => &m.file_pattern,
-                zzop_core::Matcher::LiteralScan(m) => &m.file_pattern,
-            };
-            let mask = masks.entry(pattern.as_str()).or_insert_with(|| {
-                regex::Regex::new(pattern)
-                    .ok()
-                    .map(|re| analyzed_rels.iter().map(|rel| re.is_match(rel)).collect())
-            });
-            if let Some(mask) = mask {
+            let (pattern, exclude) = rule_admission::path_gates(&rule.matcher);
+            rule_admission::ensure_mask(&mut masks, pattern, analyzed_rels);
+            if let Some(ex) = exclude {
+                rule_admission::ensure_mask(&mut masks, ex, analyzed_rels);
+            }
+            // The pack-level count stays pattern-only (the upper-bound contract documented above);
+            // only the rule-level admission consults the rule's own exclude.
+            if let Some(Some(mask)) = masks.get(pattern) {
                 for (slot, matched) in pack_mask.iter_mut().zip(mask.iter()) {
                     *slot |= matched;
                 }
+            }
+            // The path-gate fold runs unconditionally: `admitted_mask` is a statement about PATTERNS
+            // (`DslScope::rule_vetoed_rels`' doc owns why it ignores the mode), while the zero-
+            // admission list below is a statement about this run and applies the mode filter on top.
+            let admitted =
+                rule_admission::fold_admitted(&masks, pattern, exclude, &mut admitted_mask);
+            // Path-gate admission AND the mode filter: a rule this mode never evaluates admits
+            // nothing whatever its patterns match (see `compute_dsl_scope_filtered`'s doc).
+            if !rule_runs(&rule.matcher) || admitted == 0 {
+                zero_admitted.push(rule.id.clone());
             }
         }
         let count = pack_mask.iter().filter(|b| **b).count();
@@ -110,6 +176,13 @@ pub(crate) fn compute_dsl_scope(
             *slot |= matched;
         }
         files_in_scope_by_pack.push(count);
+        // See `DslScope::zero_admission_rules_by_pack`: a zero-scope pack (which an empty tree makes
+        // every pack) lists no ids — the pack-level zero already carries the whole fact.
+        if count == 0 {
+            zero_admitted.clear();
+        }
+        zero_admitted.sort_unstable();
+        zero_admission_rules_by_pack.push(zero_admitted);
     }
     let in_scope_rels = analyzed_rels
         .iter()
@@ -117,6 +190,18 @@ pub(crate) fn compute_dsl_scope(
         .filter(|(_, matched)| **matched)
         .map(|(rel, _)| (*rel).to_string())
         .collect();
+    // In scope by pattern, admitted by nothing. Sorted explicitly because `analyzed_rels` arrives in
+    // `HashMap` key order (`loc_by_path.keys()`), which would make the warning's sample paths differ
+    // between two runs over the identical tree — `in_scope_rels` gets the same ordering for free from
+    // its `BTreeSet`, and this Vec must not be the one place that forgets it.
+    let mut rule_vetoed_rels: Vec<String> = analyzed_rels
+        .iter()
+        .zip(in_scope_mask.iter())
+        .zip(admitted_mask.iter())
+        .filter(|((_, in_scope), admitted)| **in_scope && !**admitted)
+        .map(|((rel, _), _)| (*rel).to_string())
+        .collect();
+    rule_vetoed_rels.sort_unstable();
     // The language axis, folded out of the SAME per-file union above so it can never disagree with the
     // per-pack counts. Files no native frontend claims are skipped here on purpose: `unparsed_extension_
     // warning` already owns them, and "no rule targets .png" is not a coverage gap.
@@ -140,9 +225,11 @@ pub(crate) fn compute_dsl_scope(
     }
     DslScope {
         files_in_scope_by_pack,
+        zero_admission_rules_by_pack,
         analyzed_files: analyzed_rels.len(),
         any_rule_applies,
         in_scope_rels,
+        rule_vetoed_rels,
         ext_census,
     }
 }
@@ -164,113 +251,14 @@ pub(crate) fn pack_scope_warnings(config: &EngineConfig, scope: &DslScope) -> Ve
             &config.rule_config,
         ))
         .chain(uncovered_extension_warning(&config.packs, scope))
+        .chain(rule_vetoed_files_warning(
+            &config.packs,
+            scope,
+            &config.rule_config,
+        ))
         .collect()
 }
 
-/// Capability self-report (D16): packs loaded (`config.packs` non-empty) but not a SINGLE loaded rule's
-/// `file_pattern` matches any file this tree actually analyzed — e.g. a Go-only tree loaded against
-/// TS/Python-oriented packs. Without this, "112 rules loaded, 0 findings" is undiagnosable: it reads
-/// identically to "112 rules loaded, ran, tree is genuinely clean". This distinguishes "no applicable
-/// rules" from "clean" — native structural/whole-graph analyses still ran regardless (they are not
-/// `file_pattern`-gated), so this is purely a DSL-coverage disclosure. `scope` must be the
-/// [`compute_dsl_scope`] census over the SAME `packs` slice (the caller computes it once and shares it
-/// with `AnalyzeOutput::packs_loaded`'s per-pack `files_in_scope`).
-fn no_applicable_dsl_rule_warning(
-    packs: &[zzop_core::RulePackDef],
-    scope: &DslScope,
-) -> Option<String> {
-    if packs.is_empty() || scope.any_rule_applies {
-        return None;
-    }
-    let total_rules: usize = packs.iter().map(|p| p.rules.len()).sum();
-    Some(format!(
-        "{total_rules} DSL rule(s) loaded across {pack_count} pack(s), but 0 have a `file_pattern` \
-         matching any file in this tree — the loaded packs target other filetypes. Native structural/ \
-         whole-graph analyses still ran; zero DSL findings in this tree means \"no applicable rules\", \
-         not \"clean\".",
-        pack_count = packs.len()
-    ))
-}
-
-/// Capability self-report, the per-pack half of the census above: packs that loaded, ran, and had ZERO
-/// files in scope. The evidence for this has always been in the output (`PackLoaded::files_in_scope`,
-/// `packsLoaded[].filesInScope` on the wire) and the lever has always existed (`packs.disabled` drops a
-/// whole pack — `registry::is_enabled` at the ingest/pipeline gate, before any of its rules is
-/// evaluated), but nothing joined the two, so a reader had to already know both to act. This is that
-/// join, and nothing more.
-///
-/// ## What it is allowed to claim
-/// Exactly one fact: no analyzed file's path matched any of the pack's rules' `file_pattern`. That is
-/// path candidacy computed by [`compute_dsl_scope`] BEFORE any content is read — it is NOT "you have no
-/// redis", NOT "this pack is useless here", and NOT evidence that a stack is absent. A tree gains a
-/// matching path the moment someone adds one file, and the pack is back in scope with no edit at all.
-/// So the message states the path fact, names the lever, says what dropping a pack buys (the rule
-/// evaluations it performs), and stops. The engine deliberately does NOT act on this itself: an engine
-/// that inspected a tree for evidence of a stack and skipped packs on its own would be guessing at what
-/// the caller can simply declare, and a wrong evidence vocabulary makes SECURITY rules silently not run.
-///
-/// ## Why one line, and three silences
-/// ONE aggregated line naming every zero-scope pack, never one per pack: a small single-language repo
-/// can have most of the bundled packs out of scope, and a per-pack line would turn an honest signal into
-/// the wall of noise readers learn to skip. Suppressed entirely for:
-/// * a pack the caller ALREADY disabled — whole-pack (`disabled_rules` carrying the bare pack id, which
-///   is what the `packs.disabled` config key maps to) or every rule of it individually
-///   (`"<pack>/<rule>"`, what `pipeline::gate_pack_rules` drops). `packs_loaded` cannot be read for
-///   this: it reflects LOADING, not gating, so a disabled pack still appears there with
-///   `files_in_scope: 0`. Nagging about a decision the reader already made is the fastest way to teach
-///   them to ignore the channel.
-/// * a pack with no rules at all — there is no evaluation to skip, so there is no advice.
-/// * a tree that analyzed zero files ([`DslScope::analyzed_files`]), where EVERY pack is trivially
-///   zero-scope and the count carries no information; `analyze::assemble`'s own "root produced 0
-///   analyzable files" self-report owns that case.
-///
-/// Deterministic: pack ids sorted, so the same tree always produces the same line.
-///
-/// This does not replace [`no_applicable_dsl_rule_warning`], and is not redundant with it: that one
-/// fires only when NOT ONE loaded rule applies anywhere, and it answers a different question ("is zero
-/// findings clean, or is it out of scope?"). The common case here — a TypeScript repo where the Java and
-/// Python packs are out of scope while the TS packs are not — leaves it silent by construction.
-fn zero_scope_packs_warning(
-    packs: &[zzop_core::RulePackDef],
-    scope: &DslScope,
-    rule_config: &zzop_core::RuleConfig,
-) -> Option<String> {
-    if scope.analyzed_files == 0 {
-        return None;
-    }
-    let mut ids: Vec<&str> = packs
-        .iter()
-        .enumerate()
-        .filter(|(i, pack)| {
-            scope.files_in_scope_by_pack.get(*i).copied().unwrap_or(0) == 0
-                && !pack.rules.is_empty()
-                && zzop_core::registry::is_enabled(rule_config, &pack.id)
-                && pack.rules.iter().any(|rule| {
-                    zzop_core::registry::is_enabled(
-                        rule_config,
-                        &format!("{}/{}", pack.id, rule.id),
-                    )
-                })
-        })
-        .map(|(_, pack)| pack.id.as_str())
-        .collect();
-    if ids.is_empty() {
-        return None;
-    }
-    ids.sort_unstable();
-    let count = ids.len();
-    let quoted = ids
-        .iter()
-        .map(|id| format!("\"{id}\""))
-        .collect::<Vec<_>>()
-        .join(", ");
-    Some(format!(
-        "{count} loaded pack(s) had 0 files in scope and still ran. No file in this tree matches any \
-         of their rules' `file_pattern`, a path check made before any file content is read — so those \
-         packs can only ever report zero here, which is scope, not a clean bill of health, and it \
-         changes the moment a matching file is added. If this tree will never carry those stacks, \
-         dropping them buys back their rule-evaluation time: `packs: {{ disabled: [{quoted}] }}` in \
-         zzop.config.jsonc (embedders: `disabledRules`). Packs you already disabled are not listed \
-         here."
-    ))
-}
+// The two self-reports built on this census (`no_applicable_dsl_rule_warning`,
+// `zero_scope_packs_warning`) live in `scope_warnings` — split on the file-line cap; their
+// message-shape contracts are documented there.

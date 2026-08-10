@@ -134,11 +134,13 @@ pub struct MethodScan {
     /// EVIDENCE, not evidence of separation — this gate only deletes pairings the projection PROVES sit
     /// in different functions, so treating a silent projection as such a proof would delete real
     /// findings on the strength of a missing fact. Reachable with spans PRESENT: a class body's own top
-    /// level. A class symbol's body span is scanned whenever the class declares no method/constructor
-    /// sub-symbol (a component written purely with property initializers), and a property-initializer
-    /// line there sits inside no function span — so a setter on it still pairs with an `await` from a
-    /// sibling arrow property, exactly as before the gate. An external parser that projects spans only
-    /// partially lands in the same place. Pinned by
+    /// level. A class symbol's body span is scanned whenever the class declares no
+    /// method/constructor/function-property sub-symbol — since 2026-08-09 function-VALUED properties
+    /// project their own leaves (TS `symbol_shapes::emit_class`), so the surviving case is a class of
+    /// NON-function initializers (e.g. call-valued fields), where an initializer line sits inside no
+    /// function span and a setter on it still pairs with a `.then(` boundary in a sibling field's
+    /// initializer, exactly as before the gate. An external parser that projects spans only partially
+    /// lands in the same place. Pinned by
     /// `a_class_property_setter_outside_every_function_span_keeps_the_pre_gate_pairing`
     /// (`rules/dsl/react`).
     #[serde(default)]

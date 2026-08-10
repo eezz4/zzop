@@ -169,3 +169,83 @@ fn an_overlay_restating_a_native_dep_graph_fact_adds_no_duplicate() {
     assert_eq!(artifacts[0].dynamic_imports.len(), 1);
     assert_eq!(artifacts[0].imports.as_ref().unwrap().len(), 1);
 }
+
+/// A router-composition fragment channel is the one place additive merging can SUBTRACT. Fragments
+/// compose into a single by-name graph (`analyze::compose_router_mount_provides` /
+/// `compose_trpc_provides`): a fragment is a root only when no mount anywhere names it, and a mount by
+/// import alias resolves to the target file's SOLE fragment. Two producers describing one file break
+/// both — the file stops having a sole fragment, so an alias mount below it resolves to nothing and the
+/// whole subtree goes silent. Measured on `examples/fastapi_overlay_adapter` against two FastAPI trees
+/// the native Python parser already reads: provides 19 -> 0 and 25 -> 2.
+///
+/// The engine cannot pick a side (no `overrides` exists for this channel — it covers `imports` only) and
+/// must not guess, so the composition's conservatism is right. What was missing is this line: without it
+/// a route and a deleted route look identical in the output.
+#[test]
+fn an_overlay_describing_routers_another_producer_already_described_is_disclosed() {
+    use zzop_core::{RouterMountEntry, RouterMountFragment};
+
+    let mut native = projection("app/api.py", 10);
+    native.router_mount_fragments.push(RouterMountFragment {
+        name: "router".to_string(),
+        entries: vec![RouterMountEntry::Verb {
+            method: "GET".to_string(),
+            path: "/me".to_string(),
+            handler: Some("current_user".to_string()),
+            line: 4,
+            attr_keys: vec![],
+        }],
+    });
+    let mut artifacts = vec![crate::envelope::merge::synthetic_artifact_from_projection(
+        &native,
+    )];
+    let overlays = vec![envelope(vec![native.clone()])];
+    let mut warnings = Vec::new();
+    apply_adapter_overlays(&mut artifacts, &overlays, "test", &mut warnings);
+
+    let line = warnings
+        .iter()
+        .find(|w| w.contains("router-mount"))
+        .unwrap_or_else(|| panic!("expected a fragment-collision disclosure, got {warnings:?}"));
+    assert!(line.contains("app/api.py"), "{line}");
+    assert!(line.contains("router"), "{line}");
+    assert!(
+        line.contains("test-parser/1"),
+        "the disclosure names the producer that collided: {line}"
+    );
+}
+
+/// The mirror: the SUPPORTED shape must stay silent. An overlay that describes routers for a file no
+/// other producer described is exactly what Mode B exists for — including the cross-producer case where
+/// a natively-parsed parent mounts an overlay-supplied child, which per-producer scoping would have
+/// forbidden. Only a file described TWICE in one channel is a collision.
+#[test]
+fn an_overlay_supplying_routers_no_one_else_described_is_not_disclosed() {
+    use zzop_core::{RouterMountEntry, RouterMountFragment};
+
+    let native = projection("app/api.py", 10);
+    let mut overlay_only = projection("app/legacy.py", 8);
+    overlay_only
+        .router_mount_fragments
+        .push(RouterMountFragment {
+            name: "router".to_string(),
+            entries: vec![RouterMountEntry::Verb {
+                method: "GET".to_string(),
+                path: "/me".to_string(),
+                handler: Some("current_user".to_string()),
+                line: 4,
+                attr_keys: vec![],
+            }],
+        });
+    let mut artifacts = vec![crate::envelope::merge::synthetic_artifact_from_projection(
+        &native,
+    )];
+    let overlays = vec![envelope(vec![overlay_only])];
+    let mut warnings = Vec::new();
+    apply_adapter_overlays(&mut artifacts, &overlays, "test", &mut warnings);
+
+    assert!(
+        !warnings.iter().any(|w| w.contains("router-mount")),
+        "{warnings:?}"
+    );
+}

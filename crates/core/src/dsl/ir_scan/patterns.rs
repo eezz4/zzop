@@ -40,7 +40,7 @@ impl IoScanPatterns {
         // language, Python included, unlike the `//`-only per-file line/method-scan marker. Built from
         // the rule id (escaped), so a failure is structural rather than an author's bad pattern.
         let marker = rule.suppress_marker();
-        let Some(marker_re) = compile_marker_line_comment(&marker) else {
+        let Some(marker_re) = compile_marker_line_comment(&marker, diag.cache()) else {
             diag.malformed("its derived suppress marker does not compile as a regex");
             return None;
         };

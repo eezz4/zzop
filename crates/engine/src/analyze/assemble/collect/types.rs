@@ -5,7 +5,33 @@ use std::collections::{HashMap, HashSet};
 
 use zzop_core::{Finding, ImportMap, IoConsume, IoProvide, ReExport};
 
-use crate::pipeline::{CSharpIndex, GoModuleMap, JavaIndex, RustWorkspaceMap};
+use crate::pipeline::{CSharpIndex, DegradeCause, GoModuleMap, JavaIndex, RustWorkspaceMap};
+
+/// `crate::dispatch::dispatch`'s verdict for one path, aliased only to keep [`DegradedFile::new`]'s
+/// signature on one line.
+type Lang = Option<crate::dispatch::Language>;
+
+/// One degraded file as the tree-wide phases need it — see [`Collected::degraded`] for why each of the
+/// three parts is here and not re-derived downstream.
+pub(in crate::analyze) struct DegradedFile {
+    pub(in crate::analyze) rel: String,
+    pub(in crate::analyze) cause: DegradeCause,
+    /// Whether `crate::dispatch::dispatch` claimed this path for a native frontend. `false` means the
+    /// degrade cost no structural extraction, because none was ever going to run.
+    pub(in crate::analyze) dispatched: bool,
+}
+
+impl DegradedFile {
+    /// Takes the artifact's dispatch verdict rather than a bare `bool` so the "was a frontend going to
+    /// read this at all" derivation lives with the record that publishes it.
+    pub(in crate::analyze::assemble) fn new(rel: &str, cause: DegradeCause, lang: Lang) -> Self {
+        DegradedFile {
+            rel: rel.to_string(),
+            cause,
+            dispatched: lang.is_some(),
+        }
+    }
+}
 
 /// Every per-file substrate the fused pass collected, bucketed for the phases below. Field docs are
 /// preserved from the pre-split monolithic `assemble` — see each field for why it exists and who
@@ -31,11 +57,23 @@ pub(in crate::analyze::assemble) struct Collected {
     pub(in crate::analyze::assemble) ts_dynamic_import_pairs: Vec<(String, Vec<String>)>,
     pub(in crate::analyze::assemble) ts_asset_ref_pairs: Vec<(String, Vec<String>)>,
     pub(in crate::analyze::assemble) ts_paths: HashSet<String>,
-    pub(in crate::analyze::assemble) degraded: Vec<String>,
+    /// Every file that fell back to the lexical projection, paired with WHY and with whether a native
+    /// frontend was dispatched for its path at all. Three facts rather than a path list because they have
+    /// three different consumers and only one honest source — the artifact itself:
+    /// `AnalyzeOutput::degraded`/`CoverageCensus::degraded` want the paths and the count,
+    /// `diagnostics::degraded_files` wants the cause (the caller's LEVER) and the dispatch flag (which
+    /// separates "a parser was going to read this and could not" from an oversized `.png`, where nothing
+    /// was lost because nothing was ever going to run).
+    ///
+    /// The dispatch flag is recorded HERE, at the one place that already computed `dispatch_lang` for this
+    /// artifact, rather than re-derived by the consumer: `crate::dispatch::dispatch` is pure, so a second
+    /// call would be correct — and would also be a second site to remember when overlay coverage or a new
+    /// dispatch input joins the question.
+    pub(in crate::analyze::assemble) degraded: Vec<DegradedFile>,
     /// `pipeline::eval_packs`' minified/generated skip — a separate list from `degraded` (see
     /// `pipeline::FileArtifact::minified_or_generated`'s doc), surfaced as one aggregate `warnings`
     /// entry (`minified_files_warning`) rather than a per-file entry. Field name is short for
-    /// `minified_or_generated`: a file lands here on EITHER prong of `is_minified_or_generated`. Both
+    /// `minified_or_generated`: a file lands here on EITHER prong of `has_minified_line_shape`. Both
     /// prongs are purely LINE-LENGTH tests (a 5000+ byte line, or 500+ byte lines dominating half the
     /// file's bytes) — "generated" is in the name because bundler output usually trips them, NOT because
     /// generation is detected. A generated file with ordinary line lengths is never flagged here.

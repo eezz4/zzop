@@ -18,21 +18,43 @@ pub mod mutating_route_no_auth;
 pub mod route_shadowing;
 pub mod unprovided_consume;
 
-use zzop_core::{register_native_analysis_stub, RuleRegistry};
+use zzop_core::rule_channels::reads::{HTTP_CONSUMES, HTTP_PROVIDES};
+use zzop_core::{
+    declare_native_rule_channels, register_native_analysis_stub, NativeRuleChannels, RuleIoChannel,
+    RuleRegistry,
+};
+
+/// Every native analysis id this crate owns, each on one row with the cross-layer io channels its rule
+/// body reads (`zzop_core::rule_channels`' mechanism doc holds the contract). ONE table, two readers —
+/// [`register_native_analyses`] and [`native_rule_channels`] — so an id cannot be registered without a
+/// channel statement, and the statement cannot drift from the id it describes.
+///
+/// `unsafe-read-endpoint`/`non-idempotent-write` are the two rows whose channel is not visible in this
+/// crate at all: they take `zzop_core::ApiEndpoint`, which the ENGINE reconstructs from the very same
+/// http provides (`analyze::native_rules::callgraph`'s `io_provides.iter().filter(|p| p.kind == "http")`)
+/// rather than from a route pass of its own. Both are pinned by name in `rule_contracts::rule_channels`
+/// against that pre-filter, never skipped.
+const NATIVE_ANALYSES: &[(&str, &[RuleIoChannel])] = &[
+    ("duplicate-route", &[HTTP_PROVIDES]),
+    ("unsafe-read-endpoint", &[HTTP_PROVIDES]),
+    ("non-idempotent-write", &[HTTP_PROVIDES]),
+    ("route-shadowing", &[HTTP_PROVIDES]),
+    ("mutating-route-no-auth", &[HTTP_PROVIDES]),
+    ("unprovided-consume", &[HTTP_PROVIDES, HTTP_CONSUMES]),
+];
 
 /// Registers every native analysis id whose implementation lives in this crate (see `rules/README.md`'s
 /// "Adding a rule" section); `zzop_engine::register_all_native` composes this with the other crates' own.
 pub fn register_native_analyses(registry: &mut RuleRegistry) {
-    for id in [
-        "duplicate-route",
-        "unsafe-read-endpoint",
-        "non-idempotent-write",
-        "route-shadowing",
-        "mutating-route-no-auth",
-        "unprovided-consume",
-    ] {
-        register_native_analysis_stub(registry, id);
+    for row in native_rule_channels() {
+        register_native_analysis_stub(registry, &row.rule_id);
     }
+}
+
+/// This crate's half of the rule→io-channel declaration, composed with the other crates' own by
+/// `zzop_engine::native_rule_channels` — the same aggregator shape as [`register_native_analyses`].
+pub fn native_rule_channels() -> Vec<NativeRuleChannels> {
+    declare_native_rule_channels(NATIVE_ANALYSES)
 }
 
 pub use duplicate_route::duplicate_route_findings;

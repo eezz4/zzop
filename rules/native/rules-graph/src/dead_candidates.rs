@@ -134,7 +134,11 @@ pub fn dead_candidate_findings(
                  extension ts/tsx/js/jsx/mjs/cjs/mts/cts as a fallback; dev-tool config files, \
                  ambient `.d.ts` declarations, and package.json-referenced entry files are \
                  excluded — they're loaded by a tool/runtime directly, not imported). Delete the \
-                 file if it is genuinely unused, or wire it up if it should be reachable. {} if your \
+                 file if it is genuinely unused, or wire it up if it should be reachable. A file \
+                 carrying a machine-generated banner in its first 8 lines is skipped already \
+                 (`vocabulary.generatedFileMarkers` picks the banner vocabulary); a generator that \
+                 stamps NO banner is invisible to that, and the answer for it is an `exclude` entry \
+                 for its path — deleting the file is undone by the next regeneration. {} if your \
                  build loads files this graph can't see (e.g. a custom bundler entry, a \
                  template-string dynamic import).",
                 disable_hint("dead-candidates")

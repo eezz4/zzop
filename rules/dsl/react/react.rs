@@ -53,7 +53,16 @@ impl Drop for TempDir {
 
 /// Loads the real `react.json` pack, filtered so this test is unaffected by sibling packs under
 /// concurrent development.
+/// The pack this file's tests scan with. The disk load below reads and parses ALL 12 pack JSONs and
+/// throws away 11, so doing it per test cost this binary that work once per test; the `OnceLock` makes
+/// it once per binary. The clone is cheap and — importantly — SHARES the pack's compiled-regex memo
+/// (`zzop_core::dsl::RegexCache`), so the second test onward also skips recompiling every pattern.
 fn react_pack() -> RulePackDef {
+    static PACK: std::sync::OnceLock<RulePackDef> = std::sync::OnceLock::new();
+    PACK.get_or_init(react_pack_uncached).clone()
+}
+
+fn react_pack_uncached() -> RulePackDef {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("dsl");
     let result = load_dsl_packs(&dir);
     assert!(

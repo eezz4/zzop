@@ -26,6 +26,26 @@
 //! `mod x { ... }` WITH a body is not an import edge at all (nothing to resolve — the module's contents
 //! live in this same file, out of `lang::symbols`' v1 walked scope regardless).
 //!
+//! ## `#[path = "..."]` overrides the file-name convention entirely
+//! A bodiless `mod` may carry `#[path = "some/file.rs"]`, and then the module's file is that literal
+//! path — the `foo.rs`/`foo/mod.rs` naming convention does not apply at all, so encoding it as
+//! `self::x` would send `rust_import_candidates` looking for a file that is not there. The declaration
+//! is therefore encoded with a head that cannot collide with any Rust path (`#` cannot begin an
+//! identifier): specifier `#path::<literal>`, resolved by [`super::resolve`]'s own arm.
+//!
+//! **The literal is relative to the DIRECTORY CONTAINING THIS FILE**, per the Rust reference, and that
+//! is why the value cannot ride the ordinary `self::` path: for a non-root file `foo.rs` the convention
+//! anchors children at `foo/`, but a `#[path]` on a top-level `mod` in that same file anchors at
+//! `dirname(foo.rs)`. The two disagree by exactly one segment. (Only top-level `mod` items are walked
+//! here — `syn::File::items` — which is precisely the case that rule covers; a `#[path]` on a `mod`
+//! nested inside an inline `mod { ... }` block anchors differently and is out of scope, same v1
+//! "top-level only" boundary this module already draws.)
+//!
+//! Measured motivation: this repo has 13 such declarations, and every one of them was a MISSING dep
+//! edge — one file that eight parser crates pull in was drawn as an island, and a module compiled under
+//! a different name than its file (`#[path = "resolve_tests.rs"] mod tests;`) looked dead to a `grep`
+//! for its own file stem.
+//!
 //! ## `pub use` re-exports
 //! `zzop_core::ir` models a re-export via a SEPARATE `ReExport` type, but this crate's public API
 //! (`parse_rust`) has no re-export output slot, and `ImportBinding` itself carries no re-export flag —
@@ -40,6 +60,8 @@
 use syn::{Item, UseTree};
 use zzop_core::{ImportBinding, ImportMap};
 
+pub use super::resolve::PATH_ATTR_HEAD;
+
 /// Extract this file's import bindings — see module doc. Empty on parse failure (never panics).
 pub fn parse_imports(text: &str) -> ImportMap {
     let mut map = ImportMap::new();
@@ -52,10 +74,14 @@ pub fn parse_imports(text: &str) -> ImportMap {
             Item::Use(u) => walk_use_tree(&u.tree, &[], &mut map, &mut glob_seq),
             Item::Mod(m) if m.content.is_none() => {
                 let name = m.ident.to_string();
+                let specifier = match path_attr_value(&m.attrs) {
+                    Some(literal) => format!("{PATH_ATTR_HEAD}::{literal}"),
+                    None => format!("self::{name}"),
+                };
                 map.insert(
                     name.clone(),
                     ImportBinding {
-                        specifier: format!("self::{name}"),
+                        specifier,
                         original: name,
                         deferred: false,
                         type_only: false,
@@ -66,6 +92,30 @@ pub fn parse_imports(text: &str) -> ImportMap {
         }
     }
     map
+}
+
+/// The string literal of a `#[path = "..."]` attribute, if this item carries one. Reads only the
+/// `path` attribute and only in its `= "literal"` form — the sole form the language accepts here — so a
+/// sibling `#[cfg(test)]` on the same `mod` is ignored rather than confused for it (that pairing is the
+/// common case, not an edge case). Returns `None` for every other attribute shape, which is what keeps
+/// this "never guess": an attribute we do not understand leaves the declaration on the ordinary
+/// convention path instead of inventing a target.
+fn path_attr_value(attrs: &[syn::Attribute]) -> Option<String> {
+    attrs.iter().find_map(|attr| {
+        if !attr.path().is_ident("path") {
+            return None;
+        }
+        match &attr.meta {
+            syn::Meta::NameValue(nv) => match &nv.value {
+                syn::Expr::Lit(syn::ExprLit {
+                    lit: syn::Lit::Str(s),
+                    ..
+                }) => Some(s.value()),
+                _ => None,
+            },
+            _ => None,
+        }
+    })
 }
 
 /// Recursively walks one `use` tree, threading the path PREFIX (segments seen so far, e.g. `["crate",

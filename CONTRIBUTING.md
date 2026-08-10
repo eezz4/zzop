@@ -23,9 +23,103 @@ workflow, CI gates, and conventions for PRs.
     `cargo test --workspace --target x86_64-pc-windows-msvc` to test what ships. The file cannot force
     this for everyone without naming a full Windows triple, which would break macOS and Linux
     contributors outright.
-- Node 18+ — **only** for the local measurement harness under `scripts/measure/` (see
-  [Re-measuring before you commit](#re-measuring-before-you-commit)). Nothing that ships needs it:
-  both binaries are plain Rust.
+- Node 18+ — **required to commit**, not optional. Two guards in the pre-commit set shell out to
+  `node` and, rather than skipping a check they cannot run, hard-fail without it:
+  `check-rules-catalog-sync` (verifies `site/rules.html`'s generated rule rows against
+  `docs/rules/catalog.md`) and `check-license-shipping` (verifies `THIRD-PARTY-NOTICES.md` and
+  unit-tests the harvest logic). Neither needs the network or an `npm install` — only `node` and
+  `git`. Node is also what the local measurement harness under `scripts/measure/` runs on (see
+  [Re-measuring before you commit](#re-measuring-before-you-commit)). Nothing that *ships* needs
+  it: both binaries are plain Rust.
+
+## Repository layout
+
+- `crates/core` — engine library: Common IR, cross-layer linker, graph analyses, call graph, rule
+  DSL interpreter (line/method/symbol/io matchers), unified rule registry + gating
+- `crates/metrics` — score channels consumed by `engine`: roi/health/criticality/coupling/
+  seams/recommendations/diagnostics
+- `crates/engine` — fused execution pipeline: language dispatch (TS/Prisma/Python/Rust/Go/Java/C#/SQL) → rayon
+  per-file parse + per-file rules → AST drop → whole-graph passes; graceful degrade, cache
+  consumption, git/scores integration, multi-tree cross-layer join, rule profiling
+- `crates/git` — git history collection (single `git log --numstat` pass → per-file stats +
+  per-commit sets)
+- `crates/cache` — per-file IR/findings cache (content hash + parser fingerprint + ruleset
+  fingerprint)
+- `crates/facade` — the analysis-meaning contract layer. Its JSON-string-in/JSON-string-out entry points
+  are `analyze`/`analyzeTrees`/`analyzeEnvelope` (the analyses) plus `validateEnvelopeOnly`/
+  `validateRulePackOnly`/`queryIo` (read-only lookups over engine and rule data — the verdict
+  vocabulary, envelope and rule-pack validation). Two more reads answer with no JSON at all: `explain`
+  returns one bundled rule's compiled-in data as human-readable lines, and `version` returns the bare
+  release number. Called by `crates/summary`, no Node and no native addon in between
+- `crates/config` — shared Rust config front end (`zzop.config.jsonc` discovery → JSONC strip →
+  config→facade-request mapper → `trees: "auto"` workspace expansion) plus request assembly (which
+  trees a call is about) and host-boundary path absolutization, used by `crates/summary`
+- `crates/summary` — the host-shared answer layer BOTH products call: reply shaping, caps, filters and
+  warning merging, the `facts`/`graph`/`manifest` projections, and the embedded authoring-contract
+  table. It is the only zzop crate either product package ships against: `packages/cli-bin` (→ `zzop`)
+  and `packages/mcp` (→ `zzop-mcp`) each declare exactly `zzop-summary` + `serde_json` as
+  `[dependencies]` and nothing below it (`zzop-config`/`zzop-core` appear only as `[dev-dependencies]`,
+  for test-only pins against those crates' own embeds) — which is what keeps a CLI query and an MCP tool
+  call on one code path
+- `packages/` — the two shipped binaries plus the npm shim and Desktop manifest
+  ([packages/README.md](packages/README.md))
+- `parser/` — parser frontends: source → Common IR, including HTTP route/consume extraction across
+  languages and frameworks ([parser/README.md](parser/README.md))
+- `rules/native/` — whole-graph native rules (`rules-graph`, `rules-http`, `rules-cross-layer`, `rules-schema`) plus `rules/dsl/`
+  declarative JSON rule packs ([rules/README.md](rules/README.md))
+
+
+Moved here from `README.md` on 2026-08-08: that page is read to DECIDE whether to adopt zzop, and a
+per-crate dependency map answers a question nobody asks before installing. Nothing was dropped in
+the move.
+
+### Distribution surfaces — per-file responsibilities
+
+| Location | Responsibility |
+|---|---|
+| `packages/cli-bin/src/main.rs` | The `zzop` CLI entry — thin argument dispatch: `analyze` / `analyze-envelope` / `cross` / `file` / `endpoint` / `manifest` / `diff` / `facts` / `graph` / `init` / `contract` / `explain` / `validate-*` / `version` / `help` subcommands calling `zzop-summary` directly (the `USAGE` const in that file is the canonical list — every subcommand but `help` is spelled there). Its findings filters are built through the WIRE-NEUTRAL `FindingFilters::new`, never an MCP-shaped JSON object. |
+| `packages/cli-bin/src/cli/` | The CLI's own argv helpers, split by responsibility: `args.rs` (argv shape + the findings knobs), `help.rs` (the per-subcommand elaboration table both `zzop help` and `zzop <sub> --help` read), `analysis.rs` (the four lanes that run an analysis), `run.rs` (the remaining diverging runners), `mod.rs` (the two terminal print/read steps). |
+| `packages/mcp/src/bin/zzop-mcp.rs` | The `zzop-mcp` server entry — thin: bare / `mcp` serve stdio; `version` / `help` / unknown-arg lanes. |
+| `packages/mcp/src/server.rs` | The stdio JSON-RPC 2.0 loop (`initialize`, `tools/*`, `resources/*`); re-exports `version()` from `zzop-summary`. Split into seams so the protocol is testable in-process: `run_stdio` (binds real stdin/stdout), `serve` (the transport loop over any reader/writer — this is what makes *several messages on one connection* reachable from a test), `handle_line` (the trim/blank/parse-error lane, and the object-vs-array fork), `handle_batch` (maps a JSON-RPC batch through the same dispatch a lone request takes), and `handle_message(&Value) -> Option<Value>` (the dispatch, a pure function of the parsed message; `Option` is what carries "a notification gets no reply", and it is also what makes a notification-only batch produce nothing). |
+| `packages/mcp/src/server/tests.rs` | The protocol table driving `handle_message`, plus the loop tests that need a real connection (sequential requests, an interleaved notification, a malformed line not ending the session, a final line with no trailing newline). Added 2026-07-29: the dispatch previously had **no** Rust test entering it, while a test file asserted it was "covered by the protocol unit tests in `server.rs`" — a claim of coverage that did not exist, which is why a family of loop defects survived several releases. |
+| `packages/mcp/build.rs` + `packages/mcp/src/staleness.rs` | The "this build is old" self-report. `build.rs` bakes ONE constant — the committer date of the source `HEAD` this binary was built from (`SOURCE_DATE_EPOCH` if set and no older than the project's first commit — a pre-history stamp such as nix stdenv's 1980 placeholder is rejected; else `git log -1 --format=%ct`, else `None`); `staleness.rs` compares it against the system clock and, past a 90-day threshold, produces the notice that rides `initialize`'s `instructions` and the serve-time stderr banner. Zero network calls, and it never claims a newer release EXISTS — see [MCP surface](docs/modules/mcp.md#mcp-surface). |
+| `packages/mcp/src/tools.rs` | Pure dispatch: match tool name → extract arguments → call the shared `zzop-summary` function → wrap the MCP result. No shaping logic lives here. |
+| `packages/mcp/src/tools/definitions.rs` | MCP tool descriptions + input schemas (`tools/list`). |
+| `packages/mcp/src/resources.rs` | MCP resource handlers (`resources/list`, `resources/read`) over the embedded authoring contracts (from `zzop_summary::contracts`). |
+| `crates/summary/src/contracts.rs` | The embedded contract documents themselves — compiled into both binaries via `include_str!`, the ONE table both surfaces resolve `<name>` through (the `config-surface` row points at `zzop_config`'s embed rather than re-embedding those bytes). |
+| `crates/summary/src/manifest/` | `zzop manifest` / `zzop diff` — pure functions, called straight from the CLI. CLI-only, and unlike `explain` it is recorded as a CONTRACT in [contracts/surface-parity.json](docs/contracts/surface-parity.json)'s `_cliOnlyLanes` so a later batch cannot "restore parity" without re-reading why there is none. |
+| `crates/summary/src/facts.rs` | `zzop facts` — the CONSUMER half of the custom-rule extension point, emitting the uncapped post-assembly fact substrate for a user's own rule program. zzop executes nothing and ingests nothing. CLI-only, recorded in the same `_cliOnlyLanes` contract. |
+| `crates/summary/src/graph/` | `zzop graph` — a graph serialized for an EXTERNAL renderer (zzop renders no pixels): a mermaid `flowchart LR` by default, or `--format cosmograph-nodes\|cosmograph-links` NDJSON tables over `--domain dep` for an interactive viewer. The one lane whose product is not a JSON document; scoped by construction (`--top` per bucket, `--scope` prefix) with every cap and filter disclosed in the document itself. CLI-only, recorded in the same `_cliOnlyLanes` contract. |
+| `crates/facade/src/explain.rs` (+ `explain/render.rs`, `explain/output_ids.rs`) | `zzop explain <rule-id>`'s read-only lookup over the DSL rule data compiled into the binary (`zzop_config::BUNDLED_PACK_SOURCES`, parsed via `zzop_core::parse_dsl_pack`) plus the live native-analysis registry, and the rendering half. Lives in the facade because it is the same KIND of work as `queryIo`'s verdict vocabulary — a pure read whose answer is a meaning. CLI-only — MCP already reaches the same data through the `rule-catalog` embedded contract resource, so it has no `tools/call` twin. |
+| `crates/facade/src/version.rs` | `version()` and `version_string()` — one owner, two forms over `CARGO_PKG_VERSION`, so the CLI's `version`, `zzop-mcp version` and MCP `initialize` can never disagree. |
+| `crates/config/src/trees.rs` (+ `paths.rs`) | Request assembly: which trees a call is about (`path` XOR `paths` XOR `configPath`, single-tree-vs-join judgment, per-path config loading in paths mode) and host-boundary path absolutization — next to the config vocabulary that decides what a valid tree declaration is. |
+
+Everything functional — output shaping (full counts, capped lists, explicit truncation disclosure;
+see [Output contract](docs/modules/mcp.md#output-contract)), finding filters, bucket keys/sites, typo
+suggestions, the architecture summary, config-warnings merging, sibling-scope
+disclosure — is **not** in either product crate: it lives in the shared
+`zzop-summary` crate (`crates/summary`), whose crate doc states the rule: hosts are thin protocol
+facades, ALL summary logic is shared so it cannot drift per-host (the surface-parity contract at
+[contracts/surface-parity.json](docs/contracts/surface-parity.json) machine-checks the complement:
+every engine output field is either carried or documented-omitted per surface). The config
+front-end (`zzop.config.jsonc` discovery, JSONC parsing, config→request mapping, `trees: "auto"`
+workspace expansion, and the request assembly above) likewise lives in the shared `zzop-config` crate
+(`crates/config`).
+Dependency-wise each product package declares exactly `zzop-summary` + `serde_json` under
+`[dependencies]` and nothing below it. Crates lower down appear only under `[dev-dependencies]`, for
+test-only pins against those crates' own embeds — `zzop-config` in both packages (the `config-surface`
+contract bytes, and a real bundled pack as `validate_rule_pack`'s happy-path fixture) and `zzop-core` in
+`packages/cli-bin` (loading every bundled DSL pack the way `explain` does, so no hand-copied rule-id
+list can drift). Nothing that SHIPS reaches below `zzop-summary`, because `zzop-summary` re-exports the
+handful of `zzop-facade` entry points a product uses verbatim (`explain`, `version`, the two offline
+validators) rather than wrapping them, so "a host needs only `zzop-summary`" holds without a
+pass-through layer that could drift.
+
+
+
+Moved here from `docs/modules/mcp.md` on 2026-08-08: it named which source file holds which test,
+which is a fact about working ON zzop rather than about using it, and that page is a user-facing
+contract document.
 
 ## Build & test
 
@@ -245,8 +339,9 @@ Two honest limitations:
 - **English-only.** All source, comments, and docs are English (enforced by the english-source
   guard). Do not link to internal/unpublished paths from OSS-facing files.
 - **Rule contributions.** Follow [`docs/rules/authoring-guide.md`](docs/rules/authoring-guide.md) for
-  DSL rule packs. Keep `site/rules.html`'s rule listing in sync with
-  [`docs/rules/catalog.md`](docs/rules/catalog.md) (CI-checked).
+  DSL rule packs. Write the rule's row in [`docs/rules/catalog.md`](docs/rules/catalog.md) — that file
+  is the SSOT — then run `node scripts/gen-site-rules.mjs`, which rewrites `site/rules.html`'s rule
+  rows from it. Do not hand-edit those rows; a guard rejects any that the catalog does not generate.
 - **CLI docs.** Keep `packages/README.md` in sync with `zzop help`.
 
 ## PR process
@@ -254,3 +349,5 @@ Two honest limitations:
 - Fork the repository and work on a branch.
 - Keep PRs focused on a single change; describe any behavior changes in the PR description.
 - Do not bump version numbers in PRs — published versions come from release tags, not PR content.
+
+

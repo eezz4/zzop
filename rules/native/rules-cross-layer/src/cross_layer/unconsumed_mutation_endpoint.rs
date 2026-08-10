@@ -18,6 +18,21 @@
 //! rule the user did not disable. The handoff carries the interface key, not just the `file:line` anchor,
 //! because a verb-agnostic registration puts several routes on one line — see [`reported_provide_sites`].
 //!
+//! ## Confidence downgrade when a caller was actually FOUND (per-provide, 2026-08-08)
+//! The run-level check below asks "is this run's consume side blind at all". It cannot witness the
+//! case where the consume side is fully RESOLVED and simply lands one prefix over — a drifted consume
+//! is not unresolved, so `majority_unresolved_http_sources` stays empty and this rule kept saying
+//! Warning. That is the loudest possible verdict on a route whose probable caller this very message
+//! goes on to name, while `cross-layer/prefix-drift` — which states the actual cause — is info. The
+//! cause was quieter than the consequence it produced.
+//!
+//! So a provide that is a `near_miss_targets` entry de-escalates to `Severity::Info` REGARDLESS of the
+//! run-level verdict, and the note says why and what to fix first. This is the same doctrine as the
+//! blind-run branch ("a zero is only a confident zero when the consume key space was resolved"), applied
+//! to a fourth case that predicate structurally cannot see; the evidence was already in hand and until
+//! now only annotated the prose. Not suppression — the finding still fires, and returns to warning once
+//! the drift is fixed and the route is still unconsumed.
+//!
 //! ## Confidence downgrade when the run is blind
 //! A zero ("unconsumed") is only a confident zero when the consume key space was actually resolved
 //! (`output-philosophy.md` §1). When `blind_sources` (`super::majority_unresolved_http_sources`, the same
@@ -126,7 +141,7 @@ pub fn unconsumed_mutation_endpoint_findings(
     // Run-level, not per-provide: "is this run's consume side blind at all" is the question, since a blind
     // source ANYWHERE in the run is a plausible unseen caller of ANY write route regardless of which tree
     // provides it (see this rule's module doc's "Confidence downgrade" section).
-    let severity = if blind_sources.is_empty() {
+    let run_severity = if blind_sources.is_empty() {
         Severity::Warning
     } else {
         Severity::Info
@@ -172,11 +187,27 @@ pub fn unconsumed_mutation_endpoint_findings(
                 p.provide.file.clone(),
                 p.provide.line,
             ));
+            // PER-PROVIDE de-escalation, and it outranks the run-level verdict above. This rule's own
+            // doctrine is that a zero is only a confident zero when the consume key space was actually
+            // resolved; the run-level `blind_sources` predicate cannot witness THIS case, because a
+            // drifted consume IS resolved — it just lands one prefix over. Until 2026-08-08 the
+            // evidence was already in hand and only annotated the message, so a finding that names
+            // its own probable caller still shouted Warning while `cross-layer/prefix-drift`, which
+            // states the actual cause, sits at info: the louder message was the wrong one.
+            let severity = if near_miss.is_some() {
+                Severity::Info
+            } else {
+                run_severity
+            };
             let near_miss_note = if let Some(t) = near_miss {
                 format!(
-                    " However, {} unmatched http consume(s) in this run name this route as their closest \
-                     near-miss candidate (see the `cross-layer/route-near-miss` finding at {}:{}) — the route \
-                     may actually be called through a drifted or base-relative path rather than being dead.",
+                    " Severity is info rather than warning for this route because {} unmatched http \
+                     consume(s) in this run name it as their closest near-miss candidate (see the \
+                     `cross-layer/route-near-miss` finding at {}:{}) — a caller was found, off by a \
+                     drifted or base-relative path, so \"unconsumed\" is not a confident zero here. \
+                     Fix the path drift first (`cross-layer/prefix-drift` aggregates these when 3+ \
+                     consumes share one prefix); if the route is still unconsumed afterwards this \
+                     finding returns at warning.",
                     t.count, t.consume_file, t.consume_line
                 )
             } else {

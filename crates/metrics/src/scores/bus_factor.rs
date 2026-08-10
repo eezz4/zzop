@@ -55,6 +55,9 @@ pub fn compute_bus_factor(
 
     BusFactorScore {
         score: score.round(),
+        // POPULATION: the same `total` the ratio above divides by — computed here since the metric was
+        // written and never published, so 0-risky-of-0 and 0-risky-of-400 shipped identically.
+        total,
         risky,
         files,
         files_truncated,

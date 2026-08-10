@@ -286,23 +286,27 @@ fn a_then_continuation_with_an_is_mounted_guard_is_still_suppressed() {
 #[test]
 fn a_class_property_setter_outside_every_function_span_keeps_the_pre_gate_pairing() {
     // Contract pin for `after_in_same_function`'s PER-LINE degrade (`unwrap_or(0)` in
-    // `method_scan.rs`). The file HAS projected function spans — the `load` arrow property is one — but
-    // the scanned symbol is the CLASS (a class body span is scanned whenever the class declares no
-    // method/constructor sub-symbol, which is the case here: both members are properties), and the
-    // `reset` property-initializer line sits inside no function span at all. That line therefore
-    // resolves to "no enclosing function", which the gate reads as NO GATE, not as "no pair": the
-    // sibling arrow's `await` on line 4 still pairs with `setColor(` on line 6, exactly as before the
-    // gate existed. Deliberate direction — a missing span is absence of evidence, so degrading toward
-    // the pre-gate over-report beats inventing an under-report nobody measured.
+    // `method_scan.rs`). The file HAS projected function spans — the `.then` continuation callback is
+    // one — but the scanned symbol is the CLASS: function-VALUED properties leaf out since 2026-08-09
+    // (parser `symbol_shapes::emit_class`), so a class-wide span survives only when the class declares
+    // no method/constructor/function-property sub-symbol at all, which is the case here — both members
+    // are CALL-valued initializers the projection has no function body for. The `reset` line sits
+    // inside no function span, resolves to "no enclosing function", and the gate reads that as NO
+    // GATE, not as "no pair": the `.then(` boundary on line 3 still pairs with `setColor(` on line 4,
+    // exactly as before the gate existed. Deliberate direction — a missing span is absence of
+    // evidence, so degrading toward the pre-gate over-report beats inventing an under-report nobody
+    // measured. (Until 2026-08-09 this fixture spelled the boundary side as an ARROW property; that
+    // spelling now projects its own leaf and its cross-member pairing was exactly the span-boundary
+    // FP class — `cases/trees/api-be/spans/` — that this pin must not bless.)
     let dir = TempDir::new("zzop-react");
     dir.write(
         "src/Panel.tsx",
-        "import { useState } from 'react';\nexport class Panel {\n  load = async () => {\n    await fetch('/x');\n  };\n  reset = setColor(1);\n}\n",
+        "import { useState } from 'react';\nexport class Panel {\n  seed = fetchRates().then((d) => d.json());\n  reset = setColor(1);\n}\n",
     );
     let out = scan(&dir);
     let h = hits(&out, "setstate-after-async-unguarded");
     assert_eq!(h.len(), 1, "{:?}", out.findings);
-    assert_eq!(h[0].line, 6);
+    assert_eq!(h[0].line, 4);
 }
 
 // Seals the SAME-LINE NESTING RESIDUAL the rule's message discloses: `setData(await fetch(url));`

@@ -79,10 +79,18 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 ./target/release/zzop graph --domain dep --format cosmograph-nodes --config zzop.config.jsonc > "$tmp/n.ndjson"
 ./target/release/zzop graph --domain dep --format cosmograph-links --config zzop.config.jsonc > "$tmp/l.ndjson"
+# Snapshot BEFORE regenerating, and compare against that — not against HEAD. The claim this step makes
+# is "regenerating site/ changes nothing", and `git diff -- site/` does not test that claim on a dirty
+# tree: it reports every uncommitted site/ edit, regeneration or not. That is not hypothetical — this
+# script advertises itself as dirty-tree-safe thirteen lines below, and on 2026-08-06 a hand edit to
+# site/usage.html (a new `graph --domain` value, which no generator owns) made this step fail on three
+# consecutive runs while regeneration was provably a no-op each time. A guard that cannot be made green
+# by doing the thing it asks for teaches people to skip it.
+cp -R site "$tmp/site-before"
 node scripts/site-graph-data.mjs "$tmp/n.ndjson" "$tmp/l.ndjson"
-if ! git diff --quiet -- site/; then
+if ! diff -rq "$tmp/site-before" site > "$tmp/site-drift" 2>&1; then
   echo "site/ is stale — regenerating it changed these files:" >&2
-  git --no-pager diff --stat -- site/ >&2
+  cat "$tmp/site-drift" >&2
   echo "The regeneration has ALREADY been applied to your working tree; commit it." >&2
   fail "site regeneration diff"
 fi
@@ -112,7 +120,10 @@ step "site-render-check: npm ci --prefix scripts/site-render-check"
 # Installs from the committed lockfile (offline from npm's local cache once populated). The CI job's
 # `npx ... playwright install --with-deps chromium` line is deliberately NOT mirrored: it downloads a
 # browser, which locally is one-time setup rather than a per-run step — run it by hand once if
-# check.mjs below cannot find chromium. (`npx` is not an extraction needle in the mirror guard.)
+# check.mjs below cannot find chromium. That exemption is now NAMED and liveness-checked in
+# `check-ci-local-mirrors-ci.sh` — until 2026-08-08 `npx` was not an extraction needle at all, so the
+# line was invisible rather than exempted and this comment was the only thing standing in for the
+# guard's own scope. Any OTHER `npx` command in ci.yml is compared like every other command.
 npm ci --prefix scripts/site-render-check || fail "npm ci (site-render-check)"
 
 step "site-render-check: node scripts/site-render-check/check.mjs site"

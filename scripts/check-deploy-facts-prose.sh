@@ -24,21 +24,34 @@
 #      "every `"id":` in the file, minus the pack's own"; if the two derivations disagree the pack JSON
 #      was reformatted and this guard aborts loudly rather than assert a number it no longer trusts.
 #   3. Release platform count — the `platform:` entries of `.github/workflows/prebuild.yml`'s `build`
-#      job matrix (the same block check-asset-name-prose.sh parses for asset NAMES; this guard only
-#      needs how MANY). Cross-checked against `packages/cli/package.json`'s `optionalDependencies`
+#      job matrix, read through the shared reader scripts/lib/release-matrix.sh (the same block
+#      check-asset-name-prose.sh reads for asset NAMES and check-server-json-hashes.sh reads for the
+#      ORDERED platform list; this guard only needs how MANY, so it takes the count accessor).
+#      Cross-checked against `packages/cli/package.json`'s `optionalDependencies`
 #      (one `@zzop/cli-<platform>` sub-package per platform) and the directories under
 #      `packages/cli/npm/`; a disagreement between those three is itself a real drift and fails.
 #   4. npm package count — platform count + 1, the `@zzop/cli` shim itself.
 #
-# Scan surface: TRACKED `*.md`, `*.html` AND `*.rs`. `*.rs` is deliberately IN scope, unlike
+# Scan surface: TRACKED `*.md`, `*.html`, `*.rs`, `.github/workflows/*.yml` AND `scripts/*.sh`.
+# `*.rs` is deliberately IN scope, unlike
 # check-asset-name-prose.sh's md/html-only surface: two of the three confirmed instances of this defect
 # class lived in Rust, not Markdown — `crates/summary/src/contracts.rs`'s `rule-catalog` description (which
 # ships over MCP `resources/list`, i.e. a reader's only pack-count signal without a checkout) and
 # `crates/facade/src/packs_tests.rs`'s shadow-warning comments/assertions. A doc comment or a test
 # comment stating an inventory count rots exactly like a README does. Generated/vendored trees
 # (`target/`, `node_modules/`, `.claude/`) are excluded by scripts/lib/tracked-grep.sh's standard
-# exclusions. `.github/**` needs no exclusion here: this guard reads no YAML prose (the workflows state
-# these counts structurally, as matrix entries, which is the SSOT itself).
+#
+# `.github/workflows/*.yml` and `scripts/*.sh` joined the surface on 2026-08-08, and the reason is that
+# the old justification for excluding them was HALF true. It read: "the workflows state these counts
+# structurally, as matrix entries, which is the SSOT itself." That is right about the matrix and wrong
+# about the PROSE ABOVE it — a workflow comment saying "the 5 platform binaries", or a guard header
+# saying "all 23 guards", is an inventory claim in exactly this defect class, and nothing read it.
+# Measured that day: `prebuild.yml` said "all 23 guards" against a fleet of 27, `ci.yml` said the
+# committed graph block held "1,088 nodes" against 1,349, and `check-io-key-vocab.sh` said "43 docs"
+# against 55. Three stale counts in the two file families this guard had declared it did not need to
+# read. The platform/package claims in those same files were CORRECT and are now bound rather than
+# deleted — a correct number that a machine holds is worth more than a number removed to stop it
+# rotting. Widening cost nothing at the time (the surface went to 1,211 files and stayed clean).
 #
 # Claim shapes (the phrasing that actually carries the claim — never a bare digit, because numbers
 # appear in prose for a hundred unrelated reasons and a guard that cries wolf gets disabled):
@@ -61,15 +74,20 @@
 # through; no surface writes one, and it would be self-evidently wrong to any reader.
 #
 # Known-uncovered (documented, not silently ignored):
-#   - `57 native analysis ids` (docs/rules/catalog.md's totals line). Derivable only from
+#   - the `N native analysis ids` count (docs/rules/catalog.md's totals line). Derivable only from
 #     `zzop_engine::register_all_native`, i.e. only by BUILDING; a shell guard cannot see it. Already
 #     pinned by `crates/engine/tests/rule_contracts/`'s `catalog_totals_match_loaded_rule_and_analysis_counts`,
 #     which also re-pins the pack/rule totals this guard checks — this guard's value there is catching them
 #     in pre-commit, seconds instead of a full workspace test run.
-#   - `all six tools` (docs/modules/mcp.md). Spelled as an English word, not a digit, and the tool set has
-#     no declarative registry to count — `packages/mcp/src/tools.rs` dispatches them as plain match arms
-#     over `zzop_summary` calls, so any future public helper would silently change the derived number.
-#     Deriving it would be guessing.
+#   - the `all <word> tools` count (docs/modules/mcp.md). Spelled as an English word, not a digit, so this
+#     guard's digit-anchored claim shapes do not see it.
+#     NOT because the set is underivable: `packages/mcp/src/tools/definitions.rs` IS a declarative
+#     registry (the `tools/list` schema), and `"name": "<tool>"` entries in it count the set exactly.
+#     This header used to say the opposite — that the tools were plain match arms and "deriving it would
+#     be guessing" — and that claim was wrong AND its own copy of the number was stale, in both the count
+#     and the file it named (2026-08-08 audit). The remaining reason to leave it uncovered is the English
+#     spelling, which is a matcher gap, not an underivability. Closing it means adding a word-number claim
+#     shape, not a new source of truth.
 #   - `All 12 ship rules.` (docs/rules/catalog.md, same sentence as the totals). A bare digit with no
 #     anchoring noun; matching it would mean matching every bare number in the repo.
 #   - illustrative output-format examples such as `` `typescript: 12 rules` `` (crates/engine/src/output.rs,
@@ -84,6 +102,8 @@ cd "$(dirname "$0")/.."
 
 # shellcheck source=scripts/lib/tracked-grep.sh
 . ./scripts/lib/tracked-grep.sh
+# shellcheck source=scripts/lib/release-matrix.sh
+. ./scripts/lib/release-matrix.sh
 
 SELF=check-deploy-facts-prose
 PREBUILD=.github/workflows/prebuild.yml
@@ -160,16 +180,17 @@ done <<< "$pack_meta"
   "derived metadata for $pack_count of ${#pack_files[@]} pack files -- the awk pass lost one"
 
 # --- Truth 3 + 4: release platforms and npm packages -----------------------------------------------
-[ -f "$PREBUILD" ] || abort "missing $PREBUILD"
 [ -f "$CLI_PKG" ] || abort "missing $CLI_PKG"
 
-matrix_platforms="$(awk '
-  /^  build:/ { inbuild = 1 }
-  inbuild && /^      matrix:/ { active = 1; next }
-  active && /^    runs-on:/ { exit }
-  active && /^[[:space:]]*platform:[[:space:]]*[^[:space:]]/ { n++ }
-  END { print n + 0 }
-' "$PREBUILD")"
+# The build matrix is read by the SHARED reader (2026-08-08, scripts/lib/release-matrix.sh), which also
+# owns the missing-file / broken-walk / entry-without-a-platform floors. This axis needs nothing from
+# those records but HOW MANY there are, so it takes the count accessor and no more: the `os:` field and
+# the matrix ORDER the same records carry are what check-asset-name-prose.sh and
+# check-server-json-hashes.sh respectively inject on top of the same read.
+matrix_records="$(release_matrix_entries "$SELF" "$PREBUILD")" || exit 1
+matrix_platforms="$(release_matrix_count "$matrix_records")"
+# Belt for the layer's own floor -- release_matrix_entries refuses to return an empty record list, and
+# prebuild.yml's stamping loop keeps the same belt over the same reader for the same reason.
 [ "$matrix_platforms" -gt 0 ] || abort "extracted 0 platforms from $PREBUILD's build-job matrix -- parse is broken"
 
 opt_deps="$(grep -cE '"@zzop/cli-[a-z0-9-]+":' "$CLI_PKG" || true)"
@@ -287,13 +308,13 @@ fi
 bt='`'
 prefilter='[0-9]+ (bundled )?DSL packs|[0-9]+ packs shipped|[0-9]+ DSL rules|[0-9]+ platforms?|[0-9]+ packages|\([0-9]+ rules?\)|ships [0-9]+ rules?|[0-9]+-rule'
 
-candidate_files="$(tracked_files_matching "$prefilter" '*.md' '*.html' '*.rs')" \
+candidate_files="$(tracked_files_matching "$prefilter" '*.md' '*.html' '*.rs' '.github/workflows/*.yml' 'scripts/*.sh')" \
   || abort "file enumeration failed"
 
 total_files=0
 while IFS= read -r f; do
   [ -n "$f" ] && total_files=$((total_files + 1))
-done < <(git ls-files -- '*.md' '*.html' '*.rs')
+done < <(git ls-files -- '*.md' '*.html' '*.rs' '.github/workflows/*.yml' 'scripts/*.sh')
 
 # Subject-set floor (2026-07-29). Every derivation above aborts loudly on a broken parse (zero packs,
 # zero platforms, a disagreeing inventory) — but the SCAN those numbers are compared against had no

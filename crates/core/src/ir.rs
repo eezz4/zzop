@@ -85,6 +85,54 @@ pub struct WriteSite {
 
 /// A top-level symbol within a file.
 ///
+/// ## Body span contract (`body_start`/`body_end`) — ONE convention, owned here
+/// Every producer (the eight `parser/*` crates AND any external adapter feeding
+/// `docs/NORMALIZED_AST.md`'s `FileProjection`) owes exactly this, and no parser module doc restates
+/// it — they link here, because until 2026-08-10 these two fields carried a two-line comment and six
+/// parsers had grown THREE readings of it (TS/Java/C#: the body BLOCK's `{` line; Go/Rust/Python: the
+/// FIRST STATEMENT's line; TS/Java/C# containers: the declaration's own line).
+///
+/// **`body_start` is the line the DECLARATION begins on — its leading decorators, annotations and
+/// attributes INCLUDED. `body_end` is the last line of what that declaration encloses.** Both are
+/// 1-based and inclusive; the pair is the region `dsl::method_scan` scans and `drop_outer_spans`
+/// nests, and `capability_matrix`'s `decl_in_span` column proves each environment still obeys it.
+///
+/// ### Why the declaration line and not the body's first line
+/// Because that is what the RULES mean by "in this method", and the three readings agreed on it only
+/// by accident. `rules/dsl/typescript/typescript.json`'s `async-handler-no-try` triggers on
+/// `\bon[A-Z]\w*\s*[:=]\s*\{?\s*async\b` — a pattern that can only match a DECLARATION line — and it
+/// worked solely because swc's block span starts there whenever the author put the `{` on that line.
+/// Under the block-line reading the same concept was unwritable for Python/Go/Rust (`async def
+/// handler():` is never inside any span) and silently unwritable for TS/Java/C# too the moment a
+/// signature wrapped. Every portable method-scan concept is anchored on the declaration — `async`,
+/// `@Transactional`, `[HttpGet]`, `#[get(...)]`, a parameter name — so a span excluding it excludes the
+/// question. Three further properties decided it. TOTAL: every language has a declaration start line,
+/// whereas "first statement" does not exist for an empty body, a comment-only body, or an expression
+/// body (`int P => Compute();`) — each of which used to collapse the whole span to `None`,
+/// a silent and total loss of scannability. ALREADY PRECEDENT: TS classes, Java types and C# types
+/// used it already, so pinning it unifies with three producers rather than inventing a fourth reading.
+/// CONTAINMENT-PRESERVING: a container's declaration line precedes every member's and a member's
+/// precedes its own body, so `drop_outer_spans`'s innermost-wins nesting and `parse_calls`'s
+/// smallest-range attribution keep working unchanged. The cost is stated rather than hidden: the
+/// parameter list and the annotation ARGUMENTS are in the span now, so a rule's `patterns` AND its
+/// `absent` guards can both match there — the point in both directions, since a guard written as
+/// `@Transactional(readOnly = true)` should veto.
+///
+/// ### `None` means "there is no region", never "this producer could not compute one"
+/// `None`/`None` is a positive claim that the declaration encloses nothing scannable, and must stay
+/// `None` wherever that holds — a Rust `struct`/`enum`/`union`/`trait`, a Go `type X struct`, a TS
+/// `type`/`interface`, any field or const, a Prisma model, an abstract method declared with `;`. Those
+/// carry a FIELD or SIGNATURE list, not a body: a span over one would make `drop_outer_spans` treat it
+/// as scannable and claim a per-member containment the language does not have.
+///
+/// ### Leaf completeness — the producer obligation that comes with the span
+/// `drop_outer_spans` discards a container span that strictly contains another projected span, so a
+/// container's regions are reachable ONLY through the leaves its producer emits. A producer that gives
+/// a container a span therefore owes a leaf for **every** region of it a rule could need to scan — a
+/// Java `static { … }`/instance initializer, a Python class-body statement run, a C# expression-bodied
+/// property — or that region goes unreachable the instant any sibling projects a leaf. Making the
+/// discard conditional instead was measured and rejected; `drop_outer_spans`'s own doc carries why.
+///
 /// ## Casing: uniform camelCase OUTPUT, snake_case still accepted on INPUT
 /// Dual-purpose type: an OUTPUT shape (`CommonIr`'s `symbols`, via `MinimalIr`) AND the exact type
 /// `docs/NORMALIZED_AST.md`'s `FileProjection.symbols` external-parser input contract
@@ -112,9 +160,13 @@ pub struct SourceSymbol {
         skip_serializing_if = "std::ops::Not::not"
     )]
     pub is_default: bool,
-    /// Body line range for functions/classes (None for type/interface).
+    /// First line of the scannable region: the DECLARATION's own start line, decorators/annotations/
+    /// attributes included — see this struct's "Body span contract" doc section, which is the sole
+    /// owner of the rule and of what `None` claims. Both fields are `Some` together or `None`
+    /// together; a half-populated pair is a producer bug (`dsl::method_scan` skips such a symbol).
     #[serde(default, alias = "body_start", skip_serializing_if = "Option::is_none")]
     pub body_start: Option<u32>,
+    /// Last line of the scannable region, 1-based and INCLUSIVE — see the "Body span contract" above.
     #[serde(default, alias = "body_end", skip_serializing_if = "Option::is_none")]
     pub body_end: Option<u32>,
     /// Pre-computed store-write sites within this symbol's body span, in source order — computed once

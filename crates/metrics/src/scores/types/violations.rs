@@ -20,17 +20,17 @@ pub type FileKinds = BTreeMap<String, FileKind>;
 /// directly into another L2 slice's internals ("cross-slice").
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum FsdViolationKind {
+pub enum FeatureSlicedDesignViolationKind {
     LayerReverse,
     CrossSlice,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct FsdViolation {
+pub struct FeatureSlicedDesignViolation {
     pub from: String,
     pub to: String,
-    pub kind: FsdViolationKind,
+    pub kind: FeatureSlicedDesignViolationKind,
     pub from_layer: u8,
     pub to_layer: u8,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -91,7 +91,7 @@ pub struct ModuleMainSeq {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SfcViolation {
+pub struct FileSizeComplianceViolation {
     pub path: String,
     pub loc: u32,
     pub limit: u32,
@@ -135,26 +135,4 @@ pub struct BusFactorFile {
     pub path: String,
     pub change_count: u32,
     pub authors: u32,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TypeSafetyViolation {
-    pub path: String,
-    pub as_cast: u32,
-    pub any_type: u32,
-    pub loc: u32,
-    /// (as_cast + any_type) / max(loc, 1).
-    pub density: f64,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LodFileSummary {
-    pub path: String,
-    pub count: u32,
-    pub max_depth: u32,
-    pub loc: u32,
-    /// count / max(loc, 1).
-    pub density: f64,
 }

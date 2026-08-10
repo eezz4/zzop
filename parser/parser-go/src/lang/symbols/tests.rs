@@ -14,8 +14,8 @@ fn top_level_function_symbol() {
     assert_eq!(s.kind, SourceSymbolKind::Function);
     assert!(s.exported);
     assert_eq!(s.line, 3);
-    assert_eq!(s.body_start, Some(4));
-    assert_eq!(s.body_end, Some(5));
+    assert_eq!(s.body_start, Some(3));
+    assert_eq!(s.body_end, Some(6));
     assert_eq!(s.id, "a.go#DoThing");
     assert_eq!(s.file, "a.go");
 }
@@ -26,8 +26,10 @@ fn unexported_function_symbol() {
     let syms = parse_symbols("a.go", src);
     let s = sym(&syms, "doThing");
     assert!(!s.exported);
-    assert_eq!(s.body_start, None);
-    assert_eq!(s.body_end, None);
+    // An empty body is still a declaration worth scanning — the contract's totality clause, pinned by
+    // `empty_and_comment_only_bodies_still_report_the_declaration_span` below.
+    assert_eq!(s.body_start, Some(3));
+    assert_eq!(s.body_end, Some(3));
 }
 
 #[test]
@@ -38,7 +40,7 @@ fn method_with_pointer_receiver() {
     assert_eq!(s.kind, SourceSymbolKind::Function);
     assert!(s.exported);
     assert_eq!(s.line, 5);
-    assert_eq!(s.body_start, Some(6));
+    assert_eq!(s.body_start, Some(5));
 }
 
 #[test]
@@ -138,77 +140,75 @@ fn grouped_var_declaration_via_var_spec_list() {
     assert!(!sym(&syms, "port").exported);
 }
 
-/// Regression pin: a function whose LAST top-level statement is itself multi-line (here, a `for` loop
-/// that is the function's ONLY statement) must have `body_end` at the statement's own closing line, not
-/// its opening line — module doc's "`body_start`/`body_end`" section. Before this fix, `body_end` used
-/// `line_of` (the child's START line) for the last child too, so a function shaped `func f() { for
-/// ... { ... } }` reported a `body_end` equal to `body_start`, silently excluding the loop's own body
-/// lines from `Matcher::MethodScan`'s scan window — exactly the shape `trigger_in_loop` most needs to see.
+/// Regression pin, kept from the 2026-08-02 `body_end` fix: a function whose LAST top-level statement
+/// is itself multi-line (here, a `for` loop that is the function's ONLY statement) must not have that
+/// statement's own lines fall outside the scan window — exactly the shape `trigger_in_loop` most needs
+/// to see. The original bug took the last child's START line; the span is now anchored on the brace, so
+/// the failure mode is structurally gone rather than patched, and this test is what says so.
 #[test]
-fn multiline_last_statement_body_end_is_its_own_closing_line() {
+fn multiline_last_statement_is_fully_inside_the_body_span() {
     let src = "package main\n\nfunc f(items []int) {\n\tfor _, it := range items {\n\t\tgo process(it)\n\t}\n}\n";
     let syms = parse_symbols("a.go", src);
     let s = sym(&syms, "f");
-    assert_eq!(s.body_start, Some(4));
-    assert_eq!(s.body_end, Some(6));
+    assert_eq!(s.body_start, Some(3));
+    assert_eq!(s.body_end, Some(7));
 }
 
+/// The three comment shapes that each used to corrupt or erase a Go body span — a leading comment, one
+/// between statements, and a trailing one — in ONE pin, because they no longer have separate causes.
+/// `tree-sitter-go` treats `comment` as an "extra" that can be spliced in as a named child anywhere a
+/// statement can appear, which is why walking into `statement_list` for the first/last real child was
+/// fragile in three different places. The span no longer reads the block's contents at all.
 #[test]
-fn empty_body_function_has_no_body_range() {
-    let src = "package main\n\nfunc noop() {}\n";
-    let syms = parse_symbols("a.go", src);
-    let s = sym(&syms, "noop");
-    assert_eq!(s.body_start, None);
-    assert_eq!(s.body_end, None);
+fn comments_anywhere_in_a_body_cannot_move_either_boundary() {
+    for src in [
+        "package main\n\nfunc f() {\n\t// leading comment\n\tx := 1\n\t_ = x\n}\n",
+        "package main\n\nfunc f() {\n\tx := 1\n\t// mid comment\n\t_ = x\n}\n",
+        "package main\n\nfunc f() {\n\tx := 1\n\t_ = x\n\t// trailing comment\n}\n",
+    ] {
+        let syms = parse_symbols("a.go", src);
+        let s = sym(&syms, "f");
+        assert_eq!(s.body_start, Some(3), "in:\n{src}");
+        assert_eq!(s.body_end, Some(7), "in:\n{src}");
+    }
 }
 
-/// Regression pin: a function whose block opens with a standalone `//` comment before its first real
-/// statement must still get a correct body span — tree-sitter-go's `comment` is an "extra" that can be
-/// interleaved as a NAMED child of `block` (and of `statement_list`) anywhere a statement can appear, so
-/// naively taking the block's/statement_list's first named child breaks the moment that child is a
-/// leading comment. Before the fix, `body_line_range` bailed to `(None, None)` here because the block's
-/// first named child was the comment, not `statement_list`.
+// --- THE SPAN CONTRACT: `body_start` is the DECLARATION's line ---
+
+/// `zzop_core::SourceSymbol`'s "Body span contract". Under the old first-statement reading a Go
+/// method-scan rule could not see the `func` line at all, which is why the whole family of
+/// declaration-anchored concepts that ship for TypeScript (`async` handlers, decorated routes) was
+/// structurally unwritable for `.go` — the declaration is never inside any span. The wrapped signature
+/// here is the shape that also breaks the brace-line reading, so this pins the contract rather than a
+/// formatting coincidence.
 #[test]
-fn function_body_opening_with_comment_still_gets_body_range() {
-    let src = "package main\n\nfunc f() {\n\t// leading comment\n\tx := 1\n\t_ = x\n}\n";
+fn function_body_span_starts_at_the_declaration_and_ends_at_the_closing_brace() {
+    let src = "package main\n\nfunc handler(\n\tw http.ResponseWriter,\n) {\n\tuse(w)\n}\n";
     let syms = parse_symbols("a.go", src);
-    let s = sym(&syms, "f");
-    assert_eq!(s.body_start, Some(5));
-    assert_eq!(s.body_end, Some(6));
+    let s = sym(&syms, "handler");
+    assert_eq!(s.line, 3);
+    assert_eq!(s.body_start, Some(3));
+    assert_eq!(s.body_end, Some(7));
 }
 
-/// Same regression, but the comment sits between two real statements (not just leading) — the fix must
-/// be robust to comments interleaved anywhere in `statement_list`'s children, not merely skip-the-first.
+/// The contract's totality clause: a body that holds no statement at all still has a declaration line,
+/// so it reports a span. Under the first-statement reading an empty or comment-only body collapsed the
+/// WHOLE symbol to `None`/`None` — a silent, total loss of scannability that had nothing to do with
+/// whether the declaration was worth scanning. Only a genuinely body-LESS `func` (a `//go:linkname`
+/// forward declaration, no braces at all) keeps `None`.
 #[test]
-fn function_body_with_comment_between_statements_still_gets_body_range() {
-    let src = "package main\n\nfunc f() {\n\tx := 1\n\t// mid comment\n\t_ = x\n}\n";
+fn empty_and_comment_only_bodies_still_report_the_declaration_span() {
+    let src = "package main\n\nfunc noop() {}\n\nfunc todo() {\n\t// nothing but a comment\n}\n\nfunc decl()\n";
     let syms = parse_symbols("a.go", src);
-    let s = sym(&syms, "f");
-    assert_eq!(s.body_start, Some(4));
-    assert_eq!(s.body_end, Some(6));
-}
-
-/// Trailing-comment counterpart of the leading-comment pin above: a comment AFTER the last real
-/// statement (still inside the block) must not shift `body_end` onto the comment's own line.
-#[test]
-fn function_body_with_trailing_comment_still_gets_correct_body_end() {
-    let src = "package main\n\nfunc f() {\n\tx := 1\n\t_ = x\n\t// trailing comment\n}\n";
-    let syms = parse_symbols("a.go", src);
-    let s = sym(&syms, "f");
-    assert_eq!(s.body_start, Some(4));
-    assert_eq!(s.body_end, Some(5));
-}
-
-/// A body that is ENTIRELY a comment (no real statement at all) has no statement to anchor a body
-/// range to — this must fall back to `(None, None)`, the same as a truly empty `{}` body, rather than
-/// (incorrectly) reporting the comment's own line as both `body_start` and `body_end`.
-#[test]
-fn comment_only_body_has_no_body_range() {
-    let src = "package main\n\nfunc f() {\n\t// nothing but a comment\n}\n";
-    let syms = parse_symbols("a.go", src);
-    let s = sym(&syms, "f");
-    assert_eq!(s.body_start, None);
-    assert_eq!(s.body_end, None);
+    let noop = sym(&syms, "noop");
+    assert_eq!(noop.body_start, Some(3));
+    assert_eq!(noop.body_end, Some(3));
+    let todo = sym(&syms, "todo");
+    assert_eq!(todo.body_start, Some(5));
+    assert_eq!(todo.body_end, Some(7));
+    let decl = sym(&syms, "decl");
+    assert_eq!(decl.body_start, None);
+    assert_eq!(decl.body_end, None);
 }
 
 #[test]

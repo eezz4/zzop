@@ -32,4 +32,18 @@ public class CredentialsConfig {
   public String goodDigestPassword(String password) {
     return org.springframework.security.crypto.bcrypt.BCrypt.hashpw(password, org.springframework.security.crypto.bcrypt.BCrypt.gensalt(12));
   }
+
+  // security/high-entropy-secret — a secret-named field whose literal clears the rule's 80-bit Shannon
+  // floor. Distinct from `hardcoded-secret` above and deliberately so: that rule judges the NAME/value
+  // SHAPE, this one MEASURES the value, and `apiKey`'s shorter literal above trips the first while
+  // staying under this one's floor. Having both in one file is what proves they are separate axes.
+  private static final String sessionToken = "qV7mR2xL9tB4nH6kW8pD3sJ5gZ1cY0fA";
+  private static final String goodSessionToken = System.getenv("ZZOP_SESSION_TOKEN");
+
+  // security/bcrypt-cost-too-low — a single-digit cost factor. `goodDigestPassword` above is already the
+  // negative control: its two-digit `gensalt(12)` must stay silent, so this pair also pins that the
+  // rule reads the NUMBER rather than merely co-occurring with the word bcrypt.
+  public String weakHashPassword(String password) {
+    return org.springframework.security.crypto.bcrypt.BCrypt.hashpw(password, org.springframework.security.crypto.bcrypt.BCrypt.gensalt(4));
+  }
 }

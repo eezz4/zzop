@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use swc_core::common::{SourceMap, Spanned};
+use swc_core::common::SourceMap;
 use swc_core::ecma::ast::{
     AssignExpr, AssignOp, AssignTarget, BlockStmtOrExpr, Expr, MemberExpr, MemberProp, Module,
     ObjectLit, Prop, PropName, PropOrSpread, SimpleAssignTarget,
@@ -158,18 +158,22 @@ fn build_member_symbol(
     line: u32,
     rhs: Option<&Expr>,
 ) -> SourceSymbol {
+    // `body_start` is the ASSIGNMENT TARGET's own line (`zzop_core::SourceSymbol`'s "Body span
+    // contract" — `exports.onSave = async () => …` is this shape's declaration); the function value
+    // supplies only the END, block-bodied from its closing brace and expression-bodied from the
+    // arrow's own end.
     let (is_fn, body_start, body_end) = match rhs {
         Some(Expr::Fn(f)) => (
             true,
-            f.function.body.as_ref().map(|b| line_of(cm, b.span.lo)),
+            f.function.body.as_ref().map(|_| line),
             f.function.body.as_ref().map(|b| line_of(cm, b.span.hi)),
         ),
         Some(Expr::Arrow(a)) => {
-            let (lo, hi) = match &*a.body {
-                BlockStmtOrExpr::BlockStmt(b) => (b.span.lo, b.span.hi),
-                BlockStmtOrExpr::Expr(e) => (e.span().lo, e.span().hi),
+            let hi = match &*a.body {
+                BlockStmtOrExpr::BlockStmt(b) => b.span.hi,
+                BlockStmtOrExpr::Expr(_) => a.span.hi,
             };
-            (true, Some(line_of(cm, lo)), Some(line_of(cm, hi)))
+            (true, Some(line), Some(line_of(cm, hi)))
         }
         _ => (false, None, None),
     };
@@ -235,6 +239,22 @@ mod tests {
         let syms = parse_symbols("x.js", src);
         assert!(syms.iter().any(|s| s.name == "a"));
         assert!(syms.iter().any(|s| s.name == "b"));
+    }
+
+    #[test]
+    fn cjs_expression_arrow_member_span_includes_the_header_line() {
+        // Twin of `symbol_shapes`' `class_property_functions_get_leaf_spans` pin: an expression-
+        // bodied arrow whose header (`async () =>`) and expression sit on different lines must span
+        // from the header — `e.span()` started at the expression, leaving the header line outside
+        // and method-scan rules keyed on `async` silently blind for CJS exports only.
+        let src = "exports.onSave = async () =>\n  save();\n";
+        let syms = parse_symbols("x.js", src);
+        let on_save = syms
+            .iter()
+            .find(|s| s.name == "onSave")
+            .expect("onSave exported");
+        assert_eq!(on_save.body_start, Some(1));
+        assert_eq!(on_save.body_end, Some(2));
     }
 
     #[test]

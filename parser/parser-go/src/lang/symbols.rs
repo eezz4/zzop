@@ -38,18 +38,17 @@
 //! drop a legally-declared name.
 //!
 //! ## `body_start`/`body_end`
-//! Only `Function`-kind symbols (top-level `func` and methods) get a body line range, taken from the
-//! `block`'s `statement_list`'s first/last named child — mirrors the FUNCTION side of
-//! `zzop_parser_rust::lang::symbols`'s convention (no Go declaration shape has a Rust-`class`-like
-//! statement-list body, so every non-`Function` symbol here always carries
-//! `body_start: None, body_end: None`). A body-less func (a `//go:linkname`/cgo-style forward
-//! declaration, syntactically legal but rare) also carries `None`/`None`. `body_start` is the FIRST
-//! child's own START line (`util::line_of`); `body_end` is the LAST child's own END line
-//! (`util::end_line_of`), not its start line — a function whose last top-level statement is itself
-//! multi-line (an `if`/`for`/`switch`/`select` block, the common case for a worker function shaped
-//! `func f() { for ... { ... } }`) would otherwise report a `body_end` that excludes most of that
-//! statement's own lines, silently narrowing `Matcher::MethodScan`'s scan window under the very shape
-//! `MethodScan::trigger_in_loop` most needs to see (a `for` as the whole/last statement in the body).
+//! `zzop_core::SourceSymbol`'s "Body span contract" owns the rule and this crate does not restate it:
+//! `body_start` = the `func` declaration's own line, `body_end` = its body block's closing `}`.
+//!
+//! Only `Function`-kind symbols (top-level `func` and methods) get one, and that is a statement about
+//! GO, not a gap: no Go declaration shape has a statement body other than a `func`. A `type X struct`
+//! / `interface` / alias, and a `const`/`var` spec, carry a FIELD or VALUE list — projecting a span
+//! over one would make `dsl::method_scan::gates::drop_outer_spans` treat it as scannable and claim a
+//! per-member containment the language does not have, so every non-`Function` symbol here carries
+//! `None`/`None` and must keep doing so (the same call `zzop_parser_rust::lang::symbols` makes for a
+//! `struct`/`enum`/`trait`). A body-LESS func (a `//go:linkname`/cgo-style forward declaration,
+//! syntactically legal but rare) is `None`/`None` for the same reason: there is no region.
 
 use tree_sitter::Node;
 use zzop_core::{SourceSymbol, SourceSymbolKind};
@@ -93,7 +92,7 @@ fn function_symbol(rel: &str, node: Node, src: &str) -> Option<SourceSymbol> {
     let name = node_text(name_node, src).to_string();
     let (body_start, body_end) = node
         .child_by_field_name("body")
-        .map(body_line_range)
+        .map(|b| body_line_range(node, b))
         .unwrap_or((None, None));
     Some(SourceSymbol {
         id: format!("{rel}#{name}"),
@@ -123,7 +122,7 @@ fn method_symbol(rel: &str, node: Node, src: &str) -> Option<SourceSymbol> {
     let name = format!("{recv_name}.{method_name}");
     let (body_start, body_end) = node
         .child_by_field_name("body")
-        .map(body_line_range)
+        .map(|b| body_line_range(node, b))
         .unwrap_or((None, None));
     Some(SourceSymbol {
         id: format!("{rel}#{name}"),
@@ -153,37 +152,19 @@ fn receiver_type_name(ty: Node, src: &str) -> Option<String> {
     }
 }
 
-/// A `block`'s line range, taken from its `statement_list`'s first/last NON-COMMENT NAMED child's
-/// START/END line (a body-less `{}`, a comment-only body, or an entirely-erased body all yield
-/// `(None, None)`) — module doc's "`body_start`/`body_end`" section explains why the last child needs
-/// its END, not its start.
+/// The span for a `func`/method that HAS a body: the declaration's own line through the body block's
+/// closing `}` — `zzop_core::SourceSymbol`'s "Body span contract". A body-less `func` (a
+/// `//go:linkname`/cgo-style forward declaration) never reaches here and keeps `None`/`None`.
 ///
-/// Two comment pitfalls this guards against, both from `tree-sitter-go` treating `comment` as an
-/// "extra": it can be spliced in as a named child ANYWHERE a statement could appear, not just between
-/// statements.
-/// 1. At the `block` level: `statement_list` is not necessarily `block`'s first named child — a
-///    comment sitting before the block's first real statement attaches to `block` itself, ahead of
-///    `statement_list` (e.g. `func f() {\n// hi\nx := 1\n}` puts the comment before `statement_list`
-///    among `block`'s own children). Locating `statement_list` by KIND rather than by position handles
-///    this regardless of how many leading comments precede it.
-/// 2. Within `statement_list`: a comment can also be spliced in as `statement_list`'s own leading or
-///    trailing named child (no real statement around it, e.g. the whole body is one comment, or a
-///    comment sits after the last statement). Filtering `comment` out of the candidate children before
-///    taking first/last keeps `body_start`/`body_end` anchored to the first/last REAL statement.
-fn body_line_range(block: Node) -> (Option<u32>, Option<u32>) {
-    let Some(stmts) = valid_named_children(block)
-        .into_iter()
-        .find(|n| n.kind() == "statement_list")
-    else {
-        return (None, None);
-    };
-    let children: Vec<Node> = valid_named_children(stmts)
-        .into_iter()
-        .filter(|n| n.kind() != "comment")
-        .collect();
-    let start = children.first().map(|n| line_of(*n));
-    let end = children.last().map(|n| end_line_of(*n));
-    (start, end)
+/// This reads NOTHING inside the block, and that deletion is the point. The previous version walked to
+/// `statement_list` and took its first/last non-`comment` named child, which made the span depend on
+/// `tree-sitter-go`'s treatment of `comment` as an "extra" splice-able anywhere a statement can
+/// appear — a leading comment shifted `body_start` (or bailed the whole span to `None`), a trailing
+/// one shifted `body_end`, and a comment-only body erased the symbol's scannability entirely. Three
+/// regression tests existed for those three shapes; none of them can recur now, because the boundaries
+/// come from the declaration and the brace rather than from the body's contents.
+fn body_line_range(decl: Node, block: Node) -> (Option<u32>, Option<u32>) {
+    (Some(line_of(decl)), Some(end_line_of(block)))
 }
 
 /// `type_declaration`'s named children are `type_spec`/`type_alias` DIRECTLY (grouped or not — the

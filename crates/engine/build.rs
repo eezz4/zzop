@@ -1,23 +1,14 @@
 //! Derives every cache-invalidation fingerprint from the SOURCE that produces the cached bytes, so
 //! nobody has to remember to bump one.
 //!
-//! ## What this replaces, and why the replacement is smaller than the thing replaced
-//! Each fingerprint used to be a hand-held string (`"rust/syn-2/0.21.0"`, `CACHE_SCHEMA_VERSION`'s
-//! `+rN`, `LEXICAL_FALLBACK_FINGERPRINT`, `DSL_INTERPRETER_FINGERPRINT`) that an author had to bump when
-//! they changed the code behind it. A convention nobody can enforce needs a guard, the guard needs
-//! escape hatches for the cases it reads wrong, and the hatches need their own rules — that stack was
-//! ~400 lines of shell with three ways out, one of which left no record in history at all.
-//!
-//! A hash of the inputs needs none of it. It cannot be forgotten, it cannot be wrong in the dangerous
-//! direction, and there is nothing to skip.
-//!
 //! ## The file set is DERIVED, never listed
 //! Listing the files by hand would rebuild the same defect one layer down: a hand list inside a build
 //! script is exactly as blind to a new file as a hand list inside a guard was. So the set comes from
 //! Cargo: for a crate, hash every `.rs` under its own `src/` **and its own `Cargo.toml`**, then follow
 //! every `path = "..."` dependency in that manifest and do the same, transitively. `parser-rust`
 //! declares `zzop-core` by path, so `zzop-core`'s bytes are in `parser-rust`'s fingerprint because Cargo
-//! says they are — not because someone wrote them down.
+//! says they are — not because someone wrote them down. (What this replaced — a stack of hand-bumped
+//! strings, a guard for them, and three escape hatches — is the cache decision file's to tell.)
 //!
 //! ## Manifests are IN the closure, because source alone under-invalidates
 //! A crate's `.rs` files are not the only thing that decides its output. `swc_core = "71.0.5"` is a
@@ -26,6 +17,9 @@
 //! source nor the lock moving. So each crate's own `Cargo.toml` joins its hash, and the workspace root
 //! `Cargo.toml` + `Cargo.lock` (the resolved graph, which is where a dependency bump actually lands)
 //! join `FP_ENGINE` — the one token that suffixes EVERY arm of `cache::parser_fingerprint`.
+//! ...but OUR OWN release version is filtered out of those two files first, or every arm would move on
+//! every release for a bump that changed no analysis contract. Why, and how ours is told from theirs:
+//! `cache::manifest_version`, included below.
 //!
 //! ## Over-invalidation is accepted, on purpose
 //! A comment-only edit moves the hash and wipes that language's cache. That is the asymmetry
@@ -40,6 +34,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+
+// Shared VERBATIM with the crate so the crate's tests pin the logic this script runs — a build script
+// cannot depend on the crate it builds, and a copy here would rebuild the drift this file eliminates.
+include!("src/cache/manifest_version.rs");
 
 fn main() {
     let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
@@ -110,16 +108,20 @@ fn main() {
     ] {
         // The name is hashed beside the bytes so two files cannot alias by concatenation.
         engine_hash = fnv_str(engine_hash, extra);
-        engine_hash = fnv_bytes(engine_hash, &file_bytes(&workspace.join(extra)));
+        engine_hash = fnv_bytes(
+            engine_hash,
+            &without_own_release_version(extra, &file_bytes(&workspace.join(extra))),
+        );
     }
     out.push_str(&format!(
         "const FP_ENGINE: &str = \"{engine_hash:016x}\";\n"
     ));
 
-    // The cache's bulk invalidator. Composed HERE rather than in a `concat!` at the use site: that macro
-    // takes literals only, and half of this value is now computed. Both axes survive — the release
-    // version (one cache generation reclaimed per release, see the const's own doc) and a source hash
-    // that replaces the hand-held `+rN` counter.
+    // The cache's bulk invalidator, and since 2026-08-05 it is ONE axis: a source hash, nothing else.
+    // It used to be `{release_version}+{hash}`, so every upgrade wiped whether or not any analysis
+    // contract had moved (measured: `v0.29.0 -> v0.29.1` touched zero bytes of this closure and still
+    // cost every user a cold run). The release half was doing HOUSEKEEPING, not correctness, and that
+    // job is now `zzop_cache::evict`'s size cap — see `cache::CACHE_SCHEMA_VERSION`'s doc.
     //
     // Its subject is the STORED SHAPE, so its input is the two crates that define what gets persisted:
     // `zzop-cache` (the entry envelopes) and `zzop-core` (`FileIrSlice`, `Finding`, and the shared types
@@ -132,9 +134,8 @@ fn main() {
             &format!("{:016x}", closure_fingerprint(&workspace.join(member))),
         );
     }
-    let pkg_version = std::env::var("CARGO_PKG_VERSION").unwrap();
     out.push_str(&format!(
-        "const CACHE_SCHEMA_VERSION_DERIVED: &str = \"{pkg_version}+{schema_hash:016x}\";\n"
+        "const CACHE_SCHEMA_VERSION_DERIVED: &str = \"{schema_hash:016x}\";\n"
     ));
 
     let out_path = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("fingerprints.rs");

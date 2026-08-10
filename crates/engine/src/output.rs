@@ -2,8 +2,8 @@
 
 use zzop_core::{dsl::RuleTiming, CommonIr, FileNode, Finding};
 use zzop_metrics::{
-    CriticalFile, CrossLayerCoChurn, FolderAggregates, HealthIndex, Recommendation, Scores,
-    SeamCandidate,
+    CoChangeEdge, CriticalFile, CrossLayerCoChurn, FolderAggregates, HealthIndex, Recommendation,
+    Scores, SeamCandidate,
 };
 
 use crate::{CoverageCensus, EngineConfig, PackSource, PackageImportSummary};
@@ -52,6 +52,21 @@ pub struct AnalyzeOutput {
     /// vocabulary). Git-gated exactly like `scores`/`health`: `None` when git is inactive, `Some`
     /// (possibly an empty `Vec`) when collection succeeded.
     pub layer_co_churn: Option<Vec<CrossLayerCoChurn>>,
+    /// Undirected file-pair co-change edges — the second relation over the same nodes the dep graph
+    /// draws, and until 2026-08-06 the only one of the two that never left this crate: the coupling map
+    /// was consumed by `recommendations`/`seams` and dropped, so no surface could answer "what changes
+    /// together". `layer_co_churn` above is NOT that answer — it keeps only pairs that CROSS an
+    /// architectural layer, and only representative ones per layer pair, so every tie inside a module is
+    /// absent from it by construction.
+    ///
+    /// Git-gated the same way, and `Option` carries the distinction that matters: `None` means git was
+    /// inactive or collection failed, so nothing was MEASURED; `Some(vec![])` means it was measured and
+    /// nothing co-changed. A consumer that flattens those two into "no coupling" states a fact the run
+    /// never established. Ungated by `disabledRules` for the reason `layer_co_churn` is — it is not a
+    /// registered analysis id, so claiming that switch controls it would be a lie.
+    ///
+    /// ⚠ A doubly filtered sample, never a repository total — see `zzop_metrics::co_change_edges`.
+    pub co_change: Option<Vec<CoChangeEdge>>,
     /// The positive pack-load confirmation: one entry per DSL rule pack in `EngineConfig::packs`,
     /// sorted by pack id — so an embedder/agent can verify "did my custom pack actually load" without
     /// inferring it from findings deltas. Always populated; an EMPTY vec is the honest "zero DSL packs
@@ -162,8 +177,9 @@ pub struct CacheStats {
 }
 
 /// One `AnalyzeOutput::packs_loaded` entry — a loaded DSL rule pack's id, its rule count as loaded
-/// (before `disabled_rules` gating), its provenance (`PackSource::as_str`: `"dir"` | `"inline"`), and
-/// how many of this tree's analyzed files fall in scope of >=1 of its rules' `file_pattern`s.
+/// (before `disabled_rules` gating), its provenance (`PackSource::as_str`: `"dir"` | `"inline"`),
+/// how many of this tree's analyzed files fall in scope of >=1 of its rules' `file_pattern`s, and
+/// which of its rules' own path gates admitted zero files.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackLoaded {
     pub id: String,
@@ -175,18 +191,39 @@ pub struct PackLoaded {
     /// per-pack "never applicable here" disclosure: `typescript: 12 rules` on a pure-Go tree reads
     /// `filesInScope: 0`, so zero findings from that pack means "out of scope", not "clean".
     pub files_in_scope: usize,
+    /// The RULE-granularity half of the same census: sorted ids of this pack's rules whose own path
+    /// gates (`file_pattern` AND `file_exclude_pattern` — the definition's owner is
+    /// `analyze::diagnostics::pack_scope::rule_admission`'s module doc) admit ZERO analyzed files. A
+    /// rule listed here could not have read a single byte of this tree, so its zero findings are
+    /// scope, never a clean bill — the distinction `files_in_scope` cannot make one level down (a
+    /// pack with 100 in-scope files can still carry a rule whose own gates match nothing here).
+    /// Derived from the walked rel list, never from execution, so it is byte-identical on warm
+    /// (cache-replayed) and cold runs. In ENVELOPE mode the census additionally lists every rule
+    /// whose matcher kind that mode never evaluates (only `SymbolScan`/`IoScan` run there — see
+    /// `analyze::diagnostics::compute_dsl_scope_filtered`): such a rule read nothing however many
+    /// files its path gates match, so its green is vacuous too. Empty when every rule admits >=1
+    /// file, and DELIBERATELY empty
+    /// for a pack whose `files_in_scope` is 0 (admission is a subset of pattern candidacy, so "all of
+    /// them" is already said by the pack-level zero) — which also covers the empty tree. Same
+    /// loaded-not-gated convention as the rest of this struct: a disabled rule still counts by its
+    /// gates. On the wire this is `zeroAdmissionRules`, serialized only when non-empty (the
+    /// `testPaths` additive-disclosure precedent).
+    pub zero_admission_rules: Vec<String>,
 }
 
 impl PackLoaded {
     /// Builds `AnalyzeOutput::packs_loaded` from `config.packs` + `config.pack_sources`, sorted by pack
     /// id (deterministic regardless of load order). A pack id with no `pack_sources` entry reports
-    /// `"inline"` — see `EngineConfig::pack_sources`. `files_in_scope` is
-    /// `analyze::diagnostics::DslScope::files_in_scope_by_pack` — parallel to `config.packs` ORDER (the
-    /// pairing happens before the id sort), one count per pack; a missing entry (never happens from the
-    /// two real call sites, which compute the census over the same `config.packs`) degrades to `0`.
-    /// Shared by `analyze::assemble` and `envelope::analyze_envelope`, so both entry points confirm the
-    /// identical pack set.
-    pub(crate) fn from_config(config: &EngineConfig, files_in_scope: &[usize]) -> Vec<PackLoaded> {
+    /// `"inline"` — see `EngineConfig::pack_sources`. `scope` is the ONE `compute_dsl_scope` census the
+    /// caller already computed over the same `config.packs`: its per-pack vectors are parallel to
+    /// `config.packs` ORDER (the pairing happens before the id sort), one entry per pack; a missing
+    /// entry (never happens from the two real call sites) degrades to `0`/empty. Shared by
+    /// `analyze::assemble` and `envelope::analyze_envelope`, so both entry points confirm the identical
+    /// pack set.
+    pub(crate) fn from_config(
+        config: &EngineConfig,
+        scope: &crate::analyze::DslScope,
+    ) -> Vec<PackLoaded> {
         let mut loaded: Vec<PackLoaded> = config
             .packs
             .iter()
@@ -201,7 +238,12 @@ impl PackLoaded {
                     .unwrap_or(PackSource::Inline)
                     .as_str()
                     .to_string(),
-                files_in_scope: files_in_scope.get(i).copied().unwrap_or(0),
+                files_in_scope: scope.files_in_scope_by_pack.get(i).copied().unwrap_or(0),
+                zero_admission_rules: scope
+                    .zero_admission_rules_by_pack
+                    .get(i)
+                    .cloned()
+                    .unwrap_or_default(),
             })
             .collect();
         loaded.sort_by(|a, b| a.id.cmp(&b.id));

@@ -14,9 +14,9 @@
 //! **Iterator-adapter closures are deliberately NOT spans**: `xs.iter().map(|x| f(x))` is LAZY — an
 //! adapter's closure runs zero times unless the iterator is consumed (`collect`/`sum`/a `for` loop/
 //! ...), so "proven to run once per iteration" cannot be honored for the closure's body. This module
-//! stays silent there, the same call Python makes for generator expressions, Java for Stream
-//! lambdas, and C# for LINQ (and unlike TS's `ARRAY_ITERATION_METHODS` arm, whose `.map`/`.forEach`
-//! are EAGER). Distinguishing an eager consumer chain (`.map(f).collect()`) would require judging
+//! stays silent there. (Which forms every OTHER language treats as lazy is not restated here —
+//! `zzop_core::dsl::SourceFile::loop_spans`'s doc owns that boundary and its full per-language
+//! list.) Distinguishing an eager consumer chain (`.map(f).collect()`) would require judging
 //! the whole method chain's terminal — a guess this crate's never-guess discipline rules out for v1.
 //! A closure inside a recorded loop is still covered textually by that loop's span, which is the
 //! correct containment either way.

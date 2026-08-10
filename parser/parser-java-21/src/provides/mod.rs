@@ -1,8 +1,8 @@
-//! Java/Spring HTTP route PROVIDES extraction — AST-grade reimplementation of the old lexical
-//! `zzop_parser_java::provides` extractor (parity-first, precision gains second — see `annotations`'
-//! module doc for the specific lexical limits this crate no longer carries).
+//! Java/Spring HTTP route PROVIDES extraction, read off the real `tree-sitter-java` CST — every
+//! annotation is its own AST node here, already segmented and paren-balanced by the grammar (see
+//! `annotations`' module doc for what that buys the argument reader).
 //!
-//! ## Scope (v1 — identical to the old lexical crate's, task-pinned)
+//! ## Scope (v1 — task-pinned)
 //! - Method-level: `@GetMapping`/`@PostMapping`/`@PutMapping`/`@DeleteMapping`/`@PatchMapping`, verb
 //!   implied by the annotation name. Path comes from a bare annotation (empty path), a positional string
 //!   arg (`@GetMapping("/x")`), or a named `value = "/x"` / `path = "/x"` attribute — `value`/`path` are
@@ -20,10 +20,10 @@
 //!   normalization makes the join exact regardless of leading/trailing slashes on either side.
 //! - Class gating: only methods inside a declaration whose OWN annotation set carries
 //!   `@RestController`/`@Controller` produce a provide. A NESTED type gates INDEPENDENTLY of its
-//!   enclosing type (its own annotations only) — same as the old crate's span-scoped
-//!   `enclosing_class` search, just AST-native here.
+//!   enclosing type (its own annotations only) — pinned by
+//!   `tests::a_non_literal_class_prefix_does_not_block_an_independently_gated_nested_type`.
 //!
-//! ## Known limits carried forward from the old lexical crate (v1 scope, unchanged)
+//! ## Known limits (v1 scope)
 //! - `value = {"/a", "/b"}` / `@GetMapping({"/a", "/b"})` (an array of multiple paths on one annotation)
 //!   captures only the FIRST path (`/a`) — a real Spring route registers under every path in the array;
 //!   full multi-path expansion is deliberately out of scope (future work).
@@ -31,9 +31,9 @@
 //!   inherited annotation from a superclass, or a meta-annotation that itself carries `@RestController`
 //!   (Spring supports composed annotations), is invisible here and not detected.
 //!
-//! See `annotations`' module doc for the two lexical limits this AST-based reimplementation FIXES
-//! (documented precision gains, not required for parity), and for `route_path_arg`'s attribute-aware
-//! keying rationale.
+//! See `annotations`' module doc for `route_path_arg`'s attribute-aware keying rationale, and
+//! `tests`' "annotation shapes a text scan would mis-read" block for the paren-in-string and
+//! blank-line-before-declaration shapes this reader handles because the grammar hands it whole nodes.
 
 pub(crate) mod annotations;
 mod extract;

@@ -35,8 +35,9 @@
 //!   which is where three lanes independently got it wrong.
 //! - `analyze`  — `analyze_summary`: one-tree analysis (config auto-discovery + facade call + summary
 //!   assembly); `analyze_envelope_summary`: Mode A full-envelope analysis (no filesystem root — a
-//!   minimal config drives the same facade call, `"{}"` plus `profileRules` when the `_with` twin's
-//!   run knob asks), sharing the tree-mode path's post-facade shaper.
+//!   minimal config drives the same facade call: empty, plus `profileRules` when the `_with` twin's
+//!   run knob asks, plus the `vocabulary` declared by the config beside the envelope FILE when the
+//!   caller knew that file's path), sharing the tree-mode path's post-facade shaper.
 //! - `cross`    — `cross_summary`: multi-tree cross-layer join summary.
 //! - `facts`    — `facts_json`: the post-assembly FACT DUMP (`zzop facts`) — per-tree `CommonIr` plus
 //!   the whole cross-layer join, uncapped, for a user's own rule program to read. The emit half of the
@@ -75,6 +76,8 @@ pub mod output;
 mod siblings;
 mod suggest;
 mod warnings;
+#[cfg(test)]
+mod wire_contract_tests;
 
 pub use analyze::{
     analyze_envelope_summary, analyze_envelope_summary_with, analyze_summary, analyze_summary_with,

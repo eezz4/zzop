@@ -396,15 +396,27 @@ fn handle_message_is_the_parsed_value_seam_handle_line_delegates_to() {
 /// An emitted `instructions` must be a plain string — the field's spec type. A `Value::String` wrapper
 /// is easy to lose to a `json!` macro that stringifies a struct instead.
 #[test]
-fn initialize_carries_the_staleness_notice_iff_there_is_one() {
+fn initialize_always_orients_and_appends_the_staleness_notice_when_there_is_one() {
     let reply = handle_line(r#"{"jsonrpc":"2.0","id":1,"method":"initialize"}"#)
         .expect("initialize must be answered");
-    match crate::staleness::notice() {
-        Some(notice) => assert_eq!(reply["result"]["instructions"], Value::String(notice)),
-        None => assert!(
-            reply["result"].get("instructions").is_none(),
-            "a build with nothing to report must not put an empty/blank `instructions` on the wire"
-        ),
+    let instructions = reply["result"]["instructions"]
+        .as_str()
+        .expect("`instructions` must always be present and a plain string");
+    // The three things an agent otherwise learns by FAILING. Measured 2026-08-07: this slot was
+    // staleness-only and absent in the current build, so a client's whole briefing was seven tool
+    // descriptions — none of which can say "a config must exist before any of us runs".
+    assert!(instructions.contains("zzop.config.jsonc"), "{instructions}");
+    assert!(instructions.contains("config-template"), "{instructions}");
+    assert!(instructions.contains("cross_repo"), "{instructions}");
+    // Whatever `staleness::notice()` decides for this build must still ride, appended. Asserting a
+    // concrete presence/absence would make this test's meaning depend on WHEN it runs (a fresh
+    // checkout is silent today and would speak in a year); the decision's two directions are tested
+    // over injected inputs in `crate::staleness::tests`.
+    if let Some(notice) = crate::staleness::notice() {
+        assert!(
+            instructions.contains(&notice),
+            "the staleness notice must survive alongside the orientation: {instructions}"
+        );
     }
 }
 

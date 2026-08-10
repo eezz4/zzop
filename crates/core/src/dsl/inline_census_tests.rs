@@ -171,7 +171,30 @@ const UNREVIEWED_CEILING: usize = 0;
 /// is a decision, per this module's header). Not config from day one for the sibling rows' reason: no
 /// `vocabulary.secretNameTokens`-shaped key exists yet, and minting one for this change alone would
 /// leave the older rows' identical vocabulary still inline — that debt closes together or not at all.
-const CONVENTION_CEILING: usize = 64;
+/// +2 2026-08-09: `typescript/as-cast` and `typescript/no-explicit-any` each gained a
+/// `require_file_absent` restating `zzop_engine::generated_banner::MARKERS` as a regex, so a rule whose
+/// fix advice is "change this line" goes silent on a file the next regeneration rewrites (measured: 30
+/// findings over two corpus files). NOT config from day one for a STRUCTURAL reason, not a missing key:
+/// `vocabulary.generatedFileMarkers` already exists and the engine already reads it — a DSL matcher
+/// cannot. Its patterns are compiled from the pack's own JSON before any config is resolved, so no
+/// line-scan field can consult a vocabulary key without a new engine-side matcher input, which is
+/// exactly the surface the 2026-08-09 decision declined to build. The two rules disclose the divergence
+/// in their own `message`; the debt closes if a config-aware matcher field is ever minted.
+/// +1 2026-08-09: `egress/get-and-body` gained the SAME `require_file_absent` regex, byte for byte, for
+/// the same reason one rule over — its fix advice ("use POST, or move the data to query params") is
+/// undone by the next regeneration. A third row rather than a shared one because the value's key
+/// includes the rule id and applying a policy to a new rule is itself a decision (this module's header);
+/// the STRUCTURAL reason it cannot be config is unchanged, and method-scan is under it exactly as much
+/// as line-scan — `MethodScan`'s patterns are compiled from the pack JSON before any config resolves.
+/// Measured: 1 corpus finding removed (`fe-vue/src/services/api.ts`, a swagger-typescript-api client),
+/// which was this rule's entire corpus yield; deleting the banner line alone brings it back.
+///
+/// **Set to the measured count, never "count + room".** Reviewed 2026-08-09: the two bumps above had
+/// each added +1 to a bound that was already slack, so the ceiling stood at 67 against 65 actual rows —
+/// two more convention rows could have entered with no bump, hence no author and no written case, which
+/// is the decision moment this ratchet exists to force. Recount before changing it:
+/// `cargo test -p zzop-core dsl_inline_value_census -- --nocapture` prints `convention=<n>`.
+const CONVENTION_CEILING: usize = 65;
 
 /// [`CENSUS_FILE`] as an absolute path — one owner, so the reader and the writer cannot disagree about
 /// which file this census is. `real_dsl_dir()` is `<manifest>/../../rules/dsl`, so two levels up from it
@@ -390,6 +413,32 @@ fn dsl_inline_value_census_matches_the_committed_snapshot() {
         bad.len(),
         bad.join("\n    "),
         legal.join("/"),
+    );
+
+    // The declared line shape ends in an optional `[# rationale]`, and until 2026-08-10 only the
+    // `convention` axis had anything look at what sat there (the `-> <config-key>` column below, whose
+    // parse already rejects any text between the key and the ` #` — measured). Every other axis had its
+    // tail treated as opaque: `split_value_and_tail` swallows everything after the closing quote and
+    // `render` writes a nonempty tail back verbatim, so a tail that never was a rationale is not
+    // corrected by regeneration — it is PERPETUATED by it. That is not hypothetical: three rows carried
+    // a second copy of their own quoted value, pasted in during the hand-triage that created this file
+    // (b9dfa3f), and survived every regeneration since because nothing ever read the tail's shape.
+    let bad_tail: Vec<String> = prior
+        .iter()
+        .filter(|(_, (axis, _))| axis != "convention")
+        .filter(|(_, (_, tail))| !tail.is_empty() && !tail.starts_with('#'))
+        .map(|((k, v), (axis, tail))| format!("{k} {axis} {v} {tail}"))
+        .collect();
+    assert!(
+        bad_tail.is_empty(),
+        "{} census row(s) carry text after the value that is not a `# rationale`. Each line below is \
+         reproduced verbatim -- grep {CENSUS_FILE} for it:\n    {}\n\nThe declared line shape is \
+         `<pack>:<rule>:<field> <axis> <value, Rust-debug-quoted> [# rationale]` (convention-axis rows \
+         additionally carry `-> <config-key>` before the `#`). Anything after the closing quote of the \
+         value must therefore begin with `#`. Regenerating will NOT fix this -- a nonempty tail is \
+         carried forward verbatim -- so edit the line: keep the rationale, delete the rest.",
+        bad_tail.len(),
+        bad_tail.join("\n    "),
     );
 
     // Every `convention` row must carry its `-> <config-key>` column — the sibling policy census's

@@ -35,7 +35,13 @@
         "crates/summary/src/graph/dep.rs",
         "crates/summary/src/graph/dep/node.rs",
         "crates/summary/src/graph/risk.rs",
-        "crates/summary/src/graph/posture.rs"
+        "crates/summary/src/graph/posture.rs",
+        "crates/summary/src/graph/cochange.rs",
+        "crates/summary/src/graph/cochange/folded.rs",
+        "crates/summary/src/graph/fold.rs",
+        "crates/summary/src/graph/dep/folded.rs",
+        "crates/summary/src/graph/dep/render.rs",
+        "crates/summary/src/graph/vocabulary.rs"
       ],
       "reads": [
         "trees[].sourceId",
@@ -87,7 +93,7 @@
         "zzop_engine::rule_sightlines (compiled-in per-rule sightline declarations — CAPABILITY input, code not run)",
         "zzop_engine::framework_recognizers (compiled-in per-parser framework declarations — CAPABILITY input, code not run)"
       ],
-      "emits": "the aggregate-visibility view: per-extension dispatch table (structural/lexicalOnly/degraded, plus inDepGraph — files of the extension with at least one resolved outgoing dep edge, the per-extension import-resolution sparsity baseline), per-tree blindSpots (class-aware cross of each declared rule sightline with the tree's structural extensions) with blindSpotBasis (what the cross was computed from) and the top-level blindSpotMeaning legend, the top-level frameworkRecognizers table ({framework, extensions, emits} rows verbatim from the compiled-in declarations, uncrossed with any tree) with its frameworkRecognizerMeaning legend — the build-capability answer to \"does this tool know my stack?\" that previously had no user surface, per-tree warnings forwarded verbatim, the census with joinVisibility spelled as a sentence (naming that only an io-fact-contributing overlay restores join visibility), a conditional walkNote when files under a .git/ segment were walked (the otherTrees convention: absent means none were), and the unmeasured axes as a FIELD — by ruling (2026-07-31) no single score exists in the schema",
+      "emits": "the aggregate-visibility view: per-extension dispatch table (structural/lexicalOnly/degraded, plus inDepGraph — files of the extension with at least one resolved outgoing dep edge, the per-extension import-resolution sparsity baseline), per-tree blindSpots (class-aware cross of each declared rule sightline with the tree's structural extensions) with blindSpotBasis (what the cross was computed from) and the top-level blindSpotMeaning legend, the top-level frameworkRecognizers table ({framework, extensions, emits} rows verbatim from the compiled-in declarations, uncrossed with any tree) with its frameworkRecognizerMeaning legend — the build-capability answer to \"does this tool know my stack?\" that previously had no user surface, per-tree warnings forwarded verbatim, the census with joinVisibility as COUNTS (provides, consumesKeyed, consumesUnresolved) plus a meaning — naming that only an io-fact-contributing overlay restores join visibility, and that a key is a precondition for joining rather than proof of one; no rate is derived, because a quotient reads the same at 1-of-1 as at 400-of-440, a conditional walkNote when files under a .git/ segment were walked (the otherTrees convention: absent means none were), and the unmeasured axes as a FIELD — by ruling (2026-07-31) no single score exists in the schema",
       "noMcpTwinBecause": "an authoring/ops aggregate over the whole tree. The MCP agent surface already carries the per-file half (check_file) and the per-run census rides every analyze reply; an agent wanting the aggregate can ask analyze_repo and read coverage. If agent demand for the AGGREGATE arrives, promote then — the core (zzop_facade::query_coverage_json) is host-neutral by construction, so the twin is a dispatch entry away."
     },
     "zzop explain": {
@@ -106,6 +112,10 @@
     "cache": {
       "mcpAnalyzeReply": "omit",
       "note": "Internal engine cache-hit/miss diagnostic (CacheStatsView). Not referenced anywhere in the scanned delivery lane (all three directories — see `_doc`). Available only via the raw zzop-facade output (direct engine embedding) — a deliberate internal-only performance diagnostic, not part of any curated summary."
+    },
+    "coChange": {
+      "mcpAnalyzeReply": "omit",
+      "note": "Never referenced anywhere in the scanned delivery lane (all three directories — see `_doc`), for the same reason `ir` is omitted and NOT because it is bulky: the edge list is UNBOUNDED in tree size (one entry per surviving file pair — 972 on zzop's own tree, `zzop graph --domain cochange --top 100000 | grep -c ' --- '`), while the shipped reply is capped. AVAILABILITY: the CLI-only `zzop graph --domain cochange` lane draws it, capped by `--top` and with that cap plus the two upstream filters disclosed inside the document itself; a direct zzop-facade embedding yields the whole array. NOT interchangeable with `layerCoChurn`: that field keeps only pairs CROSSING an architectural layer, so it cannot answer 'what changes together' inside one module, which is this field's whole subject. A consumer must also keep `null` and `[]` apart — `null` means git was inactive (nothing measured), `[]` means it was measured and no pair survived."
     },
     "configWarnings": {
       "mcpAnalyzeReply": "carry",
@@ -133,7 +143,7 @@
     },
     "findings": {
       "mcpAnalyzeReply": "carry-conditional",
-      "note": "Shaped via output::shape_findings into {total, bySeverity, byRule, shown (severity-desc, capped at DEFAULT_FINDINGS_LIMIT=50 unless the caller supplies `limit`), truncated?} — never the raw findings array verbatim."
+      "note": "Shaped via output::shape_findings into {total, bySeverity, byRule, shown (severity-desc, capped at DEFAULT_FINDINGS_LIMIT=50 unless the caller supplies `limit`), truncated?, testPaths?} — never the raw findings array verbatim."
     },
     "folders": {
       "mcpAnalyzeReply": "omit",
@@ -145,7 +155,7 @@
     },
     "health": {
       "mcpAnalyzeReply": "carry-conditional",
-      "note": "Only `health.pain` (the scalar) rides `architecture.pain`; `contributors` (the per-metric breakdown) never reaches the reply. Gated on `health` being non-null (git signals ran this tree). The full health object is available only via the raw zzop-facade output (direct engine embedding)."
+      "note": "Gated on `health` being non-null (git signals ran this tree). `contributors` (the per-metric breakdown, including the rows naming which metrics were UNMEASURED) never reaches the reply — the full health object is available only via the raw zzop-facade output (direct engine embedding). What does ride `architecture` is `pain` PLUS its denominator: `painMeasuredWeight`/`painTotalWeight` (mirroring `health.measuredWeight`/`totalWeight`) and a `painMeaning` sentence. That trio is deliberate and is the one place this contract lets a composite scalar cross to a host surface: `pain` renormalizes over the metrics that had a population, so quoting it without saying how much of the metric table was measurable reproduces exactly the folded-single-score failure `queryCoverage` forbids. Before 2026-08-08 only the bare scalar crossed, and because an unmeasurable metric scores 100 and contributed no pain, a tree zzop could see LESS of scored better. `pain` is null (never 0) when nothing was measurable."
     },
     "ir": {
       "mcpAnalyzeReply": "omit",
@@ -177,11 +187,11 @@
     },
     "scoreMeanings": {
       "mcpAnalyzeReply": "omit",
-      "note": "One sentence per `scores` key, shipped beside the numbers it explains (added 2026-08-04). Follows `scores` exactly: present when git signals ran, absent otherwise, and omitted from the MCP reply for the same reason `scores` is — that reply forwards only the DERIVED architecture summary, so a legend for numbers it does not carry would explain nothing. Reachable on the raw zzop-facade output (direct engine embedding) and the `zzop analyze` CLI form. Why it exists at all: four of the seventeen score keys are bare acronyms (`sdp`, `sfc`, `lod`, `fsd`) whose expansion lived only in Rust doc-comments — a name survey measured zero occurrences of \"Stable Dependencies Principle\" across docs/ and site/ — so a consumer holding `scores.sdp = 41.2` had no vocabulary on any surface. Same self-describing-reply device as `verdictMeaning`, and the same reason: a documentation table would give one fact a second owner. Definitions have one owner, `zzop_metrics::SCORE_MEANINGS`, whose completeness is pinned against serde's own key set."
+      "note": "One sentence per `scores` key, shipped beside the numbers it explains (added 2026-08-04). Follows `scores` exactly: present when git signals ran, absent otherwise, and omitted from the MCP reply for the same reason `scores` is — that reply forwards only the DERIVED architecture summary, so a legend for numbers it does not carry would explain nothing. Reachable on the raw zzop-facade output (direct engine embedding) and the `zzop analyze` CLI form. Why it exists at all: four of the then-seventeen score keys were bare acronyms whose expansion lived only in Rust doc-comments — two of them (`sfc`, `fsd`) have since been renamed on the wire to `fileSizeCompliance`/`featureSlicedDesign` because their letters named the wrong thing, and `sdp` stays abbreviated because it abbreviates a proper name (`lod`, the other such key, was removed with its score on 2026-08-08 for never having measured anything) — a name survey measured zero occurrences of \"Stable Dependencies Principle\" across docs/ and site/ — so a consumer holding `scores.sdp = 41.2` had no vocabulary on any surface. Same self-describing-reply device as `verdictMeaning`, and the same reason: a documentation table would give one fact a second owner. Definitions have one owner, `zzop_metrics::SCORE_MEANINGS`, whose completeness is pinned against serde's own key set. The completeness pin runs in BOTH directions, so a sentence can neither be missing for a live score nor outlive a removed one."
     },
     "scores": {
       "mcpAnalyzeReply": "omit",
-      "note": "The raw per-metric Scores struct (which feeds health/recommendations) is never forwarded directly — only the DERIVED `health.pain` and top `recommendations[0]` reach the reply via the architecture summary. Raw scores available only via the raw zzop-facade output (direct engine embedding). Its legend rides beside it as `scoreMeanings` (see that row)."
+      "note": "The raw per-metric Scores struct (which feeds health/recommendations) is never forwarded directly — only the DERIVED `health.pain` and top `recommendations[0]` reach the reply via the architecture summary. Raw scores available only via the raw zzop-facade output (direct engine embedding). Its legend rides beside it as `scoreMeanings` (see that row). Since 2026-08-08 every score also carries the POPULATION it scored over in the same object (`featureSlicedDesign.layerClassifiedImports`, `busFactor.total`, `mainSequence.classifiedFiles`, ...): a population of 0 is the never-measured signal, because every per-metric formula returns 100 on an empty population and the denominator is the only thing that separates \"judged everything, all clean\" from \"found nothing to judge\". The same ruling removed `typeSafety` and `lod`, whose input channels had no producer anywhere in the build and which therefore published a perfect score on every run ever made. NOTE the parity consequence: because this row is `omit`, the MCP reply carries no per-metric population at all — which is exactly why `architecture` now forwards `pain`'s own denominator (`painMeasuredWeight`/`painTotalWeight`), see the `health` row."
     },
     "seams": {
       "mcpAnalyzeReply": "omit",
@@ -203,7 +213,7 @@
     },
     "crossLayerFindings": {
       "mcpAnalyzeReply": "carry-conditional",
-      "note": "Shaped via output::shape_findings identically to per-tree findings (total/bySeverity/byRule/shown+truncated) — never the raw array verbatim."
+      "note": "Shaped via output::shape_findings identically to per-tree findings (total/bySeverity/byRule/shown+truncated?+testPaths?) — never the raw array verbatim."
     },
     "warnings": {
       "mcpAnalyzeReply": "carry",

@@ -20,20 +20,41 @@ pub mod dead_candidates;
 pub mod dead_exports;
 pub mod unreachable;
 
-use zzop_core::{register_native_analysis_stub, RuleRegistry};
+use zzop_core::rule_channels::reads::NO_IO;
+use zzop_core::{
+    declare_native_rule_channels, register_native_analysis_stub, NativeRuleChannels, RuleIoChannel,
+    RuleRegistry,
+};
+
+/// Every native analysis id this crate owns, each on one row with the cross-layer io channels its rule
+/// body reads (`zzop_core::rule_channels`' mechanism doc holds the contract). ONE table, two readers —
+/// [`register_native_analyses`] and [`native_rule_channels`] — so an id cannot be registered without a
+/// channel statement, and the statement cannot drift from the id it describes.
+///
+/// Every row here reads [`NO_IO`], and that is a property of the crate rather than a coincidence: these
+/// rules judge the dependency/dead-code graph and the symbol call graph, which are extracted per file and
+/// never enter the cross-layer io join. `rule_contracts::rule_channels` checks the claim the only way it
+/// can be checked — this crate's own source names no io kind and constructs no `IoProvide`/`IoConsume`.
+const NATIVE_ANALYSES: &[(&str, &[RuleIoChannel])] = &[
+    ("circular", NO_IO),
+    ("unreachable", NO_IO),
+    ("dead-candidates", NO_IO),
+    ("unimported-export", NO_IO),
+    ("cache-lane-file-read", NO_IO),
+];
 
 /// Registers every native analysis id whose implementation lives in this crate (see `rules/README.md`'s
 /// "Adding a rule" section); `zzop_engine::register_all_native` composes this with the other crates' own.
 pub fn register_native_analyses(registry: &mut RuleRegistry) {
-    for id in [
-        "circular",
-        "unreachable",
-        "dead-candidates",
-        "unimported-export",
-        "cache-lane-file-read",
-    ] {
-        register_native_analysis_stub(registry, id);
+    for row in native_rule_channels() {
+        register_native_analysis_stub(registry, &row.rule_id);
     }
+}
+
+/// This crate's half of the rule→io-channel declaration, composed with the other crates' own by
+/// `zzop_engine::native_rule_channels` — the same aggregator shape as [`register_native_analyses`].
+pub fn native_rule_channels() -> Vec<NativeRuleChannels> {
+    declare_native_rule_channels(NATIVE_ANALYSES)
 }
 
 pub use cache_lane_file_read::{

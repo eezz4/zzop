@@ -7,8 +7,8 @@
 # blocks the commit. Fixing it by hand is three steps: regenerate, then copy LICENSE and
 # THIRD-PARTY-NOTICES.md into each shipping root (today that is the npm shim, its five platform
 # sub-packages, and the .mcpb bundle), then re-run the guard. That sequence was hand-executed twice
-# in one session, which is the definition of work that belongs to a script rather than to a person
-# (`.claude/context/0.guides/working-agreements.md` §4.6).
+# in one session. A sequence executed by hand twice is work that belongs to a script rather than to a
+# person: the second occurrence is the signal to change the environment, not to be more careful.
 #
 # ## Why it has no subject list of its own
 # It has NO independent idea of which roots must carry what. It runs `check-license-shipping.sh`,

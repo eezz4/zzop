@@ -27,9 +27,12 @@ GUARDS=(
   check-ruff-isolation
   check-syn-isolation
   check-tree-sitter-isolation
+  check-git-spawn-isolation
   check-guards-wired
   check-rules-catalog-sync
   check-rule-desc-tokens
+  check-pack-suppress-sentence
+  check-matcher-glossary-sync
   check-docs-rule-ids
   check-docs-link-graph
   check-io-key-vocab
@@ -40,6 +43,7 @@ GUARDS=(
   check-committed-config-vocabulary
   check-shell-pipe-sigpipe
   check-version-lists-parsers
+  check-framework-prose-enumeration
   check-asset-name-prose
   check-deploy-facts-prose
   check-overclaim-prose

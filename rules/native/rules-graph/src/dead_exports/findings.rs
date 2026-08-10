@@ -22,8 +22,17 @@ fn dead_export_to_finding(symbol_lines: &HashMap<(&str, &str), u32>, d: DeadExpo
         .get(&(d.file.as_str(), d.name.as_str()))
         .copied()
         .unwrap_or(1);
+    // The generated-file escape hatch is named here, not only in the catalog: a reader holding 15 of
+    // these on one machine-written file does not open the catalog, and the only other hatch this
+    // message offers ("turn the rule off") costs them every other finding in the tree. This rule
+    // already skips files carrying a generated banner; the sentence exists because the case that
+    // reaches a user is the one with NO banner, where `exclude` is the answer and nothing said so.
     let message = format!(
-        "exported {} '{}' is {} ({}). {} {} if this is public API consumed outside this repo (e.g. \
+        "exported {} '{}' is {} ({}). {} A file carrying a machine-generated banner in its first 8 \
+         lines is skipped by this rule already (`vocabulary.generatedFileMarkers` picks the banner \
+         vocabulary); a generator that stamps NO banner is invisible to that, and the answer for it \
+         is an `exclude` entry for its path — deleting the `export` there is undone by the next \
+         regeneration. {} if this is public API consumed outside this repo (e.g. \
          published to npm) — such consumers are invisible to this in-repo import graph.",
         kind_label(d.kind),
         d.name,

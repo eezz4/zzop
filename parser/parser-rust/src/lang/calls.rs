@@ -29,6 +29,42 @@
 //!   a cross-file `<file>#<Type>.<assoc>` edge resolve. `self.method()` deliberately does NOT set one:
 //!   `Self` is not an importable name, and guessing the impl's type here would produce an edge the
 //!   resolver cannot verify.
+//!
+//! # Inline `mod` bodies are NOT walked — the same v1 scope every other module here states
+//! An item nested inside an inline `mod foo { ... }` block is out of v1 scope, exactly as
+//! `lang::symbols`'s module doc says of `SourceSymbol`s, `lang::imports` says of
+//! `use` statements, and `adapters::axum` says of routers. This module used to be the ONE
+//! dissenter, walking into `Item::Mod` on the premise that "a `mod x { ... }` block's items are still
+//! THIS file's symbols, so their calls belong to this file too". That premise was FALSE, and its
+//! falseness ran in the false-negative direction:
+//!
+//! `parse_symbols` mints no symbol for a nested item, so a `RawCall` attributed to one had no symbol of
+//! its own to name — it borrowed the id an item at file top level WOULD have. `mod v1 { fn handler() }`
+//! and a top-level `fn handler()` therefore produced the SAME `from_symbol`, and
+//! `zzop_core::callgraph::build_symbol_graph` buckets by file and emits both sets of edges from that one
+//! node. MEASURED before the fix, through the real engine: a Rust tree whose deployed handler checks
+//! nothing was flagged by `mutating-route-no-auth`; appending a legacy `mod v1` whose homonym handler
+//! called `verify_token()` — a function the DEPLOYED route never reaches — silenced the finding
+//! entirely. An unrelated module's guard cleared an open mutating route.
+//!
+//! **The cost of not walking, stated plainly, because it is a real recall loss:** a call written inside
+//! an inline `mod` block is now invisible to the call graph. A guard that a handler genuinely reaches
+//! only through an inline-mod helper will no longer clear its route, so `mutating-route-no-auth` can
+//! report a route that IS guarded. That direction is the safe one — a visible false positive a reader
+//! can refute, rather than a silent clearance nobody sees — and it is the same trade
+//! `zzop_parser_python_3::lang::calls` made for nested classes, in its own words: dropping them "is
+//! not a separate policy; it is the only honest option available", because `parse_symbols` mints no
+//! symbol for them and walking in "would attribute its calls to the innermost span that DOES cover
+//! them" — a mis-attribution. `zzop_parser_java_21::lang::calls` states the positive half of the same
+//! rule: a lambda body IS covered precisely because it "is not a symbol-bearing declaration in
+//! `lang::symbols`'s scope", so its calls fall inside a span that a real symbol owns.
+//!
+//! The rule both siblings encode, and that this module now follows: **attribute a call only to a symbol
+//! `lang::symbols` actually emits.** `inline_mod_calls_are_not_attributed_to_a_homonym_top_level_symbol`
+//! and `every_from_symbol_is_a_symbol_parse_symbols_emits` in this module's tests pin it, so the two
+//! files cannot drift back into opposite premises. Qualifying inline-mod ids (`file.rs#x::inner`) and
+//! emitting matching symbols from `symbols.rs`/`imports.rs`/`axum.rs` is the larger fix that would
+//! recover the recall; it changes projected symbol ids, so it is not a same-window change.
 
 use syn::spanned::Spanned;
 use syn::{Expr, ImplItem, Item, Stmt};
@@ -67,15 +103,7 @@ fn walk_item(rel: &str, item: &Item, out: &mut Vec<RawCall>) {
                 }
             }
         }
-        // A `mod x { ... }` block's items are still THIS file's symbols (`symbols.rs` is file-scoped and
-        // v1-flat), so their calls belong to this file too.
-        Item::Mod(m) => {
-            if let Some((_, items)) = &m.content {
-                for inner in items {
-                    walk_item(rel, inner, out);
-                }
-            }
-        }
+        // `Item::Mod` is deliberately NOT walked — see the module doc's "Inline `mod` bodies" section.
         _ => {}
     }
 }
@@ -97,8 +125,9 @@ fn walk_stmt(from: &str, stmt: &Stmt, out: &mut Vec<RawCall>) {
             }
         }
         Stmt::Expr(e, _) => walk_expr(from, e, out),
-        // A nested `fn`/`impl` inside a body is still a top-level-ish symbol elsewhere; its calls are
-        // attributed there, not here, so nothing to do.
+        // A `fn`/`impl` declared INSIDE a body gets no `SourceSymbol` of its own either, so — by the
+        // module doc's rule — there is no id its calls could honestly be attributed to. Skipped, same
+        // as an inline `mod`.
         Stmt::Item(_) | Stmt::Macro(_) => {}
     }
 }

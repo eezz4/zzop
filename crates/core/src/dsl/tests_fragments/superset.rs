@@ -35,8 +35,12 @@ use std::collections::BTreeSet;
 use super::super::fragments::shared_fragments;
 use super::{raw_packs, repo_rel};
 
-/// The shared fragment every `{BASE}-*` extension must contain in full.
-const BASE: &str = "test-paths";
+/// The shared fragment every `{BASE}-*` extension must contain in full. Read from the production const
+/// rather than respelled here: `fragments::is_shared_test_path_vocabulary` decides at RUN time which
+/// exclusions are the shared test-path family (it is what routes a rule's `vocabulary.extraTestPathPatterns`
+/// tail), and this pin decides at TEST time which fragments must stay supersets of the base. A second
+/// spelling of the family prefix would let those two disagree about which fragments they are talking about.
+const BASE: &str = super::super::fragments::TEST_PATH_FRAGMENT_PREFIX;
 
 /// A fragment read as `FLAGS( ARM | ARM | … )` — the only shape this pin can reason about.
 struct Alternation {

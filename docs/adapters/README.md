@@ -22,11 +22,8 @@ separate, structural-validation-only story, distinct from actually running one. 
 envelope, use the `analyze_envelope` MCP tool on `zzop-mcp`, the `zzop analyze-envelope <file>`
 subcommand on the **`zzop` CLI binary**, or embed `zzop-facade` directly — there is no other runner.
 The subcommand is on `zzop`, not on `zzop-mcp`: that binary accepts only `mcp`, `version` and `help`,
-and exits 2 on anything else. (The historical JS implementation
-of the npm CLI, retired 2026-07-20, never ran Mode A either: its only envelope-shaped subcommands
-were `zzop adapter validate <path>`, structural validation only, and `zzop init adapter --mode a|b`,
-which scaffolded starter FILES rather than running an analysis. Today's `@zzop/cli` npm package ships
-the same native `zzop` binary, so it runs Mode A via `zzop analyze-envelope`.)
+and exits 2 on anything else. `@zzop/cli` ships that same native `zzop` binary, so it runs Mode A
+via `zzop analyze-envelope` too.
 
 ## The fixture
 
@@ -38,6 +35,14 @@ every normalization rule: leading-slash addition, duplicate-slash collapse, trai
 `{x}`/`:x` path-param collapse to `{}`, method upper-casing, and (consume side only) `?query`/
 `#fragment` suffix drop. It also covers edge inputs: empty path, root path (`/`), a path that is
 only a param, mixed `{a}/:b` params, and query-only input.
+
+`:x` collapses **only where the colon starts a segment or follows an in-segment separator** —
+Express/Rails/NestJS spellings such as `/users/:id`, `/flights/:from-:to`, `/plantae/:genus.:species`,
+`.:format`. A colon that *suffixes* a segment which already has content is the Google-AIP /
+gRPC-Gateway / Buf **custom-method** separator (`/v1/users/{id}:activate`, `/v1/users:batchGet`), and
+the token after it is kept verbatim: it identifies the endpoint, so collapsing it would key
+`:activate` and `:deactivate` identically. An adapter that reproduces only the naive `:name` rule
+will key AIP routes wrong and join them to each other.
 
 It is committed, not generated at build time, and is verified byte-for-byte against the real
 functions by `crates/core/tests/key_normalization_fixture.rs` on every `cargo test`. A diff in

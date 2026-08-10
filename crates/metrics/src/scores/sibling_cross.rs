@@ -18,10 +18,7 @@ pub fn compute_sibling_cross(
 
     // Deterministic traversal: HashMap iteration order is unspecified, so sorting by the importer path
     // gives a stable, reproducible order.
-    // Judged per IMPORTER: an excluded file is not a subject here, so it contributes neither a
-    // violation nor a denominator slot. Its edges are still real for everyone else — a scored file
-    // importing excluded code keeps that edge and any violation the edge commits, because the scored
-    // file is the one that chose it (see `ScoresInput::is_scored`).
+    // Subject here is the IMPORTER (`from`), never the target — see `ScoresInput::is_scored`.
     let mut froms: Vec<&String> = dep.keys().filter(|from| is_scored(from)).collect();
     froms.sort();
 

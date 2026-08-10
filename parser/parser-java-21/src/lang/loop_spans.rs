@@ -14,10 +14,10 @@
 //!
 //! **Stream-pipeline lambdas are deliberately NOT spans**: `xs.stream().map(x -> f(x))` is LAZY —
 //! intermediate operations run zero times unless a terminal operation consumes the stream, so
-//! "proven to run once per iteration" cannot be honored for the lambda's body. This module stays
-//! silent there, the same call Python makes for generator expressions and Rust for `.iter().map(...)`
-//! closures (and unlike TS's `ARRAY_ITERATION_METHODS` arm, whose `.map`/`.forEach` are EAGER). A
-//! lambda inside a recorded statement loop is still covered textually by that loop's span, which is
+//! "proven to run once per iteration" cannot be honored for the lambda's body, so this module stays
+//! silent there. (Which forms every OTHER language treats as lazy is not restated here —
+//! `zzop_core::dsl::SourceFile::loop_spans`'s doc owns that boundary and its full per-language list.)
+//! A lambda inside a recorded statement loop is still covered textually by that loop's span, which is
 //! the correct containment either way.
 
 use tree_sitter::TreeCursor;

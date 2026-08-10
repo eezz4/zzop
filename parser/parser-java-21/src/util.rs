@@ -12,8 +12,8 @@ pub(crate) fn line_of(node: Node) -> u32 {
     node.start_position().row as u32 + 1
 }
 
-/// 1-based END line of any tree-sitter node (the line its LAST byte sits on) — used for a body span's
-/// closing brace line, mirroring the old lexical crate's `frame`-close `line` value.
+/// 1-based END line of any tree-sitter node (the line its LAST byte sits on) — a body span's closing
+/// brace line comes from this (`lang::symbols`' `body_end`).
 pub(crate) fn end_line_of(node: Node) -> u32 {
     node.end_position().row as u32 + 1
 }
@@ -62,8 +62,8 @@ pub(crate) fn has_modifier_keyword(modifiers: Option<Node>, kw: &str) -> bool {
 
 /// Every `annotation`/`marker_annotation` directly attached via `modifiers` — the declaration's OWN
 /// annotation set (never a superclass's, an interface default, or a meta-annotation's own composed
-/// annotations — those are invisible to a per-declaration AST read, same documented limit the old
-/// lexical crate's `provides.rs` module doc carries for its regex-based annotation-block scan).
+/// annotations — those are invisible to a per-declaration AST read; `provides`' module doc carries this
+/// as a "Known limits" entry, since it is what makes an inherited `@RestController` undetectable).
 pub(crate) fn annotations_of(modifiers: Option<Node<'_>>) -> Vec<Node<'_>> {
     let Some(modifiers) = modifiers else {
         return Vec::new();
@@ -90,8 +90,8 @@ pub(crate) fn annotation_name(node: Node, src: &str) -> Option<String> {
 }
 
 /// A full `annotation`'s raw argument text — the verbatim source BETWEEN the `annotation_argument_list`'s
-/// own parens (comments/whitespace included, same "raw text" convention the old lexical crate's
-/// `annotation_block`/`method_route` regex scan produced) — `None` for a `marker_annotation` (no parens
+/// own parens, comments and whitespace included (the arg text is handed to `provides::annotations`'
+/// regexes as-is, never re-tokenized) — `None` for a `marker_annotation` (no parens
 /// at all, the "annotation absent" signal `project::ClassRow::request_mapping_arg`'s own doc
 /// distinguishes from `Some(String::new())` "present but empty").
 pub(crate) fn annotation_raw_args(node: Node, src: &str) -> Option<String> {

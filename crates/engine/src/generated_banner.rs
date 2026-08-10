@@ -33,20 +33,31 @@ pub(crate) const MARKERS: &[&str] = &[
 /// there. Scoped to *comment* lines in the head so an incidental string literal in a hand-written file
 /// can't trip it.
 ///
-/// Called only on TS-dispatched files (the callers are TypeScript dead-code passes), so the accepted
-/// comment prefixes are TS's — `//`, `/*`, `*` (block-comment continuation, e.g. ` * @generated`); `#` is
-/// excluded (in TS it opens a private field, live code).
-pub(crate) fn has_generated_banner(text: &str, markers: &[&str]) -> bool {
+/// Which comment prefixes count is NOT decided here any more: `rel` is keyed through
+/// `zzop_core::leaders_for_path`, the one comment-leader table these crates own, and the body is taken
+/// with `zzop_core::strip_comment_leader`. This module used to carry its own `//`/`/*`/`*` triple — the
+/// fourth copy of that triple in the tree, and the drift between copies had already produced a live
+/// defect on the DSL side (a commented-out `-- DROP TABLE` firing in a `.sql` migration).
+///
+/// Behaviour is unchanged for every caller as of this writing, and that is checkable rather than hoped:
+/// `dead_exports` is extension-locked to TS, and `dead-candidates` — language-neutral, excluding five
+/// languages by ELIGIBILITY (`zzop_rules_graph::dead_candidates`) rather than by dispatch — reaches here
+/// with `.vue`/`.svelte` at most, and the table answers `Slash` for all of them. `#` is still excluded
+/// on a `.ts` file, where it opens a private field rather than a comment; the difference is that a
+/// future `#`-leader extension becomes one match arm in that table instead of a fifth blind spot here.
+///
+/// Envelope mode is NOT in the caller set at all — Mode A has no filesystem root and a `FileProjection`
+/// carries no raw text, so this detector structurally cannot run there. `envelope::native_pass` owns
+/// that divergence and the adapter-side workaround; do not restate it here.
+pub(crate) fn has_generated_banner(rel: &str, text: &str, markers: &[&str]) -> bool {
+    let leaders = zzop_core::leaders_for_path(rel);
     text.lines()
         .take(8)
+        // A generated banner is always a header comment, never live code — require a comment leader
+        // this file's own syntax actually has (`markers::Leaders`), and read the body behind it.
         .filter_map(|line| {
-            let t = line.trim_start();
-            // A generated banner is always a header comment, never live code — require a TS comment prefix.
-            let body = t
-                .strip_prefix("//")
-                .or_else(|| t.strip_prefix("/*"))
-                .or_else(|| t.strip_prefix('*'))?;
-            Some(body.to_ascii_lowercase())
+            let body = zzop_core::strip_comment_leader(leaders, line)?;
+            Some(zzop_core::vocab_norm::ascii_lowercase(body))
         })
         .any(|line| markers.iter().any(|m| line.contains(m)))
 }
@@ -57,7 +68,7 @@ pub(crate) fn has_generated_banner(text: &str, markers: &[&str]) -> bool {
 /// stop flagging its exports would just read as noise. Reads the file head; false on an unreadable file.
 pub(crate) fn file_has_generated_banner(root: &Path, rel: &str, markers: &[&str]) -> bool {
     match std::fs::read(root.join(rel)) {
-        Ok(bytes) => has_generated_banner(&String::from_utf8_lossy(&bytes), markers),
+        Ok(bytes) => has_generated_banner(rel, &String::from_utf8_lossy(&bytes), markers),
         Err(_) => false,
     }
 }
@@ -66,10 +77,12 @@ pub(crate) fn file_has_generated_banner(root: &Path, rel: &str, markers: &[&str]
 mod tests {
     use super::{has_generated_banner, MARKERS};
 
-    /// The detector under the BUILT-IN banner vocabulary — every case below is about which head shapes
-    /// count as a banner, not about which words a project chose.
+    /// The detector under the BUILT-IN banner vocabulary, on a `.ts` path — every case below is about
+    /// which head shapes count as a banner, not about which words a project chose, and `.ts` is what
+    /// both real callers hand it (the leader table answers `Slash` there, the C-family set these cases
+    /// were written against).
     fn has_generated_banner_default(text: &str) -> bool {
-        has_generated_banner(text, MARKERS)
+        has_generated_banner("src/api.ts", text, MARKERS)
     }
 
     #[test]

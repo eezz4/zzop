@@ -183,6 +183,53 @@ fn unknown_key_warnings_fire_at_top_packs_and_tree_scopes() {
         && w.contains("under \"trees[0]\"")));
 }
 
+/// `vocabulary` was the one declared scope the unknown-key walk never descended into, so a misspelled
+/// or RETIRED vocabulary key was accepted in total silence — and a vocabulary key that is silently
+/// ignored is the worst shape this config has, because an undeclared vocabulary makes rules fire MORE
+/// (see `config-surface.json`'s merge-policy note). The rename of `fsd` -> `featureSlicedDesign` is what
+/// forced this: without the walk, every config still carrying the old spelling would keep its FSD layer
+/// names and get no hint that none of them reach a run any more.
+///
+/// Both levels are asserted, because the nested `featureSlicedDesign` scope has its own key list and a
+/// walk that stopped one level up would still swallow `featureSlicedDesign.entrY`.
+#[test]
+fn unknown_key_warning_fires_inside_vocabulary_and_its_nested_scope() {
+    let mapped = config_to_request(
+        &json!({
+            "roots": ["."],
+            "vocabulary": {
+                "fsd": {"entry": ["pages"]},
+                "featureSlicedDesign": {"entry": ["pages"], "bogusNested": 1},
+            },
+        }),
+        Path::new("/base"),
+    )
+    .unwrap();
+    assert!(
+        mapped
+            .warnings
+            .iter()
+            .any(|w| w.contains("unknown config key \"vocabulary.fsd\"")),
+        "the retired spelling must be named, not swallowed: {:?}",
+        mapped.warnings
+    );
+    assert!(
+        mapped.warnings.iter().any(
+            |w| w.contains("unknown config key \"vocabulary.featureSlicedDesign.bogusNested\"")
+        ),
+        "the nested scope must be walked too: {:?}",
+        mapped.warnings
+    );
+    assert!(
+        mapped
+            .warnings
+            .iter()
+            .all(|w| !w.contains("vocabulary.featureSlicedDesign.entry")),
+        "a VALID nested key must stay silent: {:?}",
+        mapped.warnings
+    );
+}
+
 #[test]
 fn unknown_key_warning_fires_inside_a_mounts_entry() {
     let mapped = config_to_request(
@@ -278,4 +325,100 @@ fn retired_presentation_keys_warn_as_removed_and_stay_unforwarded() {
     assert!(req.get("failOn").is_none());
     assert!(req.get("format").is_none());
     assert!(req.get("report").is_none());
+}
+
+// --- vocabulary entries that can never match -----------------------------------------------------
+
+/// The exact declaration that motivated this warning. `sensitive-response-field` normalizes the field
+/// name it reads (lowercase, separators dropped) before the lookup, so a camelCase entry is inert — and
+/// before 2026-08-05 nothing said so on any lane.
+#[test]
+fn a_vocabulary_entry_that_cannot_survive_its_own_normalizer_is_warned_with_the_spelling_that_works(
+) {
+    let mapped = config_to_request(
+        &json!({
+            "roots": ["."],
+            "vocabulary": {"sensitiveResponseFieldExactNames": ["sessionToken"]},
+        }),
+        Path::new("/base"),
+    )
+    .unwrap();
+    let hit = mapped
+        .warnings
+        .iter()
+        .find(|w| w.contains("sensitiveResponseFieldExactNames"))
+        .unwrap_or_else(|| panic!("expected a warning, got: {:?}", mapped.warnings));
+    assert!(hit.contains("can never match"), "{hit}");
+    assert!(
+        hit.contains("\"sessiontoken\""),
+        "the warning must name the spelling that WOULD work: {hit}"
+    );
+}
+
+/// The HTTP convention spelling of this header is `Idempotency-Key`, so it is the entry a user is most
+/// likely to declare in a form that cannot match. The separator is fine; only the case is not.
+#[test]
+fn the_conventional_http_header_spelling_is_warned_and_only_its_case_is_corrected() {
+    let mapped = config_to_request(
+        &json!({
+            "roots": ["."],
+            "vocabulary": {"idempotencyHeaderNames": ["Idempotency-Key"]},
+        }),
+        Path::new("/base"),
+    )
+    .unwrap();
+    let hit = mapped
+        .warnings
+        .iter()
+        .find(|w| w.contains("idempotencyHeaderNames"))
+        .unwrap_or_else(|| panic!("expected a warning, got: {:?}", mapped.warnings));
+    assert!(
+        hit.contains("\"idempotency-key\""),
+        "the hyphen is part of the header token and must survive: {hit}"
+    );
+}
+
+/// The over-firing this check must not do. `secretParamNames` is compared with case folding ONLY, so
+/// both separator spellings are legitimate entries — a blanket normalization would have merged two real
+/// declarations into one and warned about a correct config.
+#[test]
+fn separator_spellings_are_not_warned_for_a_key_whose_rule_keeps_separators() {
+    let mapped = config_to_request(
+        &json!({
+            "roots": ["."],
+            "vocabulary": {"secretParamNames": ["api_key", "api-key", "apikey"]},
+        }),
+        Path::new("/base"),
+    )
+    .unwrap();
+    assert!(
+        mapped
+            .warnings
+            .iter()
+            .all(|w| !w.contains("can never match")),
+        "no entry here is unmatchable: {:?}",
+        mapped.warnings
+    );
+}
+
+/// A key the rules compare verbatim is not checked at all — the table is short on purpose, and a key
+/// absent from it must stay silent rather than get a normalization it does not have.
+#[test]
+fn a_verbatim_compared_vocabulary_key_is_never_warned_about_case() {
+    let mapped = config_to_request(
+        &json!({
+            "roots": ["."],
+            "vocabulary": {"javaSourceRoot": "src/main/java", "retryWrappers": ["withRetry"]},
+        }),
+        Path::new("/base"),
+    )
+    .unwrap();
+    assert!(
+        mapped
+            .warnings
+            .iter()
+            .all(|w| !w.contains("can never match")),
+        "verbatim keys must not be normalized: {:?}",
+        mapped.warnings
+    );
 }

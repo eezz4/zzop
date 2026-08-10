@@ -28,7 +28,7 @@ fn hammer(rel: &str, text: &str) {
     let _ = rs::extract_loop_spans(rel, text);
     let _ = rs::extract_call_sites(rel, text);
     let _ = rs::extract_string_literals(rel, text);
-    let _ = rs::rust_import_candidates(text, rel);
+    let _ = rs::rust_import_candidates(text, rel, &std::collections::BTreeSet::new());
     let _ = rs::extract_axum_router_fragments(rel, text);
     let _ = rs::extract_rust_http_consumes(rel, text);
     let _ = rs::extract_rust_raw_sql_db_table_consumes(rel, text);

@@ -49,6 +49,7 @@ mod io;
 mod output;
 mod pipeline;
 mod recognizers;
+mod rule_channels;
 mod sightlines;
 mod trees;
 mod vocabulary;
@@ -69,11 +70,12 @@ pub use envelope::analyze_envelope;
 pub use io::IoOptions;
 pub use output::{AnalyzeOutput, CacheStats, GitWindow, PackLoaded, RuleOverridesApplied};
 pub use recognizers::framework_recognizers;
+pub use rule_channels::{enabled_native_rules_reading, native_rule_channels};
 pub use sightlines::rule_sightlines;
 pub use trees::{
     analyze_trees, MultiAnalyzeOutput, PackageImportSummary, MIN_PARALLEL_IMPL_SIGNALS,
 };
-pub use vocabulary::VocabularyConfig;
+pub use vocabulary::{normalizer_for, NormalizedKey, VocabularyConfig, NORMALIZED_VOCABULARY_KEYS};
 
 /// Composes every crate's own `register_native_analyses` into one `RuleRegistry` — the engine aggregator
 /// half of the extensibility contract (`rules/README.md`'s "Adding a rule" section). The kernel
@@ -94,8 +96,24 @@ pub const DEFAULT_SIZE_CAP: usize = 1_500_000;
 
 /// Runs the fused engine over every file under `root`: per-file parse + DSL rules (`pipeline`), then
 /// whole-graph assembly (`analyze`), including the optional git-history-dependent analyses. Two calls
-/// over an unchanged tree (and unchanged git history) produce byte-for-byte identical output.
+/// over an unchanged tree (and unchanged git history) produce byte-for-byte identical output — with
+/// exactly one caveat: the cache-eviction housekeeping warning is SIZE-triggered, not input-triggered,
+/// so a run that evicts stale cache entries can carry that one warning while the next identical run
+/// (nothing left to evict) does not. Every analysis result is still identical.
 pub fn analyze_tree(root: &Path, config: &EngineConfig) -> AnalyzeOutput {
+    analyze_tree_with(root, config, &analyze::GitCache::default())
+}
+
+/// [`analyze_tree`] with a caller-supplied git-collection memo. Internal because the memo is a RUN
+/// concern, not a property of a tree: `analyze_trees` shares one across the trees of a single run so a
+/// monorepo collects its shared history once instead of once per tree, while the public one-tree entry
+/// point above keeps its signature and simply passes a fresh (single-use) cache. See
+/// [`analyze::GitCache`] for why sharing it is behavior-preserving.
+pub(crate) fn analyze_tree_with(
+    root: &Path,
+    config: &EngineConfig,
+    git_cache: &analyze::GitCache,
+) -> AnalyzeOutput {
     // Input-scope self-report (`input-scope-error` in the disclosure registry): a mistyped root used
     // to be absorbed as an empty tree whose only trace was `files: 0` in the census — which reads as a
     // clean/empty repo. A root that does not exist (or is not a directory) is a structural fact about
@@ -111,6 +129,14 @@ pub fn analyze_tree(root: &Path, config: &EngineConfig) -> AnalyzeOutput {
 
     let mut cache_warnings = Vec::new();
     let analysis_cache = cache::open_cache(config, &mut cache_warnings);
+    // Cache eviction is a state change the user never asked for and cannot otherwise see: opening the
+    // cache may have deleted entries to stay under its size cap, and the only symptom is that THIS run
+    // is slower than the last one. It rides the same `cache_warnings` channel as the open failure above
+    // — one place a reader looks for "something happened to your cache" — and says nothing at all when
+    // nothing was evicted, which is every ordinary run (see `AnalysisCache::eviction_warning`).
+    if let Some(warning) = analysis_cache.as_ref().and_then(|c| c.eviction_warning()) {
+        cache_warnings.push(warning);
+    }
     let counters = analysis_cache
         .as_ref()
         .map(|_| cache::CacheCounters::default());
@@ -139,7 +165,7 @@ pub fn analyze_tree(root: &Path, config: &EngineConfig) -> AnalyzeOutput {
             &mut overlay_warnings,
         )
     };
-    let mut output = analyze::assemble(root, artifacts, config, &overlay_applied);
+    let mut output = analyze::assemble(root, artifacts, config, &overlay_applied, git_cache);
 
     // Scope warnings lead: they qualify every other line ("about nothing"), so a reader hits them first.
     if !scope_warnings.is_empty() {

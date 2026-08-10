@@ -15,7 +15,9 @@
 pub const HTTP_KEY_VERBS: &[&str] = &["GET", "POST", "PUT", "DELETE", "PATCH"];
 
 /// The canonical `http` interface key both sides must produce so the join is exact.
-/// Path params (`{x}` or `:x`) -> `{}`; duplicate slashes collapsed; trailing slash dropped; method upper-cased.
+/// Path params (`{x}`, or `:x` where the colon starts a segment or follows an in-segment separator —
+/// see [`re_param`]) -> `{}`; a Google-AIP custom-method suffix (`{id}:activate`) is KEPT, since it
+/// identifies the endpoint; duplicate slashes collapsed; trailing slash dropped; method upper-cased.
 /// Keeping this in core (not per-adapter) guarantees an FE-emitted key and a BE-emitted key are byte-identical.
 pub fn http_interface_key(method: &str, raw_path: &str) -> String {
     format!(
@@ -43,8 +45,9 @@ pub fn unknown_verb_route_path(key: &str) -> Option<&str> {
         .and_then(|(method, path)| (method == UNKNOWN_VERB).then_some(path))
 }
 
-/// The PATH-only half of [`http_interface_key`]'s normalization: path params (`{x}` or `:x`) -> `{}`,
-/// duplicate slashes collapsed, trailing slash dropped, leading slash ensured. Exposed so a caller
+/// The PATH-only half of [`http_interface_key`]'s normalization: path params (`{x}` or a
+/// separator-led `:x` — see [`re_param`]) -> `{}`, duplicate slashes collapsed, trailing slash
+/// dropped, leading slash ensured. Exposed so a caller
 /// composing a PATH PREFIX (not a full `"METHOD path"` key) — e.g. the engine's router-mount compose
 /// pass building an `EntityRef::PathScope` prefix — can normalize onto the exact same param vocabulary
 /// an `http_interface_key`-keyed route path uses, without duplicating this regex logic. A raw prefix
@@ -54,7 +57,9 @@ pub fn unknown_verb_route_path(key: &str) -> Option<&str> {
 pub fn normalize_http_path(raw_path: &str) -> String {
     let with_slash = format!("/{raw_path}");
     let collapsed = re_multi_slash().replace_all(&with_slash, "/");
-    let params = re_param().replace_all(&collapsed, "{}");
+    // `${1}` is the separator the colon arm had to consume to express "preceded by"; it expands to
+    // the empty string on the brace arm, which captures nothing.
+    let params = re_param().replace_all(&collapsed, "${1}{}");
     re_trailing().replace(&params, "$1").into_owned()
 }
 
@@ -123,9 +128,31 @@ fn re_multi_slash() -> &'static regex::Regex {
     static R: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     R.get_or_init(|| regex::Regex::new(r"/+").unwrap())
 }
+/// The path-param vocabulary. Two arms, and the SECOND one is position-sensitive on purpose.
+///
+/// `\{[^}]+\}` — the brace spelling (`{id}`, Spring's `{id:[0-9]+}`, gRPC-Gateway's `{name=x/*}`).
+/// Unconditional: a brace param is unambiguous wherever it appears.
+///
+/// `([/.-]):[A-Za-z_][A-Za-z0-9_]*` — the colon spelling, admitted ONLY when the character before the
+/// `:` is a path or in-segment separator, and that separator is CAPTURED and put back (`${1}{}`) so
+/// consecutive params still each match (`:from-:to` -> the `-` is not consumed by the first match).
+/// Rust's regex has no lookbehind, so consume-and-restore is the way to express "preceded by".
+///
+/// The separator condition is the whole point. `:` is overloaded across the ecosystems zzop keys:
+/// - Express/Rails/NestJS: `:id` is a PARAM, and it always starts a segment (`/users/:id`) or follows
+///   an in-segment separator — Express documents exactly `/flights/:from-:to` and
+///   `/plantae/:genus.:species`, Rails documents `.:format`. Hence the `[/.-]` class, no wider.
+/// - Google-AIP / gRPC-Gateway / Buf (the Go and Java server convention): `:` is the CUSTOM-METHOD
+///   separator and it is a SUFFIX on a segment that already has content (`/v1/users/{id}:activate`,
+///   `/v1/users:batchGet`). The token after it is the most identity-bearing part of the path.
+///
+/// Collapsing an AIP custom method keyed `:activate` and `:deactivate` IDENTICALLY — three wrong
+/// answers from one cause: `http/duplicate-route` false-fired on two distinct endpoints; the exact
+/// join linked a consume of one to the provide of the OTHER (a WRONG edge, worse than silence, which
+/// also hid the true unconsumed/unprovided pair); and near-miss suggestions off the key were nonsense.
 fn re_param() -> &'static regex::Regex {
     static R: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    R.get_or_init(|| regex::Regex::new(r"\{[^}]+\}|:[A-Za-z_][A-Za-z0-9_]*").unwrap())
+    R.get_or_init(|| regex::Regex::new(r"\{[^}]+\}|([/.-]):[A-Za-z_][A-Za-z0-9_]*").unwrap())
 }
 fn re_trailing() -> &'static regex::Regex {
     static R: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
@@ -148,6 +175,60 @@ mod tests {
         assert_eq!(http_interface_key("post", "//a//b/"), "POST /a/b");
         // root path preserved (single slash, no trailing-drop)
         assert_eq!(http_interface_key("get", ""), "GET /");
+    }
+
+    #[test]
+    fn colon_is_a_param_sigil_only_when_the_segment_has_no_content_before_it() {
+        // AIP / gRPC-Gateway / Buf custom methods: the token after `:` is a SUFFIX on a segment that
+        // already has content, and it is the most identity-bearing part of the path. Eating it made
+        // `:activate` and `:deactivate` the SAME key — a false `http/duplicate-route` plus a WRONG
+        // cross-layer edge (a consume of one joined to the provide of the other).
+        assert_eq!(
+            http_interface_key("post", "/v1/users/{id}:activate"),
+            "POST /v1/users/{}:activate"
+        );
+        assert_eq!(
+            http_interface_key("post", "/v1/users/{id}:deactivate"),
+            "POST /v1/users/{}:deactivate"
+        );
+        assert_ne!(
+            http_interface_key("post", "/v1/users/{id}:activate"),
+            http_interface_key("post", "/v1/users/{id}:deactivate")
+        );
+        // Custom method directly on a collection (AIP-231 `:batchGet`) — content is a plain literal.
+        assert_eq!(
+            http_interface_key("post", "/v1/users:batchGet"),
+            "POST /v1/users:batchGet"
+        );
+        assert_eq!(http_interface_key("get", "/a/b:c"), "GET /a/b:c");
+        // The consume side must reach the same key, including after `${id}` -> `{}` interpolation
+        // normalization upstream (`{}` is not a `{x}` param, so the suffix survives there too).
+        assert_eq!(
+            http_consume_interface_key("post", "/v1/users/{}:activate?force=1"),
+            "POST /v1/users/{}:activate"
+        );
+
+        // Express/Rails/NestJS `:param` — the segment has NO content before the colon. Unchanged.
+        assert_eq!(http_interface_key("get", "/users/:id"), "GET /users/{}");
+        // Express's documented multi-param segment spellings, where the param follows an in-segment
+        // separator rather than a `/`: `/flights/:from-:to` and `/plantae/:genus.:species`.
+        assert_eq!(
+            http_interface_key("get", "/flights/:from-:to"),
+            "GET /flights/{}-{}"
+        );
+        assert_eq!(
+            http_interface_key("get", "/plantae/:genus.:species"),
+            "GET /plantae/{}.{}"
+        );
+        // Rails' `.:format` suffix, and a brace param followed by a separator-led param.
+        assert_eq!(
+            http_interface_key("get", "/posts/:id.:format"),
+            "GET /posts/{}.{}"
+        );
+        assert_eq!(
+            http_interface_key("get", "/users/{id}-:rev"),
+            "GET /users/{}-{}"
+        );
     }
 
     #[test]

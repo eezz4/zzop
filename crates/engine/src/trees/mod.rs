@@ -3,72 +3,19 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-use zzop_core::{Finding, IoFacts, RuleConfig, SourceIo};
+use zzop_core::{Finding, RuleConfig, SourceIo};
 
 use crate::cross_layer_findings::compute_cross_layer_findings;
-use crate::{analyze_tree, AnalyzeOutput, EngineConfig};
+use crate::{AnalyzeOutput, EngineConfig};
 
+mod cross_tree_imports;
+mod join_io_filter;
 mod parallel_impl;
 
 pub use parallel_impl::MIN_PARALLEL_IMPL_SIGNALS;
 
-/// Per-tree drop counts + a capped file-path sample from [`filter_join_io`] — substrate for that
-/// function's caller's own per-tree warning (see the call site's doc for the disclosure rationale).
-/// `examples` combines BOTH dropped provides and dropped consumes (provides first, in their original
-/// order, then consumes), capped at 3 total — the same "up to 3 example paths" convention
-/// `unparsed_extension_warning` already uses for its own per-extension sample. DISTINCT file paths
-/// only: one test file usually carries several dropped facts, and "a.go, a.go, a.go" tells the
-/// reader nothing the count didn't (observed in the first live run of this warning).
-#[derive(Default)]
-struct JoinIoDrop {
-    provides: usize,
-    consumes: usize,
-    examples: Vec<String>,
-}
+use join_io_filter::filter_join_io;
 
-/// Cross-layer JOIN input filter: drops every provide/consume whose `file` is test-classified
-/// (`zzop_core::is_test_file`) before it ever reaches `link_cross_layer_io`/`compute_cross_layer_findings`.
-/// The published disclosure (`disclosure.rs`'s "classified-skip" class) claims test-classified io is
-/// excluded from the cross-layer join — before this filter existed that claim was false: the join input
-/// was built straight from each tree's raw `output.ir.ir.io`, so e.g. a Go `unit_test.go` route
-/// registration became an ordinary production "provide" and could join a real cross-tree edge (observed
-/// live: 4 of 5 provides on a real repo were test-harness routes). Deliberately does NOT touch
-/// `output.ir` — the per-file raw facts (test-classified included) must stay visible in that tree's own
-/// single-tree output; only the JOIN input built here is narrowed.
-fn filter_join_io(io: IoFacts) -> (IoFacts, JoinIoDrop) {
-    let mut drop = JoinIoDrop::default();
-    let provides = io
-        .provides
-        .into_iter()
-        .filter(|p| {
-            let is_test = zzop_core::is_test_file(&p.file);
-            if is_test {
-                drop.provides += 1;
-                if drop.examples.len() < 3 && !drop.examples.contains(&p.file) {
-                    drop.examples.push(p.file.clone());
-                }
-            }
-            !is_test
-        })
-        .collect();
-    let consumes = io
-        .consumes
-        .into_iter()
-        .filter(|c| {
-            let is_test = zzop_core::is_test_file(&c.file);
-            if is_test {
-                drop.consumes += 1;
-                if drop.examples.len() < 3 && !drop.examples.contains(&c.file) {
-                    drop.examples.push(c.file.clone());
-                }
-            }
-            !is_test
-        })
-        .collect();
-    (IoFacts { provides, consumes }, drop)
-}
-
-/// One `analyze_tree` call's output, per tree, plus the cross-layer join over every tree's IoFacts.
 pub struct MultiAnalyzeOutput {
     /// `(root, config.source_id, output)` for each input tree, in the same order as `trees`.
     pub trees: Vec<(PathBuf, String, AnalyzeOutput)>,
@@ -124,8 +71,13 @@ impl PackageImportSummary {
 pub fn analyze_trees(trees: &[(PathBuf, EngineConfig)]) -> MultiAnalyzeOutput {
     let mut outputs = Vec::with_capacity(trees.len());
     let mut source_ios = Vec::with_capacity(trees.len());
+    // ONE git-collection memo for the whole run — why, and why it is behavior-preserving, is
+    // `GitCache`'s own doc. Run-scoped BY CONSTRUCTION is the part that lives here: it is born on this
+    // line and dropped when this call returns, so a long-lived MCP process can never serve a later
+    // analysis from an earlier run's history.
+    let git_cache = crate::analyze::GitCache::default();
     for (root, config) in trees {
-        let mut output = analyze_tree(root, config);
+        let mut output = crate::analyze_tree_with(root, config, &git_cache);
         let raw_io = output.ir.ir.io.clone().unwrap_or_default();
         let (join_io, dropped) = filter_join_io(raw_io);
         // Honest-disclosure side of `filter_join_io`'s exclusion (see that function's doc): when it
@@ -194,6 +146,8 @@ pub fn analyze_trees(trees: &[(PathBuf, EngineConfig)]) -> MultiAnalyzeOutput {
             ));
         }
     }
+    // Cross-tree package-import disclosure — rationale in `cross_tree_imports`' module doc.
+    cross_tree_imports::disclose(&mut outputs);
     let package_imports: Vec<zzop_rules_cross_layer::PackageImportSite> = outputs
         .iter()
         .flat_map(|(_, source, output)| {

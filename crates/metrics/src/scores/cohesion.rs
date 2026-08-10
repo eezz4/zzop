@@ -67,6 +67,10 @@ pub fn compute_cohesion(dep: &DepGraph, cfg: &ScoresConfig) -> CohesionScore {
 
     CohesionScore {
         score: round(weighted_cohesion(&slices)),
+        // POPULATION, counted before any list shaping: 0 slices means the configured slice vocabulary
+        // matched nothing in this tree, so `weighted_cohesion` averaged over an empty set and returned
+        // a perfect score it never measured. See `Scores`' population table.
+        slice_count: slices.len() as u32,
         slices,
     }
 }

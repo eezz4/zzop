@@ -59,16 +59,22 @@ pub(in crate::analyze) fn resolve_rust_import(
     all_paths: &HashSet<String>,
     workspace: &RustWorkspaceMap,
 ) -> Option<String> {
-    let candidates = zzop_parser_rust::rust_import_candidates(specifier, from_file);
+    let candidates =
+        zzop_parser_rust::rust_import_candidates(specifier, from_file, workspace.target_roots());
     if let Some(hit) = candidates.into_iter().find(|c| all_paths.contains(c)) {
         return Some(hit);
     }
     let head = rust_head(specifier);
-    if matches!(head, "crate" | "super" | "self") {
+    // `#path` joins the three keyword heads here for the same reason they are here: all four name a
+    // location INSIDE this tree, so when the candidate check above found nothing, the honest answer is
+    // "no edge" — not "then it must be an external crate". Without this arm a `#[path]` whose target is
+    // outside the walked tree would fall through and resolve to a workspace crate root, inventing an
+    // edge to a file the declaration never named.
+    if matches!(head, "crate" | "super" | "self") || head == zzop_parser_rust::PATH_ATTR_HEAD {
         return None;
     }
     let crate_root = workspace
-        .get(head)?
+        .crate_roots(head)?
         .iter()
         .find(|c| all_paths.contains(c.as_str()))?;
 
@@ -78,7 +84,11 @@ pub(in crate::analyze) fn resolve_rust_import(
     // `<dir>/src/lib.rs`).
     let rest = specifier.strip_prefix(head)?.trim_start_matches(':');
     if !rest.is_empty() {
-        let inner = zzop_parser_rust::rust_import_candidates(&format!("crate::{rest}"), crate_root);
+        let inner = zzop_parser_rust::rust_import_candidates(
+            &format!("crate::{rest}"),
+            crate_root,
+            workspace.target_roots(),
+        );
         if let Some(hit) = inner.into_iter().find(|c| all_paths.contains(c)) {
             return Some(hit);
         }

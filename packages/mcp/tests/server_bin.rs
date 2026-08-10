@@ -22,7 +22,7 @@ fn run(args: &[&str]) -> Output {
 
 #[test]
 fn version_prints_the_shared_server_version_and_exits_zero() {
-    for arg in ["version", "--version"] {
+    for arg in ["version", "--version", "-V"] {
         let out = run(&[arg]);
         assert!(out.status.success(), "`zzop-mcp {arg}` must exit 0");
         assert_eq!(

@@ -100,7 +100,9 @@ pub(super) fn rule_float_money(
     if t != "float" && t != "double" && t != "real" {
         return;
     }
-    let lower = field.name.to_ascii_lowercase();
+    // Shared with the config front end's "can this entry ever match?" check — see
+    // `zzop_core::vocab_norm`'s module doc.
+    let lower = zzop_core::vocab_norm::ascii_lowercase(&field.name);
     if !money_tokens.iter().any(|tok| lower.contains(tok)) {
         return;
     }

@@ -677,18 +677,26 @@ fn finding_message_is_byte_identical_to_the_pre_sweep_text() {
         out[0].message,
         format!(
             "exported function 'helper' is never imported anywhere (deletion candidate). Delete it, \
-             or export it from somewhere it's actually consumed. {tail} if this is public API \
-             consumed outside this repo (e.g. published to npm) — such consumers are invisible to \
-             this in-repo import graph."
+             or export it from somewhere it's actually consumed. A file carrying a machine-generated \
+             banner in its first 8 lines is skipped by this rule already \
+             (`vocabulary.generatedFileMarkers` picks the banner vocabulary); a generator that \
+             stamps NO banner is invisible to that, and the answer for it is an `exclude` entry for \
+             its path — deleting the `export` there is undone by the next regeneration. {tail} if \
+             this is public API consumed outside this repo (e.g. published to npm) — such consumers \
+             are invisible to this in-repo import graph."
         )
     );
     assert_eq!(
         out[1].message,
         format!(
             "exported const 'localOnly' is only referenced within its own file (un-export candidate). \
-             Drop the `export` keyword to make the un-used-elsewhere status explicit. {tail} if this \
-             is public API consumed outside this repo (e.g. published to npm) — such consumers are \
-             invisible to this in-repo import graph."
+             Drop the `export` keyword to make the un-used-elsewhere status explicit. A file carrying \
+             a machine-generated banner in its first 8 lines is skipped by this rule already \
+             (`vocabulary.generatedFileMarkers` picks the banner vocabulary); a generator that \
+             stamps NO banner is invisible to that, and the answer for it is an `exclude` entry for \
+             its path — deleting the `export` there is undone by the next regeneration. {tail} if \
+             this is public API consumed outside this repo (e.g. published to npm) — such consumers \
+             are invisible to this in-repo import graph."
         )
     );
 }

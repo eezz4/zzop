@@ -34,6 +34,25 @@
 //! inside it is walkable without macro-specific (and inherently guessy) token parsing. Both are
 //! documented, deliberate v1 gaps: macro-expansion visibility is out of this crate's never-guess scope,
 //! the same way `zzop-parser-python-3` leaves Python's `exec`/`eval` unexamined.
+//!
+//! ## Scope note: inline `mod` bodies
+//! An item written inside an inline `mod foo { ... }` block is out of v1 scope for every SYMBOL-KEYED
+//! projection in this crate — `lang::symbols` mints no `SourceSymbol` for it, `lang::imports` reads no
+//! `use` from it, `lang::calls` attributes no `RawCall` from it, and `adapters::axum` finds no router
+//! built in it. USER-VISIBLE CONSEQUENCE, stated because a reader would otherwise read silence as a
+//! verdict: a guard call, an import, or an axum route that exists ONLY inside an inline `mod` is
+//! invisible, so `mutating-route-no-auth` can report a route that is in fact guarded that way, and a
+//! route registered that way is never reported at all.
+//!
+//! `lang::calls` was the one dissenter until 2026-08-10, and walking in cost more than the silence
+//! does: with no symbol of its own, a nested item's calls were attributed to the id a TOP-LEVEL
+//! homonym holds, so an unrelated module's auth call cleared an open mutating route (measured through
+//! the engine — that module's doc carries the reproduction). Line-keyed projections are unaffected and
+//! deliberately still see inside: `lang::call_sites` and `lang::test_spans` walk the whole file,
+//! because a line anchor cannot be mis-attributed to the wrong symbol.
+//!
+//! The v1 scope exists because a qualified id (`file.rs#foo::inner`) has to be minted by every one of
+//! those producers at once or the graph dangles. Widening it is that batch, not a local edit.
 
 pub mod adapters;
 pub mod lang;
@@ -48,22 +67,15 @@ pub use lang::extractor_guards::{
 };
 pub use lang::imports::parse_imports;
 pub use lang::loop_spans::extract_loop_spans;
-pub use lang::resolve::rust_import_candidates;
+pub use lang::resolve::{rust_import_candidates, PATH_ATTR_HEAD};
 pub use lang::string_literals::extract_string_literals;
 pub use lang::symbols::parse_symbols;
 pub use lang::test_spans::extract_test_spans;
 pub use lang::used_names::parse_local_identifier_refs;
 
-/// Cache key ingredient for `zzop-cache`, mirroring `zzop_parser_python_3::PARSER_FINGERPRINT`'s scheme:
-/// parser id + pinned frontend + a logic-version counter.
-/// - `v1`: initial release — symbols (top-level fn/struct/enum/trait/type-alias/const/static/union, plus
-///   `impl` block methods/assoc consts emitted dotted as `Type.member`), imports (`use` trees including
-///   groups/globs/renames/`pub use`, plus `mod x;` declarations), `used_names`, axum router-mount
-///   fragments, `reqwest` literal HTTP egress consumes, and raw-SQL `db-table` consumes.
-///
-/// `parse_calls`/`parse_extractor_guards` deliberately do NOT bump this: neither fact enters the cached
-/// per-file `FileArtifact` projection this fingerprint keys (the engine's call-graph pass re-parses off
-/// disk, uncached, by design — `run_callgraph_rules`' own doc), so a cached tree cannot go stale on them.
+/// Cache key ingredient for `zzop-cache`, mirroring `zzop_parser_python_3::PARSER_FINGERPRINT`'s
+/// scheme: parser id + frontend + trailing counter. The `syn-2` segment is a HUMAN LABEL, not a pin —
+/// `Cargo.toml` declares `syn = "2"`, a caret range.
 ///
 /// **This string is an ID, not a version — it no longer has to be bumped.** `crates/engine/build.rs`
 /// hashes this crate's whole dependency closure into the cache key beside it, so a change to any

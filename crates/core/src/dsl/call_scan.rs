@@ -31,9 +31,11 @@ pub(super) fn eval_call_scan(
     // Rule-skip sink — see `diagnostics`'s module doc. Same contract as every sibling matcher: a rule
     // whose regex does not compile is skipped, never fatal, and never silent.
     diagnostics: &mut Vec<String>,
+    // The owning pack's compiled-regex memo — see `crate::dsl::RegexCache`.
+    cache: &crate::dsl::RegexCache,
 ) {
     let rule_id = format!("{}/{}", pack_id, rule.id);
-    let mut diag = RuleDiag::new(&rule_id, diagnostics);
+    let mut diag = RuleDiag::new(&rule_id, diagnostics, cache);
     let Some(file_re) = diag.compile("file_pattern", &m.file_pattern) else {
         return;
     };
@@ -61,7 +63,7 @@ pub(super) fn eval_call_scan(
     //
     // Derived from the rule id (escaped), so a failure here is structural rather than an author's typo —
     // same note as `line_scan`'s twin.
-    let Some(marker_re) = compile_marker_line_comment(&marker) else {
+    let Some(marker_re) = compile_marker_line_comment(&marker, diag.cache()) else {
         diag.malformed("its derived suppress marker does not compile as a regex");
         return;
     };

@@ -98,3 +98,75 @@ fn a_call_inside_a_macro_is_not_seen_and_that_is_the_documented_boundary() {
 fn an_unparseable_file_yields_no_calls_rather_than_panicking() {
     assert!(parse_calls("a.rs", "fn f(:\n").is_empty());
 }
+
+/// The defect this module's "Inline `mod` bodies" section records, at its smallest: the inline
+/// `handler` and the top-level `handler` would both be attributed to `a.rs#handler`, so the top-level
+/// one's node would carry `verify_token` — a call its own body never makes. Downstream that is a
+/// `mutating-route-no-auth` clearance for a route that checks nothing.
+#[test]
+fn inline_mod_calls_are_not_attributed_to_a_homonym_top_level_symbol() {
+    let src = "fn handler() {\n\
+               \x20   plain();\n\
+               }\n\
+               fn verify_token() {}\n\
+               mod v1 {\n\
+               \x20   use super::verify_token;\n\
+               \x20   pub fn handler() {\n\
+               \x20       verify_token();\n\
+               \x20   }\n\
+               }\n";
+    assert_eq!(
+        names("a.rs", src),
+        vec![("a.rs#handler".to_string(), "plain".to_string())],
+        "an inline mod's call must never ride the top-level homonym's symbol id"
+    );
+}
+
+/// The AGREEMENT pin between this module and `lang::symbols`, stated as the invariant rather than as a
+/// list of shapes: every `from_symbol` this extractor mints must be an id `parse_symbols` actually
+/// emits for the same source. Widening either module's scope alone breaks this.
+#[test]
+fn every_from_symbol_is_a_symbol_parse_symbols_emits() {
+    let src = "fn top() {\n\
+               \x20   a();\n\
+               }\n\
+               struct S;\n\
+               impl S {\n\
+               \x20   fn m(&self) {\n\
+               \x20       b();\n\
+               \x20   }\n\
+               }\n\
+               mod inner {\n\
+               \x20   pub fn nested() {\n\
+               \x20       c();\n\
+               \x20   }\n\
+               \x20   pub struct T;\n\
+               \x20   impl T {\n\
+               \x20       pub fn n(&self) {\n\
+               \x20           d();\n\
+               \x20       }\n\
+               \x20   }\n\
+               }\n\
+               fn outer_with_nested_fn() {\n\
+               \x20   fn helper() {\n\
+               \x20       e();\n\
+               \x20   }\n\
+               \x20   helper();\n\
+               }\n";
+    let ids: Vec<String> = crate::lang::symbols::parse_symbols("a.rs", src)
+        .into_iter()
+        .map(|s| s.id)
+        .collect();
+    let calls = parse_calls("a.rs", src);
+    // Non-vacuity: an extractor that returned nothing would satisfy the invariant below trivially.
+    let callees: Vec<&str> = calls.iter().map(|c| c.callee_name.as_str()).collect();
+    assert_eq!(callees, vec!["a", "b", "helper"], "got {callees:?}");
+    for call in calls {
+        assert!(
+            ids.contains(&call.from_symbol),
+            "`{}` (calling `{}`) is not a symbol `parse_symbols` emits — symbols: {ids:?}",
+            call.from_symbol,
+            call.callee_name
+        );
+    }
+}

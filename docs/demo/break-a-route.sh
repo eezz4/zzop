@@ -26,8 +26,35 @@ for tree in corpus/oss/fe-vite corpus/oss/be-express; do
   fi
 done
 
+# The baseline must actually BE the baseline. `corpus/oss/` is gitignored, so if an earlier run died
+# before restoring, this file is still carrying the break — and then step 1 prints drift and calls it
+# "the two repos agree", which is worse than failing. Refuse instead of measuring a lie.
+if ! grep -q "router.put('/user'," "$BE_CTRL"; then
+  echo "!! '$BE_CTRL' does not carry the pristine route \`router.put('/user',\`." >&2
+  echo "   Either an earlier run of this script left the break in place, or your vendored copy differs" >&2
+  echo "   from the RealWorld backend this demo is written against. Restore the file (re-clone the tree)" >&2
+  echo "   before running: every number below step 1 is relative to that route." >&2
+  exit 1
+fi
+
 # Always restore the corpus, even if the analysis fails or the script is interrupted.
-restore() { git checkout -- "$BE_CTRL" 2>/dev/null || true; }
+#
+# BY BYTE SNAPSHOT, not `git checkout --`. That is what this used to do, and it could never work:
+# `corpus/oss/` is gitignored (.gitignore), so the file is UNTRACKED and `git checkout -- <path>`
+# exits 1 with "did not match any file(s) known to git" — swallowed by the `2>/dev/null || true` that
+# was there to make interruption safe. The user's vendored backend was left permanently edited by a
+# documentation demo, and this repo's own corpus was found in exactly that state. A copy of the bytes
+# depends on nothing about how the tree was obtained, which is the only assumption available for a
+# tree the reader supplies.
+SNAPSHOT="$(mktemp)"
+cp "$BE_CTRL" "$SNAPSHOT"
+restore() {
+  # `cp` back rather than `mv`, so a second signal arriving mid-restore still leaves the snapshot on
+  # disk to try again from; the temp file is removed only once the bytes are known to be back.
+  if [ -f "$SNAPSHOT" ]; then
+    cp "$SNAPSHOT" "$BE_CTRL" && rm -f "$SNAPSHOT"
+  fi
+}
 trap restore EXIT
 
 # Run the cross-layer join over the pair; on this repo's build the C-parser sources need a working

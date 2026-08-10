@@ -122,9 +122,10 @@ pub(crate) fn dead_export_findings(
         let (facts, is_generated) = match std::fs::read(root.join(rel)) {
             Ok(bytes) => {
                 let text = String::from_utf8_lossy(&bytes).into_owned();
+                let banner = crate::generated_banner::has_generated_banner;
                 (
                     zzop_parser_typescript::parse_dead_export_facts(rel, &text),
-                    crate::generated_banner::has_generated_banner(&text, generated_file_markers),
+                    banner(rel, &text, generated_file_markers),
                 )
             }
             // Unreadable (deleted/permission race) — treat as no re-exports/dynamic-imports/

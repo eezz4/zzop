@@ -18,16 +18,50 @@ use super::violations::*;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct FsdScore {
+pub struct FeatureSlicedDesignScore {
     pub score: f64,
+    /// The RATIO denominator — every in-tree import this metric looked at. Deliberately NOT the
+    /// population: `score` is `violations / total_imports`, so this is the right divisor for the
+    /// published number, but it counts imports whether or not FSD could classify either end.
     pub total_imports: u32,
-    pub violations: Vec<FsdViolation>,
+    /// POPULATION: imports with at least one endpoint in a DECLARED FSD layer (entry / slice / shared).
+    ///
+    /// `total_imports` cannot answer "did this tree adopt the convention", and that is the question
+    /// that decides whether the score means anything. An undeclared vocabulary puts every path in the
+    /// catch-all layer, so no import can violate a layer rule and the metric returns a PERFECT 100 for
+    /// a repo that has never heard of Feature-Sliced Design — measured on zzop's own tree, which scores
+    /// 100 here on 2,795 imports, none of them FSD-classified. A `0` in this field is what tells those
+    /// 2,795 apart from a real FSD repo whose layering is genuinely clean, and it is what keeps the
+    /// metric's weight (2.5, the second highest) out of `health.pain` on trees it cannot judge.
+    ///
+    /// It is a SECOND count rather than a replacement divisor on purpose. Swapping the denominator
+    /// would silently re-scale every existing score against the same configured thresholds, which this
+    /// crate already refused once for the same reason (`CouplingScore::avg_fan_out_among_importers`:
+    /// the population was stated in the name, and the computation was deliberately left alone).
+    ///
+    /// A LOW non-zero value is its own signal, and the sharpest one this field gives: it means the
+    /// verdict rests on a handful of edges. Measured on a Go tree carrying the starter config, `api/`
+    /// is the gRPC-Gateway generated-protobuf directory — the BOTTOM of that stack — while the starter
+    /// `vocabulary.featureSlicedDesign.entry` lists `api` as a TOP entry-layer name, so 4 imports
+    /// collided on the directory NAME and produced 4 layer-reverse violations that describe nothing
+    /// about the code. Read against `layerClassifiedImports: 4` those violations are visibly resting on
+    /// four edges; read against `totalImports: 10` they looked like a 40% failure rate. The fix for
+    /// that tree is its own vocabulary (drop `api` from `entry`, or declare the block empty to switch
+    /// the axis off) — the population makes the situation legible, it cannot guess the layout.
+    pub layer_classified_imports: u32,
+    pub violations: Vec<FeatureSlicedDesignViolation>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CohesionScore {
     pub score: f64,
+    /// POPULATION: FSD slices this metric found and scored. `0` means the tree exposed no slice the
+    /// configured `vocabulary.featureSlicedDesign.sliceContainers` recognizes, so the score judged
+    /// nothing — never that cohesion is perfect. Not recoverable from `slices.len()` as a contract: the
+    /// list is a detail view and this is the denominator, and the two are allowed to diverge the moment
+    /// a cap lands on the list (every other detail list here already has one).
+    pub slice_count: u32,
     pub slices: Vec<SliceCohesion>,
 }
 
@@ -44,6 +78,14 @@ pub struct CouplingScore {
     /// something. `max_fan_out` needed no rename — a maximum over a subset that excludes zeroes is the
     /// same maximum. See [`crate::scores::coupling`] for why the exclusion itself was left alone.
     pub avg_fan_out_among_importers: f64,
+    /// POPULATION: the count of files the average above is taken over — live, scored files with
+    /// `fanOut > 0`. The 2026-07-31 rename put the population in the FIELD NAME
+    /// (`avg_fan_out_among_importers`) but shipped no way to see how big it was, so a mean over 3
+    /// importers and a mean over 3,000 read identically. `0` means no file in this tree imports
+    /// anything in-tree — the score is 100 because there was nothing to average, which on a tree that
+    /// obviously has imports is the import-RESOLUTION blindness signal (`coverage.declaredImportsByExt`
+    /// high with the dep graph empty), not a clean bill of health.
+    pub importer_count: u32,
     pub max_fan_out: f64,
     pub circular_count: u32,
 }
@@ -78,12 +120,12 @@ pub struct PublicApiScore {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SfcScore {
+pub struct FileSizeComplianceScore {
     pub score: f64,
     pub limit: u32,
     pub compliant: u32,
     pub total: u32,
-    pub violations: Vec<SfcViolation>,
+    pub violations: Vec<FileSizeComplianceViolation>,
     /// Rows the MAX_FILE_ROWS_LISTED cap dropped from `violations` (0 = complete). `total - compliant`
     /// already carries the UNCAPPED violation count (one violation per non-compliant live file), so the
     /// identity is `total - compliant == violations.len() + violations_truncated` — NOT
@@ -96,6 +138,22 @@ pub struct SfcScore {
 #[serde(rename_all = "camelCase")]
 pub struct MainSequenceScore {
     pub score: f64,
+    /// POPULATION (distance-shaped metric, so this is the CLASSIFIED population, not a ratio
+    /// denominator): files whose abstract/concrete kind was actually known when `distance` was computed.
+    ///
+    /// **This is 0 on every shipped run**, and saying so is the entire reason the field exists. Martin's
+    /// distance is `|abstractness + instability - 1|`; abstractness needs a per-file abstract/concrete
+    /// classifier, and no producer of one exists anywhere in the workspace (the `FileKinds` input
+    /// reaches `compute_scores` empty from its only production call site). Every module therefore got
+    /// `abstractness: 0.0` — not measured-and-zero, but never measured — which silently turned the
+    /// metric into `|instability - 1|` and made a module with no cross-module edges score distance 1.0
+    /// (the worst possible) for the sole reason that nothing classified it.
+    ///
+    /// While this is 0, read `score`, `avgDistance`, and every row's `abstractness`/`distance` as
+    /// UNMEASURED and read only `instability`/`fileCount`, which are computed from the real dep graph.
+    /// `zzop_metrics::health` already does exactly that: a 0 here keeps `mainSequence` out of the
+    /// composite entirely rather than letting a fabricated distance move `pain`.
+    pub classified_files: u32,
     pub avg_distance: f64,
     pub modules: Vec<ModuleMainSeq>,
 }
@@ -114,6 +172,10 @@ pub struct ModularityScore {
 pub struct GodFileScore {
     pub score: f64,
     pub limit: u32,
+    /// POPULATION: live scored SOURCE files measured against `limit` — the denominator of the
+    /// `gods/live` ratio behind `score`. `0` means no file reached this metric at all (no source
+    /// dispatch class matched, or `exclude` removed them), so `score: 100` says nothing was weighed.
+    pub total: u32,
     pub files: Vec<GodFile>,
     /// Rows the MAX_FILE_ROWS_LISTED cap dropped from `files` (0 = complete). This report publishes no
     /// other count of god files, so without it a 50-row list had no recoverable total at all.
@@ -134,6 +196,10 @@ pub struct SiblingCrossScore {
 #[serde(rename_all = "camelCase")]
 pub struct DiamondScore {
     pub score: f64,
+    /// POPULATION: scored dep-graph roots this metric walked looking for two-hop diamonds. `0` means
+    /// there was no graph to walk (no resolved import edges, or every root excluded), so the `100 -
+    /// pairs x weight` formula started from a perfect score it never had a chance to lower.
+    pub roots_examined: u32,
     pub pairs: Vec<DiamondPair>,
     /// Rows the MAX_FILE_ROWS_LISTED cap dropped from `pairs` (0 = complete). The score is computed from
     /// the FULL pair count before the cap, so without this the score and the list disagreed silently.
@@ -156,6 +222,11 @@ pub struct RenameScore {
 #[serde(rename_all = "camelCase")]
 pub struct BusFactorScore {
     pub score: f64,
+    /// POPULATION: live high-churn scored files (`loc > 0` and `changeCount >= minLiveChanges`) — the
+    /// denominator of the `risky/total` ratio. It was already COMPUTED to produce `score` and simply
+    /// never published, so a `risky: 0` could not be read against anything: 0-of-0 (the git window
+    /// caught no file churning enough to judge) and 0-of-400 both shipped as `score: 100`.
+    pub total: u32,
     pub risky: u32,
     pub files: Vec<BusFactorFile>,
     /// Rows the MAX_FILE_ROWS_LISTED cap dropped from `files` (0 = complete) — `risky` already carries the
@@ -187,50 +258,6 @@ pub struct FixRatioScore {
     pub fix_share_of_tagged_touches: f64,
 }
 
-/// as-cast / any-type density — lower means higher TypeScript type confidence.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TypeSafetyScore {
-    pub score: f64,
-    pub total_as_cast: u32,
-    pub total_any_type: u32,
-    pub violations: Vec<TypeSafetyViolation>,
-    /// Rows the MAX_FILE_ROWS_LISTED cap dropped from `violations` (0 = complete). The two totals beside
-    /// it are OCCURRENCE sums, not a row count, so neither one recovers this number.
-    pub violations_truncated: u32,
-}
+mod aggregate;
 
-/// Law of Demeter — a.b.c+ chain density. Lower means less indirect coupling.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LodScore {
-    pub score: f64,
-    pub total_violations: u32,
-    pub violations: Vec<LodFileSummary>,
-    /// Rows the MAX_FILE_ROWS_LISTED cap dropped from `violations` (0 = complete). `total_violations`
-    /// counts CHAINS across every file; this list has one row per FILE, so that field cannot stand in.
-    pub violations_truncated: u32,
-}
-
-/// The aggregate score report — one field per structural-health metric.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Scores {
-    pub fsd: FsdScore,
-    pub cohesion: CohesionScore,
-    pub coupling: CouplingScore,
-    pub sdp: SdpScore,
-    pub hierarchy: HierarchyScore,
-    pub public_api: PublicApiScore,
-    pub sfc: SfcScore,
-    pub main_sequence: MainSequenceScore,
-    pub modularity: ModularityScore,
-    pub god_file: GodFileScore,
-    pub sibling_cross: SiblingCrossScore,
-    pub diamond: DiamondScore,
-    pub rename_instability: RenameScore,
-    pub bus_factor: BusFactorScore,
-    pub fix_ratio: FixRatioScore,
-    pub type_safety: TypeSafetyScore,
-    pub lod: LodScore,
-}
+pub use aggregate::Scores;

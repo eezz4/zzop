@@ -549,6 +549,88 @@ fn analyze_json_packs_loaded_carries_files_in_scope_zero_vs_nonzero() {
 }
 
 #[test]
+fn analyze_json_packs_loaded_zero_admission_rules_is_additive_only() {
+    // The rule-granularity half of the applicability census on the wire: `zeroAdmissionRules` lists a
+    // pack's rules whose own path gates admitted zero files, and it is serialized ONLY when non-empty
+    // (the `testPaths` additive-disclosure precedent) — a pack whose every rule admits files carries
+    // no new key, so existing consumers see byte-identical entries. A fully out-of-scope pack
+    // (`filesInScope: 0`) also carries no key: the pack-level zero already says "all of them".
+    let dir = cycle_fixture(); // a.ts + b.ts — no .py anywhere
+    let mixed_pack = r#"{
+        "id": "zz-mixed",
+        "framework": "any",
+        "rules": [
+            {
+                "id": "ts-quiet",
+                "severity": "warning",
+                "message": "msg",
+                "matcher": {
+                    "type": "line-scan",
+                    "file_pattern": "\\.ts$",
+                    "line_pattern": "NEVER_MATCHES"
+                }
+            },
+            {
+                "id": "py-blind",
+                "severity": "warning",
+                "message": "msg",
+                "matcher": {
+                    "type": "line-scan",
+                    "file_pattern": "\\.py$",
+                    "line_pattern": "NEVER_MATCHES"
+                }
+            }
+        ]
+    }"#;
+    let py_only_pack = r#"{
+        "id": "zz-python-only",
+        "framework": "any",
+        "rules": [
+            {
+                "id": "r1",
+                "severity": "warning",
+                "message": "msg",
+                "matcher": {
+                    "type": "line-scan",
+                    "file_pattern": "\\.py$",
+                    "line_pattern": "NEVER_MATCHES"
+                }
+            }
+        ]
+    }"#;
+    let config = format!(
+        r#"{{"root": {:?}, "packDefs": [{}, {}, {}]}}"#,
+        dir.path().display(),
+        dsl_pack_json("aa-ts", "r1", "NEVER_MATCHES"),
+        mixed_pack,
+        py_only_pack
+    );
+    let out = analyze_json(&config).expect("analyze_json should succeed");
+    let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let loaded = value["packsLoaded"].as_array().expect("packsLoaded array");
+    let by_id = |id: &str| {
+        loaded
+            .iter()
+            .find(|p| p["id"] == id)
+            .unwrap_or_else(|| panic!("expected pack {id} in packsLoaded, got: {value}"))
+    };
+    assert_eq!(
+        by_id("zz-mixed")["zeroAdmissionRules"],
+        serde_json::json!(["py-blind"]),
+        "the rule that admitted files but found nothing must not be listed, got: {value}"
+    );
+    assert!(
+        by_id("aa-ts").get("zeroAdmissionRules").is_none(),
+        "a pack whose every rule admits files must carry NO key (additive-only), got: {value}"
+    );
+    assert!(
+        by_id("zz-python-only").get("zeroAdmissionRules").is_none(),
+        "a fully out-of-scope pack repeats nothing — filesInScope: 0 already says it, got: {value}"
+    );
+    assert_eq!(by_id("zz-python-only")["filesInScope"], 0, "got: {value}");
+}
+
+#[test]
 fn analyze_json_packs_loaded_is_an_empty_array_when_no_packs_are_given() {
     // Always serialized — an empty ARRAY (not an absent field) is the honest zero-packs signal.
     let dir = cycle_fixture();
@@ -690,15 +772,15 @@ fn analyze_envelope_json_caller_pack_def_with_a_bundled_id_wins_the_collision_wh
         "the caller's override rule must fire, got: {value}"
     );
     // The replacement itself is silent no longer: a shadow warning must name the id and both
-    // sides' rule counts (bundled "security" ships 48 rules — see rules/dsl/security/security.json —
+    // sides' rule counts (bundled "security" ships 49 rules — see rules/dsl/security/security.json —
     // the caller's def has 1).
     let warnings = value["warnings"].as_array().expect("warnings array");
     assert!(
         warnings.iter().any(|w| {
             let w = w.as_str().unwrap();
-            w.contains("security") && w.contains("48 rules") && w.contains("replacement: 1 rule")
+            w.contains("security") && w.contains("49 rules") && w.contains("replacement: 1 rule")
         }),
-        "expected a shadow warning naming 'security' and both rule counts (48 -> 1), got: {value}"
+        "expected a shadow warning naming 'security' and both rule counts (49 -> 1), got: {value}"
     );
 }
 
@@ -716,7 +798,7 @@ fn analyze_envelope_json_extra_dir_pack_shadowing_the_bundled_security_pack_warn
 {
     // Reproduces the blind-test scenario directly: a custom on-disk pack (loaded the same way
     // `packs.extraDirs` ultimately reaches this engine — as a `packsDir` entry) declares `id:
-    // "security"`, colliding with the bundled 48-rule "security" pack the envelope path auto-seeds as
+    // "security"`, colliding with the bundled 49-rule "security" pack the envelope path auto-seeds as
     // inline `packDefs`. The custom 1-rule pack must win the collision whole (unchanged behavior) AND
     // the collision must now be named in `warnings`.
     let envelope = envelope_with_symbols(&["BadName"]);
@@ -751,7 +833,7 @@ fn analyze_envelope_json_extra_dir_pack_shadowing_the_bundled_security_pack_warn
         "the custom pack's rule must fire, got: {value}"
     );
 
-    // The shadowing is no longer silent: one warning names the id and both rule counts (bundled: 48,
+    // The shadowing is no longer silent: one warning names the id and both rule counts (bundled: 49,
     // replacement: 1), and identifies the winning side as coming from a packs directory.
     let warnings = value["warnings"].as_array().expect("warnings array");
     let shadow = warnings
@@ -760,8 +842,8 @@ fn analyze_envelope_json_extra_dir_pack_shadowing_the_bundled_security_pack_warn
         .find(|w| w.contains("security") && w.contains("packs directory"))
         .unwrap_or_else(|| panic!("expected a shadow warning for 'security', got: {value}"));
     assert!(
-        shadow.contains("48 rules") && shadow.contains("replacement: 1 rule"),
-        "expected both rule counts (bundled 47 -> replacement 1) in the shadow warning, got: {shadow:?}"
+        shadow.contains("49 rules") && shadow.contains("replacement: 1 rule"),
+        "expected both rule counts (bundled 49 -> replacement 1) in the shadow warning, got: {shadow:?}"
     );
 }
 

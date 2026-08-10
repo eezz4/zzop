@@ -1,6 +1,5 @@
-//! Project-wide (whole-corpus) Spring HTTP route PROVIDES resolution — the AST-grade equivalent of the
-//! old lexical `zzop_parser_java::project` module, a superset of `provides::extract_http_provides`'s
-//! per-file pass resolving two facts invisible to a single file:
+//! Project-wide (whole-corpus) Spring HTTP route PROVIDES resolution — a superset of
+//! `provides::extract_http_provides`'s per-file pass, resolving two facts invisible to a single file:
 //!
 //! 1. **Non-literal class-level prefixes**: `@RequestMapping(Path.ASSET_PATH)` where `Path.ASSET_PATH`
 //!    is a `public static final String` in another file, possibly a `+`-concatenation of further
@@ -12,29 +11,26 @@
 //!    Resolved here via a corpus-wide `extends`-chain walk (`walk::walk_chain`).
 //!
 //! Both facts are whole-project, not per-file — this module is a standalone whole-corpus pass callers
-//! run explicitly, same as the old crate's `extract_http_provides_project`'s calling convention (this
-//! crate's own `extract_http_provides_project` matches that signature exactly, so the wiring batch's
-//! `zzop-engine` call sites — `run_java_provides_project_pass`, the `java_provides_project` example —
-//! need no shape change, only the crate-name swap).
+//! run explicitly, never folded into the per-file pipeline. Live callers:
+//! `zzop_engine::analyze::native_rules::java_provides::run_java_provides_project_pass` and the engine's
+//! `java_provides_project` example.
 //!
-//! ## AST-native design change from the old lexical crate (documented, not a parity requirement)
-//! The old crate collected a flat per-file `SourceSymbol` list, then re-searched for each method's
-//! "smallest containing span" class at EMISSION time. This crate instead computes each class's own
-//! `(verb, path)` method routes ONCE, directly during the single per-file AST collection pass
-//! (`collect::walk_class`) — a method's route depends only on its OWN annotations, never on which class
-//! ends up gating it, so precomputing is behaviorally equivalent and removes the need to keep every
-//! file's line/symbol data around for a second pass.
+//! ## Two passes, not three
+//! Each class's own `(verb, path)` method routes are computed ONCE, during the single per-file AST
+//! collection pass (`collect::walk_class`), rather than re-derived at EMISSION time — a method's route
+//! depends only on its OWN annotations, never on which class ends up gating it, so precomputing is
+//! behaviorally equivalent and removes the need to keep every file's line/symbol data alive for a
+//! second pass.
 //!
-//! Also, unlike the old crate's documented "a nested class's own fields are not excluded from its
-//! enclosing class's constant scan" limit, this crate's constant collection is properly scoped to a
-//! class's OWN direct members — a nested class's `static final String` fields no longer leak into its
-//! enclosing class's constant map (a precision gain the AST's real nesting structure makes free).
+//! Constant collection is scoped to a class's OWN direct members: a nested class's `static final
+//! String` fields do not leak into its enclosing class's constant map, even when the names collide —
+//! pinned by `tests::a_nested_class_field_no_longer_leaks_into_the_enclosing_class_constant_scan`.
 //!
 //! ## Determinism
 //! An unresolvable prefix or ambiguous class name SKIPS every route needing it (never a wrong/empty
 //! prefix) — see `ProjectProvidesReport::skipped_unresolved_prefix` / `skipped_ambiguous_class_name`.
 //!
-//! ## Known limits (v1 scope, same as the old crate)
+//! ## Known limits (v1 scope)
 //! Resolution is by SIMPLE class name only (no package/import qualification); interfaces are not walked
 //! in `extends` chains (only `class_declaration` carries a `superclass` field at all).
 
@@ -49,7 +45,7 @@ mod walk;
 pub use walk::extract_http_provides_project;
 
 /// Result of a whole-corpus `extract_http_provides_project` run — see module doc's "Determinism"
-/// section. Identical shape to the old lexical crate's `ProjectProvidesReport`.
+/// section.
 #[derive(Debug, Clone, Default)]
 pub struct ProjectProvidesReport {
     pub provides: Vec<IoProvide>,
@@ -67,8 +63,8 @@ pub struct ProjectProvidesReport {
 }
 
 /// One class/interface/enum/record/annotation-type declaration's structural facts, collected once per
-/// file (`collect::walk_class`) — the AST-native counterpart of the old crate's identically-named
-/// `ClassRow`, with `methods` PRECOMPUTED instead of re-derived at emission time (module doc).
+/// file (`collect::walk_class`), with `methods` PRECOMPUTED rather than re-derived at emission time
+/// (module doc's "Two passes, not three").
 struct ClassRow {
     file: String,
     /// Simple superclass name (`class_declaration` only — module doc's "known limits").

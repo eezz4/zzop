@@ -61,16 +61,46 @@ function resolveBinaryPath() {
   return resolvePlatformPackageBinary() || resolveDevFallbackBinary();
 }
 
+// Is this a musl-based Linux (Alpine)? Only consulted on the failure path below.
+//
+// WHY: on Alpine the failure above reads as a self-contradiction. `process.platform` is `linux` and
+// `process.arch` is `x64`, so `platformKey` is `linux-x64` — and the "Supported prebuilt platforms"
+// line then prints `linux-x64` back at a user who is standing on exactly that. The list is not wrong:
+// the `@zzop/cli-linux-*-gnu` packages declare `libc: glibc`, so npm SKIPS the optionalDependency on
+// musl and there is genuinely nothing installed to resolve. But `attempts` can only report a bare
+// "Cannot find module", which is indistinguishable from a broken install, and the summary line cannot
+// say why. Naming musl is the missing half; musl is out of scope (see the header), not unnoticed.
+//
+// DETECTION: Node records the runtime glibc version in its diagnostic report, and a musl build has no
+// such field. `process.report` can be missing or restricted in an embedder, so a throw here means
+// "cannot tell" and returns false — the hint is purely additive, and a miss just restores the message
+// this shim printed before. It is never allowed to turn a resolution failure into a crash.
+function isMuslLinux() {
+  if (process.platform !== 'linux') return false;
+  try {
+    return !process.report.getReport().header.glibcVersionRuntime;
+  } catch {
+    return false;
+  }
+}
+
 const binaryPath = resolveBinaryPath();
 
 if (!binaryPath) {
   const supported = Object.keys(PLATFORM_PACKAGES)
     .map((key) => `${key} (${PLATFORM_PACKAGES[key].pkg})`)
     .join(', ');
+  const muslHint = isMuslLinux()
+    ? 'Note: this looks like a musl-based Linux (Alpine). The linux prebuilds are glibc-only — ' +
+      'they declare `libc: glibc`, so npm skipped the optional dependency for your platform, which ' +
+      'is why the line above lists a platform you appear to be on. musl is not a supported prebuild ' +
+      'target; build from source as below.\n'
+    : '';
   process.stderr.write(
     `zzop: failed to resolve the native binary for "${platformKey}".\n` +
       `Tried:\n${attempts.join('\n')}\n` +
       `Supported prebuilt platforms: ${supported}.\n` +
+      muslHint +
       'For unsupported platforms (or local development), build from source: ' +
       '`cargo build -p zzop-cli-bin --release`, then re-run — this shim also checks ' +
       '<repo root>/target/release/zzop[.exe]. See packages/cli/README.md for details.\n'

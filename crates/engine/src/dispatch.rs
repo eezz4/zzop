@@ -43,8 +43,11 @@ use std::path::Path;
 ///
 /// **Serialization invariant**: `Language` derives no `Serialize`/`Deserialize` and is never written into
 /// `zzop_cache::FileIrSlice`, the cache envelope, or any wire-format enum, so renaming a variant is
-/// cache-safe on its own. A change to a language's projected `FileIrSlice` *shape*, however, still
-/// requires a `CACHE_SCHEMA_VERSION` bump (`cache.rs`).
+/// cache-safe on its own. A change to a language's projected `FileIrSlice` *shape* is not free, but it
+/// invalidates itself: the slice's shape lives in `zzop-cache`, which the derived
+/// `CACHE_SCHEMA_VERSION` hashes by dependency closure, and the dispatch arm that fills it lives in this
+/// crate, whose own sources `FP_ENGINE` hashes into every parser fingerprint (`cache.rs`). Nothing here
+/// is raised by hand.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Language {
     TypeScript,
