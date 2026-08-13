@@ -230,14 +230,17 @@ fn an_unlabelable_item_is_counted_in_the_header_instead_of_being_silently_droppe
     );
 }
 
-/// The four things this format structurally cannot carry are named in the document, so a reader never
-/// has to infer completeness from a picture.
+/// The things this format structurally cannot carry are named in the document, so a reader never has to
+/// infer completeness from a picture. `wildcardRoutePartitions` is the sharpest of them: a partitioned
+/// route sits in NO bucket, so it draws no node — without this line a catch-all route would be missing
+/// from the join picture with nothing on the canvas to say a route was left out at all.
 #[test]
 fn the_header_names_what_the_format_cannot_render() {
     let out = rendered();
     for absent in [
         "crossLayerFindings",
         "hostRekeyCounts",
+        "wildcardRoutePartitions",
         "CALL SITES ARE AGGREGATED",
     ] {
         assert!(

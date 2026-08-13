@@ -144,11 +144,16 @@ fn config(cache_dir: &Path, packs: Vec<RulePackDef>) -> EngineConfig {
     }
 }
 
-/// Loads the real `rules/dsl/typescript/typescript.json` from the repo, filtered to just the `typescript`
-/// pack — same pattern as `rules/dsl/typescript/typescript.rs`'s own `typescript_pack` helper (duplicated here
-/// rather than shared, since these are independent `#[test]` binaries with no common test-support crate).
+/// Loads the real `examples/packs/typescript-lint.json`, filtered to just the `typescript` pack.
+///
+/// It stopped being a BUNDLED pack on 2026-08-11 (that directory's README carries the measurement and
+/// the reason), and this test kept using it deliberately rather than switching to a bundled one: the
+/// subject here is cache behaviour under rule toggles, and a pack loaded from OUTSIDE `rules/dsl/`
+/// exercises the user-supplied path — the more representative one for a cache-key question, since a
+/// third-party pack is exactly where an unexpected key collision would come from. It also keeps the
+/// moved pack parsing under CI; a pack nothing loads rots into a file that only looks like a pack.
 fn typescript_pack() -> RulePackDef {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../rules/dsl");
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/packs");
     let result = load_dsl_packs(&dir);
     assert!(
         result.errors.is_empty(),

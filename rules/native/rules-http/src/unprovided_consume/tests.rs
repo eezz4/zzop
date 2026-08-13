@@ -1057,3 +1057,66 @@ fn aggregate_message_omits_ellipsis_when_three_or_fewer_provide_segments() {
     );
     assert!(!found[0].message.contains('…'), "{}", found[0].message);
 }
+
+/// The ANT wildcard partition, single-tree half — the same fact the multi-tree linker partitions, asked
+/// through the same shared predicate (`zzop_core::wildcard_route_covers`) so the two axes cannot answer
+/// differently. Measured before the veto existed (2026-08-13): `@GetMapping("/files/**")` plus a call
+/// beneath it fired ONE `unprovided-consume` on a route that is served.
+#[test]
+fn a_call_served_by_an_ant_catch_all_is_not_unprovided_but_its_controls_still_are() {
+    let provides = vec![
+        provide("GET /api/files/**", "FileController.java", 4),
+        provide("GET /api/health", "FileController.java", 9),
+    ];
+    let consumes = vec![
+        // Served by the catch-all — the false finding this veto removes.
+        consume("http", Some("GET /api/files/a/b/c"), "client.ts", 3),
+        // CONTROL A: nothing serves this path at all.
+        consume("http", Some("GET /api/ghost"), "client.ts", 4),
+        // CONTROL B: the catch-all is GET-only, so a POST beneath it is genuinely unprovided —
+        // the partition suppresses the route's OWN verb, never its whole path space.
+        consume("http", Some("POST /api/files/new"), "client.ts", 5),
+    ];
+    let found = unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN));
+    // Anchors, not whole messages: this rule's message is ~2KB of prose, so a failure dump keyed on it
+    // buries the one fact the reader needs (which call fired) under three copies of the same essay.
+    let keys: Vec<(&str, u32)> = found.iter().map(|f| (f.file.as_str(), f.line)).collect();
+    assert_eq!(
+        found.len(),
+        2,
+        "only the two controls may fire, got {keys:?}"
+    );
+    assert!(
+        found.iter().any(|f| f.message.contains("GET /api/ghost")),
+        "{keys:?}"
+    );
+    assert!(
+        found
+            .iter()
+            .any(|f| f.message.contains("POST /api/files/new")),
+        "{keys:?}"
+    );
+    assert!(
+        !found.iter().any(|f| f.message.contains("/api/files/a/b/c")),
+        "a call the catch-all serves must not be reported as unprovided: {keys:?}"
+    );
+}
+
+/// A tree whose ONLY http provide is a wildcard route still passes the zero-provides veto (it does
+/// provide something) — and every call it does not serve still fires. Guards the lazy fix of treating a
+/// wildcard-only tree as provide-less, which would silence the whole rule for that tree.
+#[test]
+fn a_wildcard_only_tree_still_reports_the_calls_its_pattern_does_not_cover() {
+    let provides = vec![provide("GET /files/**", "Ctl.java", 4)];
+    let consumes = vec![
+        consume("http", Some("GET /files/a"), "client.ts", 3),
+        consume("http", Some("GET /users/1"), "client.ts", 4),
+    ];
+    let found = unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN));
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(
+        found[0].message.contains("GET /users/1"),
+        "{}",
+        found[0].message
+    );
+}

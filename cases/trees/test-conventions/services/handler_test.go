@@ -3,7 +3,7 @@
 // ABSENT here, and any finding at all scores as a false positive (`benign` in EXPECTED.jsonc).
 //
 // The defects below are deliberately identical to the twin's, so a divergence can only come from the
-// PATH. The `services/` directory is load-bearing too: `reliability/console-in-be` is gated on a backend
+// PATH. The `services/` directory is load-bearing too: `code-hygiene/console-in-be` is gated on a backend
 // path segment, so without it this file's silence under that rule would be free.
 package services
 

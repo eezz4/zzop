@@ -46,6 +46,60 @@ fn root_level_files_are_grouped_under_dot() {
     assert_eq!(agg[0].folder, ".");
 }
 
+/// The rollup depth is ecosystem-shaped, and this pins the ecosystem it is shaped AGAINST so the next
+/// reader meets it as a decision rather than as a bug.
+///
+/// The test above shows depth 2 doing its job on a `features/<slice>` layout. This one feeds the same
+/// function a Maven/Gradle tree — where the module names live at segments 4-6, not 1-2 — and shows the
+/// whole source root collapsing into ONE row plus one for tests. That is not a coarse module map; it
+/// is the absence of one, and no choice of a single constant fixes both layouts at once (see
+/// [`DEFAULT_FOLDER_DEPTH`]'s doc for the measurement, the refusal to move the number, and the
+/// `graph --fold <n>` lane that answers the variable-depth question instead).
+///
+/// If this ever goes red because the collapse stopped happening, the depth became per-tree or
+/// configurable — in which case `DEFAULT_FOLDER_DEPTH`'s doc and `docs/modules/facade.md`'s `folders`
+/// row both state something that is no longer true and must move in the same commit.
+#[test]
+fn a_maven_layout_collapses_into_one_row_per_source_root_at_the_default_depth() {
+    let nodes = vec![
+        n("src/main/java/com/example/svc/OrderService.java", 10.0),
+        n("src/main/java/com/example/web/OrderController.java", 20.0),
+        n("src/main/java/com/example/repo/OrderRepository.java", 5.0),
+        n("src/test/java/com/example/svc/OrderServiceTests.java", 1.0),
+    ];
+    let agg = aggregate_by_folder(&nodes, DEFAULT_FOLDER_DEPTH);
+    let rows: Vec<(&str, u32)> = agg
+        .iter()
+        .map(|s| (s.folder.as_str(), s.node_count))
+        .collect();
+    assert_eq!(
+        rows,
+        vec![("src/main", 3), ("src/test", 1)],
+        "three distinct Java packages must land in the SINGLE row `src/main` — the folder rollup \
+         cannot see a Maven module at this depth"
+    );
+
+    // And the folder dep graph over the same layout has nothing left to draw: every edge is
+    // intra-row, so it is dropped as a self-edge and the module picture comes out empty.
+    let dep: DepGraph = [
+        (
+            "src/main/java/com/example/web/OrderController.java".to_string(),
+            vec!["src/main/java/com/example/svc/OrderService.java".to_string()],
+        ),
+        (
+            "src/main/java/com/example/svc/OrderService.java".to_string(),
+            vec!["src/main/java/com/example/repo/OrderRepository.java".to_string()],
+        ),
+    ]
+    .into_iter()
+    .collect();
+    assert!(
+        aggregate_dep_by_folder(&dep, DEFAULT_FOLDER_DEPTH).is_empty(),
+        "two real cross-package edges must roll up to ZERO folder edges here — this is what makes \
+         the collapse invisible in the picture rather than merely coarse"
+    );
+}
+
 /// A non-source file's `risk_score` is zeroed upstream (`zzop_core::build_file_nodes`'s `is_source`
 /// gate) before it ever reaches `aggregate_by_folder` — this exercises the folder rollup's side of
 /// that contract: a huge, high-churn data file (risk pre-zeroed, as the real pipeline would produce)

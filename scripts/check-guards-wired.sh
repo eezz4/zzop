@@ -383,4 +383,128 @@ if [ -n "$actual_hooks_path" ] && [ "$actual_hooks_path" != "$expected_hooks_pat
   exit 1
 fi
 
-echo "check-guards-wired: clean ($count guards checked; ${#workflow_files[@]} workflows, ${wf_refs:-0} workflow_run reference(s) resolved; core.hooksPath ${actual_hooks_path:-unset})."
+# FOURTH SUBJECT (2026-08-11): every EXECUTABLE defense under scripts/ must have an invocation site.
+#
+# This file's own header states the claim it enforces -- "a guard can be written, committed, and quietly
+# never invoked again" -- while its needle is the glob `scripts/check-*.sh`. That is exactly the
+# claim-vs-needle gap the fleet exists to kill, sitting on the meta-guard itself. Four measured
+# incidents, one of them LIVE when this axis was written:
+#
+#   - scripts/site-graph-data.mjs had zero callers anywhere in the tree while its output was committed
+#     on every release (closed 2026-07-29).
+#   - two sibling adapter suites under .mjs ran zero times, one of them the only test pinning the
+#     adapter envelope snapshot contract (measured 2026-07-28).
+#   - `node --test packages/cli/test/*.test.js` on an unmatched glob printed `1..0 / # pass 0` and
+#     exited 0 while being the only proof the npm shim can spawn the native binary (2026-07-29).
+#   - LIVE: scripts/measure/config-warnings-gate.mjs, 184 lines, committed in the v0.30.0 release
+#     commit against a measured incident, with no caller anywhere in the tree.
+#
+# Why HERE and not a 33rd scripts/check-*.sh: a new script would itself need wiring into pre-commit,
+# ci.yml and this very loop to be worth anything -- the SECOND SUBJECT's argument, verbatim.
+#
+# The needle is a CALL, not a mention: an interpreter (`bash`/`sh`/`node`) must precede the path.
+# `site/graph.html` is the committed dep-graph node list and names every script in the tree, so a
+# substring test would let one generated file vouch for all of them -- bug #2 of this file's own
+# history re-committed. It is excluded by path for that reason.
+#
+# Exempt: scripts/lib/** (sourced, no exit status of its own), scripts/check-*.sh (the FIRST subject
+# already covers them), and the hand-run tools registered below WITH a reason. The registry is
+# liveness-checked: an entry whose file is gone reds, so it cannot outlive its subject.
+HAND_RUN_TOOLS=(
+  "scripts/measure/gen-scale-tree.mjs|generates a synthetic tree for one-off scale measurements; an automated run would fabricate a corpus nobody asked for"
+  "scripts/measure/classify-method-scan-spans.mjs|a one-off census used while designing the span contract; its output is a reading, not a gate"
+  "scripts/preflight-build-env.sh|a preflight a human runs BEFORE starting a long build (its own usage block says so); wiring it into CI would gate every job on the runner disk budget of a dev box"
+  "scripts/measure/config-warnings-gate.mjs|its subject is corpus/oss/*/zzop.config.jsonc, which is gitignored, so CI structurally has nothing to point it at; run by hand after a vocabulary rename"
+)
+
+
+# Two accepted invocation shapes, and the reason there are two rather than one:
+#
+#   1. INTERPRETER FORM -- `bash|sh|node <...>/<basename>`. The strict one.
+#   2. ASSIGNMENT FORM  -- `VAR=scripts/<basename>`. Added after this axis produced its first finding
+#      and that finding was a FALSE POSITIVE: scripts/check-license-shipping.sh drives
+#      scripts/test-notices-harvest.mjs as `node "$HARVEST_TEST"` after `HARVEST_TEST=scripts/...`,
+#      so no line carries both an interpreter and the literal path. This file's own header already
+#      records that residual for `invoked_in` ("bash \"$REPO/scripts/check-foo.sh\" -> nomatch") and
+#      chose to leave it; here it is closed instead, because a false RED on this axis has no escape
+#      hatch that is not "add it to HAND_RUN_TOOLS", i.e. exactly the wrong answer written down.
+#
+# The residual the assignment form accepts, stated rather than hidden: a line like
+# `echo "path=scripts/x.mjs"` would satisfy it. That is the bug-#2 shape (a mention read as a call) in
+# a much narrower window -- `=` immediately before the path, no space -- and no file in this tree
+# spells it that way today. If it ever appears, the fix is to require the assignment target to be
+# USED with an interpreter in the same file, which is a parse this line-shaped check cannot do.
+defense_invoked_anywhere() { # <path>
+  local base esc
+  base="$(basename "$1")"
+  esc="$(printf '%s' "$base" | sed 's/[.]/[.]/g')"
+  # THIRD accepted shape, found the same way the second was -- by this axis producing a false RED on
+  # scripts/measure/plant-revert.mjs, which two sibling defenses drive as
+  # `import { withPlanted } from "./plant-revert.mjs"`. A module consumed by an invoked defense IS
+  # invoked; requiring an interpreter would have pushed the repo shared plant/revert helper onto the
+  # hand-run list, which is the opposite of true.
+  git grep -nE -- "(bash|sh|node)[[:space:]][^\"']*$esc|=[\"']?(\./)?scripts/([^[:space:]\"']*/)?$esc|from[[:space:]]+[\"'][^\"']*$esc" ':!site/*' 2>/dev/null |
+    awk -v esc="$esc" '
+      {
+        line = $0
+        sub(/^[^:]*:[0-9]+:/, "", line)
+      }
+      # Comment leaders for every file type in the subject set: sh/yaml take #, and the .mjs half
+      # takes // and the * continuation of a block comment. Without the last two, a JS file that
+      # merely NAMES a sibling in its header would vouch for it -- bug #2 of this file, one language over.
+      line ~ /^[[:space:]]*(#|\/\/|\*)/ { next }
+      {
+        # A mention INSIDE output is not a call. Reject only when the echo/printf comes BEFORE the
+        # interpreter on the line, so `bash scripts/x.sh && echo ok` still counts as the call it is.
+        say = match(line, /(echo|printf)[[:space:]]/) ? RSTART : 0
+        run = match(line, /(bash|sh|node)[[:space:]]/) ? RSTART : 0
+        if (say > 0 && run > 0 && say < run) next
+        if (say > 0 && run == 0) next
+        # No early exit. awk closing the pipe early sends git grep SIGPIPE, and under
+        # set -o pipefail that failure becomes the status of the whole pipeline, so a REAL call
+        # would read as "no invocation site". Measured here 2026-08-11 on four defenses at once;
+        # the repo already has check-shell-pipe-sigpipe.sh for exactly this class.
+        # (No apostrophe in this comment: the whole awk program is a single-quoted shell string,
+        # which is why this file header already bans them in the sibling awk block.)
+        found = 1
+      }
+      END { exit(found ? 0 : 1) }
+    '
+}
+
+mapfile -t DEFENSES < <(
+  { git ls-files -- 'scripts/*.sh' 'scripts/*.mjs' 'scripts/measure/*.sh' 'scripts/measure/*.mjs'
+    git ls-files --others --exclude-standard -- 'scripts/*.sh' 'scripts/*.mjs' 'scripts/measure/*.sh' 'scripts/measure/*.mjs'
+  } | sort -u | grep -v '^scripts/check-' | grep -v '^scripts/lib/' || true
+)
+if [ "${#DEFENSES[@]}" -eq 0 ]; then
+  echo "check-guards-wired: FAILED -- the executable-defense subject set is EMPTY. The globs above"
+  echo "  matched nothing, so this axis would report clean without having looked at anything."
+  exit 1
+fi
+
+for d in "${DEFENSES[@]}"; do
+  exempt=""
+  for entry in "${HAND_RUN_TOOLS[@]}"; do
+    [ "${entry%%|*}" = "$d" ] && exempt="yes" && break
+  done
+  [ -n "$exempt" ] && continue
+  if ! defense_invoked_anywhere "$d"; then
+    echo "check-guards-wired: FAILED -- $d has no invocation site anywhere in the tree."
+    echo "  A defense nobody calls is not a defense. Wire it into ci.yml / scripts/ci-local.sh / a"
+    echo "  sibling script, or register it in HAND_RUN_TOOLS above WITH the reason it is hand-run."
+    missing=1
+  fi
+done
+for entry in "${HAND_RUN_TOOLS[@]}"; do
+  p="${entry%%|*}"
+  if [ ! -f "$p" ]; then
+    echo "check-guards-wired: FAILED -- HAND_RUN_TOOLS registers $p, which does not exist."
+    echo "  A registration that outlives its subject is a hole nobody is watching; remove the entry."
+    missing=1
+  fi
+done
+
+[ "$missing" -eq 0 ] || exit 1
+
+echo "check-guards-wired: clean ($count guards checked; ${#workflow_files[@]} workflows, ${wf_refs:-0} workflow_run reference(s) resolved; core.hooksPath ${actual_hooks_path:-unset}; ${#DEFENSES[@]} executable defense(s), ${#HAND_RUN_TOOLS[@]} hand-run)."

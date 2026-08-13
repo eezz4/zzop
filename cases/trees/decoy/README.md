@@ -39,7 +39,7 @@ rule's veto arm, which is the part most likely to rot unnoticed.
   `dead-exports` fire *legitimately*, and the scaffolding would score as a false positive. The two
   `dead.*` files are the deliberate exception-shaped cases: reachable only via a re-export hop and only via
   a dynamic import.
-* `reliability/env-outside-config` is structurally silent in this tree — it has a
+* `code-hygiene/env-outside-config` is structurally silent in this tree — it has a
   `require_attr_declared: env-config-module` gate and no overlay declares that key here — so `process.env`
   reads in these files prove nothing about that rule. Its exemption arm is covered by the `config/env.ts`
   controls in the `api` and `web` trees instead.

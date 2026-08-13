@@ -109,10 +109,13 @@ impl Drop for TempDir {
 /// (e.g. the shared test-path `file_exclude_pattern`) resolve exactly like they do at real load time —
 /// a raw struct deserialize would leave the literal `"${test-paths}"` string in place, which is not a
 /// valid regex and would silently no-op every affected rule.
-/// The pack this file's tests scan with. The disk load below reads and parses ALL 12 pack JSONs and
-/// throws away 11, so doing it per test cost this binary that work once per test; the `OnceLock` makes
-/// it once per binary. The clone is cheap and — importantly — SHARES the pack's compiled-regex memo
-/// (`zzop_core::dsl::RegexCache`), so the second test onward also skips recompiling every pattern.
+/// The pack this file's tests scan with. The disk load below parses EVERY pack JSON in the directory
+/// and throws all but this one away, so doing it per test cost this binary that work once per test; the
+/// `OnceLock` makes it once per binary. How many packs that is is not written here: it moved inside one
+/// release (v0.30.0 exported a whole pack) and the sentence needs no size to make its point — the same
+/// spelling `examples/packs/tests/sql_preferences.rs` already uses. The clone is cheap and — importantly
+/// — SHARES the pack's compiled-regex memo (`zzop_core::dsl::RegexCache`), so the second test onward
+/// also skips recompiling every pattern.
 fn browser_pack() -> RulePackDef {
     static PACK: std::sync::OnceLock<RulePackDef> = std::sync::OnceLock::new();
     PACK.get_or_init(browser_pack_uncached).clone()

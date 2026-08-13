@@ -34,6 +34,11 @@ GUARDS=(
   check-pack-suppress-sentence
   check-matcher-glossary-sync
   check-docs-rule-ids
+  check-doc-config-keys
+  check-prose-rule-ids
+  check-runtime-text-rule-ids
+  check-marker-claims
+  check-pack-id-values
   check-docs-link-graph
   check-io-key-vocab
   check-policy-census
@@ -47,6 +52,7 @@ GUARDS=(
   check-asset-name-prose
   check-deploy-facts-prose
   check-overclaim-prose
+  check-version-relative-prose
   check-vendor-token-literals
   check-server-json-hashes
   check-release-version-propagation

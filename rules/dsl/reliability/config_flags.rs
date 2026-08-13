@@ -1,49 +1,9 @@
+//! `debug-true-committed` — the half of this file that stayed. `env-nonnull-assert` was exported to
+//! `examples/packs/code-hygiene.json` on 2026-08-12 (`axis: opinion`); its tests live at
+//! `examples/packs/tests/env_nonnull_assert.rs`. The two rules shared no fixture, so nothing here had
+//! to be duplicated.
+
 use crate::{hits, scan, TempDir};
-
-// --- env-nonnull-assert ---
-
-#[test]
-fn process_env_non_null_assertion_is_flagged() {
-    let dir = TempDir::new("zzop-be-rel");
-    dir.write(
-        "src/config.ts",
-        "export const key = process.env.API_KEY!;\n",
-    );
-    let out = scan(&dir);
-    let h = hits(&out, "env-nonnull-assert");
-    assert_eq!(h.len(), 1, "{:?}", out.findings);
-    assert_eq!(h[0].line, 1);
-}
-
-#[test]
-fn process_env_strict_inequality_comparison_is_not_flagged() {
-    let dir = TempDir::new("zzop-be-rel");
-    dir.write(
-        "src/config.ts",
-        "export function checkEnv(): boolean {\n  if (process.env.API_KEY !== undefined) {\n    return true;\n  }\n  return false;\n}\n",
-    );
-    let out = scan(&dir);
-    assert!(
-        hits(&out, "env-nonnull-assert").is_empty(),
-        "{:?}",
-        out.findings
-    );
-}
-
-#[test]
-fn env_assert_ok_marker_above_the_assertion_line_suppresses_the_finding() {
-    let dir = TempDir::new("zzop-be-rel");
-    dir.write(
-        "src/config.ts",
-        "// zzop-env-nonnull-assert-ok: validated at startup in bootstrap.ts\nexport const key = process.env.API_KEY!;\n",
-    );
-    let out = scan(&dir);
-    assert!(
-        hits(&out, "env-nonnull-assert").is_empty(),
-        "{:?}",
-        out.findings
-    );
-}
 
 // --- debug-true-committed ---
 
@@ -124,7 +84,7 @@ fn debug_ok_marker_on_the_same_line_suppresses_the_finding() {
 
 #[test]
 fn tls_reject_unauthorized_disabled_in_a_playwright_e2e_helper_is_not_flagged() {
-    // `NODE_TLS_REJECT_UNAUTHORIZED=0` for a local self-signed cert in a Playwright e2e helper is the intended target, not a leaked dev backdoor — same exclusion as this pack's sibling `egress/localhost-url-literal-committed`.
+    // `NODE_TLS_REJECT_UNAUTHORIZED=0` for a local self-signed cert in a Playwright e2e helper is the intended target, not a leaked dev backdoor — same `${test-paths-stories}` exclusion the exported `code-hygiene/localhost-url-literal-committed` carries, which is where that comparison now points.
     let dir = TempDir::new("zzop-be-rel");
     dir.write(
         "e2e/globalSetup.ts",

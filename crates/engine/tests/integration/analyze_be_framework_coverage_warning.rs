@@ -846,3 +846,60 @@ fn split_internal_fetch_mass_fires_one_tree_wide_fallback_not_a_per_app_warning(
         "the fallback must use the tree-wide wording and not name any app bucket, got: {w:?}"
     );
 }
+
+/// S15 (`channel_consequence_warning`) — the consequence rider, and the one gate distinction that
+/// separates it from every sibling above: they fire at NEAR-zero, it fires only at EXACT zero.
+///
+/// `koa_import_tree` extracts no route at all, so "these rules can produce no finding here" is true
+/// of it; `real_nest_tree` keeps one route, S2 still fires on it (below `MIN_PROVIDES_FLOOR`), and
+/// the same sentence would be false — one route is still something for those rules to judge. The
+/// warning must also name BOTH directions, since the rules an empty provide channel silences and the
+/// rules it inflates are different sets: quoting only the first is the half-truth this tripwire
+/// exists to stop shipping.
+#[test]
+fn the_empty_provide_channel_consequence_rides_s2_only_at_exact_zero() {
+    let zero_dir = koa_import_tree();
+    let zero = analyze_tree(zero_dir.path(), &config());
+    let consequence: Vec<&String> = zero
+        .warnings
+        .iter()
+        .filter(|w| w.contains("Empty-channel consequence (io.provides:http)"))
+        .collect();
+    assert_eq!(
+        consequence.len(),
+        1,
+        "a tree with a server-framework import and ZERO extracted routes must carry exactly one \
+         provide-channel consequence disclosure, got: {:?}",
+        zero.warnings
+    );
+    let w = consequence[0];
+    assert!(
+        w.contains("cross-layer/unconsumed-endpoint"),
+        "the silenced side must be named: {w:?}"
+    );
+    assert!(
+        w.contains("cross-layer/unprovided-mutation-call") && w.contains("OPPOSITE"),
+        "the inflating side must be named as the opposite direction, not folded into the first \
+         list: {w:?}"
+    );
+
+    let one_route_dir = real_nest_tree();
+    let one_route = analyze_tree(one_route_dir.path(), &config());
+    assert!(
+        one_route
+            .warnings
+            .iter()
+            .any(|w| w.contains(S2_WARNING_SUBSTRING)),
+        "precondition: the 1-route tree must still fire S2, or this test proves nothing about the \
+         gates differing"
+    );
+    assert!(
+        !one_route
+            .warnings
+            .iter()
+            .any(|w| w.contains("Empty-channel consequence")),
+        "a tree with one extracted route is not an EMPTY channel — those rules still have something \
+         to judge there, got: {:?}",
+        one_route.warnings
+    );
+}

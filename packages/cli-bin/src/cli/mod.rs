@@ -22,7 +22,7 @@ pub mod run;
 
 pub use args::{parse_trees_args, reject_flag_like_args};
 pub use help::print_help;
-pub use run::{run_diff, run_file_validate, run_graph, run_init, run_lookup};
+pub use run::{run_diff, run_explain, run_file_validate, run_graph, run_init};
 
 /// Reads a file argument or exits 1 (a runtime failure, never a usage error — the argument was
 /// well-formed, the file just isn't readable). Shared by every file-taking subcommand.

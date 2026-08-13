@@ -36,8 +36,12 @@
 # Known-uncovered shapes (documented, not silently ignored):
 #   - A key whose opening `{` sits on the NEXT line (`"id":` <newline> `{`) — no scanned surface writes
 #     JSON that way; covering it needs a real parser, not grep.
-#   - `packs.disabled` entries (bare pack ids by design — a different, pack-id-only key space; validating
-#     it against the pack-id set would be a separate check, not this drift class).
+#   - ~~`packs.disabled` entries~~ — CLOSED 2026-08-12 by `scripts/check-pack-id-values.sh`, which is the
+#     separate check this line predicted: bare pack ids are a pack-id-only key space, so it validates
+#     `packs.disabled`/`packs.only` array VALUES against the ids under `rules/dsl/`, over a wider subject
+#     than this guard's `.md`/`.html` (it also reads `*.jsonc`/`*.json`, so the repo's own committed
+#     config and the config-parity fixture are in scope). Kept here rather than deleted: this line is
+#     where a reader looks for that key space, and "covered elsewhere" is the answer they need.
 #
 # Severity/disable token vocabulary (pass A): the UNION of crates/core's wire-level `Severity` enum
 # (crates/core/src/finding.rs: `#[serde(rename_all = "lowercase")] enum Severity { Critical, Warning,
@@ -137,17 +141,48 @@ fi
 # --- Build the SSOT id set from docs/rules/catalog.md ---------------------------------------------------
 # DSL rule ids are prefixed with their owning pack's heading (`<pack>/<id>`); native analysis ids
 # (including the already-slashed `cross-layer/*` ids) are taken bare, exactly as printed.
+#
+# The valid-id universe is exactly THREE tables, and the `mode` machine below is what says which one a
+# row is in. Two of the three are pack sections whose rows are prefixed with their `### `<pack>``
+# heading — `## DSL packs` (bundled) and `## Exported packs` (`examples/packs/`, retrievable and
+# loadable, so a config example naming one of their ids is legitimate). The third is the native table,
+# whose rows stand as printed.
+#
+# EVERY OTHER HEADING CLOSES THE UNIVERSE, and that line is the 2026-08-13 repair. `mode` used to be
+# set by the two `##` anchors and never reset, so it leaked DOWNWARD past `## Native analyses` into
+# `### Recommendation ids` — a table this catalog introduces with the words **"These are not rule
+# ids"** — and admitted its 8 rows as valid ids (measured: 211 ids, of which 7 were recommendation-only
+# and 1 (`circular`) collided with a real native id). The binary says the opposite in as many words:
+#   $ zzop explain hot-churn
+#   zzop: "hot-churn" is a RECOMMENDATION id, not a rule id ... there is no per-recommendation toggle.
+# So `rules: { "hot-churn": "off" }` in a doc example is exactly the silent no-op this guard exists to
+# fail on, and this guard was the thing blessing it.
+#
+# The leak's OTHER half is deliberate and stays: `## Exported packs` inherits pack mode on purpose,
+# now by an explicit anchor rather than by omission. Fixing "the mode never resets" by resetting at
+# every `##` would have deleted the 28 exported ids from the universe — legitimate ids, in the
+# population this repo just spent a release teaching people to load.
+#
+# The failure DIRECTION of the reset is the safe one: a heading this machine does not recognize
+# narrows the universe, so a doc example under it goes RED and a human looks, per the header's
+# failure-mode bias. A widening blind spot is the one outcome that must never be silent.
 catalog_ids="$(awk '
-  /^## DSL packs/      { mode = "dsl"; next }
-  /^## Native analyses/{ mode = "native"; next }
+  /^## DSL packs/       { mode = "dsl";    next }
+  /^## Exported packs/  { mode = "dsl";    next }
+  /^## Native analyses/ { mode = "native"; next }
   /^### `/ {
     if (mode == "dsl") {
       pack = $0
       sub(/^### `/, "", pack)
       sub(/`.*/, "", pack)
+    } else {
+      # A backticked subheading outside a pack section names no pack — whatever follows it is not a
+      # rule table, so stop attributing rows to the section above.
+      mode = ""
     }
     next
   }
+  /^###? / { mode = ""; next }
   /^\| `[a-z0-9]/ {
     id = $0
     sub(/^\| `/, "", id)
@@ -157,9 +192,11 @@ catalog_ids="$(awk '
   }
 ' "$catalog" | sort -u)"
 
-# Bare DSL pack ids (the `### `<pack>`` headings of the DSL section; the stub-packs heading carries no
-# backtick-wrapped id, so it is naturally excluded). Valid in `disabledRules` and as a whole-pack-off
-# `rules:` key per crates/core/src/registry.rs's `is_enabled` doc (see header comment).
+# Bare DSL pack ids — every `### `<pack>`` heading above `## Native analyses`, which is BOTH pack
+# sections (bundled and exported); a heading with no backtick-wrapped id is naturally excluded. Valid
+# in `disabledRules` and as a whole-pack-off `rules:` key per crates/core/src/registry.rs's
+# `is_enabled` doc (see header comment). No `mode` machine here and none needed: the `exit` is the
+# boundary, and the only headings above it are pack headings.
 pack_ids="$(awk '
   /^## Native analyses/ { exit }
   /^### `/ { p = $0; sub(/^### `/, "", p); sub(/`.*/, "", p); print p }

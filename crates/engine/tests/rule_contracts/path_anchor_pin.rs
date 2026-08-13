@@ -59,7 +59,7 @@ use crate::load_all_packs;
 /// non-optional `String`. This exhaustive match is what makes the subject set DERIVED rather than
 /// listed: a new matcher kind cannot be added without this failing to compile, so no rule can enter
 /// the packs outside this pin's view. (§5.5 of the working agreements: derive, never enumerate.)
-fn file_pattern(matcher: &Matcher) -> &str {
+pub(crate) fn file_pattern(matcher: &Matcher) -> &str {
     match matcher {
         Matcher::LineScan(m) => &m.file_pattern,
         Matcher::MethodScan(m) => &m.file_pattern,
@@ -84,10 +84,16 @@ fn every_file_pattern(packs: &[RulePackDef]) -> Vec<(String, String)> {
     out
 }
 
-/// The absolute floor on the subject set. Well below today's count (140 across 12 packs) so it never
-/// churns, and far enough above zero that a broken extraction or a pack directory that stopped loading
-/// fails LOUDLY instead of leaving this pin vacuously green over an empty set — the failure mode §5.5
-/// names as worse than an uncaught defect, because green then gets cited as coverage.
+/// The absolute floor on the subject set. Far enough above zero that a broken extraction or a pack
+/// directory that stopped loading fails LOUDLY instead of leaving this pin vacuously green over an empty
+/// set — the failure mode §5.5 names as worse than an uncaught defect, because green then gets cited as
+/// coverage. Today's count is deliberately not written here: this prose used to say "140 across 12
+/// packs" and v0.30.0 exported 17 rules to `examples/packs/` the same week, taking the set to 116 across
+/// 11. The assertion below prints the live pair on failure, which is the only spelling that cannot rot.
+///
+/// The floor is NOT tracked to that count. It is sized to catch "the subject set collapsed", so it may
+/// legitimately be lowered when the bundle legitimately shrinks — see the assertion's message for the
+/// one case where lowering is the correct action rather than the forbidden one.
 const SUBJECT_FLOOR: usize = 100;
 
 /// A character that can begin a directory or file NAME. `/` is deliberately excluded: a pattern
@@ -371,9 +377,15 @@ fn no_shipped_file_pattern_anchors_a_literal_directory_segment_at_the_tree_root(
     assert!(
         subjects.len() >= SUBJECT_FLOOR,
         "this pin found only {} shipped `file_pattern`(s) across {} pack(s) — it derives its subject \
-         set from the loaded packs and expects at least {SUBJECT_FLOOR}, so a number this low means \
-         pack loading or the extraction above is broken and the pin is vouching for NOTHING. Fix the \
-         extraction; do not lower the floor to make this pass.",
+         set from the loaded packs and expects at least {SUBJECT_FLOOR}. Two readings, and they take \
+         OPPOSITE actions, so read the diff that caused this before choosing:\n\
+         (1) pack loading or the extraction above is broken and the pin is vouching for NOTHING — fix \
+         the extraction; do NOT lower the floor to make this pass;\n\
+         (2) rules legitimately LEFT the bundle, the way v0.30.0 moved 17 of them to `examples/packs/` \
+         (140 across 12 packs -> 116 across 11) — then the subject set really is that small, nothing is \
+         broken, and lowering the floor in the same commit as the export IS the correct action.\n\
+         The pack count printed above discriminates: an export drops it by whole packs, a broken walk \
+         usually zeroes it.",
         subjects.len(),
         packs.len(),
     );

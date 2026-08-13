@@ -1,11 +1,33 @@
 # Rust build artifacts
 /target
+# Per-agent CARGO_TARGET_DIR. `working-agreements.md` MANDATES one per parallel agent (Windows holds a
+# link.exe lock on a shared target/, so two agents building at once deadlock each other) — and until
+# 2026-08-11 that mandated convention produced a directory that was untracked and NOT ignored, which
+# `check-english-source.sh` then walked: it drowned in `unicode_names2`'s Unicode tables and timed out.
+# Found by a parallel agent, which correctly refused to widen a guard's scope on its own and reported
+# it instead. The convention and the guard were in conflict and the guard was right; this line is the
+# fix. Deliberately `-*` rather than `/target*`: a bare wildcard would also swallow a real source
+# directory someone names `targets/`, and `target-*` cannot — the hyphen is what makes it safe.
+#
+# It reads `/target-*/` and not the `/target-agent-*/` it shipped as hours earlier the same day, because
+# that first spelling was an ALLOWLIST OF ONE NAME and lost its first race immediately: the convention
+# mandates a per-agent target dir but never fixed its NAME, so the next agent chose `target-main/` and
+# reintroduced the identical untracked-not-ignored directory. Enumerating names an agent might pick is
+# not a strategy. The convention text now requires the `target-` prefix (0.guides/working-agreements.md),
+# so this pattern and that instruction are two halves of one rule rather than a list to keep extending.
+/target-*/
 **/*.rs.bk
 *.pdb
 
 # corpus/ is now ONLY what we cannot commit — third-party code and machine-local config:
 #   corpus/oss/       — dogfood corpus checkouts (cloned OSS repos with embedded .git;
 #                       re-acquisition commands live in the internal context docs)
+#   corpus/x/         — the X (ex-Twitter) / xAI open-source set, added 2026-08-11. A SECOND
+#                       directory rather than more entries under oss/, because oss/ is a 17-tree
+#                       cross-layer JOIN and these twelve repos are unrelated to each other — putting
+#                       them in that config would answer a question nobody asked. Same "third-party
+#                       source, embedded .git, never committed" rule; re-acquisition commands live
+#                       beside oss/'s in the internal context docs.
 #   corpus/*.json*    — local e2e configs/overlays (machine-specific absolute paths)
 # The line that used to be here ignored `/corpus` wholesale, which also swallowed the labeled
 # detection benchmark. That fixture is 100% our own synthetic code — no third-party source, no
@@ -13,6 +35,7 @@
 # `cases/` (tracked, committed) 2026-07-26, moved out of `examples/` 2026-07-28; the split line is now authorship, not location:
 # what WE wrote lives under examples/ and ships, what SOMEONE ELSE wrote stays here and does not.
 /corpus/oss/
+/corpus/x/
 /corpus/*.json
 /corpus/*.jsonc
 

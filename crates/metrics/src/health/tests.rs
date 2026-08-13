@@ -371,3 +371,85 @@ fn gap_scales_the_contribution_and_contributors_are_sorted_by_contribution_desc(
     assert_eq!(h.measured_weight, total_health_weight());
     assert_eq!(h.pain, Some(15.5));
 }
+
+/// The identity that makes `axis_pain` quotable: the three axis shares sum to `pain`, on `pain`'s own
+/// scale, whether or not every metric was measurable.
+///
+/// Without this, a reader comparing `defect` against `opinion` would have to trust that the two use the
+/// same denominator — and the whole point of the split is that `pain` alone could not be trusted. Pinned
+/// under BOTH renormalization regimes (everything measured, and a metric dark) because the scale factor
+/// is the run's, not the axis's, and that is exactly the step an "obvious" refactor would get wrong by
+/// renormalizing each axis onto its own weight.
+#[test]
+fn axis_shares_sum_to_pain_under_both_renormalization_regimes() {
+    for (label, scores) in [
+        ("every metric measured", {
+            let mut s = all_measured_scores();
+            s.feature_sliced_design.score = 50.0;
+            s.god_file.score = 80.0;
+            s.coupling.circular_count = 1;
+            s
+        }),
+        ("one axis partly dark", {
+            let mut s = all_measured_scores();
+            s.feature_sliced_design.score = 50.0;
+            // Population 0 -> feature_sliced_design leaves the weighting entirely, so the surviving
+            // opinion metrics carry a scale factor > 1.
+            s.feature_sliced_design.layer_classified_imports = 0;
+            s.public_api.score = 40.0;
+            s
+        }),
+    ] {
+        let h = compute_health_index(&scores);
+        let pain = h.pain.expect("something was measured");
+        let shares = h
+            .axis_pain
+            .as_ref()
+            .expect("axis_pain rides a non-null pain");
+        let sum: f64 = shares.iter().map(|a| a.pain).sum();
+        assert!(
+            (sum - pain).abs() < 0.15,
+            "{label}: axis shares {shares:?} must sum to pain {pain} (rounding slack only)"
+        );
+        assert_eq!(
+            shares.iter().map(|a| a.axis).collect::<Vec<_>>(),
+            vec![HealthAxis::Defect, HealthAxis::Opinion, HealthAxis::History],
+            "{label}: axis order is part of the wire shape"
+        );
+        for share in shares {
+            assert_eq!(
+                share.total_weight,
+                axis_weight(share.axis),
+                "{label}: each share must carry its axis's FULL-table weight"
+            );
+        }
+    }
+}
+
+/// The measurement this whole axis exists for, stated as a test rather than as a number in prose: the
+/// opinion axis carries the majority of the weight table, and the defect axis a small minority.
+///
+/// Deliberately a FLOOR (`> 0.6`), not the exact 0.806 measured on 2026-08-12 — re-weighting a metric is
+/// a legitimate decision and should not have to touch this test, while quietly letting opinion grow to
+/// dominate even further, or shrinking defect to nothing, should. If a future table inverts the ratio
+/// this fails, and the `painMeaning` wording plus `HealthAxis`'s doc must be re-read in the same commit.
+#[test]
+fn the_opinion_axis_carries_most_of_the_weight_table() {
+    let total = total_health_weight();
+    let opinion = axis_weight(HealthAxis::Opinion);
+    let defect = axis_weight(HealthAxis::Defect);
+    let history = axis_weight(HealthAxis::History);
+    assert!(
+        (opinion + defect + history - total).abs() < f64::EPSILON * 8.0,
+        "every weighted metric must declare an axis: {opinion} + {defect} + {history} != {total}"
+    );
+    assert!(
+        opinion / total > 0.6,
+        "opinion share is {opinion}/{total} — if this dropped below 0.6 the composite changed \
+         character and every sentence describing it needs re-reading"
+    );
+    assert!(
+        defect > 0.0,
+        "the defect axis must not be empty — an all-opinion composite should not be called `pain`"
+    );
+}

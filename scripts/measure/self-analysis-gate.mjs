@@ -94,10 +94,26 @@ const PROBE = `    let ${MARKER} = std::fs::read_to_string("Cargo.toml").map(|s|
 // The canary above plants a NATIVE rule violation, and for a long time that was the whole canary. It
 // proves the walk, the Rust parser and the native evaluator can still see — and NOTHING about the DSL
 // rule packs, which are the other half of what `findings.total` sums. That gap is not theoretical on
-// this repo: 987 of its ~1400 files are `.rs`, and not one of the 138 bundled DSL rules carries a
-// `file_pattern` matching `.rs` at all (measured — the engine now says so itself in `warnings`). So the
-// native probe lives in a file no DSL rule could ever have looked at, and a DSL evaluator that had
-// stopped running entirely would have kept this gate green.
+// this repo: 987 of its ~1400 files are `.rs`, and when this probe was written NOT ONE bundled DSL rule
+// carried a `file_pattern` matching `.rs` at all (measured — the engine says so itself in `warnings`).
+// So the native probe lived in a file no DSL rule could ever have looked at, and a DSL evaluator that
+// had stopped running entirely would have kept this gate green.
+//
+// Both halves of that sentence have since moved and it is written in the PAST TENSE for that reason:
+// `.rs` patterns arrived on 2026-08-02, and v0.30.0 took the bundle from 138 rules to its current size.
+// Neither number is restated here. Recount the `.rs` half by feeding a real path to the patterns, the
+// only method that reads anchored and case-folded ones alike:
+//
+//   node -e 'for (const f of process.argv.slice(1)) {
+//     const p = JSON.parse(require("fs").readFileSync(f, "utf8"));
+//     for (const r of p.rules ?? []) {
+//       const fp = r.matcher?.file_pattern; if (!fp) continue;
+//       if (new RegExp(fp.replace(/^\(\?i\)/, ""), "i").test("src/a.rs")) console.log(`${p.id}/${r.id}`);
+//     }
+//   }' rules/dsl/*/*.json
+//
+// The probe below is unaffected either way: it does not depend on `.rs` being uncovered, only on a real
+// bundled rule firing in a file the config does not exclude.
 //
 // This probe closes that: a REAL violation of a real bundled DSL rule, in a `.mjs` file that is inside
 // that rule's `file_pattern` and outside the config's `exclude`. It is planted in the SAME pass as the

@@ -158,7 +158,7 @@
       "required": ["id", "file", "name", "kind", "line", "exported"],
       "additionalProperties": true,
       "properties": {
-        "id": { "type": "string", "description": "\"features/x/useFoo.ts#useFoo\" — file + name combination id." },
+        "id": { "type": "string", "description": "\"features/x/useFoo.ts#useFoo\" — file + name combination id. NOT UNIQUE: declarations the language distinguishes but the name does not (Java/C# overloads, TypeScript overload signatures, a TS interface and const sharing a name) share one id, measured on the reference corpus. Treat it as a label, not a key." },
         "file": { "type": "string", "description": "Normalized relative path." },
         "name": { "type": "string" },
         "kind": {
@@ -175,7 +175,7 @@
         },
         "bodyStart": {
           "type": ["integer", "null"],
-          "description": "Body line range start (1-based, inclusive) for functions/classes; absent/null for type/interface or a parser that cannot produce spans (those files silently skip method-scan DSL rules — never an error). Canonical wire name; frozen-v1 snake_case body_start is an accepted input-only alias (#[serde(alias = \"body_start\")]) — see isDefault's description for why alias never changes the OUTPUT key."
+          "description": "Start of the scannable region (1-based, inclusive): the line the DECLARATION begins on, its leading decorators/annotations/attributes INCLUDED — NOT the line the body block opens on, because every portable method-scan concept is anchored on the declaration. Absent/null is a POSITIVE claim that this declaration encloses nothing scannable (a type/interface, a field, a trait) — it does not mean the producer could not compute one, and emitting it that way tells the engine those regions are empty. A container span obliges a leaf for every region a rule could scan inside it. Full contract: `crates/core/src/ir.rs`, section \"Body span contract\". Canonical wire name; frozen-v1 snake_case body_start is an accepted input-only alias (#[serde(alias = \"body_start\")]) — see isDefault's description for why alias never changes the OUTPUT key."
         },
         "bodyEnd": {
           "type": ["integer", "null"],

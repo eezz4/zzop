@@ -12,9 +12,11 @@
 <header class="site-header">
   <div class="site-header__inner">
     <a href="index.html" class="brand">
-      <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#1e222b"></rect><path d="M9 16.5 13.5 21 23 10.5" fill="none" stroke="#34d399" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+      <span class="brand__mark" aria-hidden="true">z</span>
       <span class="brand__wordmark">zzop</span>
     </a>
+    <input type="checkbox" id="menu" class="menu-toggle">
+    <label for="menu" class="burger" aria-label="Menu"><span></span><span></span><span></span></label>
     <nav class="site-nav">
       <a href="index.html" class="site-nav__link">Overview</a>
       <a href="architecture.html" class="site-nav__link">Architecture</a>
@@ -31,35 +33,50 @@
   </div>
 </header>
 
-<main class="docs-content">
-  <section>
-    <h1>Privacy Policy</h1>
-    <p><strong>zzop collects nothing.</strong> The short version: your code never leaves your machine, and no data about you or your usage is gathered, transmitted, or stored by zzop.</p>
+<!-- One column, on purpose: this page is reached from the footer, appears in neither nav, and is four
+     headings long, so the docs sidebar would be scaffolding around nothing. What it does need is the
+     shell's gutters — without `.docs-layout` the only padding in play is `.docs-content`'s
+     `min-width: 0`, i.e. none, and the prose ran into the 2px side rule. -->
+<div class="docs-layout docs-layout--solo">
 
-    <h2>What zzop does with your data</h2>
-    <ul>
-      <li><strong>All analysis is local.</strong> The <code>zzop</code> CLI, the <code>zzop-mcp</code> MCP server, and the npm packages run entirely on your machine and read only the repository paths you point them at.</li>
-      <li><strong>No network access.</strong> The analysis binaries make no network requests of any kind — by design, they carry zero HTTP dependencies. This is verifiable from the source and the dependency tree.</li>
-      <li><strong>No telemetry.</strong> There is no usage tracking, no crash reporting, no analytics, and nothing about you or your code is ever sent anywhere — not by the binaries, not by the MCP server, not by the Claude Code plugin. One network call is not covered by that sentence and is named here rather than buried: the plugin's <code>SessionStart</code> hook asks <code>api.github.com</code> for the latest release tag, on every session, so it can <em>report</em> that a newer version exists (it never installs one). That request carries your IP and reveals that a session started; it carries nothing else. The analysis binaries themselves make no network requests at all.</li>
-      <li><strong>No accounts, no keys.</strong> zzop requires no sign-up, no API key, and no credentials.</li>
-      <li><strong>MCP communication stays local.</strong> The MCP server speaks JSON-RPC over stdio with your MCP client (e.g. Claude Code / Claude Desktop) on your machine. What that client then does with analysis results is governed by that client's own privacy policy, not this one.</li>
-    </ul>
+  <main class="docs-content">
+    <div class="docs-content-header">
+      <h1>Privacy Policy</h1>
+      <p><strong>zzop collects nothing.</strong> The short version: your code never leaves your machine, and no data about you or your usage is gathered, transmitted, or stored by zzop.</p>
+    </div>
 
-    <h2>Third-party services you may touch while installing</h2>
-    <p>Downloading release binaries or npm packages involves GitHub and npm's infrastructure, governed by their own policies:</p>
-    <ul>
-      <li>GitHub (releases, repository): <a href="https://docs.github.com/en/site-policy/privacy-policies" target="_blank" rel="noreferrer">GitHub privacy policies</a></li>
-      <li>npm (package registry): <a href="https://docs.npmjs.com/policies/privacy" target="_blank" rel="noreferrer">npm privacy policy</a></li>
-    </ul>
+    <section id="what-zzop-does">
+      <h2>What zzop does with your data</h2>
+      <ul>
+        <li><strong>All analysis is local.</strong> The <code>zzop</code> CLI, the <code>zzop-mcp</code> MCP server, and the npm packages run entirely on your machine and read only the repository paths you point them at.</li>
+        <li><strong>No network access.</strong> The analysis binaries make no network requests of any kind — by design, they carry zero HTTP dependencies. This is verifiable from the source and the dependency tree.</li>
+        <li><strong>No telemetry.</strong> There is no usage tracking, no crash reporting, no analytics, and nothing about you or your code is ever sent anywhere — not by the binaries, not by the MCP server, not by the Claude Code plugin. One network call is not covered by that sentence and is named here rather than buried: the plugin's <code>SessionStart</code> hook asks <code>api.github.com</code> for the latest release tag, on every session, so it can <em>report</em> that a newer version exists (it never installs one). That request carries your IP and reveals that a session started; it carries nothing else. The analysis binaries themselves make no network requests at all.</li>
+        <li><strong>No accounts, no keys.</strong> zzop requires no sign-up, no API key, and no credentials.</li>
+        <li><strong>MCP communication stays local.</strong> The MCP server speaks JSON-RPC over stdio with your MCP client (e.g. Claude Code / Claude Desktop) on your machine. What that client then does with analysis results is governed by that client's own privacy policy, not this one.</li>
+      </ul>
+    </section>
 
-    <h2>Changes</h2>
-    <p>If zzop's behavior ever changes in a way that affects this policy, this page changes in the same commit, in the public repository history.</p>
+    <section id="third-party">
+      <h2>Third-party services you may touch while installing</h2>
+      <p>Downloading release binaries or npm packages involves GitHub and npm's infrastructure, governed by their own policies:</p>
+      <ul>
+        <li>GitHub (releases, repository): <a href="https://docs.github.com/en/site-policy/privacy-policies" target="_blank" rel="noreferrer">GitHub privacy policies</a></li>
+        <li>npm (package registry): <a href="https://docs.npmjs.com/policies/privacy" target="_blank" rel="noreferrer">npm privacy policy</a></li>
+      </ul>
+    </section>
 
-    <h2>Contact</h2>
-    <p>Questions: open an issue at <a href="https://github.com/eezz4/zzop/issues" target="_blank" rel="noreferrer">github.com/eezz4/zzop/issues</a>.</p>
-  </section>
-</main>
-<!-- Standalone page: uses .docs-content for typography without the docs sidebar. -->
+    <section id="changes">
+      <h2>Changes</h2>
+      <p>If zzop's behavior ever changes in a way that affects this policy, this page changes in the same commit, in the public repository history.</p>
+    </section>
+
+    <section id="contact">
+      <h2>Contact</h2>
+      <p>Questions: open an issue at <a href="https://github.com/eezz4/zzop/issues" target="_blank" rel="noreferrer">github.com/eezz4/zzop/issues</a>.</p>
+    </section>
+  </main>
+
+</div>
 
 <footer class="site-footer">
   <div class="site-footer__inner">

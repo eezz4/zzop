@@ -24,18 +24,25 @@ fn main() {
     let root = PathBuf::from(&args[0]);
     let rule_ids = &args[1..];
 
-    let loaded = zzop_core::load_dsl_packs(std::path::Path::new("rules/dsl"));
-    eprintln!(
-        "packs: {} loaded, {} errors",
-        loaded.packs.len(),
-        loaded.errors.len()
-    );
-    for err in &loaded.errors {
+    // Bundled AND exported packs. This harness answers "how often does rule X fire on this tree", and a
+    // rule that left the bundle still fires for anyone who loads its pack — so loading `rules/dsl` alone
+    // would answer 0 for an id that is perfectly alive, which is the one answer a counting tool must not
+    // give silently. (Measured 2026-08-12: after the `axis: opinion` export finished, `rules/dsl` alone
+    // could not count any `code-hygiene/*` id at all.)
+    let mut packs = Vec::new();
+    let mut errors = Vec::new();
+    for dir in ["rules/dsl", "examples/packs"] {
+        let loaded = zzop_core::load_dsl_packs(std::path::Path::new(dir));
+        packs.extend(loaded.packs.into_iter().map(|(_, p)| p));
+        errors.extend(loaded.errors);
+    }
+    eprintln!("packs: {} loaded, {} errors", packs.len(), errors.len());
+    for err in &errors {
         eprintln!("  pack error: {err:?}");
     }
     let config = EngineConfig {
         source_id: "corpus-recheck".to_string(),
-        packs: loaded.packs.into_iter().map(|(_, p)| p).collect(),
+        packs,
         ..EngineConfig::default()
     };
 
@@ -78,7 +85,7 @@ fn main() {
         .findings
         .iter()
         .filter(|f| {
-            f.rule_id == "reliability/env-outside-config" && f.file.contains("constants.ts")
+            f.rule_id == "code-hygiene/env-outside-config" && f.file.contains("constants.ts")
         })
         .count();
     println!("--- env-outside-config findings in any constants.ts file: {constants_env} ---");

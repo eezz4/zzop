@@ -96,6 +96,22 @@ fn docs() -> &'static [ContractDoc] {
             mime: "text/markdown",
             content: disclosure_classes_text(),
         });
+        // The EXPORTED packs, one row each, DERIVED from `examples/packs/*.json` by
+        // `crates/config/build.rs` rather than written out here — see that function's doc for why a
+        // hand-written row per pack is a list guaranteed to rot (exporting more packs is the standing
+        // plan). Appended last so every existing resource keeps its `resources/list` position: the MCP
+        // handler's own doc records that an ordinal in prose about this table is unfalsifiable, and a
+        // reorder would still be a gratuitous change to a published listing.
+        docs.extend(
+            zzop_config::EXAMPLE_PACK_CONTRACTS
+                .iter()
+                .map(|(name, description, content)| ContractDoc {
+                    name,
+                    description,
+                    mime: "application/json",
+                    content,
+                }),
+        );
         docs
     })
 }
@@ -209,7 +225,7 @@ static EMBEDDED_DOCS: &[ContractDoc] = &[
     },
     ContractDoc {
         name: "rule-catalog",
-        description: "Every rule id the engine ships today (12 DSL packs + all native analysis ids), with severity/matcher/detection prose per rule (a DSL rule's suppress marker is derived, `zzop-<rule id>-ok`) — the ONE place a rule id can be looked up without a source checkout. Pair with the `rule` findings filter every analysis surface takes (an id absent here never fires) and the dsl-reference resource for matcher semantics.",
+        description: "Every rule id the engine ships today (11 DSL packs + all native analysis ids), with severity/matcher/detection prose per rule (a DSL rule's suppress marker is derived, `zzop-<rule id>-ok`) — the ONE place a rule id can be looked up without a source checkout. The EXPORTED packs are documented here too, under their own `Exported packs` heading, one row per rule: those ship in the repository but not in this binary and run only when a config points at them, so an id found in that section is a real id that did not LOAD — never a misspelling, and never absent from this document. The three FULL-ANALYSIS lanes — whole-repo analysis, the cross-repo join, and envelope analysis — take a `rule` findings filter to pair with it, and an id absent here never fires; the two LOOKUP lanes (one file, one endpoint) take no rule filter at all, so a rule id sent to those is not a narrower answer. Pair with the dsl-reference resource for matcher semantics.",
         mime: "text/markdown",
         content: include_str!("../../../docs/rules/catalog.md"),
     },

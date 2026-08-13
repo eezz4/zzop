@@ -2,13 +2,13 @@
 // gated module below holds four literals and the benchmark scores them in TWO different directions.
 //
 // Every literal in that module is a copy of a shape this tree's OTHER files carry as a LABELED anchor
-// (`sql/select-star`, `sql/delete-no-where`, `egress/localhost-url-literal-committed`,
+// (`sql/select-star`, `sql/delete-no-where`, `code-hygiene/localhost-url-literal-committed`,
 // `security/hardcoded-secret`). The one difference is that these sit under the two Rust test attributes
 // — the convention that puts unit tests INSIDE the shipping file, where no path pattern can see them.
 //
 // WHAT MUST STAY SILENT (`over_fetch`, `whole_table_delete`, `dev_endpoint`).
 // `sql/select-star`, `sql/delete-no-where` and
-// `egress/localhost-url-literal-committed` judge code that RUNS, and this code does not ship. The gate
+// `code-hygiene/localhost-url-literal-committed` judge code that RUNS, and this code does not ship. The gate
 // (`zzop_parser_rust::extract_test_spans` -> `SourceFile::test_spans` -> `dsl::eval`) is what keeps them
 // out; those lines carry no entry in `cases/EXPECTED.jsonc`, so a gate that stops working turns them
 // into FALSE POSITIVES here rather than going quiet somewhere nobody reads.

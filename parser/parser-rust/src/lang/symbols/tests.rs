@@ -30,6 +30,130 @@ fn trait_maps_to_interface() {
     assert_eq!(sym(&out, "T").kind, SourceSymbolKind::Interface);
 }
 
+// --- `trait` ASSOCIATED ITEMS: the extraction-scope half of the span contract ---
+
+/// The gap this arm closed: a default body is executable code, and until the walk descended into the
+/// trait it sat inside NO symbol's span — a `Command::new` + `format!` pair written here was invisible
+/// to the same method-scan rule that reads the identical pair in an `impl` method.
+#[test]
+fn a_trait_default_method_body_is_covered_by_its_own_span() {
+    let src = concat!(
+        "trait Health {\n",
+        "    fn count(&self) -> usize;\n",
+        "    fn ready(&self) -> bool {\n",
+        "        self.count() > 0\n",
+        "    }\n",
+        "}\n",
+    );
+    let out = parse_symbols("a.rs", src);
+    let ready = sym(&out, "Health.ready");
+    assert_eq!(ready.kind, SourceSymbolKind::Function);
+    assert_eq!(ready.id, "a.rs#Health.ready");
+    assert_eq!(ready.line, 3);
+    assert_eq!((ready.body_start, ready.body_end), (Some(3), Some(5)));
+}
+
+/// The other half, and the one that says what `None` MEANS: a bare signature encloses nothing, so it
+/// reports no region rather than a zero-width or declaration-only one
+/// (`zzop_core::SourceSymbol`'s span contract names this exact shape).
+#[test]
+fn a_body_less_trait_signature_reports_no_span() {
+    let out = parse_symbols("a.rs", "trait Health {\n    fn count(&self) -> usize;\n}\n");
+    let count = sym(&out, "Health.count");
+    assert_eq!(count.kind, SourceSymbolKind::Function);
+    assert_eq!((count.body_start, count.body_end), (None, None));
+}
+
+/// The trait ITSELF keeps `None` — its body is an associated-item list, not a statement list, and every
+/// item in it now projects its own leaf. This is what makes the change pure addition: `drop_outer_spans`
+/// has no container span here to discard.
+#[test]
+fn the_trait_itself_still_projects_an_interface_with_no_span() {
+    let src = "trait Health {\n    fn ready(&self) -> bool {\n        true\n    }\n}\n";
+    let out = parse_symbols("a.rs", src);
+    let t = sym(&out, "Health");
+    assert_eq!(t.kind, SourceSymbolKind::Interface);
+    assert_eq!((t.body_start, t.body_end), (None, None));
+}
+
+/// `body_start` is the DECLARATION's line, attributes included — the same contract the top-level and
+/// `impl` arms obey, verified separately here because a trait item's attributes live on a different
+/// `syn` type (`TraitItemFn`) than either of those.
+#[test]
+fn a_trait_default_method_span_starts_at_its_first_attribute() {
+    let src = "trait T {\n    #[inline]\n    fn m(&self) -> u32 {\n        1\n    }\n}\n";
+    let out = parse_symbols("a.rs", src);
+    let m = sym(&out, "T.m");
+    assert_eq!(m.line, 3); // the `fn` token — unchanged
+    assert_eq!((m.body_start, m.body_end), (Some(2), Some(5)));
+}
+
+/// A trait member and a trait-IMPL member of the same trait are two ids, because the impl side names
+/// its members after the TYPE. Nothing has to be defended for them not to collide: Rust puts traits and
+/// types in one namespace, so `trait Health` and `struct Health` cannot share a module.
+#[test]
+fn trait_members_and_impl_members_of_the_same_trait_are_distinct_ids() {
+    let src = concat!(
+        "struct Foo;\n",
+        "trait Health {\n    fn ready(&self) -> bool {\n        true\n    }\n}\n",
+        "impl Health for Foo {\n    fn ready(&self) -> bool {\n        false\n    }\n}\n",
+    );
+    let ids: Vec<String> = parse_symbols("a.rs", src)
+        .into_iter()
+        .map(|s| s.id)
+        .collect();
+    assert_eq!(
+        ids,
+        vec![
+            "a.rs#Foo",
+            "a.rs#Health",
+            "a.rs#Health.ready",
+            "a.rs#Foo.ready",
+        ]
+    );
+}
+
+/// `exported` is the TRAIT's visibility — a trait item has none of its own to read (`syn::TraitItemFn`
+/// carries no `vis` field at all), so a blanket `false` would call a `pub trait`'s default body
+/// unreachable from another file when it plainly is not. Deliberately UNLIKE the trait-impl arm, whose
+/// trait may live in a file this frontend cannot follow.
+#[test]
+fn trait_member_exported_follows_the_traits_own_visibility() {
+    let src = concat!(
+        "pub trait Open {\n    fn a(&self) {}\n    const K: u8 = 1;\n}\n",
+        "trait Closed {\n    fn b(&self) {}\n}\n",
+    );
+    let out = parse_symbols("a.rs", src);
+    assert!(sym(&out, "Open.a").exported);
+    assert!(sym(&out, "Open.K").exported);
+    assert!(!sym(&out, "Closed.b").exported);
+}
+
+/// Associated `const`s are emitted for the same reason `emit_impl` emits them, and associated TYPES are
+/// absent on both sides — the two walks answer identically about what a member is.
+#[test]
+fn a_trait_associated_const_is_a_const_and_an_associated_type_is_not_emitted() {
+    let src = "trait T {\n    const MAX: u8 = 3;\n    type Item;\n}\n";
+    let names: Vec<String> = parse_symbols("a.rs", src)
+        .into_iter()
+        .map(|s| s.name)
+        .collect();
+    assert_eq!(names, vec!["T", "T.MAX"]);
+    assert_eq!(
+        sym(&parse_symbols("a.rs", src), "T.MAX").kind,
+        SourceSymbolKind::Const
+    );
+}
+
+/// A trait inside an inline `mod` composes both separators, same as an `impl` there.
+#[test]
+fn a_trait_inside_an_inline_mod_composes_both_separators() {
+    let src = "mod v1 {\n    pub trait T {\n        fn m(&self) {}\n    }\n}\n";
+    let out = parse_symbols("a.rs", src);
+    assert_eq!(sym(&out, "v1::T").kind, SourceSymbolKind::Interface);
+    assert_eq!(sym(&out, "v1::T.m").id, "a.rs#v1::T.m");
+}
+
 #[test]
 fn type_alias_maps_to_type() {
     let out = parse_symbols("a.rs", "type Alias = i32;\n");
@@ -235,4 +359,84 @@ fn declaration_order_is_preserved() {
     let out = parse_symbols("a.rs", src);
     let names: Vec<&str> = out.iter().map(|s| s.name.as_str()).collect();
     assert_eq!(names, vec!["b", "a", "Z"]);
+}
+
+/// The qualification contract, at its smallest: an inline `mod`'s item is THIS file's symbol, named
+/// with its module chain. Before this, `parse_symbols` emitted nothing for a nested item, so
+/// `lang::calls` had no honest id to attribute a nested call to.
+#[test]
+fn an_inline_mod_item_is_qualified_with_its_module_chain() {
+    let src = "mod v1 {\n    pub fn handler() {}\n}\n";
+    let out = parse_symbols("a.rs", src);
+    let s = sym(&out, "v1::handler");
+    assert_eq!(s.id, "a.rs#v1::handler");
+    assert_eq!(s.kind, SourceSymbolKind::Function);
+    assert!(s.exported, "`pub fn` inside a mod is still written `pub`");
+}
+
+/// The whole point of qualifying: a nested homonym and a top-level one are two ids, so neither can
+/// carry the other's call-graph edges (the measured `mutating-route-no-auth` clearance).
+#[test]
+fn a_nested_homonym_never_shares_the_top_level_id() {
+    let src = "fn handler() {}\nmod v1 {\n    pub fn handler() {}\n}\n";
+    let ids: Vec<String> = parse_symbols("a.rs", src)
+        .into_iter()
+        .map(|s| s.id)
+        .collect();
+    assert_eq!(ids, vec!["a.rs#handler", "a.rs#v1::handler"]);
+}
+
+/// The two separators compose and each keeps its own meaning — `::` for modules, `.` for the type a
+/// member hangs off (module doc's `Type.member` section).
+#[test]
+fn an_impl_inside_an_inline_mod_composes_both_separators() {
+    let src = "mod v1 {\n\
+               \x20   pub struct T;\n\
+               \x20   impl T {\n\
+               \x20       pub fn run(&self) {}\n\
+               \x20       pub const K: u8 = 1;\n\
+               \x20   }\n\
+               }\n";
+    let out = parse_symbols("a.rs", src);
+    assert_eq!(sym(&out, "v1::T").kind, SourceSymbolKind::Class);
+    assert_eq!(sym(&out, "v1::T.run").kind, SourceSymbolKind::Function);
+    assert_eq!(sym(&out, "v1::T.K").kind, SourceSymbolKind::Const);
+}
+
+#[test]
+fn nesting_composes_to_arbitrary_depth() {
+    let out = parse_symbols(
+        "a.rs",
+        "mod a {\n    mod b {\n        fn c() {}\n    }\n}\n",
+    );
+    assert_eq!(sym(&out, "a::b::c").id, "a.rs#a::b::c");
+}
+
+/// A `mod x;` DECLARATION names another FILE — it has no body here, so it contributes no symbol. That
+/// fact belongs to `lang::imports`, which turns it into a `self::x` binding.
+#[test]
+fn a_mod_declaration_without_a_body_contributes_no_symbol() {
+    assert!(parse_symbols("a.rs", "mod other;\n").is_empty());
+}
+
+/// A `#[cfg(test)] mod tests` block is walked like any other inline `mod` — safe precisely because its
+/// items land in the `tests::` namespace, where no deployed symbol can collide with them.
+#[test]
+fn a_cfg_test_mod_is_walked_and_lands_in_its_own_namespace() {
+    let src = "fn ship() {}\n#[cfg(test)]\nmod tests {\n    fn ship() {}\n}\n";
+    let ids: Vec<String> = parse_symbols("a.rs", src)
+        .into_iter()
+        .map(|s| s.id)
+        .collect();
+    assert_eq!(ids, vec!["a.rs#ship", "a.rs#tests::ship"]);
+}
+
+/// The span rule survives qualification: a nested fn still carries its own body span, so a method-scan
+/// rule can reach statements that were previously inside no leaf at all.
+#[test]
+fn a_nested_fn_carries_its_own_body_span() {
+    let src = "mod v1 {\n    pub fn handler() {\n        let x = 1;\n    }\n}\n";
+    let out = parse_symbols("a.rs", src);
+    let s = sym(&out, "v1::handler");
+    assert_eq!((s.body_start, s.body_end), (Some(2), Some(4)));
 }

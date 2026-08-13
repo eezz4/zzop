@@ -48,13 +48,26 @@ fn an_arrow_means_containment_and_only_for_a_hub_inside_that_seam() {
 #[test]
 fn the_scores_omission_is_named_in_the_document() {
     let m = project(&one_tree(), None, DEFAULT_RISK_TOP);
+    // Derived on BOTH sides on purpose. The previous version of this test asserted the literal
+    // "the 17 structural health scores", so when v0.30.0 deleted two scores the guard kept the
+    // false sentence alive instead of failing — a test can only protect a number it recomputes.
     assert!(
-        m.contains("NOT drawn: the 17 structural health scores"),
+        m.contains(&format!(
+            "NOT drawn: the {} structural health scores",
+            zzop_facade::SCORE_MEANINGS.len()
+        )),
         "{m}"
     );
     assert!(m.contains("1 tree(s) computed them"), "{m}");
+    // `zzop facts` carries no scores — measured 2026-08-11, its top-level keys are config,
+    // configWarnings, crossLayer, disclosure, tool, trees, warnings. Pointing a reader there was
+    // the second half of the same falsehood, so the absence is pinned, not just the presence.
     assert!(
-        m.contains("zzop facts"),
+        !m.contains("zzop facts"),
+        "`zzop facts` carries no scores; do not send the reader there:\n{m}"
+    );
+    assert!(
+        m.contains("architecture.pain"),
         "the reader must be told where they ARE:\n{m}"
     );
 }

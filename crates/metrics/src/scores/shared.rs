@@ -12,8 +12,16 @@ pub struct PathClass {
 }
 
 /// True when a basename is a module's barrel/index file — recognizes both ESM/TS and CommonJS/JS extensions
-/// (`index.ts|tsx|js|jsx|mjs|cjs`). Used by public-API and hierarchy scoring so an `index.js` barrel in a JS/CJS
-/// repo is not misread as a deep/upward import (a TS-only `index.ts` check would silently mis-score JS repos).
+/// (`index.ts|tsx|js|jsx|mjs|cjs`), so an `index.js` barrel in a JS/CJS repo is not misread as an upward
+/// import (a TS-only `index.ts` check would silently mis-score JS repos).
+///
+/// ONE caller since 2026-08-12: [`is_upward_import`] (hierarchy scoring), which applies it to a path's
+/// BASENAME and therefore honors a nested `pkg/sub/index.ts`. `public_api` used to name it too, on a
+/// value that was the whole post-module remainder rather than a basename — a call that could never
+/// change an answer, since this regex is fully anchored and the sibling `!contains('/')` test subsumed
+/// every string it accepts. That dead call is gone; `public_api::is_root_import`'s doc carries what its
+/// removal did and did not settle, including the still-open disagreement about nested barrels and the
+/// fact that the pattern below knows no `__init__.py`/`mod.rs`.
 pub fn is_index_barrel(basename: &str) -> bool {
     static R: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     R.get_or_init(|| regex::Regex::new(r"^index\.(?:tsx?|jsx?|mjs|cjs)$").unwrap())

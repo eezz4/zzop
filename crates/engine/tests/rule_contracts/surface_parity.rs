@@ -577,7 +577,87 @@ fn every_omit_or_conditional_row_carries_a_non_empty_note() {
                 "{root}.{field} has an omit/carry-conditional status on at least one surface but an empty \
                  `note` — every omit/conditional row must explain why, and where the data IS available"
             );
+            // The decidable half of "is the note TRUE", scoped to `omit` rows only — see the doc below
+            // for why `carry-conditional` is deliberately outside it.
+            let has_omit = surfaces
+                .iter()
+                .any(|surface| row_status(row, surface) == Some("omit"));
+            assert!(
+                !has_omit || note.contains(".rs:") || note.contains("grep -rn"),
+                "{root}.{field} is `omit` on at least one surface, and its note neither cites a consumer \
+                 with `<file>.rs:<line>` nor records that a by-path search was RUN (`grep -rn ...`). \
+                 Non-emptiness was the only thing held here until 2026-08-11, and a note that merely \
+                 reads plausibly is exactly what defeated the 1.0 reviewer: it concluded nine facade \
+                 fields reached no surface, when six of the nine are read BY JSON PATH — a shape no \
+                 field-name scan shows. Note was: {note}"
+            );
         }
+    }
+}
+
+/// Why the assertion above checks for a file:line or a recorded search rather than for truth.
+///
+/// This registry's `note` prose is what a human reads when deciding whether a field is dead. On
+/// 2026-08-11 a 1.0-readiness review read it and concluded that nine facade output fields
+/// (`scores`/`scoreMeanings`/`nodes`/`ir`/`folders`/`seams`/`layerCoChurn`/`coChange`/`cache`) reached
+/// no surface and were therefore an irreversible contract to delete before freezing. **Six of the nine
+/// are consumed** — `ir` by six surfaces alone — and every one of those reads is a JSON-PATH index
+/// (`output["ir"]["dep"]`), which the registry's own field-name scan structurally cannot see. The
+/// document that guards the code was wrong before the code was, and nothing was holding it: the only
+/// machine assertion on `note` in the whole workspace was that it is non-empty.
+///
+/// Truth is not decidable here — a test cannot know whether a sentence about a consumer is accurate.
+/// But the FORM that made the error possible is: a note asserting "nothing reads this" with no cited
+/// consumer and no recorded search is an unfalsifiable claim, and that is what this rejects. Either
+/// name a consumer (`path/to/file.rs:123`) or record the search that found none (`grep -rn ...`), so
+/// the next reader inherits evidence instead of prose. The `_doc` block in the registry states the
+/// same rule to whoever is writing the note; this test is what makes it hold.
+///
+/// It is deliberately NOT stricter, in two directions.
+///
+/// It does not check that a cited path exists on disk: that would go red on an honest rename and
+/// teach people to delete citations — the opposite of the goal.
+///
+/// And it holds `omit` rows only, not the `carry-conditional` rows that share the non-emptiness
+/// assertion above. That is the defect's own boundary, not a concession to make the test pass. Only an
+/// `omit` row makes the unfalsifiable claim — *nothing reads this* — which is the claim that has no
+/// evidence attached and the one the reviewer acted on. A `carry-conditional` note says the field DOES
+/// reach the surface under a stated condition (a cap, a flag, a mode); its consumer is not in question,
+/// so there is no consumer to cite and demanding one would only produce decorative citations. The
+/// scoping is measured, not nominal: it is exactly the nine rows named above.
+///
+/// [`registry_rows`] is what keeps the two assertions walking the same rows, so this narrowing cannot
+/// quietly become "some rows are checked for nothing at all".
+#[allow(
+    dead_code,
+    reason = "documentation anchor for the assertion above; no runtime behaviour"
+)]
+const WHY_THE_NOTE_SHAPE_IS_CHECKED: () = ();
+
+/// The note-shape rule is enforced HERE but has to be learned THERE — in the registry's own `_doc`,
+/// which is what someone writing a note actually reads. Until 2026-08-11 that `_doc` said, accurately,
+/// "THIS PROSE IS GUARDED BY NOTHING"; the assertion above made that sentence half false the moment it
+/// landed. A note-writer inheriting the stale sentence writes bare prose, meets a red build, and has
+/// been told by the document that no such check exists.
+///
+/// So this pins the two needles into the `_doc` itself: whatever else that prose says, it must spell
+/// the exact tokens the guard matches on. Rewording the rule is fine — dropping it is not, and neither
+/// is changing the needles in the code while the document keeps teaching the old ones.
+#[test]
+fn the_registry_doc_states_the_note_shape_rule_it_is_held_to() {
+    let registry = load_registry();
+    let doc = registry["_doc"]
+        .as_str()
+        .expect("surface-parity.json's `_doc` must be a string");
+    for needle in ["`<file>.rs:<line>`", "`grep -rn`"] {
+        assert!(
+            doc.contains(needle),
+            "surface-parity.json's `_doc` does not mention {needle}, which is one of the two forms \
+             `every_omit_or_conditional_row_carries_a_non_empty_note` REQUIRES in every `omit` row's \
+             note. The guard and the instructions have drifted: someone writing a note learns the rule \
+             from that `_doc` and nowhere else, so a rule the document does not state is one that only \
+             announces itself as a failed build"
+        );
     }
 }
 

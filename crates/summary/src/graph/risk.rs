@@ -10,10 +10,12 @@
 //! - **`critical` and `seams` ARE graph-shaped.** A critical file is a hub with a blast radius; a seam
 //!   is a folder with edges crossing its boundary. Nodes and edges, named, few. A flowchart is right,
 //!   and 3D would add a viewer and a coordinate system to draw the same thing worse.
-//! - **`scores` is NOT a graph at all.** Seventeen 0-100 health dimensions is a TABLE of numbers. It is
-//!   the "continuous dimensions" half of that description, and the honest answer for it is not 3D — it
-//!   is that it should not be forced into a picture at all. `zzop analyze` already carries the composite
-//!   (`architecture.pain`) and `zzop facts` carries all seventeen. A flowchart of seventeen numbers is
+//! - **`scores` is NOT a graph at all.** A dozen-plus 0-100 health dimensions is a TABLE of numbers
+//!   (the live count is `zzop_metrics::SCORE_MEANINGS.len()` — deliberately not written here, because
+//!   the emitted line below once carried a typed 17 that outlived two deleted scores). It is the
+//!   "continuous dimensions" half of that description, and the honest answer for it is not 3D — it is
+//!   that it should not be forced into a picture at all. `zzop analyze` already carries the composite
+//!   (`architecture.pain`); the full table rides the direct zzop-facade output. A flowchart of them is
 //!   strictly worse than the table that exists.
 //!
 //! So the answer is not "2D wins again", it is that the thing which looked like it needed 3D was never
@@ -170,11 +172,17 @@ fn render(
         "%% per-kind cap --top {top}{}\n",
         scope.map(|s| format!(" | --scope {s}")).unwrap_or_default()
     ));
-    // Named, not inferred — the same rule the join map's header follows.
+    // Named, not inferred — the same rule the join map's header follows. The COUNT is derived from
+    // the registry rather than typed: it was typed as 17, v0.30.0 removed two scores, and this line
+    // went on publishing 17 over a table of 15 with a test pinning the literal. And the pointer was
+    // wrong in a second way — `zzop facts` carries no scores at all, so a reader who followed it
+    // found nothing and had no way to tell a dropped field from a lying disclosure.
     out.push_str(&format!(
-        "%% NOT drawn: the 17 structural health scores ({} tree(s) computed them). They are a table of \
-         numbers, not a graph; a flowchart of them would be worse than the table. Composite in `zzop \
-         analyze`'s architecture.pain, all seventeen in `zzop facts`.\n",
+        "%% NOT drawn: the {} structural health scores ({} tree(s) computed them). They are a table of \
+         numbers, not a graph; a flowchart of them would be worse than the table. The composite rides \
+         `zzop analyze`'s architecture.pain (with painMeasuredWeight/painTotalWeight); the full table \
+         rides the direct zzop-facade output and no CLI or MCP reply.\n",
+        zzop_facade::SCORE_MEANINGS.len(),
         c.trees_with_scores
     ));
     out.push_str("flowchart TD\n");

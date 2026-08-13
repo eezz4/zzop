@@ -26,6 +26,8 @@ fn healthy() -> DiagnosticsInput {
         unknown_disabled_rule_ids: Vec::new(),
         unknown_severity_override_ids: Vec::new(),
         unknown_suppression_rule_ids: Vec::new(),
+        unknown_only_pack_ids: Vec::new(),
+        only_packs_matched_nothing: false,
     }
 }
 
@@ -248,6 +250,8 @@ fn does_not_warn_about_empty_signals_on_an_empty_repo() {
         unknown_disabled_rule_ids: Vec::new(),
         unknown_severity_override_ids: Vec::new(),
         unknown_suppression_rule_ids: Vec::new(),
+        unknown_only_pack_ids: Vec::new(),
+        only_packs_matched_nothing: false,
     });
     assert!(d.warnings.is_empty());
 }
@@ -267,6 +271,8 @@ fn git_none_suppresses_every_git_window_warning_even_with_pathological_file_coun
         unknown_disabled_rule_ids: Vec::new(),
         unknown_severity_override_ids: Vec::new(),
         unknown_suppression_rule_ids: Vec::new(),
+        unknown_only_pack_ids: Vec::new(),
+        only_packs_matched_nothing: false,
     });
     assert!(!d
         .warnings

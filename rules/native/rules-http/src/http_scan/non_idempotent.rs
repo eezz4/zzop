@@ -51,8 +51,7 @@ pub fn scan_non_idempotent_write(input: &ScanNonIdempotentWriteInput) -> Vec<Fin
     }
 
     let name_index = build_name_index(input.symbols);
-    let symbols_by_id: HashMap<&str, &SourceSymbol> =
-        input.symbols.iter().map(|s| (s.id.as_str(), s)).collect();
+    let symbols_by_id = super::symbols_by_id(input.symbols);
 
     // Only classified sites (`kind` set) are relevant here — mirrors the old `symbol_bad_sites`, which
     // never emitted an unclassified write.

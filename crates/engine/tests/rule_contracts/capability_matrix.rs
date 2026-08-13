@@ -108,8 +108,8 @@
 //! from "this environment happened to be formatted so one worked".
 //!
 //! `call_sites` flipped `no` -> `yes` for typescript/python-3 on 2026-08-03 in the wave (W1) that landed
-//! the first two producers together with the three rules that read them — `reliability/console-in-be`
-//! and `reliability/console-in-loop` over `console-write`, `reliability/env-outside-config` over
+//! the first two producers together with the three rules that read them — `code-hygiene/console-in-be`
+//! and `code-hygiene/console-in-loop` over `console-write`, `code-hygiene/env-outside-config` over
 //! `env-read` — and for java-21/rust/go/csharp later the same day in W2 (six producer arms dispatched
 //! by `pipeline/fresh/call_sites.rs`; rust emits the `env-read` family only, per its producer doc).
 //! W2 (same date) flipped go/java-21/csharp (both families) and rust (`env-read` ONLY — the `println!`
@@ -1469,6 +1469,84 @@ fn every_shipped_rule_matcher_only_admits_environments_whose_required_channel_th
         offenders.is_empty(),
         "capability_matrix rule-side sweep found forever-silent matcher/environment combinations: \
          {offenders:#?}"
+    );
+}
+
+/// C#'s `method_spans`/`decl_in_span` cells are both `yes`, and both are TRUE — which is exactly why the
+/// sweep above cannot see this one. Those columns are EXISTENCE booleans; the defect here is span
+/// GRANULARITY, a third dimension no boolean row can express.
+///
+/// `parser-csharp`'s `emit_property` gives a property ONE span covering its whole `accessor_list`, so a
+/// getter body and a setter body sit inside the same span. A `MethodScan` combines its `patterns`,
+/// `trigger` and `absent` WITHIN one span, so a trigger written in the getter can pair with — or be
+/// vetoed by — text that only ever appears in the setter. That is a real defect shape, and it is why
+/// `emit_property` discloses it instead of fixing it: splitting the accessors needs a naming decision
+/// (`C.P.get`) that changes call-graph ids.
+///
+/// It is NOT a live defect today, and this test is what keeps that "today" honest. Measured 2026-08-13,
+/// three independent ways, all zero:
+/// - `0` of the 55 shipped `MethodScan` rules admit `.cs` (this test, re-derived every run).
+/// - `absent` — the span-scoped veto, the only mechanism that makes two patterns interact inside one
+///   span — appears in 25 rules, every one of them `MethodScan`:
+///   `grep -B12 '"absent"' rules/dsl/*/*.json | grep '"type":' | sort | uniq -c`
+/// - `0` bodied accessors in the whole C# corpus (75 files carry 158 accessors, all auto-implemented
+///   `get;`/`set;`/`init;`, which have no body and so cannot host a pattern at all):
+///   `rg --no-ignore -g '*.cs' -c '\b(get|set|init)\s*(\{|=>)' corpus`
+///
+/// So this is a TRIPWIRE, not a prohibition. Widening a method-scan rule to C# is a legitimate thing to
+/// want; the point is that it cannot happen SILENTLY, because the first person to do it inherits a
+/// naming decision made by nobody. When this test goes red, that is it working — it is what turns the
+/// disclosure in `emit_property` into either a fix or a documented acceptance, at the moment it matters.
+#[test]
+fn no_method_scan_rule_admits_csharp_while_its_property_accessors_still_share_one_span() {
+    let packs = crate::load_all_packs();
+    let mut admits = Vec::new();
+
+    for pack in &packs {
+        for rule in &pack.rules {
+            let Matcher::MethodScan(m) = &rule.matcher else {
+                continue;
+            };
+            let Ok(file_re) = regex::Regex::new(&m.file_pattern) else {
+                continue; // a malformed pattern is a different contract's problem, not this one's.
+            };
+            let exclude_re = m
+                .file_exclude_pattern
+                .as_deref()
+                .and_then(|p| regex::Regex::new(p).ok());
+
+            for (filename, env) in REPRESENTATIVE_FILES {
+                if *env != "csharp" || !file_re.is_match(filename) {
+                    continue;
+                }
+                if exclude_re.as_ref().is_some_and(|re| re.is_match(filename)) {
+                    continue;
+                }
+                admits.push(format!(
+                    "{}/{}: file_pattern {:?} admits {filename}",
+                    pack.id, rule.id, m.file_pattern
+                ));
+            }
+        }
+    }
+
+    assert!(
+        admits.is_empty(),
+        "a method-scan rule now admits C#, where a property's getter and setter SHARE ONE BODY SPAN \
+         (`parser-csharp`'s `emit_property`). Its `patterns`/`trigger`/`absent` combine within that \
+         one span, so on a bodied property (`get {{ ... }} set {{ ... }}`) a trigger in the getter can \
+         pair with, or be vetoed by, text that only exists in the setter — a false positive or a \
+         silent suppression, depending on which half the rule reads.\n\n\
+         This was measured harmless when the rule set could not reach it (0 method-scan rules admitting \
+         `.cs`, 0 bodied accessors in the corpus); admitting one is what makes it reachable, so the \
+         decision `emit_property` deferred is now due. Do ONE of:\n\
+         (a) split the accessors into their own symbols — this is the `C.P.get` naming decision, and it \
+         CHANGES CALL-GRAPH IDS, so it lands with the projection contract and its consumers, not alone; \
+         or\n\
+         (b) keep the shared span and add this rule here with an inline reason showing the pairing \
+         cannot bite it (e.g. its trigger and its `absent` patterns cannot occur in opposite accessors).\n\n\
+         What must NOT happen is this test being deleted to make the widening quiet.\n\n\
+         rules now admitting C#: {admits:#?}"
     );
 }
 

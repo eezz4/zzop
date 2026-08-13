@@ -41,6 +41,23 @@ baked=$(grep -o 'include_str!("[^"]*")' "$SOURCE" \
 [ -n "$baked" ] || abort "found zero include_str! docs in $SOURCE — the extraction broke, and an empty
 subject set would make this whole check vacuously green (see the repo's guard-coverage rule)"
 
+# --- the SECOND baking path, which no `include_str!` in $SOURCE can reveal (2026-08-12) ------------
+# `examples/packs/*.json` is baked too, but through a GENERATED file: crates/config/build.rs emits one
+# `include_str!` per pack into $OUT_DIR, and crates/summary/src/contracts.rs appends those rows to the
+# table. Scanning $SOURCE alone therefore sees a table SMALLER than the one the binary serves — the
+# exact "the guard covers less than it claims" shape working-agreements §5.5 is about, and it would
+# have been introduced by the very commit that added the rows.
+#
+# The subject is DERIVED from git rather than listed here, so exporting the next pack cannot slip past:
+# the pack lands, this set grows, and the run fails until VERSIONING.md names it. That is the intended
+# cost — the listing below is a RELEASE contract ("this file needs a release to reach a reader"), and a
+# new shipped document silently joining it is precisely what this guard exists to prevent.
+example_packs=$(git ls-files 'examples/packs/*.json' | sort -u)
+[ -n "$example_packs" ] || abort "git ls-files found zero examples/packs/*.json — either the exported
+packs moved (re-point this derivation in the same commit as the move) or the enumeration broke. An
+empty half of the subject set is a silently narrower guard, not a clean tree."
+baked=$(printf '%s\n%s\n' "$baked" "$example_packs" | sort -u)
+
 # --- what VERSIONING.md claims ------------------------------------------------------------------
 grep -q "$MARKER" "$LISTING" || abort "$LISTING carries no $MARKER block — the list this guard checks
 against is gone. Restore it, or delete this guard along with the section it protects."

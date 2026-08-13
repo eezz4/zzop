@@ -144,7 +144,7 @@ own `$comment` for the same statement in machine-readable form.
 
 ## Self-disclosure: coverage, source, and synthetic entries
 
-Beyond key normalization, a Mode B overlay (`adapterOverlays`) is checked against three
+Beyond key normalization, a Mode B overlay (`adapterOverlays`) is checked against four
 self-disclosure rules once it's accepted — get one wrong and the overlay still merges, but the
 engine warns rather than staying silent:
 
@@ -167,6 +167,13 @@ engine warns rather than staying silent:
   native-parser diagnostic. (The zero-fact warning itself is per-overlay: it fires only when NO
   entry in the overlay carries a fact.) **`symbols` is not a consumed fact for Mode B** — the overlay merge
   never reads an entry's `symbols`, so a symbols-only entry does not count as coverage.
+- **A file whose router fragments ANOTHER producer already described is named.** Two correct
+  descriptions of one file make its routers ambiguous to the by-name composer, so mounts below it
+  resolve to nothing and the whole subtree emits no routes — the one case where adding an overlay makes
+  the output SMALLER (measured: 19 route provides → 0). There is no engine-side remedy to offer,
+  because `overrides` covers `imports` only and the engine will not pick a side it cannot verify, so the
+  warning names every colliding file and states the two ways out: drop those files from the overlay’s
+  `files[]`, or emit only the channels the other producer left empty.
 
 See [`docs/NORMALIZED_AST.md`](../NORMALIZED_AST.md)'s "Adapter overlays" section for the
 normative merge semantics these warnings are checking.

@@ -1,5 +1,5 @@
-//! End-to-end tests for `rules/dsl/security/security.json` (41 backend-security rules), exercised via
-//! `zzop_engine::analyze_tree` so `Matcher::MethodScan` rules run against real parser-derived
+//! End-to-end tests for `rules/dsl/security/security.json`, exercised via `zzop_engine::analyze_tree`
+//! so `Matcher::MethodScan` rules run against real parser-derived
 //! `SourceSymbol` body spans (TypeScript via swc), not hand-built spans. Each rule below has at least
 //! one positive fixture (asserting finding count AND line number) and one realistic negative
 //! (near-miss) fixture; a handful of cases also exercise `suppress_marker`.
@@ -52,10 +52,13 @@ impl Drop for TempDir {
 ///
 /// `CARGO_MANIFEST_DIR` is the `rules` crate root (`rules/Cargo.toml`), so `dsl/` is `rules/dsl` — this
 /// pack's own `security.json` lives one level down, at `rules/dsl/security/security.json`.
-/// The pack this file's tests scan with. The disk load below reads and parses ALL 12 pack JSONs and
-/// throws away 11, so doing it per test cost this binary that work once per test; the `OnceLock` makes
-/// it once per binary. The clone is cheap and — importantly — SHARES the pack's compiled-regex memo
-/// (`zzop_core::dsl::RegexCache`), so the second test onward also skips recompiling every pattern.
+/// The pack this file's tests scan with. The disk load below parses EVERY pack JSON in the directory
+/// and throws all but this one away, so doing it per test cost this binary that work once per test; the
+/// `OnceLock` makes it once per binary. How many packs that is is not written here: it moved inside one
+/// release (v0.30.0 exported a whole pack) and the sentence needs no size to make its point — the same
+/// spelling `examples/packs/tests/sql_preferences.rs` already uses. The clone is cheap and — importantly
+/// — SHARES the pack's compiled-regex memo (`zzop_core::dsl::RegexCache`), so the second test onward
+/// also skips recompiling every pattern.
 fn security_pack() -> RulePackDef {
     static PACK: std::sync::OnceLock<RulePackDef> = std::sync::OnceLock::new();
     PACK.get_or_init(security_pack_uncached).clone()

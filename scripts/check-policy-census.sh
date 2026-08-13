@@ -197,7 +197,11 @@ census_file="scripts/policy-census.txt"
 # and the per-crate `NATIVE_ANALYSES` tables pair zzop's own rule IDS with them. A rule id silently
 # dropped from such a table stops being registered AND stops being declared in one edit, which is the
 # widest silent hole any of these shapes can open.
-type_alternation='&str|&\[&str\]|&\[u8\]|&\[\(&str,[[:space:]]*&str\)\]|\[&str;[[:space:]]*[0-9]+\]|\[\(&str,[[:space:]]*&str\);[[:space:]]*[0-9]+\]|&\[\(&str,[[:space:]]*&\[&str\]\)\]|&\[\(&str,[[:space:]]*&\[&str\],[[:space:]]*&str\)\]|&\[\(&str,[[:space:]]*SeverityValue\)\]|&\[\(&str,[[:space:]]*&\[RuleIoChannel\]\)\]|&\[BlindnessClass\]|&\[FrameworkRecognizer\]|&\[NormalizedKey\]|&\[RuleIoChannel\]|RuleIoChannel|RiskWeights|usize|u32|u64|i32|i64|f64|f32'
+# &[RuleChannelDirection] joined 2026-08-13: the measured `(rule id, channel, direction)` table behind
+# the empty-channel disclosure. Same rule-ID vocabulary as the `NATIVE_ANALYSES` rows above wearing a
+# third struct type — and its rows are QUOTED to users by name, so a row silently dropped removes a
+# rule from a published sentence about what this run could not see.
+type_alternation='&str|&\[&str\]|&\[u8\]|&\[\(&str,[[:space:]]*&str\)\]|\[&str;[[:space:]]*[0-9]+\]|\[\(&str,[[:space:]]*&str\);[[:space:]]*[0-9]+\]|&\[\(&str,[[:space:]]*&\[&str\]\)\]|&\[\(&str,[[:space:]]*&\[&str\],[[:space:]]*&str\)\]|&\[\(&str,[[:space:]]*SeverityValue\)\]|&\[\(&str,[[:space:]]*&\[RuleIoChannel\]\)\]|&\[BlindnessClass\]|&\[FrameworkRecognizer\]|&\[RuleChannelDirection\]|&\[NormalizedKey\]|&\[RuleIoChannel\]|RuleIoChannel|RiskWeights|usize|u32|u64|i32|i64|f64|f32'
 pattern="^[[:space:]]*(pub(\\((crate|super|in [^)]+)\\))? )?const [A-Z_][A-Z0-9_]*: ($type_alternation)"
 
 # Const types the census DELIBERATELY does not read, one line per type with its reason. Nothing is

@@ -8,12 +8,13 @@ use super::{compute_dsl_scope, pack_scope_warnings};
 use crate::EngineConfig;
 use zzop_core::{GlobalExclude, RuleConfig, RulePackDef};
 
-/// A pack whose single rule targets every `.ts` file and then vetoes the test-path ones — the shape
-/// 134 of the 144 bundled rules ship (`file_exclude_pattern: "${test-paths}"`), reduced to one rule.
-/// A FIXTURE pack, not the bundled set, and deliberately so: the bundled set's 10 exclude-free rules
-/// blanket every extension the other 134 target, so it cannot produce this shape at all (the subject
-/// module's doc owns that measurement). Testing the MECHANISM here keeps the pin off a property of the
-/// shipped packs that is free to change.
+/// A pack whose single rule targets every `.ts` file and then vetoes the test-path ones — the shape the
+/// overwhelming majority of bundled rules ship (`file_exclude_pattern: "${test-paths}"`), reduced to one
+/// rule. A FIXTURE pack, not the bundled set, and deliberately so: WHICH bundled files this can happen
+/// to is a moving property of the shipped packs, and the subject module's doc owns that measurement with
+/// the recount command beside it. Neither side's size is retyped here — both were written as `134` and
+/// `144` and both were false the moment v0.30.0 exported 17 rules. Testing the MECHANISM keeps this pin
+/// off a property that is free to change.
 fn ts_pack_vetoing_tests() -> RulePackDef {
     serde_json::from_str(
         r#"{

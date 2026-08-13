@@ -391,12 +391,18 @@ fn ambiguous_handler_name_resolves_to_the_route_file_and_is_flagged() {
 
 #[test]
 fn handler_ambiguous_even_within_the_route_file_stays_unresolved() {
-    // Two `delete` symbols in the SAME route file — file-scoping cannot disambiguate, so the rule still
-    // does not guess (preserves the do-not-guess contract).
+    // Two DIFFERENT `delete` methods in the SAME route file (two controller classes in one file) —
+    // file-scoping cannot disambiguate, so the rule still does not guess (do-not-guess contract).
+    //
+    // The fixture used to be `sym("a/ctrl.ts", "delete", 5)` twice, which is NOT this case: both calls
+    // mint the same `a/ctrl.ts#delete` id, so it tested one id listed twice and called it ambiguity.
+    // That is the shape `build_name_index` now dedups (an overload is one symbol id, not two candidates),
+    // so the old fixture would have asserted that an overloaded handler stays unresolved — the exact
+    // false negative measured on 2026-08-11. Genuine in-file ambiguity needs two distinct ids.
     let provides = vec![provide("DELETE /api/x/{}", "a/ctrl.ts", 5, "delete")];
     let symbols = vec![
-        sym("a/ctrl.ts", "delete", 5),
-        sym("a/ctrl.ts", "delete", 20),
+        sym("a/ctrl.ts", "UserCtrl.delete", 5),
+        sym("a/ctrl.ts", "AdminCtrl.delete", 20),
     ];
     let out = scan_mutating_route_no_auth(&ScanMutatingRouteNoAuthInput {
         io_provides: &provides,

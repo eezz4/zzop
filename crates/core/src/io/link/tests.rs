@@ -6,6 +6,7 @@
 
 mod gates;
 mod hosts;
+mod wildcard;
 
 use super::{link_cross_layer_io, LinkOptions};
 use crate::io::{IoConsume, IoFacts, IoProvide, SourceIo};

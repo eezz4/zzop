@@ -22,24 +22,47 @@ use super::DslScope;
 /// this set and every channel agreed with it.
 ///
 /// ## Its population against the BUNDLED packs is zero today, and that is measured, not assumed
-/// 134 of the 144 bundled rules carry a `file_exclude_pattern` (recounted 2026-08-10): 132 the shared
-/// `${test-paths}`/`${test-paths-stories}`/`${test-paths-migrations}` vocabulary, one a pack-local
-/// extension of it (`reliability/sync-fs-in-handler`'s `${test-paths-stories-scripts}`), and one a
-/// pattern of its own (`reliability/process-exit-in-lib`, naming `scripts?|tools|bin` only). The other
-/// 10 carry NONE, and their patterns
-/// blanket every extension the 133 target (`security/high-entropy-secret` alone covers
-/// ts/tsx/js/mjs/cjs/py/java/rs/go/cs), so a bundled-packs-only run can never produce a fully vetoed
-/// file: something always admits it. Measured — 0 on this repo's 1623 analyzed files under its own
-/// committed config.
+/// 106 of the 115 bundled rules carry a `file_exclude_pattern` (recounted 2026-08-12, after the
+/// `axis: opinion` export took the bundle from 123 rules to 115): 105 the shared
+/// `${test-paths}`/`${test-paths-stories}`/`${test-paths-migrations}` vocabulary, and one a pack-local
+/// extension of it (`reliability/sync-fs-in-handler`'s `${test-paths-stories-scripts}`). No bundled rule
+/// carries a hand-rolled pattern of its own any more — the one that did (`process-exit-in-lib`, naming
+/// `scripts?|tools|bin`) is now `code-hygiene/process-exit-in-lib` in `examples/packs/`, which does not
+/// change this report's reasoning but does remove the one bundled shape that was not vocabulary-derived.
+/// The rest carry NONE, and neither that roster nor its size is retyped here: the sentence that stood
+/// in this spot read *"the other 9 — every one of them a `security` rule"* and BOTH halves were false
+/// by 2026-08-13. Almost all of them are `security` rules whose subject IS the committed secret, so a
+/// fixture holding one is still a leak; the odd one out is `sql/destructive-migration`, whose
+/// `file_pattern` is anchored under `migrations?`/`migrate`/`alembic/versions?` and which an exclude
+/// drawn from the same vocabulary would empty. Recount both sides with:
+///
+/// ```sh
+/// node -e 'for (const f of process.argv.slice(1)) {
+///   const p = JSON.parse(require("fs").readFileSync(f, "utf8"));
+///   for (const r of p.rules ?? [])
+///     if (!r.matcher?.file_exclude_pattern) console.log(`${p.id}/${r.id}`);
+/// }' rules/dsl/*/*.json
+/// ```
+///
+/// Those patterns do NOT blanket every extension the excluding rules target, and this doc asserted the
+/// opposite ("something always admits it") until 2026-08-13. Measured by feeding real paths to the
+/// EXPANDED patterns (a text grep cannot answer this — the vocabulary lives behind `${…}` refs): every
+/// bundled rule that targets a `.vue` or a `.jsx` path carries a `${test-paths…}` exclude, and not one
+/// exclude-free rule admits either extension, so `tests/Foo.vue` and `tests/a.jsx` are fully vetoed by
+/// the BUNDLED set alone. The zero below is therefore a fact about this repo's file mix — it commits no
+/// `.vue` and no `.jsx` at all — and not a property of the bundle. Measured — 0 on this repo's 1623
+/// analyzed files under its own committed config.
 ///
 /// That makes this report a guard rather than a current finding, and the honest reading is that the
 /// BUNDLED set is well shaped, not that the check is idle. Its live population is the pack sets this
 /// engine does not author: a `packs.extraDirs` pack targeting a filetype the bundled patterns never
-/// reach (`.sql` outside `migrations/`, `.prisma`, `.vue`) while carrying its own exclude. Verified end
+/// reach (`.sql` outside `migrations/`, `.prisma`) while carrying its own exclude — `.vue` used to be
+/// listed here too and does not belong: `browser/vue-v-html` reaches it. Verified end
 /// to end on exactly that config — a house `.sql` pack excluding `${test-paths}` over a tree with four
 /// `.sql` files on test paths reports 4, and drops to 1 once the caller declares `tests/` in `exclude`.
-/// If a future bundled rule narrows one of those 11 patterns, this report starts firing on the shipped
-/// set, which is the point of it existing before that day rather than after.
+/// If a future bundled rule narrows one of the exclude-free patterns above, this report starts firing on
+/// the shipped set for more than `.vue`/`.jsx`, which is the point of it existing before that day rather
+/// than after.
 ///
 /// ## Never wider than `in_scope_rels`
 /// The subject set is a strict subset of [`DslScope::in_scope_rels`] by construction, which is the same

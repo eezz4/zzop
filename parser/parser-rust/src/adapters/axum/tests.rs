@@ -328,18 +328,21 @@ const TEST_GATED_ROUTERS: &[(&str, &str)] = &[
         "#[cfg(all(test, not(miri)))] fn",
         "use axum::Router;\nuse axum::routing::post;\n#[cfg(all(test, not(miri)))]\nfn t() {\n    let app = Router::new().route(\"/admin/reset\", post(h));\n}\n",
     ),
-];
-
-/// Shapes that were ALREADY silent before the gate — not because anything suppressed them, but because
-/// this adapter reads `File::items` and scans only `Item::Fn`, so an `impl`, a `trait` and a nested
-/// `mod` are out of its reach entirely. Pinned because the module doc claims exactly that, and it is
-/// what makes the missing `ImplItem`/`TraitItem` axes (which both sibling adapters do carry) correct
-/// here rather than a gap.
-const OUT_OF_REACH_ROUTERS: &[(&str, &str)] = &[
     (
+        // Moved here from `OUT_OF_REACH_ROUTERS` on 2026-08-11, when `scan_items` began recursing into
+        // inline `mod` bodies: this case is now silent because the ITEM gate skips it before the
+        // recursion reaches the body, not because the walk cannot see it. Same verdict, real reason.
         "#[cfg(test)] mod tests",
         "use axum::Router;\nuse axum::routing::post;\n#[cfg(test)]\nmod tests {\n    fn t() {\n        let app = Router::new().route(\"/admin/reset\", post(h));\n    }\n}\n",
     ),
+];
+
+/// Shapes that are silent not because anything suppresses them, but because this adapter reads
+/// `File::items` (plus, since 2026-08-11, each inline `mod`'s own item list) and scans only `Item::Fn`
+/// — so an `impl` and a `trait` are out of its reach entirely. Pinned because the module doc claims
+/// exactly that, and it is what makes the missing `ImplItem`/`TraitItem` axes (which both sibling
+/// adapters do carry) correct here rather than a gap.
+const OUT_OF_REACH_ROUTERS: &[(&str, &str)] = &[
     (
         "#[test] fn inside an impl block",
         "use axum::Router;\nuse axum::routing::post;\nstruct S;\nimpl S {\n    #[test]\n    fn t() {\n        let app = Router::new().route(\"/admin/reset\", post(h));\n    }\n}\n",
@@ -472,4 +475,47 @@ fn the_gate_agrees_with_the_test_span_axis_line_for_line() {
 #[test]
 fn empty_file_yields_empty_vec() {
     assert!(extract_axum_router_fragments("e.rs", "").is_empty());
+}
+
+/// The false-negative this walk was widened for: a router built inside a SHIPPED inline `mod` never
+/// entered the analysis at all, so the route it serves could not be reported unprotected — or reported.
+/// Not a mis-attribution; an absence.
+#[test]
+fn a_router_built_inside_a_shipped_inline_mod_is_a_deployed_provide() {
+    let out = extract_axum_router_fragments(
+        SHIPPED_REL,
+        "use axum::Router;\nuse axum::routing::post;\npub mod v1 {\n    use axum::Router;\n    use axum::routing::post;\n    pub fn build() -> Router {\n        Router::new().route(\"/admin/reset\", post(reset))\n    }\n}\n",
+    );
+    assert_eq!(out.len(), 1, "got {out:?}");
+    assert_eq!(
+        frag(&out, "build").entries,
+        vec![RouterMountEntry::Verb {
+            method: "POST".into(),
+            path: "/admin/reset".into(),
+            handler: Some("reset".into()),
+            line: 7,
+            attr_keys: vec![],
+        }]
+    );
+}
+
+/// Nesting composes, and the gate still wins at every level: the shipped inner module's route is a
+/// provide, the test-gated sibling's is not, in ONE file. Either half alone would pass on a broken
+/// walk — the shipped half on a gate that swallows everything, the gated half on a walk that sees
+/// nothing.
+#[test]
+fn a_nested_inline_mod_ships_while_its_test_gated_sibling_stays_out() {
+    let out = extract_axum_router_fragments(
+        SHIPPED_REL,
+        "use axum::Router;\nuse axum::routing::post;\nmod api {\n    mod v1 {\n        use axum::Router;\n        use axum::routing::post;\n        pub fn build() -> Router {\n            Router::new().route(\"/shipped\", post(h))\n        }\n    }\n    #[cfg(test)]\n    mod tests {\n        use axum::Router;\n        use axum::routing::post;\n        fn t() -> Router {\n            Router::new().route(\"/fixture\", post(h))\n        }\n    }\n}\n",
+    );
+    let paths: Vec<&str> = out
+        .iter()
+        .flat_map(|f| &f.entries)
+        .filter_map(|e| match e {
+            RouterMountEntry::Verb { path, .. } => Some(path.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(paths, vec!["/shipped"], "got {out:?}");
 }

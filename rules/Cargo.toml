@@ -65,12 +65,22 @@ path = "dsl/redis/redis.rs"
 name = "pack_sql"
 path = "dsl/sql/sql.rs"
 
-[[test]]
-name = "pack_typescript"
-path = "dsl/typescript/typescript.rs"
-
 # Inherit the workspace lint policy (root Cargo.toml [workspace.lints.clippy]) — every member does,
 # with no exceptions. Where a single target legitimately violates one, the exemption is a crate-level
 # #![allow] at that target's entry point, never a hole in this table.
 [lints]
 workspace = true
+
+# EXPORTED packs (examples/packs/) keep their tests too — see examples/packs/tests/orm_eager.rs for why
+# that is not the default, and what the `typescript` export cost by not doing it.
+[[test]]
+name = "pack_orm_eager"
+path = "../examples/packs/tests/orm_eager.rs"
+
+[[test]]
+name = "pack_sql_preferences"
+path = "../examples/packs/tests/sql_preferences.rs"
+
+[[test]]
+name = "pack_code_hygiene"
+path = "../examples/packs/tests/code_hygiene.rs"

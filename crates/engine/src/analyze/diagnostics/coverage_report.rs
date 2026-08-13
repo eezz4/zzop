@@ -75,12 +75,49 @@ pub(crate) fn run_diagnostics(
         unknown_disabled_rule_ids: unknown_disabled_rule_ids(config),
         unknown_severity_override_ids: unknown_severity_override_ids(config),
         unknown_suppression_rule_ids: unknown_suppression_rule_ids(config),
+        unknown_only_pack_ids: unknown_only_pack_ids(config),
+        only_packs_matched_nothing: only_packs_matched_nothing(config),
     });
 
     DiagnosticsReport {
         warnings: diagnostics.warnings,
         config_warnings: diagnostics.config_warnings,
     }
+}
+
+/// The loaded pack ids — the ONLY known-id set `only_packs` may be judged against, because
+/// `registry::is_pack_enabled` compares an allowlist entry to `pack.id` and nothing else. Deliberately
+/// NOT `known_rule_ids`: a `"<pack>/<rule>"` id or a native-analysis id in `packs.only` gates nothing,
+/// so counting it as "known" would hide exactly the entry that silently broke the run.
+fn loaded_pack_ids(config: &EngineConfig) -> std::collections::HashSet<&str> {
+    config.packs.iter().map(|p| p.id.as_str()).collect()
+}
+
+/// `RuleConfig::only_packs` entries naming no loaded pack — the substrate for
+/// `DiagnosticsInput::unknown_only_pack_ids`. See that field's doc for why this one's failure mode is
+/// the inverse of its three siblings' (it over-suppresses rather than under-suppressing).
+fn unknown_only_pack_ids(config: &EngineConfig) -> Vec<String> {
+    let loaded = loaded_pack_ids(config);
+    config
+        .rule_config
+        .only_packs
+        .iter()
+        .filter(|id| !loaded.contains(id.as_str()))
+        .cloned()
+        .collect()
+}
+
+/// `true` when an allowlist was requested and NONE of it named a loaded pack — the total-typo case, in
+/// which every DSL rule is gated off. Computed here rather than in `zzop-metrics` because only this
+/// side knows how many entries were requested (the metrics module receives the unknown ones alone).
+fn only_packs_matched_nothing(config: &EngineConfig) -> bool {
+    let loaded = loaded_pack_ids(config);
+    !config.rule_config.only_packs.is_empty()
+        && !config
+            .rule_config
+            .only_packs
+            .iter()
+            .any(|id| loaded.contains(id.as_str()))
 }
 
 /// Every native-analysis id (built fresh here since the engine keeps no live `RuleRegistry` of its own)

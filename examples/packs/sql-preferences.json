@@ -1,0 +1,109 @@
+{
+  "id": "sql-preferences",
+  "schema_version": 1,
+  "rules": [
+    {
+      "id": "query-logic-density",
+      "axis": "opinion",
+      "severity": "info",
+      "message": "SQL embeds 2+ conditional-logic constructs (CASE WHEN branches / IF·IIF calls) — filtering/aggregation in SQL is fine, but conditional business rules here are hard to test and easy to duplicate. Consider whether the policy belongs in app code instead.",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx)$",
+        "file_exclude_pattern": "${test-paths-stories}",
+        "skip_comment_lines": true,
+        "line_pattern": "(?i)\\bcase\\s+when\\b|(?i)\\bcase\\b\\s*$",
+        "snippet_max": 160,
+        "require_file_all": [
+          "(?i)\\bwhen\\b[\\s\\S]*\\bwhen\\b",
+          "(?i)\\b(?:select|from|where|update|set|join|insert|values|with)\\b"
+        ]
+      }
+    },
+    {
+      "id": "app-side-aggregation-reduce",
+      "axis": "opinion",
+      "severity": "info",
+      "message": "A `.reduce(...)` call appears in the same function as a `findMany(`/raw `prepare(` call — a CO-OCCURRENCE heuristic on two independent patterns, NOT proof the reduce consumes that query's result: nothing links them, so a `.reduce(...)` over an unrelated array in a function that queries elsewhere fires just the same, and the finding anchors on the first `.reduce(...)`. The `fetch-many` arm is `\\.findMany\\s*\\(|\\bprepare\\s*\\(` — a bare `prepare(` call, with no `.all()` required. When they ARE connected: if the row set is large, a SQL aggregate (SUM/COUNT/GROUP BY) avoids transferring it; if small and reused, app-side is fine. Decide by data volume.",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.tsx?$",
+        "file_exclude_pattern": "${test-paths-stories}",
+        "require_file": "\\.reduce\\s*\\(",
+        "skip_comment_lines": true,
+        "patterns": [
+          {
+            "pattern": "\\.findMany\\s*\\(|\\bprepare\\s*\\(",
+            "label": "fetch-many"
+          },
+          {
+            "pattern": "\\.reduce\\s*\\(",
+            "label": "reduce"
+          }
+        ],
+        "trigger": "reduce",
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "app-side-aggregation-filter-length",
+      "axis": "opinion",
+      "severity": "info",
+      "message": "A `.filter(...)` call and a `.length` access both appear in the same function as a `findMany(`/raw `prepare(` call — a CO-OCCURRENCE heuristic on THREE independent patterns, NOT proof they form one `findMany().filter(...).length` chain: the three may match three unrelated lines, `.length` matches ANY `.length` access (a string's included), and the finding anchors on the first `.length`. The `fetch-many` arm is `\\.findMany\\s*\\(|\\bprepare\\s*\\(` — a bare `prepare(` call, with no `.all()` required. When they ARE connected: if the row set is large, a SQL aggregate (SUM/COUNT/GROUP BY) avoids transferring it; if small and reused, app-side is fine. Decide by data volume.",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.tsx?$",
+        "file_exclude_pattern": "${test-paths-stories}",
+        "require_file": "\\.filter\\s*\\(",
+        "skip_comment_lines": true,
+        "patterns": [
+          {
+            "pattern": "\\.findMany\\s*\\(|\\bprepare\\s*\\(",
+            "label": "fetch-many"
+          },
+          {
+            "pattern": "\\.filter\\s*\\(",
+            "label": "filter"
+          },
+          {
+            "pattern": "\\.length\\b",
+            "label": "length"
+          }
+        ],
+        "trigger": "length",
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "select-star",
+      "axis": "opinion",
+      "severity": "info",
+      "message": "`SELECT * FROM` inside a string literal — over-fetching every column couples the caller to the table's exact shape (a later `ALTER TABLE ADD COLUMN` silently changes what this query returns) and pulls columns nobody reads across the wire. LANGUAGE SCOPE is the set `sql/delete-no-where` states, for the same reason — an opening quote and then the SQL keywords, with no host-language syntax in the pattern — so `.ts`/`.tsx`/`.js`/`.mjs`/`.cjs`, `.py`, `.java`, `.cs`, `.go` and `.rs` are all admitted, C#'s verbatim `@\"...\"` and Go's backtick raw string included. The MULTI-LINE residual is larger here than for the destructive siblings, because a long SELECT is exactly the statement people break across lines: a Java text block, a Python triple-quoted string, a Go raw-string block or a multi-line C# `@\"...\"` whose `SELECT *` sits on its own line carries no quote there, and a line-scan cannot see it. In `.py` the two comment axes part company: the SKIP axis reads `//` alone outside `.sql` and config files, so a `#`-commented-out query is read as live code, while the MARKER axis does admit `#` — which is why the suppression offered below is writable in Python. CO-FIRING with `security/sql-string-concat` is intended, not a duplicate: on a Java line like `\"SELECT * FROM users WHERE name = '\" + name + \"'\"` that rule reports the INJECTION shape and this one reports the OVER-FETCH, two independent defects with two different repairs (bind the parameter; name the columns) — the same ruling `security/weak-crypto` and `security/weak-password-hash` carry on one credential line. Neither rule's silence would imply the other's. List the columns you actually use instead, or suppress a vetted case with `// zzop-select-star-ok`, or `# zzop-select-star-ok` in a `.py` file (the `# // …` sandwich this message used to prescribe is no longer needed — `#` is a marker leader in Python now).",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs|py|java|cs|go|rs)$",
+        "file_exclude_pattern": "${test-paths}",
+        "require_file": "(?i)SELECT\\s+\\*\\s+FROM",
+        "skip_comment_lines": true,
+        "line_pattern": "(?i)[\"'`][^\"'`]*SELECT\\s+\\*\\s+FROM\\b",
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "like-leading-wildcard",
+      "axis": "opinion",
+      "severity": "info",
+      "message": "A `LIKE` pattern with a leading `%` wildcard (e.g. `LIKE '%term'`) can't use a standard B-tree index prefix — the engine falls back to a full table/index scan on every call. LANGUAGE SCOPE is the widest of this pack, because the anchor is entirely INSIDE the SQL: `LIKE` followed by a SQL string quote and a `%`, with not one character of host-language syntax in it. Admitted in `.ts`/`.tsx`/`.js`/`.mjs`/`.cjs`, `.py`, `.java`, `.cs`, `.go` and `.rs`. That very portability is what makes one exclusion necessary, and it is the only language-shaped thing here: in the printf family a `%` immediately followed by a conversion letter and then the closing quote is a PLACEHOLDER, not a wildcard — `fmt.Sprintf(\"... LIKE '%s'\", term)` in Go, `String.format` in Java, `\"... LIKE '%s'\" % term` and the named `'%(term)s'` form in Python all substitute the whole pattern at runtime, so claiming a leading wildcard there would be a claim about text this rule never sees. Those lines are excluded. The exclusion is deliberately narrow — it requires the quote to close IMMEDIATELY after the conversion letter, so `LIKE '%sale%'` (a real leading wildcard that happens to start `%s`) still fires, and `LIKE '%' + @term` / `LIKE '%%%s%%'` still fire because the `%` there is genuinely a wildcard. Its disclosed cost is the one-character search `LIKE '%s'` meaning \"ends with s\", which is now silent. Python's bare `LIKE %s` (psycopg's unquoted bound parameter) never matched in the first place: the pattern requires a quote between `LIKE` and the `%`. In `.py` the two comment axes part company: the SKIP axis reads `//` alone outside `.sql` and config files, so a `#`-commented-out query is read as live code, while the MARKER axis does admit `#` — which is why the suppression offered below is writable in Python. If this needs to stay a substring/suffix search, reach for full-text search or a reversed-column index; a trailing-only wildcard (`LIKE 'term%'`) stays index-friendly. Suppress a vetted case (small table, offline query) with `// zzop-like-leading-wildcard-ok`, or `# zzop-like-leading-wildcard-ok` in a `.py` file.",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs|py|java|cs|go|rs)$",
+        "file_exclude_pattern": "${test-paths}",
+        "require_file": "(?i)LIKE\\s+['\"`]%",
+        "skip_comment_lines": true,
+        "line_pattern": "(?i)LIKE\\s+['\"`]%",
+        "exclude_pattern": "(?i)LIKE\\s+['\"`]%(?:\\([A-Za-z_]\\w*\\))?[a-z]['\"`]",
+        "snippet_max": 160
+      }
+    }
+  ]
+}

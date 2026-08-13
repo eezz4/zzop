@@ -38,15 +38,24 @@
 //! - [`link`](self) — [`link_cross_layer_io`], its [`LinkOptions`], and the structural consume-side gate
 //!   sequence both axes share ([`classify_consume_join`] / [`ConsumeJoin`]; its internal-host re-key
 //!   transform is reachable only through it, never on its own).
+//! - [`wildcard`](self) — the ANT wildcard-route reader and matcher behind the fifth gate below.
+//!
+//! A fifth gate sits beside the four: **wildcard partition**. A route key whose PATH carries an ANT `*`
+//! (`GET /api/files/**`) is a PATTERN, not an exact key — it is lifted out of the join entirely rather
+//! than compared literally, and the consumes it covers are dropped from `unprovidedConsumes`. See
+//! [`wildcard`](self)'s module doc for the three false findings one such route used to produce, and for
+//! why a prefix-fallback JOIN was rejected in favour of a partition ([`wildcard_route_covers`]).
 
 mod facts;
 mod key;
 mod link;
+mod wildcard;
 
 pub use facts::{
     AmbiguousConsume, ConsumeBodyShape, CrossLayerEdge, CrossLayerResult, EdgeFrom, EdgeTo,
     IoConsume, IoFacts, IoKind, IoProvide, ProvideBodyField, ProvideBodyShape,
-    ProvideResponseShape, SourceIo, TaggedConsume, TaggedProvide, RULE_READ_IO_KINDS,
+    ProvideResponseShape, SourceIo, TaggedConsume, TaggedProvide, WildcardRoutePartition,
+    RULE_READ_IO_KINDS,
 };
 pub use key::{
     db_table_channel_casing, http_consume_interface_key, http_interface_key,
@@ -54,3 +63,4 @@ pub use key::{
     UNKNOWN_VERB,
 };
 pub use link::{classify_consume_join, link_cross_layer_io, ConsumeJoin, LinkOptions};
+pub use wildcard::{ant_path_matches, wildcard_route_covers, wildcard_route_path};

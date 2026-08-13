@@ -13,15 +13,13 @@ use crate::config_surface::{
 /// something today.
 fn tiny_synthetic_vocab() -> ConfigSurface {
     ConfigSurface {
-        config_keys: ConfigKeysSurface {
-            top: vec!["rules".to_string(), "git".to_string()],
-            packs: vec![],
-            git: vec!["since".to_string()],
-            vocabulary: vec![],
-            report: vec![],
-            tree: vec![],
-            rule_object: vec![],
-        },
+        config_keys: ConfigKeysSurface::from([
+            (
+                "top".to_string(),
+                vec!["rules".to_string(), "git".to_string()],
+            ),
+            ("git".to_string(), vec!["since".to_string()]),
+        ]),
         config_paths: vec!["git.since".to_string()],
         cli_flags: vec!["--config".to_string()],
         embedder_fields: vec!["disabled_rules".to_string()],

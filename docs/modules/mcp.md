@@ -62,7 +62,8 @@ zzop graph --config <zzop.config.jsonc> [--domain <join|dep|risk|posture|cochang
 zzop init [<dir>] [--force]          # write the embedded starter zzop.config.jsonc into <dir> (default: the current directory; never overwrites without --force)
 zzop contract                        # list the embedded authoring contracts (name, mime, description)
 zzop contract <name>                 # print that contract document to stdout (raw bytes, pipe-safe)
-zzop explain <rule-id>                # print one bundled DSL rule's compiled-in data (full <pack>/<rule> or an unambiguous bare id)
+zzop explain <rule-id>               # print one bundled DSL rule's compiled-in data (full <pack>/<rule> or an unambiguous bare id)
+zzop explain <rule-id> --config <p>  # same, over the packs that config's trees load — the form a recovered pack's rule needs
 zzop version [--verbose]             # print this binary's version (also: --version, -V); --verbose adds every parser's fingerprint
 zzop <subcommand> --help             # print that one subcommand's own line, exit 0 (also: -h)
 zzop-mcp mcp                             # the MCP server over stdio (newline-delimited JSON-RPC 2.0)
@@ -194,9 +195,16 @@ facts. Two honesty gates, without which the feature would manufacture silent wro
   `sources.coverageDropped` names the drop — so "the route vanished" is never reported when "we stopped
   being able to see it" is the honest reading.
 
-`zzop explain` prints one bundled DSL rule's compiled-in data — id, pack, severity, message, the derived
-suppress marker, matcher kind, and every exclusion field that kind actually carries, with its real value.
-Two answers beyond the happy path are worth knowing about in advance:
+`zzop explain` prints one DSL rule's data — id, pack, severity, message, the derived suppress marker,
+matcher kind, and every exclusion field that kind actually carries, with its real value.
+
+**Which packs it searches is the one thing you choose.** Bare `zzop explain <rule-id>` reads the packs
+compiled into the binary. `--config <path>` reads the packs that config's trees actually load — the
+compiled-in ones plus every `zzop/rules/` and `packs.extraDirs` directory those trees name. The second
+form exists because a rule that leaves the bundled set does not stop running: recovered into a tree's
+`zzop/rules/`, it appears in `packsLoaded` and its findings carry its id, while a compiled-in-only lookup
+calls that same id unknown. The bare form's unknown-id message names `--config`, so you find out where you
+find out. Two further answers beyond the happy path are worth knowing about in advance:
 
 - **An io-scan rule's marker is printed with its run-mode condition.** An io-scan marker is read off the
   finding's anchor line in the source TEXT, and an envelope carries none (`envelope::ingest`, Mode A,
@@ -295,7 +303,7 @@ both products speak through (machine-pinned by
 
 When the underlying analysis ran git signals (the default, or a config's own `git`
 settings, provided a real git history is actually present), `analyze_repo`'s reply also carries a
-compact, capped `architecture` object — `{pain, painMeasuredWeight, painTotalWeight, painMeaning,
+compact, capped `architecture` object — `{pain, painByAxis, painMeasuredWeight, painTotalWeight, painMeaning,
 topRecommendation, criticalTop}` — summarizing the
 facade's `health`/`recommendations`/`critical` computation (see
 [Output contract](#output-contract) below for the exact shape); it is present only then, absent
@@ -380,7 +388,13 @@ couldn't even dispatch.
 The embedded authoring contracts, addressed as `zzop://contract/<name>` — the documents a custom-parser,
 DSL-rule, or config author needs, with no zzop source checkout and no Node required, since they are compiled
 into the binary (`crates/summary/src/contracts.rs`, `include_str!` over the repo's own committed public
-docs, ~180KB total):
+docs). The byte total is not restated here — it was written as "~180KB" and had drifted past 500KB by the
+time anyone recounted, which is what a size claim does when the files it sums are edited by other
+batches. Recount it instead, with the same list the binary embeds:
+`grep -o 'include_str!("[^"]*")' crates/summary/src/contracts.rs | sed 's/.*("\.\.\/\.\.\/\.\.\///;s/")//' | xargs wc -c`
+— which covers the `include_str!` rows only; the two `zzop_config::` rows (the starter template and
+`config-surface.json`), the derived `example-pack-*` block baked by `crates/config/build.rs`, and the
+rendered `disclosure-classes` have no `include_str!` in that file to grep:
 
 | `<name>` | Content |
 |---|---|
@@ -394,12 +408,25 @@ docs, ~180KB total):
 | `example-envelope` | Minimal valid Mode-A envelope example (a crude JSP parser's output). |
 | `config-surface` | Machine-verified config vocabulary — every config key, dotted path, CLI flag, and embedder field zzop accepts (`crates/config/config-surface.json`, the same file `zzop-config` embeds for unknown-key warnings; its `_docs` sections self-describe). |
 | `config-template` | Annotated starter `zzop.config.jsonc` (`crates/config/src/template.rs`, whose own tests check every key it names against the `config-surface` vocabulary): each optional key with a comment saying what it MEANS, set to zzop's own value — so the file documents the defaults instead of changing them. Writing it is REQUIRED once per tree: every analysis lane refuses a tree with no config, and this document is what both hosts point at when they do. `zzop init [<dir>] [--force]` (see [CLI surface](#cli-surface)) writes these exact bytes to disk; this resource is the same document without the write. |
-| `rule-catalog` | Every rule id the engine ships today — the 12 DSL packs + all native analysis ids, with severity/matcher/detection prose per rule (the suppress marker is derived, `zzop-<rule id>-ok`) (`docs/rules/catalog.md`) — the discoverability gap closed: `packsLoaded` gives counts only, and the `dsl-reference` resource pointed at this file without it ever being served over MCP. Pair with the `rule` tool argument on `analyze_repo`/`cross_repo`/`check_endpoint` (an id absent from this catalog never fires). The CLI-only `zzop explain <rule-id>` (see [CLI surface](#cli-surface)) answers "what exactly is this ONE rule" straight from the same compiled-in DSL pack data, no catalog prose parsing required — no MCP twin, since this resource already covers that ground over the wire. |
-| `disclosure-classes` | Every silent-failure class zzop knows about, each with the status of how completely zzop detects it today (`asserted` / `partial` / `notYetDetected`) — the full text behind the counts every analyze reply carries (`zzop://contract/disclosure-classes`, also `zzop contract disclosure-classes`). The one row that is **rendered** from the engine's live blindness registry rather than `include_str!`'d from a committed file, so it cannot drift from the counts the replies tally off that same registry. Listed last, as `resources/list` serves it. |
+| `rule-catalog` | Every rule id the engine ships today — the 11 DSL packs + all native analysis ids, with severity/matcher/detection prose per rule (the suppress marker is derived, `zzop-<rule id>-ok`) (`docs/rules/catalog.md`) — the discoverability gap closed: `packsLoaded` gives counts only, and the `dsl-reference` resource pointed at this file without it ever being served over MCP. Pair with the `rule` tool argument, which the three full-analysis tools take — `analyze_repo`, `cross_repo`, `analyze_envelope` (an id absent from this catalog never fires). `check_file` and `check_endpoint` declare no `rule` property and no handler reads one, so a `rule` key sent to either is an unknown argument, silently ignored rather than a narrower answer. The CLI-only `zzop explain <rule-id>` (see [CLI surface](#cli-surface)) answers "what exactly is this ONE rule" straight from the same compiled-in DSL pack data, no catalog prose parsing required — and `--config <path>` widens it to a run's loaded packs, which is the only surface that reaches a rule this catalog cannot list (a recovered pack's). No MCP twin either way, since this resource already covers the bundled ground over the wire. |
+| `disclosure-classes` | Every silent-failure class zzop knows about, each with the status of how completely zzop detects it today (`asserted` / `partial` / `notYetDetected`) — the full text behind the counts every analyze reply carries (`zzop://contract/disclosure-classes`, also `zzop contract disclosure-classes`). The one row that is **rendered** from the engine's live blindness registry rather than `include_str!`'d from a committed file, so it cannot drift from the counts the replies tally off that same registry. Listed after the `include_str!`'d rows above, and ahead of the derived `example-pack-*` block below. |
+| `example-pack-code-hygiene` | `examples/packs/code-hygiene.json` verbatim — an EXPORTED pack: shipped in the binary but NOT loaded, so its rules run only when a config points at them. |
+| `example-pack-orm-eager` | `examples/packs/orm-eager.json` verbatim — same shape. |
+| `example-pack-sql-preferences` | `examples/packs/sql-preferences.json` verbatim — same shape. |
+| `example-pack-typescript-lint` | `examples/packs/typescript-lint.json` verbatim — same shape (the pack's own id is `typescript`; the resource name carries the file stem). |
 
-`resources/list` returns every entry above (in this order) with its `uri`/`name`/`description`/
-`mimeType`; `resources/read` returns the full text verbatim. Deterministic: same binary, same list, same
-bytes every time. An unknown `uri` is a named error listing every valid resource — an agent should never
+The `example-pack-*` rows are DERIVED — one per file in `examples/packs/`, baked by
+`crates/config/build.rs`, which owns that list — and appended after `disclosure-classes` so every older
+resource keeps its position. They are therefore what the export program had reached when this page was
+written, not a closed set: the next exported pack adds a row to `resources/list` and none here. **Ask
+`resources/list`** rather than counting rows on this page. A hand list that claims completeness over a
+derived one is a census in disguise, and this table has already been one — it enumerated twelve rows and
+said "every entry above" while the binary served sixteen. To LOAD one of these packs, save its bytes as
+`<stem>.json` under `<tree>/zzop/rules/` (no config key needed) or in a directory named by
+`packs.extraDirs` — that key REPLACES the `zzop/rules/` default rather than adding to it.
+
+`resources/list` returns each entry with its `uri`/`name`/`description`/`mimeType`; `resources/read`
+returns the full text verbatim. Deterministic: same binary, same list, same bytes every time. An unknown `uri` is a named error listing every valid resource — an agent should never
 have to guess the name. The same documents are reachable without an MCP client via
 `zzop contract [<name>]` (see [CLI surface](#cli-surface)) — both surfaces resolve names through the
 one embedded lookup, so they can never disagree on what exists.
@@ -600,10 +627,16 @@ built to never lie by omission.
   promises "git signals included". Present **only** when `health` rode this tree's output
   (i.e. git signals actually ran — a real `.git` history, not merely the default `git: {}`
   request) — **absent**, never `null`, when they did not (e.g. no `.git` directory at all). Shape:
-  `{pain, painMeasuredWeight, painTotalWeight, painMeaning, topRecommendation, criticalTop}`.
+  `{pain, painByAxis, painMeasuredWeight, painTotalWeight, painMeaning, topRecommendation, criticalTop}`.
   `pain` is `health.pain` — the composite structural-debt scalar, and **the only score number any
   shipped CLI or MCP surface publishes** (the full `scores` object rides the raw `zzop-facade`
   embedding lane alone, so nothing else here carries a per-metric denominator). It therefore ships
+  with its OWN AXIS SPLIT since 2026-08-12 — `painByAxis` says, on the wire, that this number contains
+  no rule findings at all and that most of it is a structural OPINION rather than a defect claim:
+  `defect` (import cycles, the only entry), `opinion` (barrel discipline, FSD layering, SDP/Main
+  Sequence, Newman modularity, LOC ceilings) and `history` (rename churn, bus factor), each on `pain`'s
+  own scale and summing to it. The measurement that forced it: adding 20 `$queryRawUnsafe` files to a
+  tree moved `critical` from 1 to 21 and left `pain` byte-identical. It also ships
   with its OWN denominator since 2026-08-08: `painMeasuredWeight` / `painTotalWeight` is the share of
   the weighted metric table that had a population to score over on this tree, and `painMeaning` is
   the sentence saying how to read the pair — the same self-describing-reply device as

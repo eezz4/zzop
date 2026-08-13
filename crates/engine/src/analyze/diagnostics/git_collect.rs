@@ -19,6 +19,10 @@ pub(crate) use cache::GitCache;
 /// `git_cache` collapses repeated collections across the trees of one run — see [`GitCache`]. The
 /// warnings this function pushes are still derived PER TREE from the (possibly shared) collection, so
 /// a memo hit produces exactly the text a fresh collection would have.
+///
+/// The returned paths are always in the ANALYZED TREE's coordinate system, which is not the one the
+/// collection arrives in — see the `tree_prefix` call below for why the translation lives here and what
+/// it costs.
 pub(in crate::analyze) fn collect_git(
     root: &std::path::Path,
     config: &EngineConfig,
@@ -54,12 +58,26 @@ pub(in crate::analyze) fn collect_git(
     // will fail on its own, producing the same warning it always did).
     let repo_root = zzop_git::repo_root(root).unwrap_or_else(|| root.to_path_buf());
     match git_cache.get_or_collect(&repo_root, root, &opts) {
-        Ok(collection) => {
+        Ok(mut collection) => {
+            // Judged on the REPOSITORY's commits, deliberately before the rebase below. This warning is
+            // about the caller's declared pattern table, not about this tree: a table whose regexes label
+            // fifty commits elsewhere in the repository is a working table, and telling one subtree's
+            // reader it "matched nothing" because none of those commits touched their directory would
+            // accuse a correct config.
             warn_on_inert_commit_subject_patterns(
                 &commit_subject_patterns,
                 &collection.commits,
                 warnings,
             );
+            // THE coordinate seam. The collection speaks the repository's paths (`diff.relative=false`,
+            // so the shared memo is cwd-independent); `nodes`/`folders`/`dep` and every git-derived
+            // channel this reply publishes speak the analyzed tree's. Translating here — once, on this
+            // tree's own copy of the shared collection — is what keeps the memo intact while giving each
+            // tree its own answer. `None` means the two roots already coincide, and then nothing at all
+            // happens: the single-repo shape is bit-for-bit what it was.
+            if let Some(prefix) = zzop_git::tree_prefix(&repo_root, root) {
+                collection.rebase_onto(&prefix);
+            }
             (collection.stats, collection.commits, true)
         }
         Err(e) => {

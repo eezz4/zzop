@@ -256,6 +256,14 @@ pub fn handle_message(msg: &serde_json::Value) -> Option<serde_json::Value> {
             result["instructions"] = serde_json::Value::String(instructions);
             ok(id, result)
         }
+        // A base-utility MUST in all three revisions this server advertises: the receiver responds
+        // promptly with an EMPTY result. It is not optional and not capability-gated — unlike
+        // `logging/setLevel` or `completion/complete`, which the tail arm below rightly rejects
+        // because their capabilities are absent from `initialize`. Answering -32601 here handed a
+        // JSON-RPC *error* to clients that ping as a liveness keepalive, which reads as a dead
+        // server and gets the process killed mid-session; and the tail arm does not even reach
+        // `log_protocol_error`, so nothing appeared on stderr to explain the disconnect.
+        "ping" => ok(id, serde_json::json!({})),
         "tools/list" => ok(id, crate::tools::list()),
         "tools/call" => ok(id, crate::tools::call(msg.get("params"))),
         "resources/list" => ok(id, crate::resources::list()),

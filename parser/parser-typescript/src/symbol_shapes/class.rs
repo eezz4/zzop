@@ -2,24 +2,125 @@
 //!
 //! Split out of `super` for the repo's 300-line file cap, along the seam that makes the split
 //! honest: everything here is about ONE declaration form (`class`), and nothing else in
-//! `symbol_shapes` reads it.
+//! `symbol_shapes` reads it. The same cap split THIS file in turn on 2026-08-13: `members` answers
+//! what each member node contributes, and what is left here answers what it is CALLED — the half
+//! that needs the whole class body in view.
 
-use std::collections::HashSet;
+mod members;
 
-use swc_core::common::{BytePos, SourceMap, Span};
-use swc_core::ecma::ast::{BlockStmtOrExpr, Class, ClassMember, Expr, ObjectLit, PropName};
+use std::collections::{HashMap, HashSet};
+
+use swc_core::common::SourceMap;
+use swc_core::ecma::ast::Class;
 use zzop_core::{SourceSymbol, SourceSymbolKind};
 
 use crate::factory::{extract_object_methods, ObjectLitMap};
 use crate::line_of;
+use members::{collect_members, Leaf, Member};
 
-/// The member name a static initialization block takes. A class may legally hold SEVERAL, and they
-/// have no key at all, so the 2nd and later ones take a 1-based ordinal suffix (`static-block-2`,
-/// `static-block-3`, ...) — without it the `(is_static, name)` dedup below would keep the first
-/// block's span and silently drop every later block's, which is exactly the coverage hole this name
-/// exists to close. The `-` is what makes the spelling collision-proof against an identifier-keyed
-/// member: `-` cannot appear in a JS identifier.
-const STATIC_BLOCK: &str = "static-block";
+/// The trailing segment a SETTER takes when a same-name, same-staticness getter also exists
+/// (`set x(v)` next to `get x()` -> `C.x.set`, while the getter keeps the plain `C.x`).
+///
+/// WHY THE SETTER MOVES AND NOT THE GETTER, and why only when the pair is complete: same reasoning as
+/// `Class.static.name` below — the plain id is left with the member a caller most likely means, and an
+/// UNCONTESTED accessor keeps it outright, so a write-only `set x(v)` is still `C.x`. Reading is what
+/// `C.x` resolves as everywhere else (a property read, a `c.x()` call through a getter-returned
+/// function), so the getter holds the name.
+///
+/// WHY A TRAILING SEGMENT RATHER THAN THE MIDDLE ONE `Class.static.name` USES. Both spellings collide
+/// with an existing, live shape — the object-literal leaf `Class.member.key` — but only one collision
+/// is reachable in legal TypeScript, and that was measured rather than argued:
+/// - `C.set.x` (middle) collides with `class C { set = { x: () => {} } }`, whose members are `set` and
+///   `x`: two DIFFERENT names, so the class compiles and the duplicate id is real.
+/// - `C.x.set` (trailing) collides with `class C { x = { set: () => {} } }`, which would need the class
+///   to declare `x` TWICE — as an accessor pair and as a property. That is TS2300, so the collision
+///   cannot be reached by code that type-checks.
+///
+/// The `-`-based collision-proofing `members::STATIC_BLOCK` uses is not available here: the segment has
+/// to read as the accessor keyword to a human scanning a finding, and a `Str` key
+/// (`class C { "x-set"() {} }`) makes no spelling literally unreachable anyway.
+///
+/// TWO CONSUMERS SEE THIS ID DIFFERENTLY, and both were checked rather than assumed:
+/// - `rules_http`'s `symbol_index::build_name_index` keys on the LAST dotted segment, so this leaf
+///   indexes under `set` — a phantom entry that can make a genuine route handler NAMED `set`
+///   ambiguous, which resolves to `None` (do-not-guess) rather than to the wrong symbol. The rejected
+///   `C.set.x` spelling would have indexed under the MEMBER name instead, so its phantom would collide
+///   on arbitrary names rather than on one.
+/// - `parse_calls` attributes a call in the setter body to this leaf instead of the class symbol, and
+///   `zzop_core::callgraph::resolve_method` cannot mint a three-segment id, so the leaf takes no
+///   in-edges. `lang::calls::tests::a_call_in_a_setter_body_attributes_to_the_setter_leaf_not_the_class`
+///   carries the measurement and why the write-site channel those rules read is unaffected.
+///
+/// ONE OTHER FRONT END IS WAITING ON THIS DECISION, which is why it is written down here rather than
+/// left implicit in the code: `zzop_parser_csharp`'s `lang::symbols::member::emit_property` discloses
+/// that both accessors of a C# `accessor_list` share ONE span and says splitting them "needs a naming
+/// decision (`C.P.get`) that changes call-graph ids". That is this decision, and the shape it takes
+/// here — trailing segment, only when contested, plain name to the READING side — is the precedent.
+/// The C# case is NOT the same defect and must be re-measured before it is taken: its shared span
+/// COVERS both bodies, so the loss there is cross-accessor pattern pairing (a false-positive
+/// direction), not the unscanned body this repair recovers.
+const ACCESSOR_SET: &str = "set";
+
+/// For each dedup key, the INDEX of the member that survives it — the one that has a body, never
+/// simply the one that came first.
+///
+/// TypeScript lets one member name carry several declarations: `foo(a: string): void;` twice over an
+/// implementation `foo(a: any) { ... }`. Unlike a get/set pair, all of them are ONE member, so no
+/// naming decision arises (see [`ACCESSOR_SET`] for the case where one does) and one leaf is right —
+/// the only question is which declaration that leaf comes from. Keeping the FIRST, which is what this
+/// did until 2026-08-13, keeps an overload SIGNATURE. MEASURED before the repair, on
+/// `class C { foo(a: string): void; foo(a: number): void; foo(a: any) { write(a); } ping = () => {} }`:
+///
+/// ```text
+///   x.ts#C       Class     line 1  body 1..10
+///   x.ts#C.foo   Function  line 2  body None..None   <- the implementation, lines 4..8, is in NO span
+///   x.ts#C.ping  Function  line 9  body 9..9
+/// ```
+///
+/// The `ping` leaf is enough to make `dsl::method_scan::gates::drop_outer_spans` discard the
+/// class-wide span that used to cover those lines, so the body became unreachable to every
+/// method-scan rule. That is strictly worse than the get/set defect this follows: there the surviving
+/// symbol carried the WRONG body, here it carries none, and `zzop_core::SourceSymbol`'s span contract
+/// reads `None` as the positive claim "this declaration encloses nothing scannable".
+///
+/// WHY "HAS A BODY" AND NOT "TAKE THE LAST". TypeScript requires the implementation to come last, so
+/// the two rules agree on every overload set that type-checks — and that agreement is the trap.
+/// `Class.static.name` and [`ACCESSOR_SET`] both exist because SOURCE ORDER had been silently deciding
+/// which body survived; "take the last" would reinstate exactly that, differently spelled, and it
+/// would take the wrong member the moment a language or a future TS relaxation puts the body first.
+/// "The one with something to scan" is order-free, and it is the rule this workspace already names for
+/// its other id-keyed consumer: `zzop_rules_http::http_scan::symbols_by_id` prefers the entry carrying
+/// `write_sites` and otherwise keeps the first (`zzop_core::SourceSymbol`'s id doc mandates it for any
+/// new id-keyed map). Same shape, different evidence field.
+///
+/// WHEN NOTHING HAS A BODY the first still wins and the leaf keeps `None`/`None` — an `abstract`
+/// member, a `declare class`, an overload set with no implementation in this file. That `None` is the
+/// span contract's positive claim, not a lost body.
+///
+/// THE `line` DECISION THAT COMES WITH THE TIE-BREAK: the surviving member is taken WHOLE, so `line`
+/// moves to the implementation's declaration line (4 above, not 2). `line` and `body_start` are one
+/// coordinate at the emission site — both are `line_of(cm, lo)` for the same member node — and keeping
+/// them together is what makes "a symbol's `line` is the declaration line of the body it projects"
+/// true of every TS symbol that has a body. REJECTED: freeze `line` at the FIRST signature's line so
+/// the reported location does not move. It would make one symbol name two declarations at once, a
+/// `line` pointing at a signature with no body and a span starting elsewhere; and the drift it avoids
+/// was inventoried rather than assumed. `symbol.line` becomes a rule anchor in three places —
+/// `dsl::ir_scan`'s symbol-scan (which matches NAMES, so the line it reports should be the declaration
+/// it scanned), `engine::dead_exports` (leaves are `exported: false`, so never a leaf), and
+/// `rules_graph`'s cache-lane anchor. `http_scan::scan_marker_window` reads `body_start` and falls back
+/// to `line` only where there is no span, which after this repair is only the all-signatures case.
+fn dedup_winners<'a>(leaves: &'a [Member<'_>]) -> HashMap<(bool, &'a str, bool), usize> {
+    let mut winners: HashMap<(bool, &str, bool), usize> = HashMap::new();
+    for (i, m) in leaves.iter().enumerate() {
+        let held = winners
+            .entry((m.is_static, m.name.as_str(), m.is_setter))
+            .or_insert(i);
+        if !leaves[*held].leaf.is_scannable() && m.leaf.is_scannable() {
+            *held = i;
+        }
+    }
+    winners
+}
 
 fn class_symbol(
     cm: &SourceMap,
@@ -44,28 +145,20 @@ fn class_symbol(
     }
 }
 
-/// What one class member contributes to the scannable-span projection.
-enum Leaf<'a> {
-    /// One `Class.member` symbol spanning this body (`None` = declared with no body).
-    Body(Option<Span>),
-    /// An object-literal VALUE — the leaves are its own `key: value` members, emitted as
-    /// `Class.member.key` by the same extractor object-literal factories use, so the three
-    /// spellings of "a bag of handlers" (`return {...}` from a factory, a top-level
-    /// `const o = {...}`, and a class property `o = {...}`) project the same shape.
-    Object(&'a ObjectLit),
-}
-
 /// Class symbol + method sub-symbols (`Class.method`) — constructor/method/getter/setter/private-method,
 /// function-VALUED properties (`m = () => {...}` / `m = function () {...}`, incl. `#private = ...`),
 /// object-literal-valued properties (`routes = { m: () => {} }` -> `Class.routes.m`), and static
-/// initialization blocks. Same-name SAME-STATICNESS pairs (e.g. get/set) emit once — which is a
-/// DISCLOSED LEAF HOLE, not a clean simplification: the second accessor's body ends up in no leaf, and
-/// the class span that used to cover it is discarded in favour of the first's
-/// (`symbols_tests::class_member_shapes_that_still_project_no_leaf_are_disclosed_here` pins it). A
+/// initialization blocks. A getter and a setter sharing a name are two distinct BODIES and BOTH emit,
+/// the setter as `Class.name.set` (see [`ACCESSOR_SET`]); until 2026-08-13 the dedup key could not tell
+/// them apart, so the second one's body landed in NO leaf while the class span that used to cover it
+/// was discarded in favour of the first's — and which one survived was decided by SOURCE ORDER, so
+/// `C.x` meant the getter's body in one class and the setter's in the next. A
 /// static member
 /// and an instance member sharing a name are two distinct members and BOTH emit — the dedup key is
-/// `(is_static, name)`, never the bare name, which used to let whichever came first in source order
-/// swallow the other's leaf span. In that collision case (only then) the static one is named
+/// `(is_static, name, is_setter)`, never the bare name, which used to let whichever came first in source
+/// order swallow the other's leaf span. Several declarations that DO share a key are one member and
+/// collapse onto one leaf — a TypeScript overload set — and [`dedup_winners`] states which of them the
+/// leaf is taken from, and what that costs the symbol's reported `line`. In the static/instance collision case (only then) the static one is named
 /// `Class.static.name`, because `Class.name`/`{file}#Class.name` must stay unique and the id belongs
 /// to the instance member — a documented approximation: call-graph resolution of `Class.name()` keeps
 /// targeting `{file}#Class.name` regardless of which member the caller meant. An UNCONTESTED static
@@ -121,73 +214,47 @@ pub(crate) fn emit_class(
         exported,
         is_default,
     ));
-    // Pass 1: extractable members with their staticness, in source order. Collected up front because
-    // the collision-only `Class.static.name` spelling below must not depend on source order — whether
-    // a name is contested is a fact of the WHOLE class body.
-    let mut static_blocks = 0usize;
-    let leaves: Vec<(String, bool, BytePos, Leaf<'_>)> = class
-        .body
-        .iter()
-        .filter_map(|member| match member {
-            ClassMember::Constructor(c) => Some((
-                "constructor".to_string(),
-                false,
-                c.span.lo,
-                Leaf::Body(c.body.as_ref().map(|b| b.span)),
-            )),
-            ClassMember::Method(m) => {
-                let n = prop_name(&m.key)?;
-                Some((
-                    n,
-                    m.is_static,
-                    m.span.lo,
-                    Leaf::Body(m.function.body.as_ref().map(|b| b.span)),
-                ))
-            }
-            ClassMember::PrivateMethod(m) => Some((
-                format!("#{}", m.key.name),
-                m.is_static,
-                m.span.lo,
-                Leaf::Body(m.function.body.as_ref().map(|b| b.span)),
-            )),
-            ClassMember::ClassProp(p) => {
-                let n = prop_name(&p.key)?;
-                // non-function, non-object field — no body to scan
-                Some((n, p.is_static, p.span.lo, prop_leaf(p.value.as_deref())?))
-            }
-            ClassMember::PrivateProp(p) => Some((
-                format!("#{}", p.key.name),
-                p.is_static,
-                p.span.lo,
-                prop_leaf(p.value.as_deref())?,
-            )),
-            ClassMember::StaticBlock(b) => {
-                static_blocks += 1;
-                let n = match static_blocks {
-                    1 => STATIC_BLOCK.to_string(),
-                    n => format!("{STATIC_BLOCK}-{n}"),
-                };
-                Some((n, true, b.span.lo, Leaf::Body(Some(b.body.span))))
-            }
-            // index signatures / auto-accessors / empty statements — nothing scannable
-            _ => None,
-        })
-        .collect();
+    // Pass 1: collected up front because neither naming decision below may depend on SOURCE ORDER —
+    // whether a name is contested is a fact of the WHOLE class body.
+    let leaves = collect_members(class);
     let contested = |n: &str| {
-        leaves.iter().any(|(m, s, _, _)| m == n && *s)
-            && leaves.iter().any(|(m, s, _, _)| m == n && !*s)
+        leaves.iter().any(|m| m.name == n && m.is_static)
+            && leaves.iter().any(|m| m.name == n && !m.is_static)
     };
-    // Pass 2: emit, deduping on (staticness, name) — get/set pairs share both and emit once, while a
-    // static/instance collision emits both members (see the fn doc for the naming).
-    let mut seen = HashSet::new();
-    for (mname, is_static, lo, leaf) in &leaves {
-        if !seen.insert((*is_static, mname.clone())) {
+    // Does a non-setter member hold the plain spelling this setter would otherwise take?
+    let paired = |n: &str, is_static: bool| {
+        leaves
+            .iter()
+            .any(|m| m.name == n && m.is_static == is_static && !m.is_setter)
+    };
+    // Pass 2: emit, deduping on (staticness, name, setter-ness) — a get/set pair and a static/instance
+    // collision each emit BOTH members (see the fn doc and `ACCESSOR_SET` for the naming), while the
+    // several declarations of ONE overloaded member collapse onto the one that has a body
+    // (`dedup_winners`).
+    let winners = dedup_winners(&leaves);
+    for (
+        i,
+        Member {
+            name: mname,
+            is_static,
+            is_setter,
+            lo,
+            leaf,
+        },
+    ) in leaves.iter().enumerate()
+    {
+        if winners[&(*is_static, mname.as_str(), *is_setter)] != i {
             continue;
         }
-        let full = if *is_static && contested(mname) {
+        let base = if *is_static && contested(mname) {
             format!("{name}.static.{mname}")
         } else {
             format!("{name}.{mname}")
+        };
+        let full = if *is_setter && paired(mname, *is_static) {
+            format!("{base}.{ACCESSOR_SET}")
+        } else {
+            base
         };
         match leaf {
             // `body_start` is the MEMBER's own declaration line — decorators included, since `lo` is
@@ -219,41 +286,5 @@ pub(crate) fn emit_class(
                 out,
             ),
         }
-    }
-}
-
-/// What a property's initializer contributes. `None` for a value with nothing scannable in it.
-///
-/// The `Span` returned here supplies only `body_END` (and the Some/None decision) — `body_start` is
-/// the MEMBER's declaration line at the call site above, per `zzop_core::SourceSymbol`'s "Body span
-/// contract". Which end is taken still differs by shape:
-/// - BLOCK-bodied (`m = () => { ... }` / `m = function () { ... }`): the body BLOCK's closing brace,
-///   for parity with class methods.
-/// - EXPRESSION-bodied arrow (`m = () => expr`): the arrow's own end, since there is no block.
-///
-/// Until the contract landed this asymmetry carried the START too, and had to: taking the expression's
-/// own span left an `async` on the header line (`m = async () => expr`) outside the span, so a
-/// `\basync\b`-anchored method-scan pattern could pair in every spelling of the same function EXCEPT
-/// this one. The declaration-line start makes that failure mode structurally impossible instead of
-/// patched per shape.
-fn prop_leaf(value: Option<&Expr>) -> Option<Leaf<'_>> {
-    match value? {
-        Expr::Arrow(a) => Some(Leaf::Body(Some(match &*a.body {
-            BlockStmtOrExpr::BlockStmt(b) => b.span,
-            BlockStmtOrExpr::Expr(_) => a.span,
-        }))),
-        Expr::Fn(f) => Some(Leaf::Body(Some(f.function.body.as_ref()?.span))),
-        Expr::Object(o) => Some(Leaf::Object(o)),
-        _ => None,
-    }
-}
-
-/// PropName -> static name. `Ident` and `Str` are statically known; `Computed` (and `Num`/`BigInt`)
-/// are not — see `emit_class`'s KEY SHAPES paragraph for why they emit nothing.
-fn prop_name(key: &PropName) -> Option<String> {
-    match key {
-        PropName::Ident(i) => Some(i.sym.to_string()),
-        PropName::Str(s) => Some(s.value.as_str().unwrap_or_default().to_string()),
-        _ => None,
     }
 }

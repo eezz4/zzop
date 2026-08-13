@@ -75,12 +75,22 @@ fn scan(dir: &TempDir, vocabulary: VocabularyConfig) -> AnalyzeOutput {
 }
 
 /// The Go/Python/C# defect content, written to whatever paths the caller names. `services/` is
-/// load-bearing: `reliability/console-in-be` is gated on a backend path segment, so a fixture outside
-/// one would silently drop that rule from what is being measured.
+/// load-bearing: the console rules are gated on a backend path segment, so a fixture outside one would
+/// silently drop them from what is being measured.
+///
+/// ⚠ Every body carries a BUNDLED rule's trigger, and that is a requirement rather than an accident.
+/// On 2026-08-12 the last `axis: opinion` export moved `console-in-be`/`console-in-loop` out of the
+/// bundle, and the C# body — whose only defect was a `Console.WriteLine` in a `foreach` — stopped
+/// reporting on its PRODUCTION path, turning the first half of the pin red. The right repair was not to
+/// load the exported pack here: this test's subject is the shared test-path vocabulary as a DEFAULT run
+/// applies it, so its population must stay `rules/dsl` alone. Instead the C# body gained an `MD5.Create()`
+/// call, which `security/weak-crypto` (bundled, `.cs` in its `file_pattern`, `${test-paths-stories}` in
+/// its exclude) flags — the same shape the Python body already had in `hashlib.md5`. Go keeps its console
+/// write but also fires on the goroutine-capture shape, so it never depended on the exported rules alone.
 const GO_BODY: &str = "package services\n\nimport \"fmt\"\n\nfunc FanOut(rows []string) {\n\tfor _, row := range rows {\n\t\tgo func() { fmt.Println(row) }()\n\t\tfmt.Println(row)\n\t}\n}\n";
 const PY_BODY: &str =
     "import hashlib\n\n\ndef audit(ids):\n    for i in ids:\n        print(i)\n\n\ndef digest(password):\n    return hashlib.md5(password.encode()).hexdigest()\n";
-const CS_BODY: &str = "using System;\nusing System.Security.Cryptography;\n\npublic class Thing\n{\n    public void Audit(int[] ids)\n    {\n        foreach (var i in ids)\n        {\n            Console.WriteLine($\"{i}\");\n        }\n    }\n}\n";
+const CS_BODY: &str = "using System;\nusing System.Security.Cryptography;\n\npublic class Thing\n{\n    public void Audit(int[] ids)\n    {\n        foreach (var i in ids)\n        {\n            Console.WriteLine($\"{i}\");\n        }\n    }\n\n    public byte[] Digest(byte[] data)\n    {\n        using var h = MD5.Create();\n        return h.ComputeHash(data);\n    }\n}\n";
 
 /// THE PIN. The same bytes at a production path and at each language's own test path: the production
 /// side must report, the test side must be silent, and BOTH halves are asserted because either alone is
@@ -176,7 +186,9 @@ fn a_declared_extra_test_path_adds_to_the_built_in_conventions_instead_of_replac
     );
 }
 
-/// An unusable declaration is DROPPED and NAMED, never spliced into the exclusions of the 132 rules that reference the shared vocabulary. Splicing it
+/// An unusable declaration is DROPPED and NAMED, never spliced into the exclusions of every rule that
+/// references the shared vocabulary (the module doc above dates that count; this line carried an undated
+/// copy of it and rotted). Splicing it
 /// would make every one of those rules fail to compile its `file_exclude_pattern`, which the DSL treats
 /// as "skip the whole rule" — one bad character in a config file turning into a silent, green, empty run.
 #[test]

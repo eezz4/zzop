@@ -77,6 +77,7 @@ fn io_scan_rule(id: &str, m: IoScan) -> RuleDef {
     // Suppress marker is derived `zzop-<id>-ok` (see `RuleDef::suppress_marker`), so the rule's id alone
     // determines the marker text a fixture comment must carry — e.g. `marker-scan` -> `// zzop-marker-scan-ok`.
     RuleDef {
+        axis: zzop_core::RuleAxis::Defect,
         id: id.to_string(),
         severity: Severity::Warning,
         message: format!("io-scan-e2e/{id} fired"),
@@ -91,9 +92,9 @@ fn io_scan_rule(id: &str, m: IoScan) -> RuleDef {
 fn pack() -> RulePackDef {
     RulePackDef {
         id: "io-scan-e2e".to_string(),
-        framework: "any".to_string(),
         schema_version: 1,
         fragments: BTreeMap::new(),
+        exported_from: None,
         rules: vec![
             // (a) design win: matches only an assemble-composed provide under /admin.
             io_scan_rule(

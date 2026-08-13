@@ -49,7 +49,9 @@ pub(crate) fn shared_fragments() -> &'static BTreeMap<String, String> {
 /// * the summary layer's first-screen ordering of test-path findings (the 2026-08-09 U78 ruling), and
 /// * [`crate::paths::is_test_file`] — the native/cross-layer "not deployed" predicate, which carried a
 ///   SECOND arm table until 2026-08-10. That table knew `_test.go` / `test_*.py` / `*Tests.cs` /
-///   `FooTest.java` and this fragment did not, so the 132 bundled rules that exclude a shared `${test-paths…}` name (measured 2026-08-10; 144 rules ship)
+///   `FooTest.java` and this fragment did not, so the 132 bundled rules that excluded a shared
+///   `${test-paths…}` name (both figures measured 2026-08-10, when 144 rules shipped; v0.30.0 has
+///   since exported 17 of them)
 ///   judged idiomatic Go, Python and C# test files as production code. `is_test_file`'s doc carries the
 ///   measurement and the two case-sensitivity conflicts the merge had to settle.
 pub fn test_path_re() -> &'static regex::Regex {

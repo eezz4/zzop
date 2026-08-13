@@ -1,4 +1,4 @@
-// DECOY for egress/http-url-literal + egress/localhost-url-literal-committed. In scope: `.ts`, no
+// DECOY for egress/http-url-literal + code-hygiene/localhost-url-literal-committed. In scope: `.ts`, no
 // require_file. Line 1 matches mixed-content's `'http://` line_pattern and is vetoed by its `w3.org`
 // namespace arm; line 2 matches BOTH rules' patterns and is vetoed by mixed-content's `localhost` arm and
 // by localhost-egress's env-fallback arm; line 3 is plain https.

@@ -35,9 +35,20 @@ use zzop_core::Matcher;
 /// (W3's structural line gate). A `CallScan` with `kind: None` contributes nothing on purpose: it selects
 /// every family, which is a claim about no particular kind and therefore cannot make one READ in the
 /// sense the disclosure means; the two gate fields have no such wildcard form (absent = no gate at all).
+///
+/// ⚠ SHIPPED means bundled **or exported** ([`crate::load_shipped_packs`]), which is wider than what a
+/// default run loads and is the correct population for THIS constant. `RULE_READ_CALL_KINDS`' own doc
+/// states its job as *"which call kinds does this BUILD act on"*, and `examples/packs/*.json` is compiled
+/// into this binary (`zzop_config::EXAMPLE_PACK_CONTRACTS`) — an exported rule is one `zzop/rules/` copy
+/// away from running, not gone. On 2026-08-12 the last `axis: opinion` export moved
+/// `console-in-be`/`console-in-loop` (`console-write`) and `env-outside-config` (`env-read`) out of the
+/// bundle, which left this census claiming those two kinds were read by nothing. Narrowing the CONSTANT
+/// to match would have been the wrong repair in both directions: the eventual unread-call-kind
+/// disclosure would then cry wolf at every user who loaded `code-hygiene`, and the parser would still be
+/// projecting both families for the rules that read them.
 fn kinds_named_by_shipped_rules() -> BTreeSet<String> {
     let mut out = BTreeSet::new();
-    for pack in crate::load_all_packs() {
+    for pack in crate::load_shipped_packs() {
         for rule in &pack.rules {
             match &rule.matcher {
                 Matcher::CallScan(m) => {

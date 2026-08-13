@@ -82,6 +82,10 @@ fn pack_shadow_warning(
 /// pack's (often smaller) rule count with no trace that another same-id pack had just been dropped
 /// whole. A normal, non-colliding load (every pack id distinct) never hits this — see
 /// `pack_shadow_warning`'s doc for the exact wording and why it does not claim "bundled" specifically.
+///
+/// One more `warnings` source rides on the FINAL list rather than on either loop: the retrieval-stamp
+/// census (`zzop_core::pack_export_staleness`), which names a pack whose `exported_from` says a
+/// different zzop build served it. Both lanes reach this function, so neither can miss it.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn base_engine_config(
     source_id: &str,
@@ -182,6 +186,14 @@ pub(crate) fn base_engine_config(
             ));
         }
     }
+
+    // Retrieval-stamp census, over the FINAL pack list rather than inside either loop above: a pack
+    // that lost a same-id collision was replaced whole and is not in this run, so naming its stamp
+    // would report on rules nothing will evaluate. Every pack shape funnels here (`packDefs` inline,
+    // `packs.extraDirs`/`packsDir` on disk, bundled seeds), so both the tree lane and the envelope lane
+    // get the identical disclosure with no second call site. See `zzop_core::pack_export_staleness` for
+    // why an unstamped pack — which is every bundled and every hand-written one — stays silent.
+    warnings.extend(packs.iter().filter_map(zzop_core::pack_export_staleness));
 
     EngineConfig {
         source_id: source_id.to_string(),

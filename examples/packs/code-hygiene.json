@@ -1,0 +1,126 @@
+{
+  "id": "code-hygiene",
+  "schema_version": 1,
+  "rules": [
+    {
+      "id": "no-system-dialogs",
+      "axis": "opinion",
+      "severity": "info",
+      "message": "Blocking system dialog (alert/confirm/prompt) freezes the whole page/tab while shown (blocks the main thread) and is native browser chrome — it can't be styled or driven by automated tests. Use a non-blocking in-app modal/toast/confirm component instead. Suppress a vetted case with `// zzop-no-system-dialogs-ok:`.",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|jsx)$",
+        "file_exclude_pattern": "${test-paths-stories}",
+        "require_file": "\\b(?:alert|confirm|prompt)\\s*\\(",
+        "skip_comment_lines": true,
+        "line_pattern": "(?:^|[^.\\w])(?:alert|confirm|prompt)\\s*\\(|\\b(?:window|globalThis|self)\\.(?:alert|confirm|prompt)\\s*\\(",
+        "exclude_pattern": "^\\s*(?:readonly\\s+)?[\\w$]+\\s*\\([^)]*\\)\\s*:[^{]*$",
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "localhost-url-literal-committed",
+      "axis": "opinion",
+      "severity": "warning",
+      "message": "A committed localhost/private-IP URL STRING LITERAL — the literal is what is measured; nothing proves it is used as a request target, only that it is hardcoded in source rather than read from env/config. When it is one, it breaks outside the dev machine. Move it to env/config; if this file is genuinely dev-only, add it to this rule's config `exclude` list (a path substring or glob) instead of disabling the rule everywhere.",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs|rs)$",
+        "file_exclude_pattern": "${test-paths-stories}",
+        "line_pattern": "['\"]https?://(localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0|192\\.168\\.[0-9]{1,3}\\.[0-9]{1,3}|10\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}|172\\.(1[6-9]|2[0-9]|3[01])\\.[0-9]{1,3}\\.[0-9]{1,3})",
+        "exclude_pattern": "(?i)(process\\.env|getEnv\\(|IS_PRODUCTION).*(\\|\\||\\?\\?|\\?)|new\\s+URL\\s*\\(|[!=]==?\\s*[\"'`]https?://localhost",
+        "skip_comment_lines": true
+      }
+    },
+    {
+      "id": "env-nonnull-assert",
+      "axis": "opinion",
+      "severity": "warning",
+      "message": "`process.env.X!` non-null assertion — bypasses the null check and defers the crash from startup to first use, wherever that happens to be. Validate required env vars once at startup (a config module that throws if any are missing) and reference the validated value elsewhere.",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.tsx?$",
+        "file_exclude_pattern": "${test-paths-stories}",
+        "skip_comment_lines": true,
+        "line_pattern": "process\\.env\\.[A-Za-z0-9_]+!([^=]|$)"
+      }
+    },
+    {
+      "id": "process-exit-in-lib",
+      "axis": "opinion",
+      "severity": "warning",
+      "message": "`process.exit(...)` called inside a function — skips pending I/O flushes and cleanup handlers, killing the entire process, not just the current request. Throw (or reject) instead and let a top-level handler decide; legitimate only in a CLI entrypoint or a signal-handling module.",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "(?i)(^|/)(scripts?|tools|bin)/",
+        "skip_comment_lines": true,
+        "strip_string_literals": true,
+        "require_file_absent": ["process\\.on\\s*\\(\\s*['\"]SIG"],
+        "patterns": [
+          { "pattern": "process\\.exit\\s*\\(", "label": "exit" }
+        ],
+        "trigger": "exit"
+      }
+    },
+    {
+      "id": "console-in-be",
+      "axis": "opinion",
+      "severity": "info",
+      "message": "Console write in backend-path source (`api/`, `server/`, `backend/`, `be/`, `routes/`, and `controller/`/`service/` in either the singular or the plural) — console writes are synchronous and unstructured. Use the project's structured logger instead so output is queryable, non-blocking, and carries request context. This rule reads the parser's projected call-site channel rather than a text regex, so a console call named inside a string literal or a comment is not a site at all, and the one rule covers five languages with each platform's own spellings: TypeScript/JavaScript's `console.*`, Python's `print`, Go's `fmt.Print`/`fmt.Println`/`fmt.Printf` (plus `fmt.Fprint`/`fmt.Fprintln`/`fmt.Fprintf` when the writer is spelled `os.Stdout` or `os.Stderr` at the site — an aliased writer is silent, spelling over data flow), Java's `System.out`/`System.err` `print`/`println`/`printf`/`format`, and C#'s `Console.Write`/`Console.WriteLine` including the `Console.Error`/`Console.Out` and `System.`-prefixed spellings. Scope stated so the blanks read as choices: on TypeScript only `log`, `error`, `warn` and `info` count — `console.debug` and `console.trace` ARE projected and deliberately left out, so that moving off the text regex neither gained nor lost a TypeScript finding. Rust is a permanent blank BY JUDGMENT, not by gap: `println!` is a console write in the fact layer but a CLI's normal output, so this rule never admits `.rs`. A structured logger (`winston`, `pino`, Python's `logging`, slf4j, `ILogger`) is never a console write and never fires here — and Go's stdlib `log.Print*` is on the LOGGER side of that line (it defaults to stderr but `log.SetOutput` retargets it; the boundary case the design excludes from v1). One more Python silence is FILE-scoped and worth knowing before trusting a quiet file: a file that rebinds the name `print` anywhere (`def print`, `print = ...`, `from rich import print`, even a parameter named `print`) projects no console-write sites at all — the projected fact claims the BUILT-IN, and a file that shadows the name has taken that claim away, so one unrelated rebinding silences every `print` in that file. The PATH axis is this rule's hardest limit, and unlike the language blanks above it is NOT a vocabulary that can be finished. It recognizes directories named for a ROLE, but most real backends name their directories after their DOMAIN. Measured across the dogfood corpus's ten backend trees whose language this rule admits: six are reached, and four are not — `be-aspnet` (`Articles/`, `Users/`, `Features/`), `be-django` (`articles/`, `profiles/`), `be-gin` (`users/`, `articles/`) and `be-nest` (`user/`, `article/`, which additionally puts the role in the FILENAME as `*.controller.ts`, where no directory pattern can see it). Widening the list cannot close that gap, because the misses are the application's own nouns and those are unbounded; the singular `controller/`/`service/` spellings were added because they name the SAME role the plural already claimed and 9 corpus files sat in them, not because more words would eventually cover everything. Two words in the list are kept on judgment with zero corpus evidence rather than removed — `be/` and the plural `controllers/` (the singular is the form this corpus actually uses) — because deleting a legitimate spelling to fit an eleven-repository sample would be overfitting a vocabulary to one measurement. A file this engine cannot parse, or one in a language with no call-site producer, yields no sites at all — and a backend that names no directory for its role is quiet here for the same kind of reason. Silence from this rule is absence of evidence, never a clean bill.",
+      "matcher": {
+        "type": "call-scan",
+        "file_pattern": "(?i)(^|/)(api|server|backend|be|routes|controllers?|services?)/.*\\.(ts|js|mjs|cjs|py|go|java|cs)$",
+        "file_exclude_pattern": "${test-paths-stories}",
+        "kind": "console-write",
+        "callee_pattern": "^(console\\.(log|error|warn|info)|print|System\\.(out|err)\\.(print|println|printf|format)|(System\\.)?Console(\\.(Error|Out))?\\.(Write|WriteLine)|fmt\\.(Print|Println|Printf|Fprint|Fprintln|Fprintf))$"
+      }
+    },
+    {
+      "id": "console-in-loop",
+      "axis": "opinion",
+      "severity": "warning",
+      "message": "Console write PROVED to run inside a loop — the call site's own line falls within one of the parser's projected loop spans (a `for`/`for-of`/`for-in`/`while`/`do-while` statement or an Array `forEach`/`map`/`filter`/`reduce` callback in TypeScript/JavaScript; a `for`/`while` statement or a comprehension in Python; every `for` form in Go; `for`/enhanced-`for`/`while`/`do` in Java; `for`/`foreach`/`while`/`do` in C# — each language's console-write spellings are `console-in-be`'s, and each language's lazy callback forms, Java Stream lambdas and C# LINQ included, are deliberately NOT loop spans, so a write inside one is missed rather than claimed), so it writes once per iteration instead of once. Rust is a permanent blank BY JUDGMENT, `console-in-be`'s own: `println!` is a CLI's normal output, so `.rs` is never admitted here either. Console writes are synchronous: to a pipe or a file each one blocks until the write lands, so a loop over a few thousand items turns a millisecond of work into seconds of I/O, and the volume it emits is unreadable to the person who has to grep it. Emit one aggregated line after the loop, or move the per-item detail behind a structured logger's debug level where a sink can drop it. This is a STRUCTURAL claim, not a co-occurrence heuristic — a console write merely sharing a function with a loop does not fire, only one the parser placed inside the loop's span. Both inputs degrade to SILENCE and never to a guess: a file with no projected call sites (unparseable, or a language with no producer) and a file with no projected loop spans each yield nothing, so this rule under-reports by construction. One silence is FILE-scoped and worth knowing before trusting a quiet Python file: a file that rebinds the name `print` anywhere (`def print`, `print = ...`, `from rich import print`, even a parameter named `print`) projects no console-write sites at all — the projected fact claims the BUILT-IN, and a file that shadows the name has taken that claim away. A single-line callback or comprehension also projects no loop span (line-granular containment cannot tell its body from the receiver line), so a one-liner`'`s per-iteration write is deliberately missed rather than a one-shot write falsely claimed. Unlike `code-hygiene/console-in-be`, every console write method the parser recognizes counts here, `debug` and `trace` included — the harm is per-iteration volume and blocking, which the level does not change.",
+      "matcher": {
+        "type": "call-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|jsx|mjs|cjs|py|go|java|cs)$",
+        "file_exclude_pattern": "${test-paths-stories}",
+        "kind": "console-write",
+        "in_loop": true
+      }
+    },
+    {
+      "id": "env-outside-config",
+      "axis": "opinion",
+      "severity": "info",
+      "message": "A process environment variable is read outside the env-config module(s) declared for this project — scattering env parsing and validation across the codebase, so nothing can state what the app actually depends on or validate it at startup. WHICH paths are the config module is a fact about the project, not something the source says, so this rule does not guess it: it runs only when an `env-config-module` attribute is declared, and a file covered by a truthy one is exempt. An exact `{\"file\": {\"path\": ...}}` target overrides a covering `{\"pathScope\": {\"prefix\": ...}}`, so one file can be carved out of a directory declared wholesale. Declare it with `overlays: [\"./zzop-attributes.json\"]` in zzop.config.jsonc (embedders: `adapterOverlays`), whose envelope carries the attribute on a file entry — examples/adapters/auth-overlay-adapter is a complete working one. With nothing declared this rule does not run at all, and the run's warnings say so along with how many sites it left unjudged; it does not fall back to flagging every read. Two consequences worth stating rather than discovering: the exemption is whole-FILE, so every env read in a declared file is exempt including ones unrelated to config; and the declaration is taken on trust — nothing here verifies that a declared module validates, caches, or re-exports what it reads, only that you said it is the place. Test, spec, story and Storybook paths are excluded outright, independently of any declaration. WHAT COUNTS AS A READ is the parser's projected call-site channel, not a text regex, and that changed the reach in three directions worth naming rather than discovering. It covers six languages, each with its platform's own keyed-read spellings: TypeScript/JavaScript's `process.env`, Python's `os.getenv(...)`/`os.environ.get(...)`/`os.environ[...]`, Go's `os.Getenv`/`os.LookupEnv`, Java's `System.getenv`, C#'s `Environment.GetEnvironmentVariable` (with or without the `System.` prefix), and Rust's `std::env::var`/`std::env::var_os` (each spelling kept as written, so `env::var` after `use std::env` is its own callee). Deliberately NOT reads, per producer: whole-environment enumerations (`os.Environ()`, `GetEnvironmentVariables()`, `std::env::vars()`, bare `os.environ` as a mapping) and Rust's `env!()`/`option_env!()`, which resolve at COMPILE time and read no process environment. It is WIDER on TypeScript/JavaScript than the regex it replaced: that regex could only see `process.env.` followed by a bare identifier, so `process.env[\"NAME\"]` and `process.env[key]` were invisible to it and are now flagged; every read point is one finding, so two reads on one line are two findings where the old line scan reported one. And it is narrower in the honest direction: a read named only inside a string literal or a comment was never a read and is no longer counted as one, while a file this engine cannot parse — or one in a language with no call-site producer — yields no sites at all, so silence there is absence of evidence rather than a clean bill. The variable's NAME is deliberately not carried, because this rule fires on any read and no rule asks which one. Centralize env reads in a declared config module and import the validated value elsewhere.",
+      "matcher": {
+        "type": "call-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs|py|go|java|cs|rs)$",
+        "file_exclude_pattern": "${test-paths-stories}",
+        "kind": "env-read",
+        "attr_absent": "env-config-module",
+        "require_attr_declared": "env-config-module"
+      }
+    },
+    {
+      "id": "promise-race-no-cancel",
+      "axis": "opinion",
+      "severity": "info",
+      "message": "`Promise.race([...])` with no `AbortController`/`AbortSignal`/`clearTimeout`/`.abort()` visible in the same function — the operation(s) that lose the race are never cancelled, so their socket/timer/handle stays alive after the race settles, and a later rejection from a loser becomes an unhandled rejection. Wire an `AbortController` (or equivalent cancellation) through to every raced operation and abort the losers once the race settles. Heuristic, not proof: some raced operations (e.g. a plain in-memory timer promise) hold no cancellable resource, so this can over-flag.",
+      "matcher": {
+        "type": "method-scan",
+        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
+        "file_exclude_pattern": "${test-paths}",
+        "skip_comment_lines": true,
+        "patterns": [
+          { "pattern": "Promise\\.race\\s*\\(", "label": "race" }
+        ],
+        "trigger": "race",
+        "absent": [
+          { "pattern": "AbortController|AbortSignal|clearTimeout|\\.abort\\s*\\(|signal\\s*:", "label": "cancels" }
+        ]
+      }
+    }
+  ]
+}

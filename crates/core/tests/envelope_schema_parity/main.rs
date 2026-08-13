@@ -74,10 +74,12 @@
 //! being skipped) so a future schema edit that DOES add an alias-named property has one obvious,
 //! deliberate place to declare it — instead of the parity check silently weakening everywhere.
 mod enum_parity;
+mod id_uniqueness_parity;
 mod key_parity;
 mod probes;
 mod required_nullable;
 mod samples;
+mod span_contract_ownership;
 mod wire_variants;
 
 use std::collections::HashSet;

@@ -265,7 +265,7 @@ fn turning_the_cache_off_leaves_the_other_defaults_alone() {
     .unwrap();
     let req = analyze_request(&mapped.request);
     assert_eq!(req["git"], json!({}));
-    assert_eq!(req["packDefs"].as_array().unwrap().len(), 12);
+    assert_eq!(req["packDefs"].as_array().unwrap().len(), 11);
 }
 
 #[test]
@@ -285,8 +285,8 @@ fn pack_defs_carries_every_bundled_pack_with_no_parse_warnings() {
     let pack_defs = req["packDefs"].as_array().unwrap();
     assert_eq!(
         pack_defs.len(),
-        12,
-        "expected exactly the 12 bundled DSL packs"
+        11,
+        "expected exactly the 11 bundled DSL packs"
     );
     assert!(mapped.warnings.iter().all(|w| !w.contains("bundled pack")));
 }
@@ -296,7 +296,7 @@ fn every_tree_in_an_analyze_trees_request_gets_its_own_pack_defs() {
     let mapped = config_to_request(&json!({"roots": ["./a", "./b"]}), Path::new("/base")).unwrap();
     let trees = mapped.request["trees"].as_array().unwrap();
     for tree in trees {
-        assert_eq!(tree["packDefs"].as_array().unwrap().len(), 12);
+        assert_eq!(tree["packDefs"].as_array().unwrap().len(), 11);
     }
 }
 
@@ -368,7 +368,7 @@ fn representative_config_maps_to_the_expected_request_shape() {
     });
 
     assert_eq!(actual, expected);
-    assert_eq!(pack_defs_len, 12);
+    assert_eq!(pack_defs_len, 11);
     assert!(mapped
         .warnings
         .iter()

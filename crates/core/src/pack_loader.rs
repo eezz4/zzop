@@ -26,8 +26,12 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+mod marker_collisions;
+mod provenance;
 mod retired_fields;
 mod rule_issues;
+pub use marker_collisions::suppress_marker_collisions;
+pub use provenance::pack_export_staleness;
 pub use retired_fields::pack_retired_field_issues;
 pub use rule_issues::pack_regex_issues;
 

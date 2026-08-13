@@ -1,10 +1,19 @@
 //! `cross-layer/external-ip-literal` (warning) — an external HTTP consume whose host is a raw IP literal
 //! (dotted-quad IPv4, or bracketed IPv6) rather than a hostname. A hardcoded IP pins the call to one specific
 //! network/environment and silently breaks — or silently points elsewhere — once the target moves; hostnames
-//! exist so infra can rotate underneath a stable name. Loopback literals (`127.0.0.0/8`, `[::1]`) are excluded
-//! as the separate "committed dev config" smell owned by the DSL `localhost-url-literal-committed` rule.
-//! Private-range IPs (`10.x`, `192.168.x`, ...) are NOT excluded: a hardcoded internal IP is still the
-//! environment-drift signal this rule exists to surface. Anchored at the consume site.
+//! exist so infra can rotate underneath a stable name.
+//!
+//! What is measured is therefore precisely *"this literal PINS AN ENVIRONMENT"*, and that is the whole test
+//! for what belongs here. Loopback literals (`127.0.0.0/8`, `[::1]`) are excluded because they pin none:
+//! every machine's loopback is its own, so the address designates no host that could move and no network
+//! that could be rotated out from under the call. Private-range IPs (`10.x`, `192.168.x`, ...) are NOT
+//! excluded for exactly the same reason read the other way — an internal IP names one specific network,
+//! which is the environment-drift signal this rule exists to surface. Anchored at the consume site.
+//!
+//! The exclusion is stated in the finding text as this rule's own scope, and names no other rule. Whether a
+//! committed loopback URL is a problem at all is a judgment about the project rather than about the line, so
+//! it is not a claim this rule can make — and pointing at whoever might make it is only meaningful while that
+//! owner is guaranteed to be running, which nothing here can guarantee.
 
 use zzop_core::io::TaggedConsume;
 use zzop_core::{disable_hint, Finding, Severity};
@@ -99,8 +108,10 @@ pub fn external_ip_literal_findings(external_consumes: &[TaggedConsume]) -> Vec<
              break — or silently point at the wrong place — if the target ever moves; DNS-backed hostnames \
              are what let infra rotate underneath a stable name. Verify whether this should be a real hostname \
              (config/DNS drift) and replace the literal with one. (Loopback literals like `127.0.0.1`/`[::1]` \
-             are intentionally not flagged here — that's the DSL `localhost-url-literal-committed` rule's \
-             turf.) \
+             are intentionally out of scope: what this rule measures is a literal PINNING AN ENVIRONMENT, and \
+             loopback pins none — every machine's loopback is its own, so there is no host that can move and \
+             no network to drift away from. Private-range IPs ARE flagged, because those do name one specific \
+             network.) \
              {} if this integration legitimately targets a fixed IP on purpose (e.g. a pinned on-prem \
              appliance with no DNS entry).",
             url.method, url.host, url.path, c.source,
@@ -127,172 +138,4 @@ pub fn external_ip_literal_findings(external_consumes: &[TaggedConsume]) -> Vec<
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn consume(
-        kind: &str,
-        key: Option<&str>,
-        source: &str,
-        file: &str,
-        line: u32,
-    ) -> TaggedConsume {
-        TaggedConsume {
-            source: source.to_string(),
-            consume: zzop_core::IoConsume {
-                client: None,
-                body: None,
-                kind: kind.to_string(),
-                key: key.map(str::to_string),
-                file: file.to_string(),
-                line,
-                raw: None,
-                method: None,
-                retry_configured: None,
-            },
-        }
-    }
-
-    #[test]
-    fn ipv4_literal_host_is_flagged() {
-        let external = vec![consume(
-            "http",
-            Some("GET https://203.0.113.5/v1/users"),
-            "fe",
-            "Client.ts",
-            10,
-        )];
-        let out = external_ip_literal_findings(&external);
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0].rule_id, "cross-layer/external-ip-literal");
-        assert_eq!(out[0].severity, Severity::Warning);
-        assert_eq!(out[0].file, "Client.ts");
-        assert_eq!(out[0].line, 10);
-        assert!(out[0].message.contains("203.0.113.5"));
-        assert!(out[0].message.contains("disabledRules"));
-        let data = out[0].data.as_ref().unwrap();
-        assert_eq!(data["ip"], "203.0.113.5");
-    }
-
-    #[test]
-    fn ipv4_literal_with_port_is_flagged_with_port_stripped() {
-        let external = vec![consume(
-            "http",
-            Some("GET https://203.0.113.5:8443/v1/users"),
-            "fe",
-            "Client.ts",
-            10,
-        )];
-        let out = external_ip_literal_findings(&external);
-        assert_eq!(out.len(), 1);
-        let data = out[0].data.as_ref().unwrap();
-        assert_eq!(data["ip"], "203.0.113.5");
-    }
-
-    #[test]
-    fn private_range_ipv4_still_fires() {
-        let external = vec![consume(
-            "http",
-            Some("GET https://10.0.4.12/v1/users"),
-            "fe",
-            "Client.ts",
-            10,
-        )];
-        assert_eq!(external_ip_literal_findings(&external).len(), 1);
-    }
-
-    #[test]
-    fn loopback_ipv4_is_excluded() {
-        let external = vec![consume(
-            "http",
-            Some("GET https://127.0.0.1:3000/v1/users"),
-            "fe",
-            "Client.ts",
-            10,
-        )];
-        assert!(external_ip_literal_findings(&external).is_empty());
-    }
-
-    #[test]
-    fn loopback_ipv6_bracketed_is_excluded() {
-        let external = vec![consume(
-            "http",
-            Some("GET https://[::1]:3000/v1/users"),
-            "fe",
-            "Client.ts",
-            10,
-        )];
-        assert!(external_ip_literal_findings(&external).is_empty());
-    }
-
-    #[test]
-    fn non_loopback_ipv6_bracketed_literal_fires() {
-        let external = vec![consume(
-            "http",
-            Some("GET https://[2001:db8::1]/v1/users"),
-            "fe",
-            "Client.ts",
-            10,
-        )];
-        let out = external_ip_literal_findings(&external);
-        assert_eq!(out.len(), 1);
-        let data = out[0].data.as_ref().unwrap();
-        assert_eq!(data["ip"], "[2001:db8::1]");
-    }
-
-    #[test]
-    fn hostname_is_not_flagged() {
-        let external = vec![consume(
-            "http",
-            Some("GET https://api.vendor.com/v1/users"),
-            "fe",
-            "Client.ts",
-            10,
-        )];
-        assert!(external_ip_literal_findings(&external).is_empty());
-    }
-
-    #[test]
-    fn non_http_kind_is_ignored() {
-        let external = vec![consume(
-            "queue",
-            Some("GET https://203.0.113.5/v1/users"),
-            "fe",
-            "Client.ts",
-            10,
-        )];
-        assert!(external_ip_literal_findings(&external).is_empty());
-    }
-
-    #[test]
-    fn findings_are_sorted_deterministically_by_file_then_line() {
-        let external = vec![
-            consume(
-                "http",
-                Some("GET https://203.0.113.5/v1/x"),
-                "fe",
-                "b.ts",
-                5,
-            ),
-            consume(
-                "http",
-                Some("GET https://198.51.100.9/v1/x"),
-                "fe",
-                "a.ts",
-                20,
-            ),
-            consume(
-                "http",
-                Some("GET https://198.51.100.9/v1/y"),
-                "fe",
-                "a.ts",
-                3,
-            ),
-        ];
-        let out = external_ip_literal_findings(&external);
-        assert_eq!(out.len(), 3);
-        assert_eq!((out[0].file.as_str(), out[0].line), ("a.ts", 3));
-        assert_eq!((out[1].file.as_str(), out[1].line), ("a.ts", 20));
-        assert_eq!((out[2].file.as_str(), out[2].line), ("b.ts", 5));
-    }
-}
+mod tests;

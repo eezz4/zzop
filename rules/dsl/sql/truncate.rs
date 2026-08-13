@@ -135,3 +135,65 @@ fn truncate_bare_table_without_the_table_keyword_is_still_flagged() {
         out.findings
     );
 }
+
+// --- the Python comment leader: two tables, one file type ------------------------------------------
+//
+// This rule's message says two things about a `.py` file that come from DIFFERENT engine tables, and it
+// said them with ONE word ("the comment/marker leader") until 2026-08-12 — true of at most one of the
+// two, and self-contradicted four clauses later by the `#` marker it offers. `scripts/check-marker-claims.sh`
+// now refuses the fused wording; the three fixtures below decide the same question by BEHAVIOUR, so a
+// future edit cannot satisfy the guard with prose the engine does not back. The control is not optional:
+// without it the suppression assertion passes just as happily on a rule that was never going to fire in
+// a `.py` file at all.
+const PY_TRUNCATE: &str = "def reset(db):\n    db.exec(\"TRUNCATE TABLE users\")\n";
+
+#[test]
+fn an_unmarked_truncate_in_python_app_code_fires() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write("src/cleanup.py", PY_TRUNCATE);
+    let out = scan(&dir);
+    assert_eq!(
+        hits(&out, "truncate-in-app-code").len(),
+        1,
+        "the control for the two `#` tests below: {:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn sql_truncate_app_hash_ok_marker_in_python_suppresses_the_finding() {
+    // The MARKER axis: `py` is in `HASH_COMMENT_EXTENSIONS`, so `# <marker>` suppresses exactly as
+    // `// <marker>` does elsewhere — which is what makes the message's closing offer writable in a
+    // language that cannot spell `//` at all.
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "src/cleanup.py",
+        "def reset(db):\n    # zzop-truncate-in-app-code-ok: dedicated nightly cache-reset job\n    db.exec(\"TRUNCATE TABLE users\")\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "truncate-in-app-code").is_empty(),
+        "a `#` marker must suppress in a `.py` file: {:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn a_hash_commented_truncate_still_fires_in_python() {
+    // The SKIP axis, deliberately NOT widened alongside the marker axis: `skip_comment_lines` still
+    // reads `//` alone outside `.sql` and config files, so a `#`-commented-out TRUNCATE is judged as
+    // live code. This is the half a reader is most likely to get backwards here — the same `#` that
+    // silences a finding one line above does NOT make the line below it invisible.
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "src/cleanup.py",
+        "def reset(db):\n    # db.exec(\"TRUNCATE TABLE users\")\n    pass\n",
+    );
+    let out = scan(&dir);
+    assert_eq!(
+        hits(&out, "truncate-in-app-code").len(),
+        1,
+        "a `#`-commented-out TRUNCATE is still live code to the skip axis: {:?}",
+        out.findings
+    );
+}

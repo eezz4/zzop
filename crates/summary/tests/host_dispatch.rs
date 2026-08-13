@@ -797,6 +797,42 @@ fn analyze_repo_carries_a_compact_architecture_summary_when_git_signals_ran() {
         architecture["criticalTop"].is_array(),
         "got: {architecture}"
     );
+
+    // The AXIS SPLIT, pinned on the wire rather than only in `zzop-metrics` (2026-08-12). `pain` is the
+    // one score number this reply publishes, it contains no rule findings at all, and 80.6% of its
+    // weight is structural OPINION — so the split is not a nicety, it is the difference between a
+    // reader treating this scalar as a verdict on the code and treating it as a verdict on the code's
+    // STYLE. Asserted here because the shaper is what decides whether it reaches a host: the sibling
+    // unit test proves the arithmetic, and this proves it is not dropped on the way out.
+    let axes = architecture["painByAxis"]
+        .as_array()
+        .unwrap_or_else(|| panic!("painByAxis must ride pain, got: {architecture}"));
+    assert_eq!(
+        axes.iter()
+            .filter_map(|a| a["axis"].as_str())
+            .collect::<Vec<_>>(),
+        vec!["defect", "opinion", "history"],
+        "axis order and spelling are wire shape, got: {architecture}"
+    );
+    let sum: f64 = axes.iter().filter_map(|a| a["pain"].as_f64()).sum();
+    let pain = architecture["pain"]
+        .as_f64()
+        .expect("pain is a number here");
+    assert!(
+        (sum - pain).abs() < 0.15,
+        "the three axis shares must sum to `pain` on the wire — a consumer comparing defect against \
+         opinion is trusting exactly that. got: {architecture}"
+    );
+    // `painMeaning` is the reply's own instruction for reading the scalar, and the sentence it was
+    // missing is the one that matters most: findings are not in this number.
+    let meaning = architecture["painMeaning"]
+        .as_str()
+        .expect("painMeaning rides the summary");
+    assert!(
+        meaning.contains("NO RULE FINDINGS"),
+        "painMeaning must state that findings are excluded — without it the number reads as a defect \
+         signal, which it has never been. got: {meaning}"
+    );
     // Capped, never the full detail: this reply must not also carry the full `recommendations`/
     // `critical` arrays (they stay in the raw `zzop-facade` embedding lane, per this tool's description).
     assert!(v.get("recommendations").is_none(), "got: {v}");

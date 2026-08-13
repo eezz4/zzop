@@ -7,6 +7,7 @@
   "rules": [
     {
       "id": "async-route-no-catch",
+      "axis": "defect",
       "severity": "warning",
       "message": "Async Express/router handler with no surrounding try/catch, `next(err)`, or `.catch()` — on Express 4, an unhandled rejection in an async handler crashes or hangs the process; Express 5 forwards async rejections to error-handling middleware automatically, so there it's a style/consistency concern rather than a crash bug. Wrap in try/catch and call `next(err)`, or attach `.catch(next)`. A route wrapped by error-handling middleware like `express-async-handler` or `express-async-errors` is also safe, but that wrapping isn't visible in the handler body this rule scans — the rule's biggest real-world false-positive source.",
       "matcher": {
@@ -27,6 +28,7 @@
     },
     {
       "id": "sync-fs-in-handler",
+      "axis": "defect",
       "severity": "warning",
       "message": "Synchronous fs/child_process call (`readFileSync`, `execSync`, etc.) alongside request-handler evidence (a `req.`/`request.` member access, or a response-API call like `res.status(...)`/`res.send(...)` — deliberately NOT `res.json(`/`res.text(`, which a fetch `Response` also has, so a handler whose only response evidence is a bare `res.json(x)` is accepted as a miss rather than risking fetch-response false positives) — a blocking call on the request path stalls Node's event loop for every concurrent request. Use the async `fs.promises`/`child_process` APIs, or move CPU-heavy work to a worker thread.",
       "matcher": {
@@ -43,6 +45,7 @@
     },
     {
       "id": "map-async-no-promise-all",
+      "axis": "defect",
       "severity": "warning",
       "message": "`.map(async ...)` used without wrapping the result in `Promise.all`/`Promise.allSettled` — `.map` returns pending Promises, so a rejection becomes unhandled and any ordering/completion guarantee is lost. Wrap the call in `Promise.all(...)` (or `Promise.allSettled(...)` for expected partial failures).",
       "matcher": {
@@ -60,19 +63,8 @@
       }
     },
     {
-      "id": "env-nonnull-assert",
-      "severity": "warning",
-      "message": "`process.env.X!` non-null assertion — bypasses the null check and defers the crash from startup to first use, wherever that happens to be. Validate required env vars once at startup (a config module that throws if any are missing) and reference the validated value elsewhere.",
-      "matcher": {
-        "type": "line-scan",
-        "file_pattern": "(?i)\\.tsx?$",
-        "file_exclude_pattern": "${test-paths-stories}",
-        "skip_comment_lines": true,
-        "line_pattern": "process\\.env\\.[A-Za-z0-9_]+!([^=]|$)"
-      }
-    },
-    {
       "id": "debug-true-committed",
+      "axis": "defect",
       "severity": "warning",
       "message": "Debug flag or disabled TLS verification (`debug: true`, `NODE_TLS_REJECT_UNAUTHORIZED=0`, `rejectUnauthorized: false`) committed to source — ships a dev backdoor or TLS bypass to production if deployed unchanged. The two TLS shapes are Node-specific, but the `debug: true` shape is not, and this rule scans Rust as well: a struct literal (`Settings { debug: true }`) fires exactly as a JS object literal does. Remove the flag, or gate it behind an environment check in whichever language the line is written in — `process.env.NODE_ENV !== 'production'` in Node, `std::env::var` in Rust. Suppress a vetted line with `// zzop-debug-true-committed-ok`.",
       "matcher": {
@@ -89,6 +81,7 @@
     },
     {
       "id": "promise-all-and-writes",
+      "axis": "defect",
       "severity": "warning",
       "message": "`Promise.all(...)` used with DB write calls on a DB-client-shaped receiver (`prisma`/`db`/`tx`/`client`/`repo`) — non-atomic: some writes land and others don't when one rejects, with no rollback for what committed. Wrap the writes in a transaction, or use `Promise.allSettled(...)` with compensation logic. Co-occurrence heuristic, not proof — it flags a `Promise.all(...)` and a write call in the same function, not that the writes are actually inside the `Promise.all(...)` array; confirm before acting.",
       "matcher": {
@@ -105,6 +98,7 @@
     },
     {
       "id": "json-parse-no-try",
+      "axis": "defect",
       "severity": "warning",
       "message": "`JSON.parse(...)` called directly on apparent external input (`req`/`body`/`params`/`query`/`payload`/`event`) without a surrounding `try` — malformed input throws, turning a bad request into a 500 or a process crash. Wrap the parse in try/catch and return a proper 4xx on failure.",
       "matcher": {
@@ -123,6 +117,7 @@
     },
     {
       "id": "fetch-no-timeout",
+      "axis": "defect",
       "severity": "warning",
       "message": "Outbound HTTP call (`fetch`/`axios`/`got`) in server/worker code with no timeout or `AbortController` visible in the same function — `fetch` has no default timeout, so a hung upstream hangs the request and can exhaust the connection pool. Pass an explicit timeout (e.g. `AbortSignal.timeout(...)`) or wire up an `AbortController`. A timeout set on a shared client instance in another file (e.g. `axios.create({ timeout })` in a helper module) isn't visible to this per-function check — this is the rule's biggest real-world false-positive vector.",
       "matcher": {
@@ -143,6 +138,7 @@
     },
     {
       "id": "reqwest-no-timeout",
+      "axis": "defect",
       "severity": "warning",
       "message": "A `reqwest` HTTP client is constructed inside this function (`Client::new()` / `Client::builder()` / `Client::default()` / `ClientBuilder::new()`, or the `reqwest::get(url)` convenience call — which builds a fresh, timeout-less default client on every invocation — in a file that names `reqwest` at all) and no `.timeout(` call appears in the same function body — reqwest's default client has no request timeout, so a peer that accepts the connection and then stalls holds this task, its connection and whatever it borrows for as long as the peer likes. Set one: `Client::builder().timeout(Duration::from_secs(5)).build()`, or `.timeout(..)` on the individual request builder; for `reqwest::get` there is no builder to put one on — construct a client instead. Scope, disclosed rather than assumed: the veto is FUNCTION-LOCAL, purely lexical, and matches the METHOD spellings `.timeout(` and `.read_timeout(` only — so a client built by a shared constructor elsewhere and merely used here is invisible to it, a timeout configured outside this function reads as absent, and a caller-side deadline such as `tokio::time::timeout(...)` does not clear it either (use the suppression marker for that case) — confirm before changing code. `read_timeout` DOES clear it: it bounds exactly the stalled-peer read this message describes. `connect_timeout` deliberately does NOT clear it: that caps the HANDSHAKE only, and the stalled-peer failure above begins after the handshake succeeds. The TypeScript sibling is `reliability/fetch-no-timeout`.",
       "matcher": {
@@ -168,24 +164,8 @@
       }
     },
     {
-      "id": "process-exit-in-lib",
-      "severity": "warning",
-      "message": "`process.exit(...)` called inside a function — skips pending I/O flushes and cleanup handlers, killing the entire process, not just the current request. Throw (or reject) instead and let a top-level handler decide; legitimate only in a CLI entrypoint or a signal-handling module.",
-      "matcher": {
-        "type": "method-scan",
-        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)(^|/)(scripts?|tools|bin)/",
-        "skip_comment_lines": true,
-        "strip_string_literals": true,
-        "require_file_absent": ["process\\.on\\s*\\(\\s*['\"]SIG"],
-        "patterns": [
-          { "pattern": "process\\.exit\\s*\\(", "label": "exit" }
-        ],
-        "trigger": "exit"
-      }
-    },
-    {
       "id": "body-limit-missing",
+      "axis": "defect",
       "severity": "info",
       "message": "Body parser (`express.json`/`urlencoded`, `bodyParser.json`/`urlencoded`) configured without an explicit `limit` — the code relies on the implicit 100kb default, which is too small for some legitimate endpoints and simply unexamined for the rest. Set an explicit `limit` (e.g. `{ limit: '1mb' }`) sized to the endpoint's needs.",
       "matcher": {
@@ -198,31 +178,8 @@
       }
     },
     {
-      "id": "console-in-be",
-      "severity": "info",
-      "message": "Console write in backend-path source (`api/`, `server/`, `backend/`, `be/`, `routes/`, `controllers/`, `services/`) — console writes are synchronous and unstructured. Use the project's structured logger instead so output is queryable, non-blocking, and carries request context. This rule reads the parser's projected call-site channel rather than a text regex, so a console call named inside a string literal or a comment is not a site at all, and the one rule covers five languages with each platform's own spellings: TypeScript/JavaScript's `console.*`, Python's `print`, Go's `fmt.Print`/`fmt.Println`/`fmt.Printf` (plus `fmt.Fprint`/`fmt.Fprintln`/`fmt.Fprintf` when the writer is spelled `os.Stdout` or `os.Stderr` at the site — an aliased writer is silent, spelling over data flow), Java's `System.out`/`System.err` `print`/`println`/`printf`/`format`, and C#'s `Console.Write`/`Console.WriteLine` including the `Console.Error`/`Console.Out` and `System.`-prefixed spellings. Scope stated so the blanks read as choices: on TypeScript only `log`, `error`, `warn` and `info` count — `console.debug` and `console.trace` ARE projected and deliberately left out, so that moving off the text regex neither gained nor lost a TypeScript finding. Rust is a permanent blank BY JUDGMENT, not by gap: `println!` is a console write in the fact layer but a CLI's normal output, so this rule never admits `.rs`. A structured logger (`winston`, `pino`, Python's `logging`, slf4j, `ILogger`) is never a console write and never fires here — and Go's stdlib `log.Print*` is on the LOGGER side of that line (it defaults to stderr but `log.SetOutput` retargets it; the boundary case the design excludes from v1). One more Python silence is FILE-scoped and worth knowing before trusting a quiet file: a file that rebinds the name `print` anywhere (`def print`, `print = ...`, `from rich import print`, even a parameter named `print`) projects no console-write sites at all — the projected fact claims the BUILT-IN, and a file that shadows the name has taken that claim away, so one unrelated rebinding silences every `print` in that file. A file this engine cannot parse, or one in a language with no call-site producer, yields no sites at all — silence from this rule is absence of evidence, never a clean bill.",
-      "matcher": {
-        "type": "call-scan",
-        "file_pattern": "(?i)(^|/)(api|server|backend|be|routes|controllers|services)/.*\\.(ts|js|mjs|cjs|py|go|java|cs)$",
-        "file_exclude_pattern": "${test-paths-stories}",
-        "kind": "console-write",
-        "callee_pattern": "^(console\\.(log|error|warn|info)|print|System\\.(out|err)\\.(print|println|printf|format)|(System\\.)?Console(\\.(Error|Out))?\\.(Write|WriteLine)|fmt\\.(Print|Println|Printf|Fprint|Fprintln|Fprintf))$"
-      }
-    },
-    {
-      "id": "console-in-loop",
-      "severity": "warning",
-      "message": "Console write PROVED to run inside a loop — the call site's own line falls within one of the parser's projected loop spans (a `for`/`for-of`/`for-in`/`while`/`do-while` statement or an Array `forEach`/`map`/`filter`/`reduce` callback in TypeScript/JavaScript; a `for`/`while` statement or a comprehension in Python; every `for` form in Go; `for`/enhanced-`for`/`while`/`do` in Java; `for`/`foreach`/`while`/`do` in C# — each language's console-write spellings are `console-in-be`'s, and each language's lazy callback forms, Java Stream lambdas and C# LINQ included, are deliberately NOT loop spans, so a write inside one is missed rather than claimed), so it writes once per iteration instead of once. Rust is a permanent blank BY JUDGMENT, `console-in-be`'s own: `println!` is a CLI's normal output, so `.rs` is never admitted here either. Console writes are synchronous: to a pipe or a file each one blocks until the write lands, so a loop over a few thousand items turns a millisecond of work into seconds of I/O, and the volume it emits is unreadable to the person who has to grep it. Emit one aggregated line after the loop, or move the per-item detail behind a structured logger's debug level where a sink can drop it. This is a STRUCTURAL claim, not a co-occurrence heuristic — a console write merely sharing a function with a loop does not fire, only one the parser placed inside the loop's span. Both inputs degrade to SILENCE and never to a guess: a file with no projected call sites (unparseable, or a language with no producer) and a file with no projected loop spans each yield nothing, so this rule under-reports by construction. One silence is FILE-scoped and worth knowing before trusting a quiet Python file: a file that rebinds the name `print` anywhere (`def print`, `print = ...`, `from rich import print`, even a parameter named `print`) projects no console-write sites at all — the projected fact claims the BUILT-IN, and a file that shadows the name has taken that claim away. A single-line callback or comprehension also projects no loop span (line-granular containment cannot tell its body from the receiver line), so a one-liner`'`s per-iteration write is deliberately missed rather than a one-shot write falsely claimed. Unlike `reliability/console-in-be`, every console write method the parser recognizes counts here, `debug` and `trace` included — the harm is per-iteration volume and blocking, which the level does not change.",
-      "matcher": {
-        "type": "call-scan",
-        "file_pattern": "(?i)\\.(ts|tsx|js|jsx|mjs|cjs|py|go|java|cs)$",
-        "file_exclude_pattern": "${test-paths-stories}",
-        "kind": "console-write",
-        "in_loop": true
-      }
-    },
-    {
       "id": "interval-no-clear",
+      "axis": "defect",
       "severity": "warning",
       "message": "`setInterval(...)` with no matching `clearInterval(...)` anywhere in this file — a leaked timer keeps the process (or page) alive and re-fires forever, since nothing cancels it. Store the return value in a handle and call `clearInterval(handle)` during teardown/cleanup.",
       "matcher": {
@@ -235,20 +192,8 @@
       }
     },
     {
-      "id": "env-outside-config",
-      "severity": "info",
-      "message": "A process environment variable is read outside the env-config module(s) declared for this project — scattering env parsing and validation across the codebase, so nothing can state what the app actually depends on or validate it at startup. WHICH paths are the config module is a fact about the project, not something the source says, so this rule does not guess it: it runs only when an `env-config-module` attribute is declared, and a file covered by a truthy one is exempt. An exact `{\"file\": {\"path\": ...}}` target overrides a covering `{\"pathScope\": {\"prefix\": ...}}`, so one file can be carved out of a directory declared wholesale. Declare it with `overlays: [\"./zzop-attributes.json\"]` in zzop.config.jsonc (embedders: `adapterOverlays`), whose envelope carries the attribute on a file entry — examples/adapters/auth-overlay-adapter is a complete working one. With nothing declared this rule does not run at all, and the run's warnings say so along with how many sites it left unjudged; it does not fall back to flagging every read. Two consequences worth stating rather than discovering: the exemption is whole-FILE, so every env read in a declared file is exempt including ones unrelated to config; and the declaration is taken on trust — nothing here verifies that a declared module validates, caches, or re-exports what it reads, only that you said it is the place. Test, spec, story and Storybook paths are excluded outright, independently of any declaration. WHAT COUNTS AS A READ is the parser's projected call-site channel, not a text regex, and that changed the reach in three directions worth naming rather than discovering. It covers six languages, each with its platform's own keyed-read spellings: TypeScript/JavaScript's `process.env`, Python's `os.getenv(...)`/`os.environ.get(...)`/`os.environ[...]`, Go's `os.Getenv`/`os.LookupEnv`, Java's `System.getenv`, C#'s `Environment.GetEnvironmentVariable` (with or without the `System.` prefix), and Rust's `std::env::var`/`std::env::var_os` (each spelling kept as written, so `env::var` after `use std::env` is its own callee). Deliberately NOT reads, per producer: whole-environment enumerations (`os.Environ()`, `GetEnvironmentVariables()`, `std::env::vars()`, bare `os.environ` as a mapping) and Rust's `env!()`/`option_env!()`, which resolve at COMPILE time and read no process environment. It is WIDER on TypeScript/JavaScript than the regex it replaced: that regex could only see `process.env.` followed by a bare identifier, so `process.env[\"NAME\"]` and `process.env[key]` were invisible to it and are now flagged; every read point is one finding, so two reads on one line are two findings where the old line scan reported one. And it is narrower in the honest direction: a read named only inside a string literal or a comment was never a read and is no longer counted as one, while a file this engine cannot parse — or one in a language with no call-site producer — yields no sites at all, so silence there is absence of evidence rather than a clean bill. The variable's NAME is deliberately not carried, because this rule fires on any read and no rule asks which one. Centralize env reads in a declared config module and import the validated value elsewhere.",
-      "matcher": {
-        "type": "call-scan",
-        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs|py|go|java|cs|rs)$",
-        "file_exclude_pattern": "${test-paths-stories}",
-        "kind": "env-read",
-        "attr_absent": "env-config-module",
-        "require_attr_declared": "env-config-module"
-      }
-    },
-    {
       "id": "stream-open-no-close-in-loop",
+      "axis": "defect",
       "severity": "warning",
       "message": "A file/stream handle (`fs.createReadStream(`/`fs.createWriteStream(`/`fs.open(`/`fs.openSync(`) is opened structurally inside a loop body — verified against the parser's projected loop spans (the open call's own line falls within a loop statement's or array-iteration callback's span), not merely co-occurring with loop syntax somewhere in the same function — and the enclosing function never closes it (`.close(`/`.destroy(`/`pipeline(`/`finished(` anywhere in the function). Under a fan-out, the file descriptors accumulate across iterations and the process eventually hits `EMFILE: too many open files`. Note honestly: the close-absence check is whole-function scoped and matches `.close(`/`.destroy(`/`pipeline(`/`finished(` on ANY object — so a close inside a sibling branch or a callee is invisible here and the finding still fires (false positive), while an unrelated `res.close()`/`conn.destroy()` elsewhere in the function vetoes a genuine stream leak (false negative); verify before refactoring. Close the handle in a `finally` block, or use `pipeline(...)`, which closes both ends automatically.",
       "matcher": {
@@ -270,6 +215,7 @@
     },
     {
       "id": "listener-subscribe-in-loop",
+      "axis": "defect",
       "severity": "warning",
       "message": "An EventEmitter listener (`.on('event',…)`/`.once(`/`.addListener(`/`.prependListener(`, anchored on a string event-name argument) is registered structurally inside a loop body — verified against the parser's projected loop spans (the subscribe call's own line falls within a loop statement's or array-iteration callback's span), not merely co-occurring with loop syntax somewhere in the same function — with no matching removal (`.off(`/`.removeListener(`/`.removeAllListeners(`) anywhere in the enclosing function. To avoid firing on same-shaped non-EventEmitter `.on('...')` calls (a frontend DOM/jQuery `$(el).on('click', …)`, a knex join builder, a D3 selection), the rule only scans files that use a Node event-emitter/server library (an `events`/`net`/`http`/`ws`/`socket.io`/... import, or a `.setMaxListeners(` call). This is the event-listener sibling of `interval-no-clear` (which covers `setInterval`): listeners pile up on every iteration, Node warns `MaxListenersExceeded`, and each event then fires the handler N times (duplicate side effects, unbounded memory growth). Note honestly: the removal-absence check is whole-function scoped — a teardown living in a different function (or an unrelated `.off(` on another object) either misses a real fix or vetoes a real leak; verify before refactoring. Register the listener once outside the loop, or collect the listeners and remove them during teardown.",
       "matcher": {
@@ -291,6 +237,7 @@
     },
     {
       "id": "await-inside-promise-all-array",
+      "axis": "defect",
       "severity": "warning",
       "message": "`await` used directly inside a `Promise.all(...)`/`Promise.allSettled(...)`/`Promise.race(...)` array literal — each awaited element resolves before the next element of the array is even evaluated, so the calls run one after another instead of concurrently, silently defeating the whole point of `Promise.all`. This is syntax-proven where it fires: an `await` textually between the array's `[` and `]` on the SAME line always serializes that element against the next (the line-scan only sees the single-line form — a multi-line array with each `await` on its own line is not flagged). Move the `await` out — build the array of un-awaited promises first, then await the combinator once (e.g. `Promise.all([getA(), getB()])`, or `await Promise.all(items.map((i) => getA(i)))`).",
       "matcher": {
@@ -304,6 +251,7 @@
     },
     {
       "id": "emitter-async-listener",
+      "axis": "defect",
       "severity": "warning",
       "message": "An `async` callback registered as an EventEmitter listener (`.on`/`.once`/`.addListener`/`.prependListener`) — the emitter fires it and discards the returned promise, so a rejection inside the handler becomes an unhandled promise rejection, which crashes the process on Node 15+ (and is a silent swallow on older Node). The rule only scans files that use a Node event-emitter/server library (an `events`/`net`/`http`/`ws`/... import, or a `.setMaxListeners(` call), so a frontend DOM `el.on('click', async …)` is not flagged. Wrap the handler body in try/catch and log/handle the error there, or wrap the callback so its promise is observed (e.g. a small `catchAsync(fn)` helper).",
       "matcher": {
@@ -319,25 +267,8 @@
       }
     },
     {
-      "id": "promise-race-no-cancel",
-      "severity": "info",
-      "message": "`Promise.race([...])` with no `AbortController`/`AbortSignal`/`clearTimeout`/`.abort()` visible in the same function — the operation(s) that lose the race are never cancelled, so their socket/timer/handle stays alive after the race settles, and a later rejection from a loser becomes an unhandled rejection. Wire an `AbortController` (or equivalent cancellation) through to every raced operation and abort the losers once the race settles. Heuristic, not proof: some raced operations (e.g. a plain in-memory timer promise) hold no cancellable resource, so this can over-flag.",
-      "matcher": {
-        "type": "method-scan",
-        "file_pattern": "(?i)\\.(ts|tsx|js|mjs|cjs)$",
-        "file_exclude_pattern": "${test-paths}",
-        "skip_comment_lines": true,
-        "patterns": [
-          { "pattern": "Promise\\.race\\s*\\(", "label": "race" }
-        ],
-        "trigger": "race",
-        "absent": [
-          { "pattern": "AbortController|AbortSignal|clearTimeout|\\.abort\\s*\\(|signal\\s*:", "label": "cancels" }
-        ]
-      }
-    },
-    {
       "id": "fs-check-then-use",
+      "axis": "defect",
       "severity": "warning",
       "message": "A create/write call (`fs.writeFile`/`fs.open`/`fs.rename`/...) appears LEXICALLY AFTER a filesystem existence/permission check (`fs.existsSync`/`fs.access`/`fs.stat`/...) in the NEAREST enclosing function, with no exclusive-create flag (`wx`/`O_EXCL`) visible anywhere in it — CWE-367 TOCTOU: between the check and the use, the path can be swapped out from under it (e.g. via a symlink) or another writer can win the race, so the check is stale by the time the write happens. A trigger line that sits inside NO parser-projected function span (a class-property initializer, a top-level statement) is read as ungated, and the pairing there widens back to the whole scanned symbol span. The order is TEXTUAL, and path identity is not checked at all: it does not confirm the check and the write target the same path, nor that both run on the same control-flow path (`fs.existsSync(a)` followed by `fs.writeFile(b)` still fires). SAME-LINE NESTING RESIDUAL (a disclosed false negative shared by every rule that uses this order gate): on a single line \"after\" is decided by MATCH START OFFSET, so a check nested INSIDE the write call's own argument list reads as coming AFTER it and does not pair — `fs.writeFileSync(p, data, { flag: fs.existsSync(p) ? 'a' : 'w' });` is silently NOT reported, while the ordinary one-liner `if (!fs.existsSync(p)) fs.writeFileSync(p, data);` (check first) fires. Prefer opening with an exclusive-create flag (`{ flag: 'wx' }` in Node, `O_EXCL` at the syscall level), which fails atomically if the path already exists instead of trusting a separate check.",
       "matcher": {
@@ -360,6 +291,7 @@
     },
     {
       "id": "fs-in-loop-serial",
+      "axis": "defect",
       "severity": "warning",
       "message": "An `await`ed Node `fs`/`fs.promises` call (`readFile`/`writeFile`/`appendFile`/`unlink`/`rename`/`copyFile`/`mkdir`/`rm`/`readdir`/`stat`/`access`/... — deliberately excluding `open`/`createReadStream`/`createWriteStream`, which `stream-open-no-close-in-loop` already covers for the handle-leak angle) executes structurally inside a loop body — verified against the parser's projected loop spans (the call's own line falls within a loop statement's or array-iteration callback's span), not merely co-occurring with loop syntax somewhere in the same function — with no `Promise.all`/`Promise.allSettled` anywhere in the enclosing function. Each iteration's disk I/O waits for the previous one to finish before starting, serializing work the filesystem would otherwise run concurrently; over many files this adds up to iteration-count times the single-call latency. This generalizes `map-async-no-promise-all` (which only catches the `.map(async ...)` callback shape) to the ordinary `for`/`for-of`/`for-in`/`while` loop forms, scoped to `fs` I/O specifically — database calls in a loop are `sql/nplus1`'s territory and outbound network calls are `perf/api-in-loop`'s, both already covering their own receivers, so this rule only anchors on an `fs`/`fsPromises`/`fsp`/`fs.promises`-shaped receiver to stay out of their way. Gather the paths up front and run the calls concurrently with `Promise.all(...)` (bounded by a concurrency limiter if the fan-out is large), or use a single directory-level/batch operation where the API allows it. Suppress a vetted case (e.g. deliberately sequential writes to preserve on-disk ordering) with `// zzop-fs-in-loop-serial-ok`.",
       "matcher": {

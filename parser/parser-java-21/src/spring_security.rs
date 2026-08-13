@@ -70,47 +70,12 @@ impl SpringAntMatcher {
             }
         }
         // A method-only matcher (`antMatchers(HttpMethod.OPTIONS)`) opens every path for that method.
-        self.patterns.is_empty() || self.patterns.iter().any(|p| ant_matches(p, path))
+        self.patterns.is_empty()
+            || self
+                .patterns
+                .iter()
+                .any(|p| zzop_core::ant_path_matches(p, path))
     }
-}
-
-/// Spring `AntPathMatcher`-style match of an ANT `pattern` against a concrete `path`, segment-based:
-/// `**` matches zero or more whole segments (so `/articles/**` matches `/articles` AND `/articles/{}`),
-/// `*` matches exactly one segment, a literal segment matches itself. A route path's `{}` param
-/// placeholder is an ordinary segment (a literal pattern segment won't equal it; `*`/`**` will).
-fn ant_matches(pattern: &str, path: &str) -> bool {
-    let p: Vec<&str> = pattern.trim_start_matches('/').split('/').collect();
-    let s: Vec<&str> = path.trim_start_matches('/').split('/').collect();
-    seg_match(&p, &s)
-}
-
-fn seg_match(pat: &[&str], seg: &[&str]) -> bool {
-    match pat.split_first() {
-        None => seg.is_empty(),
-        Some((&"**", rest)) => {
-            // `**` consumes zero or more segments — a trailing `**` matches any remainder (incl. none).
-            rest.is_empty() || (0..=seg.len()).any(|k| seg_match(rest, &seg[k..]))
-        }
-        Some((&ph, prest)) => match seg.split_first() {
-            Some((&sh, srest)) if seg_glob(ph, sh) => seg_match(prest, srest),
-            _ => false,
-        },
-    }
-}
-
-/// Single-segment match: `*` matches any one segment; a Spring path-variable segment `{id}` matches any
-/// one segment too (crucially, it matches the route path's own `{}` param placeholder — the two mirror
-/// halves normalize path variables differently, `http_interface_key` to `{}` and the matcher to `{id}`,
-/// and this reconciles them so a `permitAll("/users/{id}")` is NOT under-matched against `/users/{}`);
-/// a within-segment glob (`feed*`/`user?`, rare) is treated permissively as a match; else a literal must be
-/// equal. Every non-exact case errs toward MATCH — the generous/safe direction (matching a permitAll means
-/// NOT exempting the route, so an open route is never wrongly cleared).
-fn seg_glob(pat: &str, seg: &str) -> bool {
-    pat == "*"
-        || pat == seg
-        || (pat.starts_with('{') && pat.ends_with('}'))
-        || pat.contains('*')
-        || pat.contains('?')
 }
 
 const MATCHER_METHODS: &[&str] = &["antMatchers", "requestMatchers", "mvcMatchers"];

@@ -70,9 +70,9 @@ Neither binary needs Node.js, npm, or a compiler. Get them one of four ways:
 
 - **Download the binaries.** Grab the `zzop-cli-<platform>[.exe]` (CLI) and/or `zzop-mcp-<platform>[.exe]`
   (MCP server) assets for your platform from [GitHub Releases](https://github.com/eezz4/zzop/releases)
-  and run them directly, or put them on `PATH`. **From the next release onward** each release also
-  carries a `SHA256SUMS` asset covering every one of those assets — releases up to and including
-  v0.29.1 do not have one, so check that the file is there before relying on it. Verify with
+  and run them directly, or put them on `PATH`. Each release also carries a `SHA256SUMS` asset covering
+  every one of those assets — **from v0.30.0 onward**; releases up to and including v0.29.1 do not have
+  one, so on an older pin check that the file is there before relying on it. Verify with
   `sha256sum -c SHA256SUMS --ignore-missing`, or `shasum -a 256 -c SHA256SUMS --ignore-missing` on a
   macOS box that has no `sha256sum`. Its scope is narrow and worth stating: it catches a corrupted
   download, and it is a hook for anyone who obtained the digest through another channel. It does
@@ -140,8 +140,8 @@ zzop graph ./api ./web > join.mmd            # the cross-layer join as mermaid, 
                                              # scoped with --scope/--top, every cap disclosed in the file
 zzop graph . --domain dep > imports.mmd      # the FILE import graph instead — cycles drawn as hexagons
                                              # with thick arrows, from the engine's own circular findings
-zzop graph . --domain risk > risk.mmd        # blast-radius hubs + extraction seams. The 17 health
-                                             # SCORES are NOT drawn — a table of numbers is not a graph
+zzop graph . --domain risk > risk.mmd        # blast-radius hubs + extraction seams. The health SCORES
+                                             # are NOT drawn — a table of numbers is not a graph
 zzop graph . --domain posture               # the mutating attack surface and its guard status —
                                              # a box means GUARDED-OR-EXEMPT, never proven guarded
 zzop graph . --domain cochange > churn.mmd   # which files keep changing TOGETHER, from git history —
@@ -188,8 +188,21 @@ This is what the two binaries above actually print — `findings` is a **census 
 because the reply is a shaped summary rather than a raw dump. The numbers below are a real run against
 this repository's own `cases/trees/api-be` fixture, so you can reproduce them:
 `zzop analyze --config cases/trees/api-be/zzop.config.jsonc`. (To the next editor: these numbers move
-whenever `cases/trees/api-be` changes — re-run that command and re-measure them, never patch one in
-isolation.)
+whenever `cases/trees/api-be` changes **and whenever a release changes what is measured** — re-run that
+command and re-measure them, never patch one in isolation. Three of them were stale for exactly that
+second reason until 2026-08-11.)
+
+`pain` never travels alone. `painMeasuredWeight` / `painTotalWeight` is how much of the weight table this
+tree could actually be measured on, and `pain: null` means no metric had a population at all — absence of
+data, never a clean bill.
+
+**And `pain` is not a defect score.** It contains no rule findings whatever: the run below reports 114
+findings, 5 of them critical, while its `defect` pain is `0`. `painByAxis` splits the number so that is
+visible instead of implied — `defect` (import cycles, the only entry), `opinion` (barrel discipline, FSD
+layering, SDP/Main Sequence, Newman modularity, LOC ceilings — a project that deliberately does the
+opposite is not wrong, it scores low), and `history` (rename churn, bus factor). The three sit on `pain`'s
+own scale and sum to it. Read `findings` for defects; read `pain` for how much zzop disagrees with how the
+code is arranged.
 
 ```json
 {
@@ -197,12 +210,16 @@ isolation.)
   "findings": {
     "total": 114,
     "bySeverity":  { "critical": 5, "warning": 75, "info": 34 },
-    "byRule":      { "reliability/console-in-be": 10, "db/unawaited-write": 1 },
+    "byRule":      { "code-hygiene/console-in-be": 10, "db/unawaited-write": 1 },
     "shown":       [ /* 50 here — the listed slice, capped by --limit; each entry has ruleId, severity, file, line, message */ ]
   },
-  "architecture": { "pain": 6.4, "topRecommendation": null, "criticalTop": [] },
+  "architecture": { "pain": 7.5, "painMeasuredWeight": 13.8, "painTotalWeight": 18.6,
+                    "painByAxis": [ { "axis": "defect",  "pain": 0.0, "totalWeight": 3.0 },
+                                    { "axis": "opinion", "pain": 7.5, "totalWeight": 15.0 },
+                                    { "axis": "history", "pain": 0.0, "totalWeight": 0.6 } ],
+                    "topRecommendation": null, "criticalTop": [] },
   "coverage":     { /* how much of the tree zzop actually saw, per extension */ },
-  "disclosure":   { "classes": 17, "asserted": 5, "partial": 10, "notYetDetected": 2 },
+  "disclosure":   { "classes": 18, "asserted": 6, "partial": 10, "notYetDetected": 2 },
   "warnings":     [ /* anything this run could not provide */ ]
 }
 ```

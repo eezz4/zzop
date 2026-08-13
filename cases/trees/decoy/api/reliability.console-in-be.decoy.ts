@@ -1,4 +1,4 @@
-// DECOY for reliability/console-in-be. In scope, provably: the rule's file_pattern gates on a
+// DECOY for code-hygiene/console-in-be. In scope, provably: the rule's file_pattern gates on a
 // `(api|server|backend|be|routes|controllers|services)/` path segment, and this file sits under `api/`.
 // Its line_pattern lists exactly `console.(log|error|warn|info)`; `debug`/`trace` are outside it, a
 // structured logger is the intended replacement, and a commented-out call is skipped by

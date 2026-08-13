@@ -1,9 +1,9 @@
-// DECOY for reliability/console-in-loop. In scope, provably: the rule's file_pattern admits any `.ts`
+// DECOY for code-hygiene/console-in-loop. In scope, provably: the rule's file_pattern admits any `.ts`
 // with no path gate, and this file's `console.log` calls ARE projected `console-write` call sites —
 // verified by mutating one into the loop body, confirming the rule fires, and restoring. Only the loop
 // containment is missing, which is the whole point.
 //
-// `lib/` and not `api/` on purpose: reliability/console-in-be gates on a backend path segment, so a
+// `lib/` and not `api/` on purpose: code-hygiene/console-in-be gates on a backend path segment, so a
 // console write under `decoy/api/` would fire THAT rule and this file could never be a clean control.
 // The console-in-be boundary has its own decoy at ../api/reliability.console-in-be.decoy.ts.
 //

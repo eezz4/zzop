@@ -136,11 +136,43 @@ pub fn aggregate_dep_by_folder(dep: &DepGraph, depth: usize) -> Vec<FolderEdge> 
 // view.
 // ---------------------------------------------------------------------------------------------
 
-/// Default folder-aggregation depth (2 leading path segments, e.g. `features/alpha`) — deep enough to
-/// distinguish feature/module directories in a typical tree, shallow enough to stay a small, skimmable
-/// summary on a large repo. `AnalyzeOutput::folders`'s sole caller (`engine::analyze::assemble`) uses this
-/// constant; a caller with different aggregation needs can call `aggregate_by_folder`/
-/// `aggregate_dep_by_folder` directly with its own depth.
+/// Default folder-aggregation depth (2 leading path segments, e.g. `features/alpha`) — shallow enough
+/// to stay a small, skimmable summary on a large repo. `AnalyzeOutput::folders`'s sole caller
+/// (`engine::analyze::assemble`) uses this constant; a caller with different aggregation needs can call
+/// `aggregate_by_folder`/`aggregate_dep_by_folder` directly with its own depth.
+///
+/// # This depth is ECOSYSTEM-SHAPED, and it is staying that way on purpose
+///
+/// It used to claim it was "deep enough to distinguish feature/module directories in a typical tree".
+/// That is true of layouts whose module names live in the first two segments (`src/features`,
+/// `app/api`, `frontend/src`) and FALSE of every layout that nests its source root deeper — Maven and
+/// Gradle (`src/main/java/<group>/<artifact>/...`), .NET (`src/<Project>/...`), any repo whose code all
+/// hangs under one directory. There, two segments stop at `src/main` and the whole repository becomes
+/// one or two boxes with almost no edges between them, which is not a coarse module map but the
+/// absence of one.
+///
+/// Measured 2026-08-13 over the 17-repo corpus (recount: run an analysis over
+/// `corpus/oss/zzop.config.jsonc` and compare each tree's `folders.summaries.length` and
+/// `folders.edges.length` against its `fileCount`): the JS/TS and Python trees spread across enough
+/// folder rows to read as a module map, while the Java/Gradle trees put the large majority of their
+/// nodes into the single row `src/main` and produce a folders graph with a single edge. The collapse
+/// is real and reproducible.
+///
+/// **It is not being fixed by changing the number**, because no single constant is right for every
+/// ecosystem — raising it to reach `com/<org>` in Maven shatters the JS trees into per-file noise, and
+/// picking per-language depths would make one reply's rows mean different things in different trees.
+/// The variable-depth question already has an owner on the product surface: `zzop graph --fold <n>`
+/// lets the reader choose the granularity for the picture they want. What this constant owes its
+/// consumer is that the granularity be STATED, which is `docs/modules/facade.md`'s `folders` row (the
+/// same debt `godFile`/`fileSizeCompliance` pay by publishing the `limit` they judged against).
+///
+/// Retest trigger for reopening this: a real user request for a configurable or per-tree folder
+/// depth. Corpus measurement alone does not reopen it — the collapse above is already known and is
+/// the accepted cost of one granularity meaning one thing across every tree in a reply.
+///
+/// Note that nothing SCORED reads this rollup: `folders` is a summary view, so moving the depth would
+/// change a picture, never a number in `scores`/`health`. That is also why this is a disclosure fix
+/// rather than a scoring one.
 pub const DEFAULT_FOLDER_DEPTH: usize = 2;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -60,3 +60,55 @@ pub async fn good_fetch_profile_request_timeout(url: &str) -> Result<String, req
         .text()
         .await
 }
+
+/// The INLINE-`mod` half of the same method-scan question, added 2026-08-11 with the qualified-id
+/// change (`zzop_parser_rust::lang::symbols`'s module doc). A method-scan rule rides `SourceSymbol` body
+/// spans, and until nested items got a symbol of their own the entire body of an inline `mod` sat in no
+/// span at all — so this exact `Command::new` + `format!` pair, which scores at the top of this file,
+/// was invisible here. It is NOT a duplicate of `run_report`: deleting the `Item::Mod` walk from
+/// `symbols.rs` leaves that anchor scoring and takes only this one away.
+///
+/// The good twin sits in the same module, so the module cannot be cleared wholesale either.
+pub mod legacy {
+    use std::process::Command;
+
+    pub fn run_report(period: &str) -> std::io::Result<std::process::Output> {
+        let script = format!("/usr/local/bin/report --period {}", period);
+        Command::new("sh").arg("-c").arg(script).output()
+    }
+
+    pub fn good_run_report(period: &str) -> std::io::Result<std::process::Output> {
+        Command::new("/usr/local/bin/report")
+            .arg("--period")
+            .arg(period)
+            .output()
+    }
+}
+
+/// The `trait`-DEFAULT half of the same method-scan question, added 2026-08-13. A default body is code
+/// that runs unless an impl overrides it, and until `zzop_parser_rust::lang::symbols` walked a trait's
+/// associated items it emitted only the trait's own span-less `Interface` symbol — so this exact
+/// `Command::new` + `format!` pair sat in no span at all, while the identical one at file top level
+/// (`run_report`, :11) and the one inside `mod legacy` (:76) both scored. Reverting the trait walk takes
+/// this anchor and leaves those two.
+///
+/// Two things beside it are deliberate rather than decorative. `label` is a BODY-LESS signature: it
+/// encloses nothing, so it must carry no span at all — the span contract's own worked example of what
+/// `None` claims. And `good_run_report` is a default of the SAME trait, so giving the trait one span
+/// over its whole item list instead of a leaf per method does not pass here either: the two bodies
+/// would share a region, and the pair would report at the `trait` line rather than at this one.
+pub trait Reporting {
+    fn label(&self) -> &str;
+
+    fn run_report(&self, period: &str) -> std::io::Result<std::process::Output> {
+        let script = format!("/usr/local/bin/report --period {}", period);
+        Command::new("sh").arg("-c").arg(script).output()
+    }
+
+    fn good_run_report(&self, period: &str) -> std::io::Result<std::process::Output> {
+        Command::new("/usr/local/bin/report")
+            .arg("--period")
+            .arg(period)
+            .output()
+    }
+}

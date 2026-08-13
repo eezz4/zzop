@@ -99,9 +99,17 @@ pub const CALL_KIND_HASH_CALL: &str = "hash-call";
 ///
 /// **Every entry was earned in the wave that landed its readers, and the list is machine-bound.** W1
 /// landed the TypeScript and Python producers together with the three rules that read them —
-/// `reliability/console-in-be` and `reliability/console-in-loop` name [`CALL_KIND_CONSOLE_WRITE`] in
-/// their `CallScan::kind`, `reliability/env-outside-config` names [`CALL_KIND_ENV_READ`] — so neither
-/// entry is the speculative claim this list's predecessor (an honest `&[]`) refused to make. W3 added
+/// `code-hygiene/console-in-be` and `code-hygiene/console-in-loop` name [`CALL_KIND_CONSOLE_WRITE`] in
+/// their `CallScan::kind`, `code-hygiene/env-outside-config` names [`CALL_KIND_ENV_READ`] — so neither
+/// entry is the speculative claim this list's predecessor (an honest `&[]`) refused to make.
+///
+/// ⚠ Those three carried a `reliability/` prefix until 2026-08-12, when the last `axis: opinion` export
+/// moved them to `examples/packs/code-hygiene.json`. They are still READERS in this list's sense, which
+/// is why both entries stayed: this list answers *which kinds does this BUILD act on*, and an exported
+/// pack is compiled into the binary (`zzop_config::EXAMPLE_PACK_CONTRACTS`) and runs the moment a tree's
+/// `zzop/rules/` holds it. What DID change is that a DEFAULT run reads neither family — worth knowing
+/// before the unread-call-kind report ships, because the honest subtraction base for a per-run report is
+/// the rules that run, not this build-level list. W3 added
 /// [`CALL_KIND_PROCESS_EXEC`] in the wave that pointed the three exec rules' STRUCTURAL gates at it —
 /// `security/shell-exec-interpolation`'s `LineScan::line_call_kind`, `security/cmd-injection`'s and
 /// `security/command-and-interpolation`'s `MethodScan::require_call_kind` — a second declarative

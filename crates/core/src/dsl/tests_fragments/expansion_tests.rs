@@ -10,6 +10,7 @@ use crate::Severity;
 
 fn line_scan_rule(id: &str, file_exclude_pattern: Option<&str>) -> RuleDef {
     RuleDef {
+        axis: crate::RuleAxis::Defect,
         id: id.to_string(),
         severity: Severity::Info,
         message: "m".to_string(),
@@ -29,8 +30,8 @@ fn minimal_pack(
 ) -> RulePackDef {
     RulePackDef {
         id: "p".to_string(),
-        framework: "any".to_string(),
         schema_version: 1,
+        exported_from: None,
         fragments,
         rules,
         regex_cache: Default::default(),
@@ -200,6 +201,7 @@ fn expand_fragments_covers_every_pattern_bearing_field_on_every_matcher_kind() {
     }
 
     let line_scan_rule = RuleDef {
+        axis: crate::RuleAxis::Defect,
         id: "ls".to_string(),
         severity: Severity::Info,
         message: "m".to_string(),
@@ -225,6 +227,7 @@ fn expand_fragments_covers_every_pattern_bearing_field_on_every_matcher_kind() {
         }),
     };
     let method_scan_rule = RuleDef {
+        axis: crate::RuleAxis::Defect,
         id: "ms".to_string(),
         severity: Severity::Info,
         message: "m".to_string(),
@@ -254,6 +257,7 @@ fn expand_fragments_covers_every_pattern_bearing_field_on_every_matcher_kind() {
         }),
     };
     let symbol_scan_rule = RuleDef {
+        axis: crate::RuleAxis::Defect,
         id: "ss".to_string(),
         severity: Severity::Info,
         message: "m".to_string(),
@@ -267,6 +271,7 @@ fn expand_fragments_covers_every_pattern_bearing_field_on_every_matcher_kind() {
         }),
     };
     let io_scan_rule = RuleDef {
+        axis: crate::RuleAxis::Defect,
         id: "is".to_string(),
         severity: Severity::Info,
         message: "m".to_string(),

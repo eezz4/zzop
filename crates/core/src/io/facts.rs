@@ -224,6 +224,39 @@ pub struct CrossLayerResult {
     /// relative paths — see `zzop_engine::analyze_trees`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub host_rekey_counts: Vec<(String, usize)>,
+    /// Every route lifted OUT of the exact join because its path is an ANT PATTERN, not a key
+    /// (`GET /api/files/**`) — see [`crate::io::wildcard_route_covers`] for the partition and why a
+    /// prefix-fallback join was rejected. Sorted by `(source, key, file, line)`; empty when no analyzed
+    /// tree declares one, which is every tree in this repo's 17-tree corpus today.
+    ///
+    /// **This is the disclosure substrate, and it exists because the partition BUYS its correctness with
+    /// silence.** A partitioned route emits no edge, is absent from
+    /// [`unconsumed_provides`](Self::unconsumed_provides), and takes `covered_consumes` call sites out of
+    /// [`unprovided_consumes`](Self::unprovided_consumes) — none of which any bucket count can show. The
+    /// engine turns each row into a self-report on the OWNING tree's own `warnings` channel (the same
+    /// channel the test-io join filter and the topology-host tripwire use), which is what carries it to
+    /// `zzop cross`'s `sources[].warnings`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub wildcard_route_partitions: Vec<WildcardRoutePartition>,
+}
+
+/// One route partitioned out of the exact join for carrying an ANT wildcard — see
+/// [`CrossLayerResult::wildcard_route_partitions`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WildcardRoutePartition {
+    /// The tree that declares the route — the tree whose `warnings` the engine self-reports on.
+    pub source: String,
+    /// The route's full interface key, wildcard intact (`GET /api/files/**`).
+    pub key: String,
+    pub file: String,
+    pub line: u32,
+    /// How many consume call sites this route's pattern covered, i.e. how many rows it took OUT of
+    /// `unprovided_consumes`. `0` is a real and meaningful value: the route is still partitioned (it can
+    /// never join an exact key), it simply swallowed nothing this run — the same "declared but zero
+    /// effect" shape `host_rekey_counts` reports, and the reader must be able to tell it from a route
+    /// that silently absorbed a dozen calls.
+    pub covered_consumes: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

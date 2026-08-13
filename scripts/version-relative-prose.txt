@@ -1,0 +1,31 @@
+# Registry for scripts/check-version-relative-prose.sh. Three line kinds, whitespace-separated.
+#
+#   VETTED <version>
+#     The workspace version the `claim` lines below were last READ against. When Cargo.toml's version
+#     moves, every claim reds until a human re-reads those sentences and bumps this line. Bumping it
+#     without re-reading is the one way to defeat this guard, and it is a deliberate act with a diff.
+#
+#   claim <path> <line-count>
+#     <path> makes <line-count> version-boundary claims — sentences naming an explicit vX.Y.Z edge
+#     ("from v0.30.0 onward", "up to and including v0.29.1"). The count is registered so that ADDING a
+#     claim to an already-vetted file also reds; a file whose claims all disappear reds too, because a
+#     registry entry that vouches for prose that is gone is worse than no entry.
+#
+#   exempt <path> <reason>
+#     <path> may use an unanchored deictic ("the current release", "the next release"). The reason is
+#     mandatory and is read by the next person, not by the machine. Liveness-checked: if the deictic is
+#     gone, the exemption reds — an exemption cannot outlive what it excuses.
+
+VETTED 0.31.0
+
+# All three were FALSE on 2026-08-11, one release after v0.30.0 shipped, with the whole guard fleet
+# green. They now name their boundary explicitly; this registry is what makes the next bump re-read them.
+claim README.md 1
+claim VERSIONING.md 2
+claim docs/ARCHITECTURE.md 1
+
+# "the hook installs the current release" describes the auto-update hook's BEHAVIOUR — it fetches
+# whatever the newest published tag is — so there is no version for it to name. This is the shape the
+# guard exists to distinguish from a version claim, and `.claude-plugin/hooks/bootstrap.sh` is the
+# code it describes.
+exempt .claude-plugin/commands/update.md the hook installs whatever tag is newest; behaviour, not a version claim

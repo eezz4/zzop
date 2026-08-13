@@ -6,9 +6,21 @@ and when to reach for a native rule instead.
 
 ## File placement
 
-A pack is one `<id>.json` file, loaded from a configured packs directory (the `packsDir` option — see
-[../modules/facade.md](../modules/facade.md#the-zzop-facade-json-contract)) via `zzop_core::pack_loader::load_dsl_packs`. Two directory shapes
-are supported, and may be mixed in the same directory:
+A pack is one `<id>.json` file, loaded from a configured packs directory via
+`zzop_core::pack_loader::load_dsl_packs`. Two directory shapes are supported, and may be mixed in the
+same directory.
+
+**How you name that directory depends on which surface you are on, and the two spellings are different
+words** — a pack author who guesses gets an ignored key rather than an error:
+
+| Surface | Spelling |
+|---|---|
+| `zzop.config.jsonc` (CLI, MCP) | `packs.extraDirs` — an array of directories |
+| no config at all | drop the file in `<tree>/zzop/rules/` and it loads (`DEFAULT_AUTHORED_PACKS_DIR`) |
+| embedding `zzop-facade` directly | the `packsDir` request field — see [../modules/facade.md](../modules/facade.md#the-zzop-facade-json-contract) |
+
+`packs.extraDirs` **replaces** the `zzop/rules/` default rather than adding to it, so the two config-file
+rows above are alternatives, not a pair. Below, `<packsDir>` means "whichever directory you named".
 
 - **Flat** — `<packsDir>/<id>.json`, directly under the directory. This is what an external/third-party
   `packsDir` typically uses.
@@ -49,7 +61,6 @@ sentences" below). Write the cause and the fix; the two escape hatches are added
 ```json
 {
   "id": "debug-headers",
-  "framework": "any",
   "schema_version": 1,
   "rules": [
     {
@@ -82,6 +93,16 @@ sentences" below). Write the cause and the fix; the two escape hatches are added
 `method-scan`, `symbol-scan`, and `io-scan` examples live in `crates/core/src/dsl.rs`'s own test module (the
 `http-conventions` fixture pack there is a full `symbol-scan` + `io-scan` end-to-end demo, kept test-only
 rather than shipped — it exists to demonstrate the matcher shapes, not because it detects anything real).
+
+**`symbol-scan` ships with zero rules using it, and you should know that before you pick it.** The
+matcher kind is implemented, evaluated, and covered by that end-to-end demo — it is not a stub — but no
+rule in any bundled pack is a `symbol-scan` today. Practically that means two things: the shape has no
+production-scale exercise behind it, and it is the one kind you cannot copy a shipped example of. Nothing
+here discourages using it; the point is that the other five kinds have been run over real corpora
+thousands of times and this one has not. (Said out loud rather than left to be discovered, on the same
+disclosure rule the rest of this engine follows. The claim is machine-held —
+`zzop_core::dsl::tests_shipped_matcher_kinds` counts the bundled packs and fails if a `symbol-scan` rule
+ever ships, which is what forces this paragraph to be deleted on the day it stops being true.)
 
 ## The auto-appended suppress sentence
 
@@ -258,6 +279,21 @@ each fix was applied to one sampled rule instead of the whole class. A whole-cat
 and turned the underlying judgment calls into a checklist every new `line-scan`/`method-scan` rule must run
 through before it ships:
 
+0. **Is this a defect, or a preference?** Declare it: `"axis": "defect"` or `"axis": "opinion"` (see
+   [dsl-reference.md § Axis](dsl-reference.md#axis-defect-vs-opinion)). The test is one question —
+   *could a competent team deliberately choose the flagged shape, in production, and be right?* If yes it
+   is an `opinion`, and the `message` must name that case, the way `sql/destructive-migration` does.
+   ⚠ That rule is also the standing warning against reading this answer as an export decision: it
+   declares `opinion`, correctly, and is BUNDLED anyway, because three critical siblings narrow
+   themselves on the premise that it runs. Exporting it on the strength of its axis alone left a real
+   `DROP TABLE` unreported until it was put back. `axis` answers *what kind of claim is this*; whether a
+   default run still makes sense without the rule is a separate question with a separate answer. This
+   is the only checklist item a rule shipped from this repo cannot skip — `examples/packs/` included,
+   since 2026-08-12: the field defaults to `defect` for third-party compatibility, but
+   `rule_contracts::rule_axis::every_shipped_rule_declares_its_axis` reads the pack JSON text and
+   rejects a rule in either directory that says nothing. Do NOT reach for `severity` to express this —
+   it answers confidence × blast radius, and the two were measured to disagree.
+
 1. **Can this pattern match inside a comment?** For a keyword/call-shaped `line_pattern`/`patterns` regex,
    the answer is almost always yes — a JSDoc example, an ESLint-disable comment naming the rule, prose
    mentioning the keyword, or commented-out old code all read as ordinary source text to a regex. Set
@@ -282,11 +318,11 @@ through before it ships:
    ```
    "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?)/|\\.(test|spec)\\.|\\.stories\\.|(^|/)\\.storybook/|(^|/)(playwright|vitest|jest|cypress)\\.config\\.)"
    ```
-   This is the same string `reliability/debug-true-committed` and `egress/localhost-url-literal-committed`
+   This is the same string `reliability/debug-true-committed` and `code-hygiene/localhost-url-literal-committed`
    already used before the sweep unified every other deployed-surface DSL rule onto it. If a rule already
-   has a `file_exclude_pattern` for an unrelated reason (e.g. `reliability/process-exit-in-lib` excludes
+   has a `file_exclude_pattern` for an unrelated reason (e.g. `code-hygiene/process-exit-in-lib` excludes
    `scripts?/tools/bin` as CLI-entrypoint dirs), leave that alone rather than conflating two different
-   exclude reasons into one regex. (`reliability/env-outside-config` used to fold a config-basename guess
+   exclude reasons into one regex. (`code-hygiene/env-outside-config` used to fold a config-basename guess
    into the same field; it now carries only the shared test-path fragment and gets its real exemption from
    a declared attribute — see item 3.)
    Adversarial review on a large real monorepo closed three more gaps in the canonical string: NestJS
@@ -320,7 +356,7 @@ through before it ships:
    [dsl-reference: Attribute gates](dsl-reference.md#attribute-gates-consuming-a-declaration). The trade
    has to be made deliberately: a user who declared nothing for it then gets silence plus a disclosure instead of a
    partly-right answer, so this is right only where a wrong answer is worse than none.
-   `reliability/env-outside-config` is the shipped example — it previously guessed the config module from
+   `code-hygiene/env-outside-config` is the shipped example — it previously guessed the config module from
    its basename and from two whole-file syntax shapes, and its own message admitted the decisive gap
    ("a whole-tree fact no file-local matcher can establish").
 4. **Does the message carry problem + fix + suppress?** Every DSL rule's `message` must explain what's wrong,

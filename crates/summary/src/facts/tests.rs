@@ -127,6 +127,10 @@ fn every_key_is_present_even_when_the_run_produced_nothing() {
         "externalConsumes",
         "ambiguousConsumes",
         "hostRekeyCounts",
+        // A re-implementer who cannot see which routes were partitioned out of the join would rebuild
+        // the false findings the partition removed — so "no pattern route here" must be an empty array,
+        // never an absent key.
+        "wildcardRoutePartitions",
     ] {
         assert_eq!(
             v["crossLayer"][bucket],

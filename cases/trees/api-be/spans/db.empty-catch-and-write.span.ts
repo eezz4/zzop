@@ -32,3 +32,42 @@ export async function persistAuditRow(row: EventRow) {
     await auditLog.create({ data: row });
   } catch {}
 }
+
+// ACCESSOR ANCHOR (2026-08-13) — the SETTER half of a same-name get/set pair. Until the
+// `(is_static, name)` dedup learned to tell the two apart, only ONE of them projected a leaf, so the
+// getter's span made `drop_outer_spans` discard the class-wide span and this setter body sat in NO
+// span at all: a genuine swallowed write, invisible to every method-scan rule. The getter below is
+// deliberately trivial — it is not the subject, it is what makes the class span droppable.
+export class RetentionPolicy {
+  private _days = 30;
+
+  get days(): number {
+    return this._days;
+  }
+
+  set days(next: number) {
+    try {
+      void auditLog.create({ data: { setting: "retentionDays", next } });
+    } catch {}
+    this._days = next;
+  }
+}
+
+// OVERLOAD ANCHOR (2026-08-13) — the IMPLEMENTATION of an overloaded method. Three `foo`-shaped
+// members share one dedup key, and until that key preferred the member that HAS a body it kept the
+// FIRST — an overload SIGNATURE, which has none. So the leaf shipped with `bodyStart`/`bodyEnd` of
+// `None`, the sibling `flush` leaf still made `drop_outer_spans` discard the class-wide span, and the
+// implementation body below sat in NO span at all: a genuine swallowed write, invisible to every
+// method-scan rule. `flush` is deliberately trivial — it is not the subject, it is what makes the
+// class span droppable.
+export class ArchiveWriter {
+  flush = () => {};
+
+  archive(row: EventRow): void;
+  archive(row: EventRow, retries: number): void;
+  archive(row: EventRow, retries = 0) {
+    try {
+      void auditLog.create({ data: { ...row, retries } });
+    } catch {}
+  }
+}

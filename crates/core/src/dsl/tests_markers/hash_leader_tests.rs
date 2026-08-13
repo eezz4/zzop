@@ -1,5 +1,6 @@
-//! The `#`-comment marker half of the suppression suite — the config-file family where `//` is not a
-//! comment at all, so a `//`-only marker table leaves those files with no working marker.
+//! The `#`-comment marker half of the suppression suite — the files where `//` is not a comment at all,
+//! so a `//`-only marker table leaves them with no working marker. Two groups: the config formats (where
+//! `//` is stray data) and `.py` (where `//` is a SyntaxError, added 2026-08-12).
 //!
 //! Its own file because the two axes it holds apart (`markers::marker_leaders_for_path` vs
 //! `markers::leaders_for_path`) want OPPOSITE answers for the same `#`, and a reader who meets these
@@ -126,6 +127,68 @@ fn the_hash_family_covers_every_extension_config_file_secret_matches() {
         );
         assert!(f.is_empty(), "`#` marker must suppress in {rel}: {f:?}");
     }
+}
+
+// --- `.py`, the second group (2026-08-12) ---
+//
+// The subjects are the shipped line-scan rules whose `file_pattern` admits a `.py` path — the `sql`
+// pack's whole-statement family in the bundle, plus what the exported packs carry. Until this widening
+// every one of them offered a marker (`// zzop-<id>-ok`) that is a SyntaxError in Python, so the only
+// lever a Python author had was a whole-FILE `rules`/`exclude` path in config for a one-LINE judgment.
+// They say so in their own message rather than promise something that did nothing; those sentences now
+// promise `#`.
+//
+// Neither the roster nor its size is retyped here. `markers/path.rs`'s `.py` entry owns both and carries
+// the recount command, and every hand-written copy of this roster has gone stale so far without
+// exception — this one named `security/private-key-committed`, which is patterned
+// (`(?i)\.(ts|…|pem|rs)$`) and does not admit `.py` at all.
+
+fn marker_line_pack_py() -> RulePackDef {
+    rule_pack(
+        r#"{"id":"pysql","severity":"critical","message":"m","matcher":{"type":"line-scan","file_pattern":"\\.py$","line_pattern":"DELETE FROM"}}"#,
+    )
+}
+
+#[test]
+fn hash_marker_on_the_same_line_suppresses_line_scan_finding_in_a_python_file() {
+    let f = scan_pack(
+        &marker_line_pack_py(),
+        "svc.py",
+        "cur.execute('DELETE FROM sessions')  # zzop-pysql-ok: nightly reaper\n",
+        vec![],
+    );
+    assert!(f.is_empty(), "{f:?}");
+}
+
+#[test]
+fn hash_marker_on_the_line_above_suppresses_line_scan_finding_in_a_python_file() {
+    let f = scan_pack(
+        &marker_line_pack_py(),
+        "svc.py",
+        "# zzop-pysql-ok: nightly reaper\ncur.execute('DELETE FROM sessions')\n",
+        vec![],
+    );
+    assert!(f.is_empty(), "{f:?}");
+}
+
+/// The SKIP axis is deliberately NOT widened with the marker axis, and this is the property that says
+/// so. A `#`-commented-out statement is still text in the file; treating `#` as "commentary to ignore"
+/// is the measured detection loss the module header records for secrets, and there is no reason to buy
+/// it here either. Same `#`, same file, opposite answers — which is exactly why the two axes are two
+/// functions.
+#[test]
+fn a_hash_commented_statement_still_fires_in_a_python_file() {
+    let f = scan_pack(
+        &marker_line_pack_py(),
+        "svc.py",
+        "# cur.execute('DELETE FROM sessions')\n",
+        vec![],
+    );
+    assert_eq!(
+        f.len(),
+        1,
+        "the marker axis learned `#`; the skip axis must not have: {f:?}"
+    );
 }
 
 /// The `.env` branch matches a NAME, and a name test is where an over-eager prefix check hides. These

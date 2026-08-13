@@ -63,7 +63,8 @@ use crate::scores::types::Scores;
 mod types;
 
 pub use types::{
-    total_health_weight, HealthContributor, HealthIndex, HealthMetric, HEALTH_METRIC_WEIGHTS,
+    axis_weight, total_health_weight, AxisPain, HealthAxis, HealthContributor, HealthIndex,
+    HealthMetric, HEALTH_METRIC_WEIGHTS,
 };
 
 /// The 0-100 score scale.
@@ -155,7 +156,7 @@ pub fn compute_health_index(scores: &Scores) -> HealthIndex {
 
     let all: Vec<HealthContributor> = HEALTH_METRIC_WEIGHTS
         .iter()
-        .map(|&(metric, weight)| {
+        .map(|&(metric, weight, axis)| {
             let population = population_of(scores, metric);
             // A population of 0 is the "never measured" signal — no gap, no contribution, and no seat
             // in the weighting below. Reporting `gap: 0.0` here is what used to make an unmeasurable
@@ -168,6 +169,7 @@ pub fn compute_health_index(scores: &Scores) -> HealthIndex {
             };
             HealthContributor {
                 metric,
+                axis,
                 weight,
                 population,
                 gap: gap_v,
@@ -188,6 +190,30 @@ pub fn compute_health_index(scores: &Scores) -> HealthIndex {
     // `pain`. `measured_weight == 0` means nothing was judged at all: absence of data, not 0 pain.
     let pain = (measured_weight > 0.0).then(|| round1(raw * total_weight / measured_weight));
 
+    // The same renormalization applied per axis. The scale factor (`total_weight / measured_weight`) is
+    // the WHOLE run's, not the axis's, which is exactly what makes the three shares add up to `pain`
+    // instead of each being a separate 0..100 needing its own denominator beside it. An axis with no
+    // measured metric contributes 0.0 — a real measurement here, not the `null` `pain` uses, because
+    // "this axis was judged and found nothing" and "nothing was judged at all" differ and the latter is
+    // already carried by `pain` being null.
+    let axis_pain = pain.map(|_| {
+        [HealthAxis::Defect, HealthAxis::Opinion, HealthAxis::History]
+            .into_iter()
+            .map(|axis| {
+                let axis_raw: f64 = all
+                    .iter()
+                    .filter(|c| c.axis == axis)
+                    .filter_map(|c| c.contribution)
+                    .sum();
+                AxisPain {
+                    axis,
+                    pain: round1(axis_raw * total_weight / measured_weight),
+                    total_weight: axis_weight(axis),
+                }
+            })
+            .collect()
+    });
+
     // The ranked "why" keeps only metrics that explain something; the UNMEASURED ones follow, because
     // "this axis was dark" is itself a thing the reader must be told rather than left to infer from an
     // absence. Measured-and-clean (contribution 0.0) is dropped — it is neither a driver nor a gap.
@@ -205,6 +231,7 @@ pub fn compute_health_index(scores: &Scores) -> HealthIndex {
 
     HealthIndex {
         pain,
+        axis_pain,
         measured_weight,
         total_weight,
         contributors,

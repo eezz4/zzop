@@ -16,6 +16,38 @@
 //! the end, and only the top `top_pairs` (20) rows are returned. `docs/modules/facade.md`'s
 //! `layerCoChurn` row carries the same sentence for the consumer, since this field reaches no shaped
 //! CLI/MCP reply and the raw facade contract is where its reader looks.
+//!
+//! ## An empty result and a wrong result have DIFFERENT causes, and both are the caller's
+//!
+//! This module was investigated on 2026-08-13 against a backlog claim that it is *structurally always
+//! empty*. **It is not** — measured over the 17-repo corpus (`corpus/oss/zzop.config.jsonc`), the one
+//! tree whose history produced a usable commit set produced layer pairs, and the rest produced none
+//! for a reason that lives entirely outside this file: those checkouts are `--depth=1` clones, so
+//! there is a single commit and no co-change substrate at all. That state is already disclosed —
+//! `zzop_metrics::build_diagnostics` emits the thin-history warning naming the shallow clone and its
+//! `git fetch --unshallow` remedy — so the reader who receives `[]` there is not being told a clean
+//! story about a dark channel. The disclosure is threshold-based (it fires at one commit), which
+//! leaves a narrower unlit case: a repo with several commits, none of which lands inside the
+//! [`MIN_FILES_PER_COMMIT`]..=`max_files_per_commit` window, also yields `[]` with nothing said.
+//!
+//! The sharper hazard ran the other way and made a NON-empty result the dangerous one. Every path this
+//! module sees arrives in `commits`, which is collected per GIT REPOSITORY and keyed by the repo root —
+//! while the `nodes`/`folders`/`dep` paths the same reply publishes are relative to the analyzed TREE
+//! root. Same-directory roots coincide; a tree that is a SUBDIRECTORY of its repository — exactly the
+//! monorepo shape `zzop cross ./fe ./be` is built for — did not, and this module cannot tell the
+//! difference, because a repo-relative path is still a well-formed path that `layer_of` classifies
+//! happily. Measured on this repository's own subtrees the same day: not one co-change edge had both
+//! endpoints among the tree's nodes, and every tree of a run received an identical layer-pair list —
+//! the enclosing repository's, not its own.
+//!
+//! **That is fixed upstream, not here, and it stays that way.** The git-collection lane now rebases each
+//! tree's copy of the shared collection onto the tree root before handing it over
+//! (`zzop_git::GitCollection::rebase_onto`, called from `zzop_engine`'s `collect_git`), so `commits`
+//! arrives in the coordinate system the rest of the reply speaks. This module is still handed `commits`
+//! and a classifier and still joins them faithfully — it has no way to validate a path and must not grow
+//! one, since a second opinion about coordinates is how two answers start disagreeing. What this note
+//! owes the next reader is the shape of the remaining risk: `[]` here means "measured, nothing crossed a
+//! layer", and it is the thin-history case above, not a dark channel.
 
 use std::collections::{BTreeMap, BTreeSet};
 

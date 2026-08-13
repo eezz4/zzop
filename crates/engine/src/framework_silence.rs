@@ -54,6 +54,12 @@
 //!   call graph — Rust routes are now IN `mutating-route-no-auth`'s range, and the one auth idiom the
 //!   engine cannot see there (a tower `.route_layer`) is mainstream rather than marginal.
 //!
+//! - S15 [`channel_consequence_warning`]: the only one that detects nothing. It RIDES the siblings
+//!   above — when one of them has already reported an empty io channel, it names the rules that
+//!   emptiness measurably silences AND the rules it measurably inflates, which are two different sets
+//!   pointing opposite ways. See its module doc for why the naive one-direction sentence is false and
+//!   why the fact it quotes is a measurement (`crate::channel_direction`) rather than a list.
+//!
 //! All of them are per-tree self-report `warnings: Vec<String>` strings (not `Finding`s — no rule id, no
 //! catalog sync needed); over-disclosure is safe, silence is fatal (the coverage-disclosure decision doc's
 //! governing principle) — each function is additive and may fire independently of the others.
@@ -95,6 +101,7 @@
 mod app_buckets;
 mod builtin_fetch;
 mod call_graph_language;
+mod channel_consequence;
 mod client_library_import;
 mod committed_spec_io_silence;
 mod controller_silence;
@@ -119,6 +126,7 @@ pub(crate) use app_buckets::{app_roots, keyed_http_by_root};
 // private, so there is no external API surface to keep them on).
 pub use builtin_fetch::builtin_fetch_census;
 pub use call_graph_language::call_graph_language_gap_warning;
+pub use channel_consequence::channel_consequence_warning;
 pub use client_library_import::client_library_import_warning;
 pub use committed_spec_io_silence::committed_spec_io_silence_warning;
 pub(crate) use committed_spec_io_silence::IO_NEAR_ZERO_FLOOR;

@@ -79,6 +79,8 @@ mod tests_method_scan_after;
 #[cfg(test)]
 mod tests_method_scan_same_fn;
 #[cfg(test)]
+mod tests_shipped_matcher_kinds;
+#[cfg(test)]
 mod tests_test_regions;
 #[cfg(test)]
 mod tests_trigger_in_loop;
@@ -86,7 +88,7 @@ mod tests_trigger_in_loop;
 pub use attr_gate::apply_attr_gates;
 pub use def::{
     CallScan, IoDirection, IoScan, LabeledPattern, LineScan, LiteralScan, Matcher, MethodScan,
-    RuleDef, RulePackDef, SymbolScan,
+    RuleAxis, RuleDef, RulePackDef, SymbolScan,
 };
 pub use eval::{eval_pack, eval_pack_into, eval_pack_profiled, eval_pack_profiled_into};
 pub use fragments::{test_path_re, FragmentError};

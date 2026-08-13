@@ -878,6 +878,80 @@ fn analyze_json_packs_dir_array_no_collision_produces_no_shadow_warning() {
     );
 }
 
+// --- Suppress-marker collision across packs (1.0 gate review, I5) -------------------------------
+// The marker is DERIVED `zzop-<rule id>-ok` with no pack namespace, so a third-party pack reusing a
+// bundled rule's bare id makes ONE `// zzop-hardcoded-secret-ok` comment silence both rules. The
+// grammar is frozen for 1.0 (user source already carries these comments), so the collision is
+// DISCLOSED instead of renamed away — see `zzop_core::suppress_marker_collisions`. These two tests are
+// the shipping evidence that the disclosure reaches a user-visible `warnings` entry, not just a unit
+// test: (1) it fires end-to-end on a real cross-pack collision, (2) an ordinary non-colliding pack
+// load stays silent.
+
+#[test]
+fn analyze_envelope_json_third_party_rule_id_colliding_with_a_bundled_one_warns_about_the_marker() {
+    // Distinct PACK ids (`acme` vs the bundled `security`), so nothing is shadowed and both packs stay
+    // loaded — the collision is purely on the derived marker, which is exactly the silent case.
+    let envelope = envelope_with_symbols(&["BadName"]);
+    let acme_dir = TempDir::new("zzop-facade-marker-collision");
+    acme_dir.write(
+        "acme.json",
+        &symbol_scan_pack_json("acme", "hardcoded-secret", "^Bad"),
+    );
+    let config = format!(
+        r#"{{"sourceId": "legacy", "packsDir": {:?}}}"#,
+        acme_dir.path().display()
+    );
+    let out =
+        analyze_envelope_json(&envelope, &config).expect("analyze_envelope_json should succeed");
+    let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+
+    let warnings = value["warnings"].as_array().expect("warnings array");
+    let collision = warnings
+        .iter()
+        .filter_map(|w| w.as_str())
+        .find(|w| w.contains("zzop-hardcoded-secret-ok"))
+        .unwrap_or_else(|| panic!("expected a marker-collision warning, got: {value}"));
+    assert!(
+        collision.contains("\"acme/hardcoded-secret\"")
+            && collision.contains("\"security/hardcoded-secret\""),
+        "the warning must name BOTH colliding pack-qualified ids, got: {collision:?}"
+    );
+    // No pack was replaced — the shadow warning is a different report and must stay quiet here.
+    assert!(
+        !warnings.iter().any(|w| w
+            .as_str()
+            .unwrap()
+            .contains("replaces an earlier-loaded pack")),
+        "distinct pack ids must not trip the shadow warning, got: {value}"
+    );
+}
+
+#[test]
+fn analyze_envelope_json_distinct_rule_ids_produce_no_marker_collision_warning() {
+    // CONTROL: same shape, one character of difference — a rule id no bundled pack uses. The
+    // disclosure must be silent, or it would fire on every run that loads a second pack.
+    let envelope = envelope_with_symbols(&["BadName"]);
+    let acme_dir = TempDir::new("zzop-facade-marker-no-collision");
+    acme_dir.write(
+        "acme.json",
+        &symbol_scan_pack_json("acme", "acme-token-in-source", "^Bad"),
+    );
+    let config = format!(
+        r#"{{"sourceId": "legacy", "packsDir": {:?}}}"#,
+        acme_dir.path().display()
+    );
+    let out =
+        analyze_envelope_json(&envelope, &config).expect("analyze_envelope_json should succeed");
+    let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let warnings = value["warnings"].as_array().expect("warnings array");
+    assert!(
+        !warnings
+            .iter()
+            .any(|w| w.as_str().unwrap().contains("suppress marker `")),
+        "distinct rule ids must never trip the marker-collision warning, got: {value}"
+    );
+}
+
 #[test]
 fn envelope_analyze_request_defaults_pack_defs_to_empty() {
     // `packDefs` absent from envelope config JSON must behave identically to before this field

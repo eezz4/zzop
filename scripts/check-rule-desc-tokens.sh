@@ -198,7 +198,7 @@ FILENAME == shared {
 }
 
 # ---------------- pass 1b: pack JSON ----------------
-FILENAME ~ /rules\/dsl\/[^\/]+\/[^\/]+\.json$/ {
+FILENAME ~ /(rules\/dsl\/[^\/]+|examples\/packs)\/[^\/]+\.json$/ {
   if (FNR == 1) { infrag = 0; cur = "" }
   if ($0 ~ /^  "fragments":[ \t]*\{/) { infrag = 1; next }
   if (infrag) {
@@ -309,7 +309,7 @@ function expanded(id,   m, guard, nm) {
 END {
   # Silent-failure assertions. Every stage of this guard is a regex over a hand-maintained layout, so
   # the cheapest way for it to become useless is to keep exiting 0 while parsing nothing at all.
-  if (nrules == 0) { print "check-rule-desc-tokens: parsed 0 rules from rules/dsl/*/*.json — the pack layout this guard reads has changed." > "/dev/stderr"; fail = 1 }
+  if (nrules == 0) { print "check-rule-desc-tokens: parsed 0 rules from rules/dsl/*/*.json + examples/packs/*.json — the pack layout this guard reads has changed." > "/dev/stderr"; fail = 1 }
   if (rows_catalog == 0) { print "check-rule-desc-tokens: matched 0 DSL rows in the catalog — its table layout has changed." > "/dev/stderr"; fail = 1 }
 
   # ...and the cheaper way for it to become PARTLY useless is to keep parsing SOME rows. The three
@@ -362,4 +362,4 @@ END {
   }
   printf "check-rule-desc-tokens: OK (%d code-shaped description tokens vouched by their rule across %d DSL rules; rows in scope: catalog %d; %d vetted exceptions)\n", checked, nrules, rows_catalog, length(allowed)
 }
-' "$SHARED" rules/dsl/*/*.json "$CATALOG"
+' "$SHARED" rules/dsl/*/*.json examples/packs/*.json "$CATALOG"

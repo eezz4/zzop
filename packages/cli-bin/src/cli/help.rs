@@ -86,7 +86,7 @@ fn elaborations() -> Vec<(&'static str, String)> {
         ),
         (
             "explain",
-            "explain <rule-id> — print one bundled DSL rule's compiled-in data (full <pack>/<rule> id or an unambiguous bare id)".to_string(),
+            "explain <rule-id> [--config <path>] — print one DSL rule's data (full <pack>/<rule> id or an unambiguous bare id). Reads the packs compiled into this binary; --config widens that to the packs that config's trees load, which is how a rule recovered into zzop/rules/ or named by packs.extraDirs becomes explainable".to_string(),
         ),
         (
             "version",

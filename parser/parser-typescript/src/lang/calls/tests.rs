@@ -114,3 +114,55 @@ fn class_implements_emits_heritage_raw_call_per_interface() {
         .collect();
     assert_eq!(names, vec!["IA", "IB"]);
 }
+
+/// The DOWNSIDE half of `symbol_shapes::class`'s accessor repair, pinned where it is observable.
+///
+/// `find_enclosing` takes the SMALLEST covering span, so giving a setter its own leaf moves every call
+/// in that body off the class node (`x.ts#C`) and onto `x.ts#C.x.set`. That id is a graph ORPHAN:
+/// `zzop_core::callgraph::resolve_method` mints only two-segment `<file>#<Class>.<method>` candidates,
+/// and a setter is reached by ASSIGNMENT (`c.x = v`) rather than by a call, so no call site anywhere
+/// can name it — while `x.ts#C` does receive edges (`new C()` resolves to it). A rule that walks
+/// reachability from a route handler therefore stops crossing INTO a setter body.
+///
+/// It is a narrow loss and it was measured rather than assumed, on the one channel those rules
+/// actually read: `write_sites` are computed per symbol from that symbol's OWN body span, and the class
+/// symbol's span still covers the whole class, so `C` and `C.x.set` BOTH carry the setter's write sites
+/// (`symbols_tests::a_same_name_getter_and_setter_are_two_bodies_and_both_get_a_leaf` pins the spans
+/// that make that true). `http_scan`'s `symbols_by_id` lookup off a reachable `x.ts#C` is unchanged.
+/// What moves is the outgoing CALL edge, and the pre-repair attribution it moves from — "some call
+/// inside class C" — was itself the coarse consequence of the setter having no leaf at all.
+#[test]
+fn a_call_in_a_setter_body_attributes_to_the_setter_leaf_not_the_class() {
+    let calls = parse_calls(
+        "x.ts",
+        "class C {\n  get x() {\n    return this._x;\n  }\n  set x(v) {\n    validate(v);\n  }\n}\nfunction validate(v) {}\n",
+    );
+    let attributed: Vec<(&str, &str)> = calls
+        .iter()
+        .filter(|c| !c.is_heritage)
+        .map(|c| (c.from_symbol.as_str(), c.callee_name.as_str()))
+        .collect();
+    assert_eq!(attributed, vec![("x.ts#C.x.set", "validate")]);
+}
+
+/// The same seam for `symbol_shapes::class`'s OVERLOAD repair — and here it moves the other way.
+///
+/// Before the repair the overload set's leaf had no span, so `find_enclosing` attributed every call in
+/// the implementation body to the class node `x.ts#C`. Giving that leaf the implementation's span moves
+/// them to `x.ts#C.foo`, which — unlike the setter leaf above — is a name the call graph CAN reach:
+/// `zzop_core::callgraph::resolve_method` mints exactly this two-segment `<file>#<Class>.<method>`
+/// candidate for a `c.foo()` call site. So the overload arc has no orphan half; reachability from a
+/// route handler into an overloaded method's body starts working rather than stopping.
+#[test]
+fn a_call_in_an_overload_implementation_attributes_to_the_resolvable_method_leaf() {
+    let calls = parse_calls(
+        "x.ts",
+        "class C {\n  foo(a: string): void;\n  foo(a: any) {\n    validate(a);\n  }\n}\nfunction validate(v) {}\n",
+    );
+    let attributed: Vec<(&str, &str)> = calls
+        .iter()
+        .filter(|c| !c.is_heritage)
+        .map(|c| (c.from_symbol.as_str(), c.callee_name.as_str()))
+        .collect();
+    assert_eq!(attributed, vec![("x.ts#C.foo", "validate")]);
+}

@@ -2,6 +2,21 @@
 // config-warnings-gate.mjs — assert that a measurement config's `configWarnings` is EMPTY, so a
 // measurement can never again be taken through a config the engine is partly ignoring.
 //
+// ## HAND-RUN, and why that is not an oversight
+// This file shipped in the v0.30.0 release commit with NO caller anywhere in the tree — found on
+// 2026-08-11 by `check-guards-wired.sh`'s fourth subject, which exists because this repo keeps writing
+// defenses and forgetting to connect them (three prior incidents are listed in that file). It is now
+// registered there as hand-run, with the reason recorded in both places so neither can quietly become
+// the only copy:
+//
+//   its subject is `corpus/oss/*/zzop.config.jsonc`, which is GITIGNORED. A CI checkout has no corpus,
+//   so an automated lane would have nothing to point this at and would either fail permanently or pass
+//   vacuously — and passing vacuously is the exact defect this gate exists to prevent, one level up.
+//
+// So: run it by hand after any vocabulary rename, and after re-fetching the corpus
+// (`.claude/context/0.guides/dogfood-corpus.md`). If the corpus ever becomes tracked, this note and the
+// HAND_RUN_TOOLS entry both come out and it gets a real lane.
+//
 // ## Why this exists
 // `corpus/oss/zzop.config.jsonc` declared `vocabulary.fsd` for two days after that key was renamed to
 // `vocabulary.featureSlicedDesign` (2026-08-07). Under the vocabulary contract an UNDECLARED key is not

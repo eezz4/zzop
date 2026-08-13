@@ -238,9 +238,21 @@ to the cross-layer join. Per-rule conditions are spelled out in
 
 | Code | Meaning |
 | --- | --- |
-| `0` | Ran successfully (regardless of what was found). |
-| `1` | Runtime failure — an unreadable path, an invalid or missing config, a refused request. **Every config error lands here**, not on `2`. |
-| `2` | Argument-shape mistake only — an unknown flag, a missing or extra positional, an unknown subcommand. |
+| `0` | Ran successfully (regardless of what was found), **except** on the two `validate-*` lanes below, where a successful run that judges the document INVALID exits `1`. |
+| `1` | Runtime failure — an unreadable path, an invalid or missing config, a refused request. **Every config error lands here**, not on `2`. Also: `validate-envelope`/`validate-rule-pack` judged the document invalid, and `zzop init` refused to overwrite an existing config. |
+| `2` | Argument-shape mistake — an unknown flag, a missing or extra positional, an unknown subcommand. Also `zzop init <dir>` when the directory does not exist (`zzop analyze <missing>` puts that same fact on `1`; `init` treats it as an argument mistake because there is nothing to initialize). |
+
+`1` therefore carries three different meanings, and **that is not going to change** — a fourth code
+introduced later would silently alter what `[ $? -eq 1 ]` means in every script written against this
+table. Disambiguate by stdout instead, which is already deterministic:
+
+| You see | It means |
+| --- | --- |
+| exit `1`, **a report on stdout** (`{"valid":false,…}`) | the document was read and judged invalid |
+| exit `1`, **stdout empty** (the reason is on stderr) | nothing was judged — the path was unreadable, the config was missing, or the request was refused |
+
+So `zzop validate-envelope e.json && deploy` is safe against invalidity but **not** against a
+misspelled path unless you also check that stdout was non-empty.
 
 The binary does **not** gate its exit code on finding severity: it is an analysis + summary surface, not
 a CI linter. To gate CI, read the JSON counts yourself (e.g. fail the job when `bySeverity.critical > 0`).
@@ -270,9 +282,12 @@ recognized depends on the matcher AND on the file, and the two axes are asked se
 that scans a file in its own language reads `//`; one whose anchor line can come from any language at
 once — an HTTP route, a call site, a literal — reads `//` **or** `#` instead, and never `--`, because no
 `.sql` file produces the anchors those channels match. By file, for the first group only, two additive
-widenings: `--` in a `.sql` file, and `#` in a config file (`.env`, `.yml`, `.toml`, `.ini`, `.conf`,
-`.cfg`, `.properties`) — where `//` is not a comment at all, so without it those files would have no
-writable marker. `//` keeps working everywhere regardless. So `# zzop-protected-path-no-auth-evidence-ok` on a FastAPI route works exactly
+widenings: `--` in a `.sql` file, and `#` in a file whose own comment leader is `#` — the config formats
+where `//` is not a comment at all, plus `.py`, where `//` is a SyntaxError. Without them those files
+would have no writable marker. `//` keeps working everywhere regardless. The exact extension list is not
+written out here for the reason this paragraph ends with: it is derived from
+`crates/core/src/dsl/markers/`, `zzop explain <rule-id>` prints it, and the copy that used to sit on this
+line had already lost `.yaml` before it lost `.py`. So `# zzop-protected-path-no-auth-evidence-ok` on a FastAPI route works exactly
 like `// zzop-protected-path-no-auth-evidence-ok` on an Express one. Which matcher falls on which
 side is NOT listed here on purpose: that roster lives in exactly one place
 (`crates/core/src/dsl/markers/`) and `zzop explain <rule-id>` prints your own rule's leaders
@@ -327,7 +342,7 @@ is used as-is (e.g. `dead-candidates` — and note some native ids contain a sla
 
 ```jsonc
 "rules": {
-  "typescript/no-explicit-any": "off",
+  "sql/count-in-loop": "off",
   "dead-candidates": { "exclude": ["**/app/**/{page,layout,route}.tsx"] }
 }
 ```

@@ -132,8 +132,139 @@ fn class_constructor_static_get_set_private() {
             "x.ts",
             "class C {\n  constructor() {}\n  static s() {}\n  get g() { return 1 }\n  set g(v) {}\n  #p() {}\n}\n",
         );
-    // same name for get/set -> only the first
-    assert_eq!(names(&s), vec!["C", "C.constructor", "C.s", "C.g", "C.#p"]);
+    // The getter keeps the plain name; the setter takes `.set` (see `emit_class`'s `ACCESSOR_SET`).
+    assert_eq!(
+        names(&s),
+        vec!["C", "C.constructor", "C.s", "C.g", "C.g.set", "C.#p"]
+    );
+}
+
+#[test]
+fn a_same_name_getter_and_setter_are_two_bodies_and_both_get_a_leaf() {
+    // Until 2026-08-13 the `(is_static, name)` dedup collapsed the pair, and which body survived was
+    // decided by SOURCE ORDER — so `C.x` named the getter's body in one class and the setter's in the
+    // next, and the loser's body sat in NO span once the survivor's leaf made `drop_outer_spans`
+    // discard the class span. The setter takes `.set`; see `emit_class`'s `ACCESSOR_SET` for why the
+    // getter keeps the plain name and why the suffix is TRAILING rather than the middle segment
+    // `Class.static.name` uses.
+    let pair = "class C {\n  get x() {\n    return this._x;\n  }\n  set x(v) {\n    validate(v);\n    this._x = v;\n  }\n}\n";
+    let s = parse_symbols("x.ts", pair);
+    assert_eq!(names(&s), vec!["C", "C.x", "C.x.set"]);
+    assert_eq!(s[1].id, "x.ts#C.x");
+    assert_eq!(s[2].id, "x.ts#C.x.set");
+    assert_eq!((s[1].body_start, s[1].body_end), (Some(2), Some(4)));
+    assert_eq!((s[2].body_start, s[2].body_end), (Some(5), Some(8)));
+
+    // Source order decides neither the names nor the spans (order-dependence was half the defect).
+    let s = parse_symbols(
+        "x.ts",
+        "class C {\n  set x(v) {\n    validate(v);\n    this._x = v;\n  }\n  get x() {\n    return this._x;\n  }\n}\n",
+    );
+    assert_eq!(names(&s), vec!["C", "C.x.set", "C.x"]);
+    assert_eq!((s[1].body_start, s[1].body_end), (Some(2), Some(5)));
+    assert_eq!((s[2].body_start, s[2].body_end), (Some(6), Some(8)));
+
+    // A LONE setter is uncontested and keeps the plain spelling, exactly as an uncontested static
+    // member does — the suffix exists to break a collision, not to label a member kind.
+    let s = parse_symbols(
+        "x.ts",
+        "class C {\n  set x(v) {\n    validate(v);\n  }\n}\n",
+    );
+    assert_eq!(names(&s), vec!["C", "C.x"]);
+
+    // The two discriminators are independent and compose: staticness picks the base spelling, the
+    // accessor suffix is appended to whichever base the member landed on.
+    let s = parse_symbols(
+        "x.ts",
+        "class C {\n  get x() { return 1; }\n  set x(v) {}\n  static get x() { return 2; }\n  static set x(v) {}\n}\n",
+    );
+    assert_eq!(
+        names(&s),
+        vec!["C", "C.x", "C.x.set", "C.static.x", "C.static.x.set"]
+    );
+
+    // Private accessors take the same treatment — `#` is part of the member name, not a separate axis.
+    let s = parse_symbols(
+        "x.ts",
+        "class C {\n  get #x() {\n    return 1;\n  }\n  set #x(v) {\n    b(v);\n  }\n}\n",
+    );
+    assert_eq!(names(&s), vec!["C", "C.#x", "C.#x.set"]);
+
+    // Containment still holds for the new leaf, which is what lets `drop_outer_spans` discard the
+    // class span without leaving the setter body uncovered — the whole point of the repair.
+    let s = parse_symbols("x.ts", pair);
+    assert!(s[0].body_start.unwrap() <= s[2].body_start.unwrap());
+    assert!(s[0].body_end.unwrap() >= s[2].body_end.unwrap());
+}
+
+#[test]
+fn an_overload_sets_leaf_is_taken_from_the_declaration_that_has_a_body() {
+    // Until 2026-08-13 the dedup key kept the FIRST declaration sharing it, and for an overload set
+    // that is a SIGNATURE — no body at all. `C.foo` shipped with `None`/`None` while the sibling
+    // `ping` leaf still made `drop_outer_spans` discard the class span that used to cover the
+    // implementation, so lines 4..8 were in no span whatsoever. See `emit_class`'s `dedup_winners`
+    // for the tie-break and for the `line` decision that comes with it.
+    let s = parse_symbols(
+        "x.ts",
+        "class C {\n  foo(a: string): void;\n  foo(a: number): void;\n  foo(a: any) {\n    try {\n      write(a);\n    } catch {}\n  }\n  ping = () => {};\n}\n",
+    );
+    // ONE leaf, not three: every overload of a name is the same member, so this is a tie-break and
+    // never a naming decision (contrast `ACCESSOR_SET`, where the two bodies are two members).
+    assert_eq!(names(&s), vec!["C", "C.foo", "C.ping"]);
+    assert_eq!(s[1].id, "x.ts#C.foo");
+    assert_eq!((s[1].body_start, s[1].body_end), (Some(4), Some(8)));
+    // THE `line` DECISION, pinned so it cannot move in silence: the winning member is taken WHOLE, so
+    // the reported line is the IMPLEMENTATION's declaration line and not the first signature's (2).
+    assert_eq!(s[1].line, 4);
+    assert_eq!(s[1].line, s[1].body_start.unwrap());
+    // Containment is what lets `drop_outer_spans` discard the class span safely.
+    assert!(s[0].body_start.unwrap() <= s[1].body_start.unwrap());
+    assert!(s[0].body_end.unwrap() >= s[1].body_end.unwrap());
+
+    // The tie-break is on HAVING A BODY, not on position. When nothing in the set has one, the first
+    // still wins and `None`/`None` stays the span contract's positive claim "there is no region".
+    let s = parse_symbols(
+        "x.ts",
+        "abstract class C {\n  abstract foo(a: string): void;\n  abstract foo(a: number): void;\n  ping = () => {};\n}\n",
+    );
+    assert_eq!(names(&s), vec!["C", "C.foo", "C.ping"]);
+    assert_eq!(s[1].line, 2);
+    assert_eq!((s[1].body_start, s[1].body_end), (None, None));
+
+    // Staticness and setter-ness still split the key first, so a static overload set and an instance
+    // one are two members and each resolves its own implementation.
+    let s = parse_symbols(
+        "x.ts",
+        "class C {\n  static foo(a: string): void;\n  static foo(a: any) {\n    s(a);\n  }\n  foo(b: string): void;\n  foo(b: any) {\n    i(b);\n  }\n}\n",
+    );
+    assert_eq!(names(&s), vec!["C", "C.static.foo", "C.foo"]);
+    assert_eq!((s[1].body_start, s[1].body_end), (Some(3), Some(5)));
+    assert_eq!((s[2].body_start, s[2].body_end), (Some(7), Some(9)));
+}
+
+#[test]
+fn the_trailing_set_segment_cannot_collide_with_an_object_literal_leaf_in_legal_typescript() {
+    // Both candidate spellings collide in SHAPE with the object-literal leaf `Class.member.key`, and
+    // the choice between them was made on which collision legal TypeScript can actually reach.
+    //
+    // The REJECTED middle spelling `C.set.x` is reachable: `set` and `x` are two different members, so
+    // this class compiles and BOTH would want `C.set.x`. Pinned here as the reason, not as behaviour —
+    // the setter below is `C.x.set`, so the ids stay distinct.
+    let s = parse_symbols(
+        "x.ts",
+        "class C {\n  set = {\n    x: () => {\n      a();\n    },\n  };\n  get x() {\n    return 1;\n  }\n  set x(v) {\n    b(v);\n  }\n}\n",
+    );
+    assert_eq!(names(&s), vec!["C", "C.set.x", "C.x", "C.x.set"]);
+
+    // The CHOSEN spelling's collision needs the class to declare `x` twice — as a property AND as an
+    // accessor pair — which is TS2300. A property named `x` alone (no accessor) still projects
+    // `C.x.set` from its `set` key, and that is the shape the suffix must not be confused with.
+    let s = parse_symbols(
+        "x.ts",
+        "class C {\n  x = {\n    set: () => {\n      a();\n    },\n  };\n}\n",
+    );
+    assert_eq!(names(&s), vec!["C", "C.x.set"]);
+    assert_eq!((s[1].body_start, s[1].body_end), (Some(3), Some(5)));
 }
 
 #[test]
@@ -165,17 +296,19 @@ fn class_property_functions_get_leaf_spans() {
     // ...and an expression-bodied arrow spans the WHOLE arrow, header line included (parity with the
     // sibling spellings in `factory`/`symbols`) — spanning only the expression left `async` on the
     // header outside the span, so `\basync\b`-anchored method-scan patterns could not pair in this
-    // spelling alone. See `symbol_shapes::class::prop_leaf`'s doc for the block-vs-arrow choice.
+    // spelling alone. See `symbol_shapes::class::members::prop_leaf`'s doc for the block-vs-arrow
+    // choice.
     assert_eq!(s[3].body_start, Some(8));
     assert_eq!(s[3].body_end, Some(9));
 }
 
 #[test]
 fn static_and_instance_members_sharing_a_name_both_emit_in_either_order() {
-    // A static function-property and an instance method legally share a name. The dedup exists for
-    // same-staticness get/set pairs only — keyed on the bare name it let whichever member came FIRST
-    // in source order swallow the other's leaf span, so `C.m`'s facts pointed at the wrong member.
-    // Both must emit; the colliding STATIC one is named `C.static.m` (see `emit_class`'s doc).
+    // A static function-property and an instance method legally share a name. Keyed on the BARE name
+    // the dedup let whichever member came FIRST in source order swallow the other's leaf span, so
+    // `C.m`'s facts pointed at the wrong member. Both must emit; the colliding STATIC one is named
+    // `C.static.m` (see `emit_class`'s doc). The dedup key's third component (setter-ness) is the same
+    // fix applied to the other pair that shares a name — `ACCESSOR_SET` owns that half.
     let s = parse_symbols(
         "x.ts",
         "class C {\n  static m = () => {\n    return 1;\n  };\n  m() {\n    return 2;\n  }\n}\n",
@@ -292,9 +425,10 @@ fn class_object_literal_property_non_function_members_carry_no_span() {
 
 #[test]
 fn several_static_blocks_in_one_class_each_get_a_distinct_leaf() {
-    // A static block has no key, so all of them would share one name — and the `(is_static, name)`
-    // dedup would keep the first block's span and drop the rest, re-opening the very hole the leaf
-    // exists to close. The 2nd and later take a 1-based ordinal suffix.
+    // A static block has no key, so all of them would share one name — and the dedup would keep the
+    // first block's span and drop the rest, re-opening the very hole the leaf exists to close (no
+    // component of the key tells two static blocks apart: same staticness, same name, neither a
+    // setter). The 2nd and later take a 1-based ordinal suffix.
     let s = parse_symbols(
         "x.ts",
         "class C {\n  static {\n    a();\n  }\n  static {\n    b();\n  }\n}\n",
@@ -316,7 +450,7 @@ fn class_member_shapes_that_still_project_no_leaf_are_disclosed_here() {
     // and StaticBlock are covered above. `TsIndexSignature` and `Empty` are absent by CONSTRUCTION —
     // a type declaration and a stray `;` have no runtime body — so they are not in this list.
     let uncovered = [
-        // Stage-3 auto-accessor. `emit_class` has no `AutoAccessor` arm; the value is a plain
+        // Stage-3 auto-accessor. `collect_members` has no `AutoAccessor` arm; the value is a plain
         // initializer expression exactly like a `ClassProp`'s, so the arm is the whole cost.
         "class C {\n  accessor h = async () => {\n    await x();\n  };\n  ping = () => {};\n}\n",
         // TS type wrapper around the value — `prop_leaf` matches on the value expression itself, and
@@ -343,22 +477,6 @@ fn class_member_shapes_that_still_project_no_leaf_are_disclosed_here() {
             "expected ONLY the sibling arrow's leaf from:\n{src}"
         );
     }
-    // The SECOND of a same-name get/set pair. Found 2026-08-10 while pinning the span contract, and
-    // it is the only entry in this list that is not a missing ARM: `emit_class` reaches the setter,
-    // recognizes it, and then drops it because the `(is_static, name)` dedup key cannot tell a getter
-    // from a setter — so the setter's body (which is where validation logic actually lives) sits in no
-    // leaf, and the class span that used to cover it is discarded in favour of the getter's. The fix
-    // has a shape already in this file (`Class.static.name` for the static/instance collision) but it
-    // is a NAMING decision that changes emitted symbol ids, so it is disclosed here rather than taken
-    // in passing. Both bodies below are real; only the getter's is reachable.
-    let s = parse_symbols(
-        "x.ts",
-        "class C {\n  get x() {\n    return this._x;\n  }\n  set x(v) {\n    validate(v);\n    this._x = v;\n  }\n  ping = () => {};\n}\n",
-    );
-    assert_eq!(names(&s), vec!["C", "C.x", "C.ping"]);
-    assert_eq!(s[1].body_start, Some(2));
-    assert_eq!(s[1].body_end, Some(4)); // the getter's; lines 5..=8 are in no span at all
-
     // Nested object literals are a partial case: the outer key becomes a span-less `Const`, so the
     // inner handler is still unscanned. `extract_object_methods` flattens spreads, not nesting.
     let s = parse_symbols(

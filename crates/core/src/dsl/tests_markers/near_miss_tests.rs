@@ -215,14 +215,37 @@ fn a_detached_colon_is_a_conservative_miss_and_a_lone_hyphenated_ok_word_is_accu
 }
 
 #[test]
-fn the_hash_leader_is_not_recognized_for_a_line_scan_finding() {
-    // Leader parity with suppression, exactly: `#` is a marker leader for the whole-tree io-scan pass
-    // only. A `#`-comment never suppresses a line-scan finding, so it must never be disclosed for one
-    // either — otherwise the message would blame a comment that was never in the running.
+fn the_hash_leader_is_recognized_for_a_python_line_scan_finding() {
+    // RE-JUDGED 2026-08-12, and the judgment is the same one as before — leader parity with
+    // suppression, exactly. What changed is which side of it `.py` sits on: `py` joined the marker
+    // axis's hash family, so a `#` comment CAN now suppress a `.py` line-scan finding, and near-miss
+    // must therefore blame it when it almost does. The old assertion (`message == BASE_MESSAGE`) was
+    // right for as long as the leader could never have worked; keeping it after the widening would
+    // have hidden the very marker the reader was reaching for.
     let f = scan_pack(
         &near_miss_pack("\\\\.py$"),
         "f.py",
         "x = widen(y)  # as-ok: guaranteed by caller\n",
+        vec![],
+    );
+    assert_eq!(f.len(), 1, "{f:?}");
+    assert!(
+        f[0].message.contains("reads `as-ok`"),
+        "a `#` near-miss above a Python line-scan finding must be disclosed: {}",
+        f[0].message
+    );
+}
+
+/// The other half of the same parity, and the reason the widening is per-EXTENSION rather than global:
+/// a `#` comment still cannot suppress a line-scan finding in a language where `#` is not a comment, so
+/// it must not be disclosed there either. Without this, "`.py` gained `#`" and "every file gained `#`"
+/// look identical from the test suite.
+#[test]
+fn the_hash_leader_is_still_not_recognized_for_a_typescript_line_scan_finding() {
+    let f = scan_pack(
+        &near_miss_pack("\\\\.ts$"),
+        "f.ts",
+        "const x = widen(y);  # as-ok: guaranteed by caller\n",
         vec![],
     );
     assert_eq!(f.len(), 1, "{f:?}");

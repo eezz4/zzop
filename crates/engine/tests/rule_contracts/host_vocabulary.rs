@@ -444,6 +444,14 @@ fn cli_subcommands() -> Vec<String> {
 /// documents INSTEAD of one route to them. Exempting the template was the other option and was rejected:
 /// naming the artifact is strictly better information than naming a command, because it is the same
 /// answer for a reader on either surface.
+///
+/// **And IN-haystack is not the same as SEEN** (2026-08-13). One of those two spellings came back —
+/// ``recovering a rule? `zzop explain <rule-id> --config <path>` then answers about it`` — and this
+/// contract stayed green for it, because the whole template is one `r#"…"#` and [`prose_literals`] read
+/// raw strings as fragments: 7 of 247 lines were inside a literal at all, and the returning line was not
+/// one of them. The paragraph above was TRUE and useless; a haystack claim is only worth what the
+/// extractor over it can see, and this file now measures that rather than asserting it. The reworded
+/// line names the rule-catalog document in both dialects, the shape the header block already used.
 #[test]
 fn shared_crate_user_facing_messages_carry_no_cli_only_vocabulary() {
     let excluded = cli_only_lane_sources(&load_registry());
@@ -591,9 +599,61 @@ struct Hit {
     /// Workspace-relative, forward-slashed (`crates/engine/src/...`) so an offender line and an
     /// exemption entry are spelled the same way and can be compared as text.
     rel: String,
+    /// The physical line the TOKEN sits on, not the literal's first line — see [`locate_in_literal`].
     line: usize,
     token: String,
+    /// The whole literal, which the exemption predicates read (the facade filter asks what a sentence
+    /// STARTS with). What a failure message prints is [`Hit::excerpt`].
     literal: String,
+    /// A bounded window around the token, for the offender line.
+    excerpt: String,
+}
+
+/// How much context either side of the offending token an offender line carries.
+const EXCERPT_RADIUS: usize = 120;
+
+/// Where the offending token sits inside its literal: (physical line, bounded excerpt).
+///
+/// Load-bearing since raw strings became one literal instead of a run of fragments (2026-08-13): the
+/// starter config is a SINGLE 212-line literal, so reporting the literal's starting line would name
+/// line 35 for a spelling on line 64, and printing the literal whole would bury the sentence in 7KB of
+/// annotated JSONC. The token is re-found in the UNCOLLAPSED literal — whose newlines are exactly the
+/// physical ones the extractor counted while building it — which answers both questions at once.
+///
+/// A `\`-WRAPPED token exists only in the collapsed form and cannot be found here; the literal's own
+/// start line and a head excerpt are then the honest answer, which is what every offender line said
+/// before this function existed.
+fn locate_in_literal(literal: &str, start_line: usize, token: &str, norm: &str) -> (usize, String) {
+    match token_offset(literal, token) {
+        Some(at) => (
+            start_line + literal[..at].matches('\n').count(),
+            excerpt_around(literal, at, token.len()),
+        ),
+        None => (start_line, excerpt_around(norm, 0, 0)),
+    }
+}
+
+/// `text` narrowed to [`EXCERPT_RADIUS`] either side of `[at, at+len)`, whitespace-collapsed, with `…`
+/// marking each end that was cut. Boundaries are walked to char boundaries — a message here can carry
+/// `—` and an offender line must not panic on one.
+fn excerpt_around(text: &str, at: usize, len: usize) -> String {
+    let mut start = at.saturating_sub(EXCERPT_RADIUS);
+    while start > 0 && !text.is_char_boundary(start) {
+        start -= 1;
+    }
+    let mut end = (at + len + EXCERPT_RADIUS).min(text.len());
+    while end < text.len() && !text.is_char_boundary(end) {
+        end += 1;
+    }
+    let mut out = String::new();
+    if start > 0 {
+        out.push('…');
+    }
+    out.push_str(&collapse_whitespace(&text[start..end]));
+    if end < text.len() {
+        out.push('…');
+    }
+    out
 }
 
 /// A source path from the haystack walk, reduced to its workspace-relative forward-slashed form. The
@@ -782,11 +842,13 @@ fn offenders_naming(
             if !names_token(&norm, token) || twin_named(token, &norm) {
                 continue;
             }
+            let (at_line, excerpt) = locate_in_literal(literal, *line, token, &norm);
             out.push(Hit {
                 rel: rel_path(path),
-                line: *line,
+                line: at_line,
                 token: token.clone(),
                 literal: literal.clone(),
+                excerpt,
             });
         }
     }
@@ -799,7 +861,7 @@ fn render_offenders(hits: &[Hit], audience: &str) -> Vec<String> {
         .map(|h| {
             format!(
                 "{}:{}: user-facing string names {audience} `{}` with no twin: {:?}",
-                h.rel, h.line, h.token, h.literal
+                h.rel, h.line, h.token, h.excerpt
             )
         })
         .collect()
@@ -815,6 +877,12 @@ fn render_offenders(hits: &[Hit], audience: &str) -> Vec<String> {
 /// ``` `zzop analyze-envelope ```, reporting the wrong — and twinless — subcommand for a spelling that
 /// is correctly paired with the `analyze_envelope` tool right next to it.
 fn names_token(literal: &str, token: &str) -> bool {
+    token_offset(literal, token).is_some()
+}
+
+/// The byte offset of the first word-boundary-respecting occurrence — the same question
+/// [`names_token`] asks, keeping the answer so [`locate_in_literal`] can turn it into a line.
+fn token_offset(literal: &str, token: &str) -> Option<usize> {
     let boundary =
         |c: Option<char>| !c.is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '-');
     let mut from = 0;
@@ -823,11 +891,42 @@ fn names_token(literal: &str, token: &str) -> bool {
         let end = start + token.len();
         if boundary(literal[..start].chars().next_back()) && boundary(literal[end..].chars().next())
         {
-            return true;
+            return Some(start);
         }
         from = start + 1;
     }
-    false
+    None
+}
+
+/// Does a RAW string literal open at `i`? Returns its `#` count and the index just past the opening
+/// quote.
+///
+/// The prefix is `r` or `br`, and neither may CONTINUE an identifier — otherwise the `r` ending a name
+/// (`let separator = …`, `fn to_str`) would open a literal on the next `"` it happens to sit before, which
+/// is the same parity inversion this function exists to stop. `#` count is what closes it, so
+/// `r#"…"#`, `r##"…"##` and the hash-free `r"…"` all resolve here.
+fn raw_string_open(chars: &[char], i: usize) -> Option<(usize, usize)> {
+    if chars[i] != 'r' {
+        return None;
+    }
+    let ident = |c: char| c.is_alphanumeric() || c == '_';
+    if i > 0 {
+        let prev = chars[i - 1];
+        if prev == 'b' {
+            if i >= 2 && ident(chars[i - 2]) {
+                return None;
+            }
+        } else if ident(prev) {
+            return None;
+        }
+    }
+    let mut j = i + 1;
+    let mut hashes = 0usize;
+    while chars.get(j) == Some(&'#') {
+        hashes += 1;
+        j += 1;
+    }
+    (chars.get(j) == Some(&'"')).then_some((hashes, j + 1))
 }
 
 /// Every double-quoted literal in a whole source file that looks like PROSE (contains a space), paired
@@ -845,18 +944,66 @@ fn names_token(literal: &str, token: &str) -> bool {
 /// of a future sibling would otherwise open a literal that swallows the rest of the file). Escaped
 /// quotes (`\"`, which the shipped messages really do contain) do not terminate a literal.
 ///
-/// RAW STRINGS are not understood as such, and the consequence is worth stating exactly rather than
-/// waving at, because one is in the haystack (`crates/config/src/template.rs`'s starter config): the `r#`
-/// prefix is skipped, the opening `"` starts a literal, and every `"` INSIDE the raw text ends one. So a
-/// raw string is scanned as a run of FRAGMENTS rather than one literal. That is lossy but fail-safe in
-/// the direction that matters — a needle is missed only if it straddles an embedded quote, and no
-/// fragment is invented — which is why it is left alone rather than fixed with a raw-string parser this
-/// suite would then have to test.
+/// RAW STRINGS (`r"…"`, `r#"…"#`, `br##"…"##`) are understood, and the reason is a measurement that
+/// destroyed the previous doc's claim. That doc said the `r#` prefix is skipped, the opening `"` starts a
+/// literal and every `"` inside the raw text ends one, so a raw string is read as a run of FRAGMENTS —
+/// "lossy but fail-safe in the direction that matters — a needle is missed only if it straddles an
+/// embedded quote, and no fragment is invented". BOTH halves of that were false, measured 2026-08-13
+/// over the whole haystack:
+/// - **The loss is not a straddle, it is the file.** `crates/config/src/template.rs` — the starter config
+///   the doc named as its own example — is 247 lines, of which the fragment reading put **7** inside a
+///   prose literal (the six-line header, plus one line whose value carries a space). The `r#"` at line 35
+///   opens on the first `"` of the template body, the body's own `"roots"` closes it, and from there the
+///   parity is inverted: every `//`-led sentence in the template — which is nearly all of it — reads as a
+///   Rust comment and is skipped. 97% of the file was invisible, which is how a spelling contract 16
+///   itself caught and fixed on this exact file (`zzop explain <rule-id> --config <path>`, line 64) came
+///   back and stayed green.
+/// - **Fragments ARE invented.** A desynced parity does not merely drop text, it reads SOURCE CODE as
+///   prose: `crates/engine/src/framework_silence/fetch_wrapper.rs`'s `Regex::new(r#"\bfrom\s*['"]…"#)` on
+///   line 62 inverted the parity for the next 165 lines, and the fragment reading reported one "literal"
+///   spanning lines 62-227 built out of Rust expressions. A needle landing in such a span is a red with no
+///   sentence behind it — the false direction the doc promised could not happen.
+///
+/// So the prefix is now lexed: `#` count in, matching `"` + same `#` count out, no escape processing
+/// inside (a `\` is a backslash in a raw string), and the whole body is ONE literal. The same measurement
+/// re-run after: template.rs 212 lines seen, fetch_wrapper.rs's phantom span gone (7 real prose lines).
+///
+/// What is still NOT understood, stated the way the paragraph above should have been: `/* … */` block
+/// comments (this repo writes `//` doc comments, and a block comment containing an odd `"` would desync
+/// the same way `r#"` did) and nested `//`-in-string sequences are handled only incidentally.
 fn prose_literals(source: &str) -> Vec<(usize, String)> {
     let chars: Vec<char> = source.chars().collect();
     let mut out = Vec::new();
     let (mut i, mut line) = (0usize, 1usize);
     while i < chars.len() {
+        // Raw strings first: the `r`/`br` prefix would otherwise fall through to the plain-string arm
+        // one character later, with the body's own quotes cutting it into fragments.
+        if let Some((hashes, body)) = raw_string_open(&chars, i) {
+            let start_line = line;
+            let mut literal = String::new();
+            let mut j = body;
+            let closed = loop {
+                if j >= chars.len() {
+                    break false;
+                }
+                if chars[j] == '"' && (1..=hashes).all(|k| chars.get(j + k) == Some(&'#')) {
+                    break true;
+                }
+                if chars[j] == '\n' {
+                    line += 1;
+                }
+                literal.push(chars[j]);
+                j += 1;
+            };
+            if !closed {
+                break;
+            }
+            if literal.contains(' ') {
+                out.push((start_line, literal));
+            }
+            i = j + 1 + hashes;
+            continue;
+        }
         match chars[i] {
             '\n' => {
                 line += 1;
@@ -951,6 +1098,62 @@ mod tests {
             "`zzop analyze"
         ));
         assert!(super::names_token("run `zzop analyze .`", "`zzop analyze"));
+    }
+
+    /// Seals RAW-STRING lexing and the offender-line resolution that only matters because of it.
+    ///
+    /// Every case here is a shape the fragment reading got wrong on real haystack files, not a
+    /// hypothetical: an embedded `"` closing the literal early (the starter config's `"roots"`), the
+    /// inverted parity that follows turning template prose into skipped `//` comments, and a regex raw
+    /// string whose `['"]` character class produced a 165-line phantom literal made of Rust code.
+    #[test]
+    fn a_raw_string_is_one_literal_and_its_offender_line_is_the_tokens_own() {
+        let starter = "pub const T: &str = r#\"// header line\n{\n  \"roots\": [\".\"],\n  // run `zzop explain <id>` for it\n}\n\"#;";
+        let found = super::prose_literals(starter);
+        assert_eq!(found.len(), 1, "one raw string is ONE literal: {found:?}");
+        assert_eq!(found[0].0, 1, "reports the literal's starting line");
+        assert!(
+            found[0].1.contains("`zzop explain <id>`"),
+            "the embedded `\"roots\"` must not close the literal, and the `//` prose after it must not \
+             read as a Rust comment: {found:?}"
+        );
+        // The line a failure names is the TOKEN's, four lines into a literal that starts on line 1.
+        let (line, excerpt) =
+            super::locate_in_literal(&found[0].1, found[0].0, "`zzop explain", &found[0].1);
+        assert_eq!(line, 4, "offender line is the token's own physical line");
+        assert!(excerpt.contains("`zzop explain <id>`"), "{excerpt}");
+
+        // A regex raw string carrying a `"` inside a character class: no space in the body, so it is
+        // not prose — and, the part that broke, it consumes to `"#` instead of inverting the parity of
+        // everything after it.
+        let regex_then_prose = "Regex::new(r#\"\\bfrom\\s*['\"]([^'\"]+)['\"]\"#);\nconst M: &str = \"drill in with check_endpoint\";";
+        let found = super::prose_literals(regex_then_prose);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].1, "drill in with check_endpoint");
+        assert_eq!(found[0].0, 2, "the message's real line, not a desynced one");
+
+        // Hash counts, the hash-free form, and the byte-string prefix all close on their own terminator.
+        assert_eq!(
+            super::prose_literals("let a = r##\"a \"# b\"##;")
+                .into_iter()
+                .map(|(_, t)| t)
+                .collect::<Vec<_>>(),
+            vec!["a \"# b".to_string()]
+        );
+        assert_eq!(
+            super::prose_literals("let a = br\"raw bytes\";")
+                .into_iter()
+                .map(|(_, t)| t)
+                .collect::<Vec<_>>(),
+            vec!["raw bytes".to_string()]
+        );
+        // An `r` CONTINUING an identifier does not open a raw string, in either prefix position.
+        let ident_r: Vec<char> = "myvar#\"a b\"#".chars().collect();
+        assert!(super::raw_string_open(&ident_r, 4).is_none());
+        let ident_br: Vec<char> = "sub\u{62}r\"a b\"".chars().collect();
+        assert!(super::raw_string_open(&ident_br, 4).is_none());
+        let free_br: Vec<char> = " br\"a b\"".chars().collect();
+        assert_eq!(super::raw_string_open(&free_br, 2), Some((0, 4)));
     }
 
     /// Seals the TWIN clause in both directions, including the two ways it must NOT be widened.

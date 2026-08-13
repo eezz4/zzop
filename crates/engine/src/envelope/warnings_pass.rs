@@ -69,5 +69,9 @@ pub(super) fn collect_envelope_warnings(
     // Same disclosure Mode B's native twin makes (`analyze::assemble`) — an uncompilable rule is dead in
     // envelope mode too, and a caller who injected the pack inline never ran `validate-rule-pack` on it.
     warnings.extend(crate::analyze::uncompilable_rule_warnings(&config.packs));
+    // Config-derived like the disclosure above it, so Mode A gets it too: a caller who seeded a pack
+    // inline (or pointed at a `packsDir`) whose rule id collides with a bundled one has the identical
+    // silent co-suppression hazard here — the marker is derived from the pack set, not from the tree.
+    warnings.extend(zzop_core::suppress_marker_collisions(&config.packs));
     (config_warnings, dsl_scope)
 }

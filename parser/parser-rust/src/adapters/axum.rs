@@ -41,15 +41,33 @@
 //!
 //! The third gate asks about ONE node axis where the siblings ask about three (`Item`, `ImplItem`,
 //! `TraitItem`), because the other two are unreachable from here. Both siblings are `syn::visit::Visit`
-//! walks that descend the whole file, while this one reads `syn::File::items` and scans only
-//! `Item::Fn` — nothing inside an `impl`, a `trait`, or even a nested `mod` is ever looked at (the v1
-//! scope above). Measured 2026-08-02 before any gate existed: `#[cfg(test)] mod tests`, `#[test] fn` in
-//! an `impl`, and a `#[cfg(test)]` default trait method each already yielded zero fragments, while a
-//! file-level `#![cfg(test)]`, a top-level `#[cfg(test)] fn`/`#[test] fn`/`#[cfg(all(test, not(miri)))]
-//! fn`, and a `tests/` PATH each leaked a deployed route. `OUT_OF_REACH_ROUTERS` in this module's tests
-//! pins that measurement, so the missing axes stay a proven non-gap rather than an asserted one. The
-//! gate is nonetheless applied to EVERY top-level item rather than to `Item::Fn` alone, so it stays
-//! co-extensive with the loop should the walk ever widen.
+//! walks that descend the whole file, while this one reads `syn::File::items` and scans only `Item::Fn`
+//! — nothing inside an `impl` or a `trait` is ever looked at (the v1 scope above). Measured 2026-08-02
+//! before any gate existed: `#[cfg(test)] mod tests`, `#[test] fn` in an `impl`, and a `#[cfg(test)]`
+//! default trait method each already yielded zero fragments, while a file-level `#![cfg(test)]`, a
+//! top-level `#[cfg(test)] fn`/`#[test] fn`/`#[cfg(all(test, not(miri)))] fn`, and a `tests/` PATH each
+//! leaked a deployed route. `OUT_OF_REACH_ROUTERS` in this module's tests pins the two axes that are
+//! still out of reach, so they stay a proven non-gap rather than an asserted one. The gate is applied to
+//! EVERY item rather than to `Item::Fn` alone, so it stays co-extensive with the walk.
+//!
+//! ## Inline `mod` bodies ARE walked (2026-08-11)
+//! An inline `mod` used to be one of those out-of-reach axes, and it was the WRONG one to leave there:
+//! a router built inside `mod v1 { ... }` was not merely mis-attributed, it never entered the analysis
+//! at all — so a route it serves could not be reported unprotected, or reported at all. That is a
+//! false-negative on the security side, unlike the `impl`/`trait` axes where the measurement above shows
+//! no real router shape lives. `scan_items` now recurses through `Item::Mod`'s own item list, and the
+//! test gate composes for free: a `#[cfg(test)] mod tests` is skipped as a test-gated ITEM before the
+//! recursion can reach its body, which is why that case moved from `OUT_OF_REACH_ROUTERS` to
+//! `TEST_GATED_ROUTERS` in this module's tests rather than losing its pin.
+//!
+//! **Fragment names stay FILE-GLOBAL and UNQUALIFIED**, which is a deliberate call rather than an
+//! oversight. `.nest("/v1", child)`'s child is read by `util::simple_expr_ident`, which accepts a
+//! SINGLE-segment path only — so a cross-module mount (`.nest("/v1", v1::app)`) resolves to `None` and
+//! is skipped today either way. Naming an inline-mod fragment `v1::app` would therefore make it
+//! unmountable by construction while gaining nothing, so an inline `mod`'s router shares the same
+//! file-global name space two top-level functions already share. The consequence is the same one the
+//! "Builder chains" bullet above already documents — two routers bound to the same variable name in one
+//! file merge — now reachable one more way. Documented, not engineered around, on the same grounds.
 //!
 //! What is NOT gated is [`crate::lang::imports::parse_imports`] and the `imports_axum` check built on
 //! it, for the reason `adapters::http_clients` keeps its `BindingCollector` file-wide: a file whose only
@@ -101,14 +119,7 @@ pub fn extract_axum_router_fragments(rel: &str, text: &str) -> Vec<RouterMountFr
 
     let mut order: Vec<String> = Vec::new();
     let mut entries: HashMap<String, Vec<RouterMountEntry>> = HashMap::new();
-    for item in &file.items {
-        if item_is_test_gated(item) {
-            continue; // a fixture's routes are not deployed PROVIDES
-        }
-        if let syn::Item::Fn(f) = item {
-            scan_fn(f, &imports, &mut order, &mut entries);
-        }
-    }
+    scan_items(&file.items, &imports, &mut order, &mut entries);
     order
         .into_iter()
         .filter_map(|name| {
@@ -119,6 +130,31 @@ pub fn extract_axum_router_fragments(rel: &str, text: &str) -> Vec<RouterMountFr
             Some(RouterMountFragment { name, entries: es })
         })
         .collect()
+}
+
+/// Walks one item list — the file's own, then each inline `mod`'s, recursively (module doc's "Inline
+/// `mod` bodies"). The test gate is asked FIRST and on every item, so a `#[cfg(test)] mod tests` is
+/// skipped whole rather than descended into.
+fn scan_items(
+    items: &[syn::Item],
+    imports: &ImportMap,
+    order: &mut Vec<String>,
+    entries: &mut HashMap<String, Vec<RouterMountEntry>>,
+) {
+    for item in items {
+        if item_is_test_gated(item) {
+            continue; // a fixture's routes are not deployed PROVIDES
+        }
+        match item {
+            syn::Item::Fn(f) => scan_fn(f, imports, order, entries),
+            syn::Item::Mod(m) => {
+                if let Some((_brace, inner)) = &m.content {
+                    scan_items(inner, imports, order, entries);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 fn imports_axum(imports: &ImportMap) -> bool {

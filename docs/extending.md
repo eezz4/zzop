@@ -132,8 +132,8 @@ See [rules/authoring-guide.md](rules/authoring-guide.md).
 
 ```jsonc
 "rules": {
-  "typescript/no-explicit-any": "off",
-  "sql/select-star": { "severity": "warn", "exclude": ["src/legacy/"] }
+  "reliability/fetch-no-timeout": "off",
+  "sql/truncate-in-app-code": { "severity": "warn", "exclude": ["src/legacy/"] }
 }
 ```
 

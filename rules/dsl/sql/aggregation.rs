@@ -1,3 +1,8 @@
+//! `count-in-loop` only, since 2026-08-12. This file also held the five
+//! `app-side-aggregation-{reduce,filter-length}` fixtures until those two rules left the bundle for
+//! `examples/packs/sql-preferences.json`; they moved to that pack's own `aggregation.rs` rather than
+//! being deleted, so the export cost no coverage.
+
 use crate::{hits, scan, TempDir};
 
 // --- count-in-loop ---
@@ -61,80 +66,4 @@ fn count_call_outside_loop_after_findmany_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(hits(&out, "count-in-loop").is_empty(), "{:?}", out.findings);
-}
-
-// --- app-side-aggregation ---
-
-#[test]
-fn findmany_result_reduced_in_app_is_flagged() {
-    let dir = TempDir::new("zzop-sql");
-    dir.write(
-        "sum.ts",
-        "export async function total(store: any) {\n  const rows = await store.findMany({ where: { active: true } });\n  return rows.reduce((s: number, r: any) => s + r.amount, 0);\n}\n",
-    );
-    let out = scan(&dir);
-    assert_eq!(
-        hits(&out, "app-side-aggregation-reduce").len(),
-        1,
-        "{:?}",
-        out.findings
-    );
-    assert!(hits(&out, "app-side-aggregation-filter-length").is_empty());
-}
-
-#[test]
-fn findmany_result_counted_via_filter_length_is_flagged() {
-    let dir = TempDir::new("zzop-sql");
-    dir.write(
-        "count.ts",
-        "export async function activeCount(store: any) {\n  const items = await store.findMany();\n  return items.filter((r: any) => r.active).length;\n}\n",
-    );
-    let out = scan(&dir);
-    assert_eq!(
-        hits(&out, "app-side-aggregation-filter-length").len(),
-        1,
-        "{:?}",
-        out.findings
-    );
-    assert!(hits(&out, "app-side-aggregation-reduce").is_empty());
-}
-
-#[test]
-fn raw_d1_prepare_all_reduced_in_app_is_flagged() {
-    let dir = TempDir::new("zzop-sql");
-    dir.write(
-        "d1.ts",
-        "export async function total(env: any) {\n  const rows = await env.DB.prepare(\"SELECT amount FROM orders\").all();\n  return rows.reduce((s: number, r: any) => s + r.amount, 0);\n}\n",
-    );
-    let out = scan(&dir);
-    assert_eq!(
-        hits(&out, "app-side-aggregation-reduce").len(),
-        1,
-        "{:?}",
-        out.findings
-    );
-}
-
-#[test]
-fn aggregation_on_unrelated_variable_is_not_flagged() {
-    let dir = TempDir::new("zzop-sql");
-    dir.write(
-        "x.ts",
-        "export function f(nums: number[]) { return nums.reduce((a, b) => a + b, 0); }\n",
-    );
-    let out = scan(&dir);
-    assert!(hits(&out, "app-side-aggregation-reduce").is_empty());
-    assert!(hits(&out, "app-side-aggregation-filter-length").is_empty());
-}
-
-#[test]
-fn sql_aggregate_done_in_db_is_not_flagged() {
-    let dir = TempDir::new("zzop-sql");
-    dir.write(
-        "ok.ts",
-        "export async function total(store: any) {\n  const agg = await store.aggregate({ _sum: { amount: true } });\n  return agg._sum.amount;\n}\n",
-    );
-    let out = scan(&dir);
-    assert!(hits(&out, "app-side-aggregation-reduce").is_empty());
-    assert!(hits(&out, "app-side-aggregation-filter-length").is_empty());
 }

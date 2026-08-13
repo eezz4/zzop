@@ -30,225 +30,180 @@
 //!   `Self` is not an importable name, and guessing the impl's type here would produce an edge the
 //!   resolver cannot verify.
 //!
-//! # Inline `mod` bodies are NOT walked — the same v1 scope every other module here states
-//! An item nested inside an inline `mod foo { ... }` block is out of v1 scope, exactly as
-//! `lang::symbols`'s module doc says of `SourceSymbol`s, `lang::imports` says of
-//! `use` statements, and `adapters::axum` says of routers. This module used to be the ONE
-//! dissenter, walking into `Item::Mod` on the premise that "a `mod x { ... }` block's items are still
-//! THIS file's symbols, so their calls belong to this file too". That premise was FALSE, and its
-//! falseness ran in the false-negative direction:
+//! # Inline `mod` bodies ARE walked — and the qualification is what makes that safe
+//! The rule this module and `lang::symbols` both encode: **attribute a call only to a symbol
+//! `lang::symbols` actually emits.** Two earlier arrangements each broke it in one direction, and both
+//! failures were measured through the real engine:
 //!
-//! `parse_symbols` mints no symbol for a nested item, so a `RawCall` attributed to one had no symbol of
-//! its own to name — it borrowed the id an item at file top level WOULD have. `mod v1 { fn handler() }`
-//! and a top-level `fn handler()` therefore produced the SAME `from_symbol`, and
-//! `zzop_core::callgraph::build_symbol_graph` buckets by file and emits both sets of edges from that one
-//! node. MEASURED before the fix, through the real engine: a Rust tree whose deployed handler checks
-//! nothing was flagged by `mutating-route-no-auth`; appending a legacy `mod v1` whose homonym handler
-//! called `verify_token()` — a function the DEPLOYED route never reaches — silenced the finding
-//! entirely. An unrelated module's guard cleared an open mutating route.
+//! 1. Until 2026-08-10 this module walked into `Item::Mod` while `lang::symbols` did not. A `RawCall`
+//!    attributed to a nested item had no symbol of its own to name, so it borrowed the id an item at
+//!    file top level WOULD have: `mod v1 { fn handler() }` and a top-level `fn handler()` produced the
+//!    SAME `from_symbol`, and `build_symbol_graph` buckets by file and emitted both sets of edges from
+//!    that one node. A Rust tree whose deployed handler checks nothing was flagged by
+//!    `mutating-route-no-auth`; appending a legacy `mod v1` whose homonym handler called `verify_token()`
+//!    — a function the DEPLOYED route never reaches — silenced the finding entirely.
+//! 2. The narrowing that fixed it (stop walking) closed the false-negative but paid recall: every call
+//!    written inside an inline `mod` became invisible, so a guard a handler genuinely reaches only
+//!    through an inline-mod helper could no longer clear its route.
 //!
-//! **The cost of not walking, stated plainly, because it is a real recall loss:** a call written inside
-//! an inline `mod` block is now invisible to the call graph. A guard that a handler genuinely reaches
-//! only through an inline-mod helper will no longer clear its route, so `mutating-route-no-auth` can
-//! report a route that IS guarded. That direction is the safe one — a visible false positive a reader
-//! can refute, rather than a silent clearance nobody sees — and it is the same trade
-//! `zzop_parser_python_3::lang::calls` made for nested classes, in its own words: dropping them "is
-//! not a separate policy; it is the only honest option available", because `parse_symbols` mints no
-//! symbol for them and walking in "would attribute its calls to the innermost span that DOES cover
-//! them" — a mis-attribution. `zzop_parser_java_21::lang::calls` states the positive half of the same
-//! rule: a lambda body IS covered precisely because it "is not a symbol-bearing declaration in
-//! `lang::symbols`'s scope", so its calls fall inside a span that a real symbol owns.
+//! `lang::symbols` now QUALIFIES a nested item's name with its inline-`mod` chain (`x::inner`), which
+//! removes the premise both failures rested on: a nested `handler` and a top-level `handler` are two
+//! distinct ids, so walking in cannot forge the first failure, and not walking in is no longer the only
+//! way to avoid it. This module walks the same chain and builds the same qualified id.
+//! `inline_mod_calls_are_not_attributed_to_a_homonym_top_level_symbol` and
+//! `every_from_symbol_is_a_symbol_parse_symbols_emits` in this module's tests pin the pair, so the two
+//! files cannot drift back into opposite premises.
 //!
-//! The rule both siblings encode, and that this module now follows: **attribute a call only to a symbol
-//! `lang::symbols` actually emits.** `inline_mod_calls_are_not_attributed_to_a_homonym_top_level_symbol`
-//! and `every_from_symbol_is_a_symbol_parse_symbols_emits` in this module's tests pin it, so the two
-//! files cannot drift back into opposite premises. Qualifying inline-mod ids (`file.rs#x::inner`) and
-//! emitting matching symbols from `symbols.rs`/`imports.rs`/`axum.rs` is the larger fix that would
-//! recover the recall; it changes projected symbol ids, so it is not a same-window change.
+//! ## What the CALLEE side qualifies, and what it deliberately leaves bare
+//! `from_symbol` is only half the id question — a call's own name has to reach the right node too.
+//! [`Level`] answers it with the narrowest rule that cannot invent an edge:
+//! - A bare `f()` written inside `mod x` becomes `x::f` **only when `x`'s own item list declares `f`**.
+//!   Otherwise it stands as written, so it resolves to the file-level or imported `f` — which is what
+//!   Rust name resolution would do.
+//! - `x::f()` becomes `x::f` with NO `receiver_type` when `x` is an inline `mod` declared at the same
+//!   level. Without this the qualifier would be handed to `resolve_method` as if it were a TYPE, and a
+//!   module is not a type.
+//! - Everything else is left exactly as written. In particular a METHOD call (`v.f()`) is never
+//!   qualified: its receiver is a value, not a module path, and rewriting it would claim a containment
+//!   the expression does not state.
+//!
+//! Two shadowing shapes stay unmodelled, both MISSES rather than wrong edges: a name declared in `x` and
+//! called from `x::y` (only the innermost level's own item list is consulted), and a `use` written
+//! inside an inline `mod` (`lang::imports` reads file-level `use` only, so such a binding is invisible
+//! to resolution regardless of what this module records).
 
-use syn::spanned::Spanned;
-use syn::{Expr, ImplItem, Item, Stmt};
+mod expr;
+
+use std::collections::HashSet;
+
+use syn::{ImplItem, Item};
 
 use zzop_core::callgraph::RawCall;
 
-/// Every call site in `text`, attributed to the enclosing top-level symbol. Empty when `syn` cannot
-/// parse (the caller has already degraded to lexical in that case).
+use super::symbols::qualify;
+
+/// Every call site in `text`, attributed to the enclosing symbol. Empty when `syn` cannot parse (the
+/// caller has already degraded to lexical in that case).
 pub fn parse_calls(rel: &str, text: &str) -> Vec<RawCall> {
     let Ok(file) = syn::parse_file(text) else {
         return Vec::new();
     };
     let mut out = Vec::new();
-    for item in &file.items {
-        walk_item(rel, item, &mut out);
-    }
+    walk_items(rel, &file.items, &[], &mut out);
     out
 }
 
-fn walk_item(rel: &str, item: &Item, out: &mut Vec<RawCall>) {
-    match item {
-        Item::Fn(f) => {
-            let from = format!("{rel}#{}", f.sig.ident);
-            walk_block(&from, &f.block, out);
-        }
-        Item::Impl(imp) => {
-            // The symbol id an impl method gets is `<Type>.<method>` (see `symbols::emit_impl`) — this
-            // must agree byte-for-byte or every edge from a method dangles.
-            let Some(type_name) = super::symbols::type_leaf_name(&imp.self_ty) else {
-                return;
+/// One inline-`mod` level's own naming context — see the module doc's callee-side section. Built once
+/// per level (never per call) because it is a property of the item list, not of any expression.
+pub(super) struct Level {
+    /// The enclosing inline-`mod` chain, outermost first. Empty at file top level.
+    path: Vec<String>,
+    /// Names this level's own item list declares — the set `lang::symbols` emits here as bare leaves.
+    /// `impl` members are absent on purpose: a `Type.method` is not callable by a bare name.
+    declared: HashSet<String>,
+    /// Inline `mod` names this level's own item list declares.
+    inline_mods: HashSet<String>,
+}
+
+impl Level {
+    fn of(items: &[Item], path: &[String]) -> Self {
+        let mut declared = HashSet::new();
+        let mut inline_mods = HashSet::new();
+        for item in items {
+            let ident = match item {
+                Item::Fn(f) => Some(f.sig.ident.to_string()),
+                Item::Struct(s) => Some(s.ident.to_string()),
+                Item::Enum(e) => Some(e.ident.to_string()),
+                Item::Union(u) => Some(u.ident.to_string()),
+                Item::Trait(t) => Some(t.ident.to_string()),
+                Item::Type(t) => Some(t.ident.to_string()),
+                Item::Const(c) => Some(c.ident.to_string()),
+                Item::Static(s) => Some(s.ident.to_string()),
+                Item::Mod(m) if m.content.is_some() => {
+                    inline_mods.insert(m.ident.to_string());
+                    None
+                }
+                _ => None,
             };
-            for it in &imp.items {
-                if let ImplItem::Fn(f) = it {
-                    let from = format!("{rel}#{type_name}.{}", f.sig.ident);
-                    walk_block(&from, &f.block, out);
-                }
+            if let Some(ident) = ident {
+                declared.insert(ident);
             }
         }
-        // `Item::Mod` is deliberately NOT walked — see the module doc's "Inline `mod` bodies" section.
-        _ => {}
+        Self {
+            path: path.to_vec(),
+            declared,
+            inline_mods,
+        }
+    }
+
+    /// A bare `f()` written at this level — module doc's callee-side rule.
+    pub(super) fn callee(&self, name: &str) -> String {
+        if self.declared.contains(name) {
+            qualify(&self.path, name)
+        } else {
+            name.to_string()
+        }
+    }
+
+    /// `q::f()` written at this level, when `q` is an inline `mod` declared here — `Some` carries the
+    /// qualified callee and means the caller must drop `receiver_type` (a module is not a type).
+    pub(super) fn path_callee(&self, qualifier: &str, name: &str) -> Option<String> {
+        if !self.inline_mods.contains(qualifier) {
+            return None;
+        }
+        let mut path = self.path.clone();
+        path.push(qualifier.to_string());
+        Some(qualify(&path, name))
     }
 }
 
-fn walk_block(from: &str, block: &syn::Block, out: &mut Vec<RawCall>) {
-    for stmt in &block.stmts {
-        walk_stmt(from, stmt, out);
-    }
+/// One walk position: the symbol id calls are attributed to, plus the level that names them.
+pub(super) struct Cx<'a> {
+    pub(super) from: String,
+    pub(super) level: &'a Level,
 }
 
-fn walk_stmt(from: &str, stmt: &Stmt, out: &mut Vec<RawCall>) {
-    match stmt {
-        Stmt::Local(local) => {
-            if let Some(init) = &local.init {
-                walk_expr(from, &init.expr, out);
-                if let Some((_, diverge)) = &init.diverge {
-                    walk_expr(from, diverge, out);
+fn walk_items(rel: &str, items: &[Item], path: &[String], out: &mut Vec<RawCall>) {
+    let level = Level::of(items, path);
+    for item in items {
+        match item {
+            Item::Fn(f) => {
+                let name = qualify(path, &f.sig.ident.to_string());
+                let cx = Cx {
+                    from: format!("{rel}#{name}"),
+                    level: &level,
+                };
+                expr::walk_block(&cx, &f.block, out);
+            }
+            Item::Impl(imp) => {
+                // The symbol id an impl method gets is `<mod path>::<Type>.<method>` (see
+                // `symbols::emit::emit_impl`) — this must agree byte-for-byte or every edge from a
+                // method dangles.
+                let Some(type_name) = super::symbols::type_leaf_name(&imp.self_ty) else {
+                    continue;
+                };
+                for it in &imp.items {
+                    if let ImplItem::Fn(f) = it {
+                        let name = qualify(path, &format!("{type_name}.{}", f.sig.ident));
+                        let cx = Cx {
+                            from: format!("{rel}#{name}"),
+                            level: &level,
+                        };
+                        expr::walk_block(&cx, &f.block, out);
+                    }
                 }
             }
-        }
-        Stmt::Expr(e, _) => walk_expr(from, e, out),
-        // A `fn`/`impl` declared INSIDE a body gets no `SourceSymbol` of its own either, so — by the
-        // module doc's rule — there is no id its calls could honestly be attributed to. Skipped, same
-        // as an inline `mod`.
-        Stmt::Item(_) | Stmt::Macro(_) => {}
-    }
-}
-
-/// Records `expr` if it is a call, then descends into every sub-expression.
-///
-/// Written as one exhaustive-ish walk rather than `syn::visit` to keep the crate's dependency surface as
-/// it is (this crate takes `syn` with the features it already needs); the cost is that a shape not listed
-/// below is not descended into. That is a MISS, never a wrong edge — the direction this repo's
-/// extraction discipline requires.
-fn walk_expr(from: &str, expr: &Expr, out: &mut Vec<RawCall>) {
-    match expr {
-        Expr::Call(c) => {
-            if let Expr::Path(p) = &*c.func {
-                let mut segs = p.path.segments.iter().rev();
-                if let Some(last) = segs.next() {
-                    let receiver_type = segs.next().map(|s| s.ident.to_string());
-                    out.push(RawCall {
-                        from_symbol: from.to_string(),
-                        callee_name: last.ident.to_string(),
-                        line: c.span().start().line as u32,
-                        receiver_type,
-                        is_heritage: false,
-                    });
+            // An INLINE `mod x { ... }` is walked with `x` pushed onto the chain — module doc. A
+            // `mod x;` DECLARATION (`content: None`) names another FILE and has no body here.
+            Item::Mod(m) => {
+                if let Some((_brace, inner)) = &m.content {
+                    let mut nested = path.to_vec();
+                    nested.push(m.ident.to_string());
+                    walk_items(rel, inner, &nested, out);
                 }
             }
-            walk_expr(from, &c.func, out);
-            for a in &c.args {
-                walk_expr(from, a, out);
-            }
+            _ => {}
         }
-        Expr::MethodCall(m) => {
-            out.push(RawCall {
-                from_symbol: from.to_string(),
-                callee_name: m.method.to_string(),
-                line: m.span().start().line as u32,
-                // No type layer, so no receiver type — see the module doc's trait-dispatch note.
-                receiver_type: None,
-                is_heritage: false,
-            });
-            walk_expr(from, &m.receiver, out);
-            for a in &m.args {
-                walk_expr(from, a, out);
-            }
-        }
-        Expr::Await(a) => walk_expr(from, &a.base, out),
-        Expr::Try(t) => walk_expr(from, &t.expr, out),
-        Expr::Paren(p) => walk_expr(from, &p.expr, out),
-        Expr::Group(g) => walk_expr(from, &g.expr, out),
-        Expr::Reference(r) => walk_expr(from, &r.expr, out),
-        Expr::Unary(u) => walk_expr(from, &u.expr, out),
-        Expr::Cast(c) => walk_expr(from, &c.expr, out),
-        Expr::Field(f) => walk_expr(from, &f.base, out),
-        Expr::Binary(b) => {
-            walk_expr(from, &b.left, out);
-            walk_expr(from, &b.right, out);
-        }
-        Expr::Assign(a) => {
-            walk_expr(from, &a.left, out);
-            walk_expr(from, &a.right, out);
-        }
-        Expr::Index(i) => {
-            walk_expr(from, &i.expr, out);
-            walk_expr(from, &i.index, out);
-        }
-        Expr::Let(l) => walk_expr(from, &l.expr, out),
-        Expr::Return(r) => {
-            if let Some(e) = &r.expr {
-                walk_expr(from, e, out);
-            }
-        }
-        Expr::Break(b) => {
-            if let Some(e) = &b.expr {
-                walk_expr(from, e, out);
-            }
-        }
-        Expr::Closure(c) => walk_expr(from, &c.body, out),
-        Expr::Async(a) => walk_block(from, &a.block, out),
-        Expr::Unsafe(u) => walk_block(from, &u.block, out),
-        Expr::Block(b) => walk_block(from, &b.block, out),
-        Expr::Loop(l) => walk_block(from, &l.body, out),
-        Expr::While(w) => {
-            walk_expr(from, &w.cond, out);
-            walk_block(from, &w.body, out);
-        }
-        Expr::ForLoop(f) => {
-            walk_expr(from, &f.expr, out);
-            walk_block(from, &f.body, out);
-        }
-        Expr::If(i) => {
-            walk_expr(from, &i.cond, out);
-            walk_block(from, &i.then_branch, out);
-            if let Some((_, e)) = &i.else_branch {
-                walk_expr(from, e, out);
-            }
-        }
-        Expr::Match(m) => {
-            walk_expr(from, &m.expr, out);
-            for arm in &m.arms {
-                if let Some((_, g)) = &arm.guard {
-                    walk_expr(from, g, out);
-                }
-                walk_expr(from, &arm.body, out);
-            }
-        }
-        Expr::Array(a) => {
-            for e in &a.elems {
-                walk_expr(from, e, out);
-            }
-        }
-        Expr::Tuple(t) => {
-            for e in &t.elems {
-                walk_expr(from, e, out);
-            }
-        }
-        Expr::Struct(s) => {
-            for f in &s.fields {
-                walk_expr(from, &f.expr, out);
-            }
-        }
-        _ => {}
     }
 }
 

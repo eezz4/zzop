@@ -48,13 +48,44 @@ pub fn leaders_for_path(rel: &str) -> Leaders {
     }
 }
 
-/// Extensions whose line comment is `#`, and in which `//` is not a comment at all — the set
-/// `security/config-file-secret`'s `file_pattern` accepts, which is the rule that proved the marker axis
-/// needed them. Deliberately does NOT include `.py`/`.sh`/`.rb`: `#` is their comment leader too, but no
-/// shipped rule directs a reader to a `#` marker there, and widening the set changes near-miss disclosure
-/// for every Python line-scan finding. That is a real gap, recorded rather than silently closed — see
-/// [`marker_leaders_for_path`].
-const HASH_COMMENT_EXTENSIONS: [&str; 8] = [
+/// Extensions whose line comment is `#`. Two groups, and the second one arrived later:
+///
+/// - **Config formats** — the set `security/config-file-secret`'s `file_pattern` accepts, which is the
+///   rule that proved the marker axis needed them. `//` is not a comment in any of them.
+/// - **`.py`** (2026-08-12) — `#` is Python's comment leader and `//` is a SyntaxError, so a `.py`
+///   line-scan finding had NO writable marker at all: `// zzop-<rule>-ok` cannot be typed, and the only
+///   remaining lever was a `rules`/`exclude` path in config, which is a whole-file instrument for a
+///   one-line judgment. The subjects are the shipped line-scan rules whose `file_pattern` admits a `.py`
+///   path — the `sql` pack's whole-statement family in the bundle, plus what the exported packs carry —
+///   and they spell the gap out in their own message rather than promise a marker that did nothing. This
+///   entry is what makes those messages able to promise one.
+///
+/// HOW MANY those subjects are is deliberately NOT written here. The number moved inside one release
+/// (v0.30.0 exported `sql/select-star` and `sql/like-leading-wildcard` in `2de0399`), and a text grep
+/// answers it wrong in both directions: `(?i)\.pyi?$` spells no `py` alternative and is missed, while a
+/// pattern naming `py` under a `migrations/`-anchored prefix is counted as if it admitted every `.py`.
+/// Recount by feeding real paths to the patterns, which is the only way that reads both:
+///
+/// ```sh
+/// node -e 'for (const f of process.argv.slice(1)) {
+///   const p = JSON.parse(require("fs").readFileSync(f, "utf8"));
+///   for (const r of p.rules ?? []) {
+///     const m = r.matcher;
+///     if (m?.type !== "line-scan") continue;
+///     const re = new RegExp(m.file_pattern.replace(/^\(\?i\)/, ""), "i");
+///     if (["a.py", "a.pyi", "migrations/0001.py", "alembic/versions/a.py"].some(s => re.test(s)))
+///       console.log(`${p.id}/${r.id}`);
+///   }
+/// }' rules/dsl/*/*.json examples/packs/*.json
+/// ```
+///
+/// `.sh`/`.rb` are still out, and that is measured rather than assumed: ZERO shipped rules admit either
+/// extension, so adding them would advertise a leader for files no rule reads — `marker_widening_prose`
+/// prints this list to users, so an entry with no subject is a claim with no subject.
+///
+/// A SLICE, not `[&str; N]`: the length was a literal that every edit here had to remember to bump, and
+/// nothing reads the count.
+const HASH_COMMENT_EXTENSIONS: &[&str] = &[
     "properties",
     "yaml",
     "yml",
@@ -63,6 +94,7 @@ const HASH_COMMENT_EXTENSIONS: [&str; 8] = [
     "conf",
     "cfg",
     "env",
+    "py",
 ];
 
 /// The per-file marker widenings, spelled for a human, DERIVED from the tables above rather than
@@ -78,7 +110,9 @@ pub fn marker_widening_prose() -> String {
         .map(|e| format!("`.{e}`"))
         .collect::<Vec<_>>()
         .join(", ");
-    format!("also `--` inside a .sql file, and `#` inside a config file ({exts})")
+    format!(
+        "also `--` inside a .sql file, and `#` inside a file whose comment leader is `#` ({exts})"
+    )
 }
 
 /// The MARKER axis — which leaders may carry a suppress marker for the file at `rel`, case-insensitive.
@@ -91,13 +125,22 @@ pub fn marker_widening_prose() -> String {
 /// suppression exactly — a leader that can suppress must be blamable for failing to, and one that can
 /// never suppress must never be blamed. That parity is the invariant; the two axes above are not.
 ///
-/// KNOWN GAP, deliberately open: `.py` / `.sh` / `.rb` are `#`-comment languages that are not in the
-/// family, so a line-scan finding in a `.py` file still honors `//` only — and `// zzop-x-ok` is a
-/// SyntaxError in Python, meaning those findings have no writable marker. Nothing lies about it today
-/// (no shipped rule names a `#` marker for them), which is why this is recorded instead of fixed inside
-/// a change whose acceptance criterion was byte-identical messages. Closing it is one entry here plus a
-/// re-judged `the_hash_leader_is_not_recognized_for_a_line_scan_finding`, whose current rationale
-/// ("`#` never suppresses a line-scan finding") would become false.
+/// ~~KNOWN GAP~~ CLOSED 2026-08-12 for `.py`, exactly as the gap note here predicted: one entry in
+/// [`HASH_COMMENT_EXTENSIONS`] plus a re-judged `the_hash_leader_is_not_recognized_for_a_line_scan_finding`,
+/// whose rationale ("`#` never suppresses a line-scan finding") is now false and whose replacement pins
+/// the opposite. `.sh`/`.rb` stay out for the reason recorded on the constant (no shipped rule admits
+/// them), so the note is narrowed rather than deleted.
+///
+/// What the close changes beyond suppression: NEAR-MISS disclosure mirrors this function, so a
+/// `# something-ok` line above a `.py` line-scan finding is now named in the message as the marker that
+/// ALMOST worked. Before, it was silently ignored — correctly, because it could never have suppressed.
+/// That is the whole-tree fallout the backlog flagged, and it moves in the honest direction: the comment
+/// really is in the running now.
+///
+/// The SKIP axis is deliberately NOT widened alongside it. `#` still does not make a line "commentary to
+/// ignore", so a `#`-commented-out `DELETE FROM` in a `.py` file is still read as live code (measured
+/// 0 times across 16,652 corpus Python lines) — and, more to the point, a `#`-commented secret is still
+/// a committed secret. See this module's header for the measurement that split the two axes.
 pub fn marker_leaders_for_path(rel: &str) -> Leaders {
     let path = std::path::Path::new(rel);
     if let Some(ext) = path.extension().and_then(|e| e.to_str()) {

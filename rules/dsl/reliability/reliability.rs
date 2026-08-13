@@ -1,8 +1,8 @@
 //! End-to-end tests for `rules/dsl/reliability/reliability.json` — exercised via `zzop_engine::analyze_tree` so `Matcher::MethodScan` rules run against real parser-derived `SourceSymbol` body spans (not hand-built spans), same convention as `sql/sql.rs`/`http/http.rs`.
 //!
-//! Covers all rules in the pack: `async-route-no-catch`, `sync-fs-in-handler`, `map-async-no-promise-all`, `promise-all-and-writes`, `json-parse-no-try`, `fetch-no-timeout`, `process-exit-in-lib`, `emitter-async-listener`, `promise-race-no-cancel`, `fs-check-then-use`, `stream-open-no-close-in-loop`, `listener-subscribe-in-loop` (method-scan; the last two via `trigger_in_loop` loop-span containment — see `perf/api-in-loop`'s convention); `env-nonnull-assert`, `debug-true-committed`, `body-limit-missing`, `interval-no-clear` (line-scan, uses the `require_file_absent` DSL extension), `await-inside-promise-all-array` (line-scan); `console-in-be`, `console-in-loop`, `env-outside-config` (call-scan, over the projected `call_sites` channel — the last of the three additionally crosses it with `loop_spans` via `in_loop`).
+//! Covers all rules in the pack: `async-route-no-catch`, `sync-fs-in-handler`, `map-async-no-promise-all`, `promise-all-and-writes`, `json-parse-no-try`, `fetch-no-timeout`, `emitter-async-listener`, `fs-check-then-use`, `stream-open-no-close-in-loop`, `listener-subscribe-in-loop` (method-scan; the last two via `trigger_in_loop` loop-span containment — see `perf/api-in-loop`'s convention); `debug-true-committed`, `body-limit-missing`, `interval-no-clear` (line-scan, uses the `require_file_absent` DSL extension), `await-inside-promise-all-array` (line-scan); `reqwest-no-timeout` (method-scan, `.rs`).
 //!
-//! The three call-scan rules run on `.py` files as well as `.ts`/`.js`, because the channel has TypeScript and Python producers and the rule is one rule rather than one regex per language. That makes some fixtures below Python source in a pack whose other tests are all TypeScript — deliberate, and the point of the migration.
+//! SIX rules left this pack on 2026-08-12 — `env-nonnull-assert`, `process-exit-in-lib`, `console-in-be`, `console-in-loop`, `env-outside-config`, `promise-race-no-cancel` — exported to `examples/packs/code-hygiene.json` as the last increment of the `axis: opinion` export. Their tests went with them (`examples/packs/tests/`), and so did the whole Mode-B overlay helper set (`scan_with`, `env_config_overlay`, `deny_env_config_for_file`), which existed only for the declaration-gated `env-outside-config` and had no consumer left here. That also means this pack no longer reads the projected `call_sites` channel at all: all three of its call-scan rules were among the six, so the Python/Go/Java/C#/Rust fixtures that used to live here are now in `examples/packs/tests/w2_languages.rs`.
 //!
 //! `fetch-no-timeout` scopes to backend files via a content-based `require_file` pre-gate (server-framework import / server-runtime API / Workers module shape / D1 prepared-statement call) rather than a path heuristic, so a standalone backend repo with no `be`/`api`/`server`-ish path segment is still in scope.
 //!
@@ -16,14 +16,11 @@ use zzop_core::{load_dsl_packs, RulePackDef};
 use zzop_engine::{analyze_tree, AnalyzeOutput, EngineConfig};
 
 mod config_flags;
-mod console_in_loop;
-mod env_outside_config;
 mod fetch_and_process;
 mod routes_and_handlers;
 mod rust_reqwest;
 mod server_hygiene;
 mod suppression;
-mod w2_languages;
 mod writes_and_parsing;
 
 /// A self-cleaning temp directory (std-only mkdtemp equivalent).
@@ -64,10 +61,13 @@ impl Drop for TempDir {
 /// Loads the real `rules/dsl/reliability/reliability.json` from the repo, filtered to just the `reliability` pack so this test is unaffected by sibling packs under concurrent development (same convention as `http/http.rs`).
 ///
 /// `CARGO_MANIFEST_DIR` is the `rules` crate root (`rules/Cargo.toml`), so `dsl/` is `rules/dsl` — this pack's own `reliability.json` lives one level down, at `rules/dsl/reliability/reliability.json`.
-/// The pack this file's tests scan with. The disk load below reads and parses ALL 12 pack JSONs and
-/// throws away 11, so doing it per test cost this binary that work once per test; the `OnceLock` makes
-/// it once per binary. The clone is cheap and — importantly — SHARES the pack's compiled-regex memo
-/// (`zzop_core::dsl::RegexCache`), so the second test onward also skips recompiling every pattern.
+/// The pack this file's tests scan with. The disk load below parses EVERY pack JSON in the directory
+/// and throws all but this one away, so doing it per test cost this binary that work once per test; the
+/// `OnceLock` makes it once per binary. How many packs that is is not written here: it moved inside one
+/// release (v0.30.0 exported a whole pack) and the sentence needs no size to make its point — the same
+/// spelling `examples/packs/tests/sql_preferences.rs` already uses. The clone is cheap and — importantly
+/// — SHARES the pack's compiled-regex memo (`zzop_core::dsl::RegexCache`), so the second test onward
+/// also skips recompiling every pattern.
 fn reliability_pack() -> RulePackDef {
     static PACK: std::sync::OnceLock<RulePackDef> = std::sync::OnceLock::new();
     PACK.get_or_init(reliability_pack_uncached).clone()
@@ -99,72 +99,6 @@ fn config() -> EngineConfig {
 
 fn scan(dir: &TempDir) -> AnalyzeOutput {
     analyze_tree(dir.path(), &config())
-}
-
-/// `scan` with one Mode-B adapter overlay attached — the channel a `zzop.config.jsonc` author reaches
-/// through the `overlays` key, and the only way a declaration-gated rule (`env-outside-config`) can be
-/// exercised in its ENABLED state. Kept beside `scan` rather than inside the one test file that needs it:
-/// the gate is a general line-scan capability, so the next rule to use one starts here.
-fn scan_with(dir: &TempDir, overlay: zzop_core::NormalizedEnvelope) -> AnalyzeOutput {
-    let mut cfg = config();
-    cfg.adapter_overlays = vec![overlay];
-    analyze_tree(dir.path(), &cfg)
-}
-
-/// An attributes-only overlay declaring each entry of `prefixes` an `env-config-module`. A path that
-/// names a directory is a covering `pathScope`; the same call is used for an exact file path, which
-/// resolves as the more specific `pathScope` of that exact string — `deny_env_config_for_file` is what
-/// adds a genuine exact-`file` target.
-///
-/// The envelope carries a single synthetic file entry, because `AttributeStore::from_parts` flattens
-/// `files[].attributes` tree-wide and never cares which file emitted them — the same shape
-/// `examples/adapters/auth-overlay-adapter` emits.
-fn env_config_overlay(prefixes: &[&str]) -> zzop_core::NormalizedEnvelope {
-    overlay_with_attributes(
-        prefixes
-            .iter()
-            .map(|p| zzop_core::Attribute {
-                target: zzop_core::EntityRef::PathScope {
-                    prefix: (*p).to_string(),
-                },
-                key: "env-config-module".to_string(),
-                value: serde_json::Value::Bool(true),
-            })
-            .collect(),
-    )
-}
-
-/// Appends an exact-`file` `env-config-module: false` to `overlay` — the carve-out spelling: an exact
-/// target beats every covering scope, so this un-declares one file inside a declared directory.
-fn deny_env_config_for_file(overlay: &mut zzop_core::NormalizedEnvelope, path: &str) {
-    overlay.files[0].attributes.push(zzop_core::Attribute {
-        target: zzop_core::EntityRef::File {
-            path: path.to_string(),
-        },
-        key: "env-config-module".to_string(),
-        value: serde_json::Value::Bool(false),
-    });
-}
-
-fn overlay_with_attributes(attributes: Vec<zzop_core::Attribute>) -> zzop_core::NormalizedEnvelope {
-    zzop_core::NormalizedEnvelope {
-        format: zzop_core::NORMALIZED_AST_FORMAT.to_string(),
-        version: zzop_core::NORMALIZED_AST_CONTRACT_VERSION.to_string(),
-        parser: "reliability-fixture-declarations/1".to_string(),
-        source: String::new(),
-        files: vec![zzop_core::FileProjection {
-            path: "zzop-attributes.json".to_string(),
-            loc: 1,
-            attributes,
-            ..Default::default()
-        }],
-    }
-}
-
-/// Every `AnalyzeOutput::warnings` entry mentioning `needle` — the disclosure channel a silenced rule
-/// reports through.
-fn warnings_matching<'a>(out: &'a AnalyzeOutput, needle: &str) -> Vec<&'a String> {
-    out.warnings.iter().filter(|w| w.contains(needle)).collect()
 }
 
 fn hits<'a>(out: &'a AnalyzeOutput, rule: &str) -> Vec<&'a zzop_core::Finding> {

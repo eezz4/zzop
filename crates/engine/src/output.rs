@@ -161,11 +161,24 @@ pub struct RuleOverridesApplied {
     /// its own doc, and it stays identical under BOTH knobs — it was never an enablement report).
     ///
     /// Only entries naming a pack in `config.packs` appear, mirroring `disabled`'s known-id filter: an
-    /// allowlist entry that names no loaded pack contributed nothing to this run's gate. Unlike
-    /// `disabled_rules`, an all-typo `only_packs` has no unknown-id diagnostic of its own today — and it
-    /// is the more dangerous typo, because `is_pack_enabled` then admits NO pack and every DSL finding
-    /// disappears at once. That makes this list the signal: `only` present but EMPTY means the caller set
-    /// an allowlist and none of it named a loaded pack.
+    /// allowlist entry that names no loaded pack contributed nothing to this run's gate. An all-typo
+    /// `only_packs` is the more dangerous typo, because `is_pack_enabled` then admits NO pack and every
+    /// DSL finding disappears at once.
+    ///
+    /// ⚠ This field is NOT the signal for that, and this doc claimed it was until 2026-08-11. The claim
+    /// was *"`only` present but EMPTY means the caller set an allowlist and none of it named a loaded
+    /// pack"* — false, because `only: []` is ALSO what a run produces when `only_packs` was never set
+    /// and `disabled_rules` or `severity_overrides` was (either one is enough to make this whole struct
+    /// `Some`). Measured on identical source, with `rules: {"dead-candidates": "off"}` also present:
+    /// `packs.only: ["typo"]` and no allowlist at all produced envelopes differing in NO field but
+    /// `findings` — `packsLoaded`, `filesInScope`, `warnings` and `configWarnings` were all identical.
+    /// A wire field that only discriminates when no other knob is set is not a signal; it is a
+    /// coincidence that holds in the bare case.
+    ///
+    /// The real signal is a `configWarning`, which fires regardless of what else is set:
+    /// `DiagnosticsInput::unknown_only_pack_ids` (+ `only_packs_matched_nothing` for the wording),
+    /// computed by `analyze::diagnostics::coverage_report`. This field keeps its original job —
+    /// positively confirming the allowlist that DID take effect.
     pub only: Vec<String>,
 }
 

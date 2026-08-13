@@ -1,0 +1,69 @@
+{
+  "id": "orm-eager",
+  "schema_version": 1,
+  "rules": [
+    {
+      "id": "eager-relation-declared",
+      "axis": "opinion",
+      "severity": "warning",
+      "message": "TypeORM's `eager: true` relation option (typically on `@OneToMany`/`@ManyToOne`/`@OneToOne`/`@ManyToMany`/`@JoinTable` option objects — the matcher fires on any `eager: true` line in a file with TypeORM/Sequelize signals, a deliberate heuristic), or Sequelize's `include: [{ all: true }]` — an entity-level eager-load declaration that makes EVERY finder/query of this entity join the association, whether or not that particular caller needs it: the query-time opposite of N+1, over-fetching on every read instead of under-fetching per iteration. Default relations to lazy and opt in per query instead — TypeORM's `relations: [...]`/`relations: { ... }` on the specific `find`/`findOne` call, or Sequelize's own `include: [...]` at the call site — so only the queries that actually use the association pay for the join. Suppress a vetted case (e.g. a small lookup table genuinely read together on every access) with `// zzop-eager-relation-declared-ok`.",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.(?:ts|tsx|js|jsx|mts|cts)$",
+        "file_exclude_pattern": "${test-paths-stories}",
+        "require_file": "(?i)@(?:OneToMany|ManyToOne|OneToOne|ManyToMany|JoinTable)\\s*\\(|\\btypeorm\\b|\\bsequelize\\b|\\binclude\\s*:\\s*\\[",
+        "skip_comment_lines": true,
+        "any": [
+          {
+            "pattern": "(?i)\\beager\\s*:\\s*true\\b",
+            "label": "typeorm-eager"
+          },
+          {
+            "pattern": "(?i)include\\s*:\\s*\\[?\\s*\\{[^}]*\\ball\\s*:\\s*true\\b",
+            "label": "sequelize-include-all"
+          }
+        ],
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "jpa-eager-fetch",
+      "axis": "opinion",
+      "severity": "warning",
+      "message": "An explicit `fetch = FetchType.EAGER` on a JPA/Hibernate mapping annotation (`@OneToMany`/`@ManyToOne`/`@OneToOne`/`@ManyToMany`/`@ElementCollection` — the matcher fires on the `fetch = FetchType.EAGER` attribute itself, whichever annotation carries it) forces every finder/query of the owning entity to join and load that association, whether or not the caller needs it — most expensive on `@OneToMany`/`@ManyToMany` collections, where it can pull an unbounded child set on every parent read. Prefer `FetchType.LAZY` and fetch the association explicitly per query that needs it (a JPQL `JOIN FETCH`, an entity graph, or a dedicated projection). Disclosure: this rule only catches the EXPLICIT declaration above — `@ManyToOne`/`@OneToOne` default to EAGER in the JPA spec with no `fetch` attribute at all, so a clean scan here is not proof the entity has no eager-loading cost.",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.java$",
+        "file_exclude_pattern": "${test-paths-stories}",
+        "require_file": "\\bFetchType\\.EAGER\\b",
+        "skip_comment_lines": true,
+        "line_pattern": "\\bfetch\\s*=\\s*FetchType\\.EAGER\\b",
+        "snippet_max": 160
+      }
+    },
+    {
+      "id": "sqlalchemy-eager-relationship",
+      "axis": "opinion",
+      "severity": "warning",
+      "message": "A SQLAlchemy DECLARATION-level eager loader strategy — `lazy` set to `joined`, `subquery`, `selectin` or `immediate` on a `relationship(...)`/`backref(...)`, the legacy `lazy=False` synonym for `joined`, or the same key written as a string inside a SQLModel `sa_relationship_kwargs` dict — makes EVERY query that loads the owning entity also load this association, whether or not that particular caller needs it: the query-time opposite of N+1, over-fetching on every read instead of under-fetching per iteration, and on a collection relationship it can pull an unbounded child set on every parent read. Leave the relationship at SQLAlchemy's lazy default and opt in per query instead — `joinedload(`, `selectinload(` or `subqueryload(` on the specific query that needs the association (or a `raiseload(` default, which turns a forgotten opt-in into a loud error instead of a silent join) — so only the queries that actually use the association pay for it. Three precision limits, stated rather than left to be discovered. (1) The gate is FILE-level: a `sqlalchemy`/`sqlmodel` mention anywhere in the file admits it and the line pattern is the bare `lazy` keyword argument, so a `lazy` entry in an unrelated dict in the same file also fires — the same deliberate heuristic `eager-relation-declared` documents for TypeORM. (2) A whole-line `#` comment is excluded, but an occurrence in a TRAILING `#` comment on a code line is not. (3) Its POSITIVE behavior rests on unit fixtures alone. The Python trees this rule has actually been run against contain no instance of the shape at all — their ORM relationship declarations sit at the lazy default — so it is measured to stay silent on correct code and measured not at all for recall; read a first run's count as candidates to review, not as a calibrated rate. Suppression: in a `.py` file, write `# zzop-sqlalchemy-eager-relationship-ok` on the declaration's own line or the line directly above it. Until 2026-08-12 this paragraph prescribed a `# // zzop-...-ok` sandwich, because the line-scan marker axis honored `//` alone and Python has no `//` — that is no longer true (`.py` joined the hash-comment family), and the sandwich still works only by accident of containing the `//` form. THE `.pyi` STUBS THIS RULE ALSO READS SPLIT THE OTHER WAY: the hash family is spelled by extension and `pyi` is not in it, so the marker axis grants `//` alone in a stub — which is exactly what the sandwich is for. Write `# // zzop-sqlalchemy-eager-relationship-ok` there: a Python comment whose body carries the `//` form the axis accepts. Measured 2026-08-13 on this pack, one declaration per file: `.py` plain marker suppresses and `.pyi` plain marker does NOT, while the sandwich suppresses in both. So the sandwich is not dead, it MOVED — unnecessary in `.py` since 2026-08-12, and the only inline spelling that works in `.pyi`. Reproduce those four combinations by putting this pack in a tree’s `zzop/rules/` directory, writing one declaration per file, running whatever single-tree repository analysis your host offers over that tree, and reading this rule's id out of the findings — the reproduction names no command, because restricting a RUN to one rule is an argv-only knob and an MCP host has no argv to put it in; filter the reply by rule id instead. If you would rather not write a two-leader comment, the `rules` config entry is the other lever (a path `exclude` on this rule, or `off`).",
+      "matcher": {
+        "type": "line-scan",
+        "file_pattern": "(?i)\\.pyi?$",
+        "file_exclude_pattern": "${test-paths-stories}",
+        "require_file": "(?i)\\bsqlalchemy\\b|\\bsqlmodel\\b",
+        "exclude_pattern": "^\\s*#",
+        "any": [
+          {
+            "pattern": "\\blazy\\s*=\\s*(?:[\"'](?:joined|subquery|selectin|immediate)[\"']|False\\b)",
+            "label": "relationship-eager-loader"
+          },
+          {
+            "pattern": "[\"']lazy[\"']\\s*:\\s*[\"'](?:joined|subquery|selectin|immediate)[\"']",
+            "label": "sqlmodel-eager-loader"
+          }
+        ],
+        "snippet_max": 160
+      }
+    }
+  ]
+}

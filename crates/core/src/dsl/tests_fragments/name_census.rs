@@ -85,6 +85,15 @@ const CENSUSED_FRAGMENTS: &[&str] = &[
     // standing as the two `test-paths-*` rows above, and a strict superset of `test-paths` for the same
     // reason they are.
     "rules/dsl/reliability/reliability.json:test-paths-stories-scripts",
+    // 2026-08-12, and it left and came back the same day. `sql-bootstrap-drop-create`'s only referent is
+    // `sql/destructive-migration`, which was exported to `examples/packs/sql-preferences.json` and
+    // re-bundled hours later; the fragment travelled with it both ways, so this row was deleted and
+    // restored. The mechanics are what is worth keeping: [`shipped_fragment_names`] reads `raw_packs()`,
+    // whose scope is `rules/dsl/**` — the loader contract for the BUNDLED tree — so an exported pack's
+    // fragments are outside this census entirely. That is why the row had to be REMOVED rather than
+    // repointed while the rule was away, and why `sql-where-veto` (defined in both files during that
+    // window, because the disclosure and its two critical siblings each needed it) showed one row, not
+    // two. Both fragments are back to a single home in `sql.json`.
     "rules/dsl/sql/sql.json:sql-bootstrap-drop-create",
     "rules/dsl/sql/sql.json:sql-where-veto",
 ];

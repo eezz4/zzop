@@ -1,28 +1,13 @@
 {
   "id": "browser",
-  "framework": "any",
   "schema_version": 1,
   "fragments": {
     "html-sink-sanitized": "(?:\\.(?:innerHTML|outerHTML)\\s*[+]?=|__html\\s*:|insertAdjacentHTML\\s*\\(\\s*['\"][^'\"]*['\"]\\s*,)\\s*(?:await\\s+)?(?:(?:[A-Za-z_$][\\w$]*\\.)?\\b(?:escape|sanitize|validate|purify)\\w*|[A-Za-z_$][\\w$]*(?:Safe|Sanitized|Escaped|Purified))\\s*\\((?:[^()]|\\([^()]*\\))*\\)\\s*(?:[;,)}]|$)"
   },
   "rules": [
     {
-      "id": "no-system-dialogs",
-      "severity": "info",
-      "message": "Blocking system dialog (alert/confirm/prompt) freezes the whole page/tab while shown (blocks the main thread) and is native browser chrome — it can't be styled or driven by automated tests. Use a non-blocking in-app modal/toast/confirm component instead. Suppress a vetted case with `// zzop-no-system-dialogs-ok:`.",
-      "matcher": {
-        "type": "line-scan",
-        "file_pattern": "(?i)\\.(ts|tsx|js|jsx)$",
-        "file_exclude_pattern": "${test-paths-stories}",
-        "require_file": "\\b(?:alert|confirm|prompt)\\s*\\(",
-        "skip_comment_lines": true,
-        "line_pattern": "(?:^|[^.\\w])(?:alert|confirm|prompt)\\s*\\(|\\b(?:window|globalThis|self)\\.(?:alert|confirm|prompt)\\s*\\(",
-        "exclude_pattern": "^\\s*(?:readonly\\s+)?[\\w$]+\\s*\\([^)]*\\)\\s*:[^{]*$",
-        "snippet_max": 160
-      }
-    },
-    {
       "id": "no-document-write",
+      "axis": "defect",
       "severity": "warning",
       "message": "document.write/writeln breaks HTML parsing once the document has loaded (blocked under many CSP/PWA setups) and can clobber the page. Build DOM nodes (or set textContent) instead. Suppress a vetted case with `// zzop-no-document-write-ok:`.",
       "matcher": {
@@ -37,6 +22,7 @@
     },
     {
       "id": "postmessage-wildcard",
+      "axis": "defect",
       "severity": "warning",
       "message": "A `postMessage(..., '*')` call sends the payload to whatever origin currently holds the window at delivery time — an opener swap, an embedding iframe/parent change, or a same-window navigation to a different origin all qualify, so a `'*'` targetOrigin does not authenticate the recipient and can leak the payload to an attacker-controlled origin. Pass the exact intended origin (a literal `https://...` string, or a validated same-origin check) instead of `'*'`. Suppress a vetted case (e.g. a genuinely non-sensitive broadcast payload) with `// zzop-postmessage-wildcard-ok`.",
       "matcher": {
@@ -51,6 +37,7 @@
     },
     {
       "id": "unsafe-html-sink",
+      "axis": "defect",
       "severity": "warning",
       "message": "A `.innerHTML`/`.outerHTML` assignment, `insertAdjacentHTML(...)` call, or JSX `dangerouslySetInnerHTML` prop whose value is not a plain no-interpolation string literal — this is the classic DOM XSS sink: whatever ends up in that string is parsed and executed as HTML/script by the browser. Use `textContent` for plain text, or a vetted HTML-sanitizer library (e.g. DOMPurify) if HTML must genuinely be inserted — never assign unsanitized dynamic content into an HTML sink. A SANITIZER-PASSAGE veto keeps the rule off values that were already cleaned: the finding is dropped only when a sanitizer-shaped call is the ENTIRE value — `escape*`/`sanitize*`/`validate*`/`purify*` (optionally method-qualified, so `DOMPurify.sanitize(x)` counts) or a `*Safe`/`*Sanitized`/`*Escaped`/`*Purified` wrapper such as `jsonLdSafe(x)`. WHOLE-VALUE is ENFORCED, not merely claimed: the veto consumes the call's own argument list and then requires the value to END (`;`, `,`, a closing `)`/`}`, or end of line), so every shape that leaves attacker-controlled text OUTSIDE the sanitized call still fires — `escapeHtml(title) + rawUserHtml` (concat), `sanitizeSvg(a) ? raw : other` (ternary), `sanitize(x).replace(/a/, evil)` (method chain), and a template literal that interpolates an escaped fragment into an `href=` attribute. Escaping a fragment is not the same as sanitizing the HTML around it. `JSON.stringify(x)` is deliberately NOT in this vocabulary: JSON encoding escapes only `\"`, `\\` and control characters, so `<`, `>`, `&` and `/` pass through verbatim — `__html: JSON.stringify(data)` breaks out of its `<script>` block the moment any string value contains `</script>`, which is exactly why a `jsonLdSafe`-style wrapper (`JSON.stringify(x).replace(/</g, ...)`) exists in the first place. The vocabulary is a deliberate WIDENING of `security/taint-flow`'s, not a copy of it: taint-flow vetoes on `escape*`/`sanitize*`/`validate*` plus zod-shaped parses, and knows nothing of `purify*` or the `*Safe`-family suffixes. It does inherit taint-flow's SHAPE of limit — a sanitizer reached through an alias or a differently-named custom validator is invisible. Measured on a 22-tree corpus, the veto clears 1 of 7 findings; of the other 6, one is a true positive (an escaped markdown link text used to build an `href` with no URL-scheme allowlist) and five are standing residuals. Residual 1 — VOCABULARY: sanitizer-NAMED is not sanitizer-PROVEN, so a do-nothing function called `sanitizeFoo` silences this rule, while a differently-named builder that genuinely is safe (`buildRedirectScript(key)`) is not recognized. Residual 2 — NO DATAFLOW: a sanitizer applied on an earlier line and stored in a variable is invisible here, and so are its two commonest real spellings, a hook return (`const { html } = useEmailSignature()`) and a component PROP that the CALLER sanitized (`<Preview svg={sanitizeSvg(raw)} />` seen from inside `Preview`); every one of those shapes still fires, and closing it needs local/interprocedural dataflow that a line-scan matcher does not have. SCOPE NOTE on the PROP spelling: it is a residual only where the caller set is CLOSED — a component private to the tree, whose call sites can all be read. On a component its package EXPORTS, the caller set is open-ended and a `svg: string` prop type promises nothing about sanitization, so the finding there is CORRECT rather than a limitation: the remedy is to sanitize inside the component or to take a branded sanitized-HTML type, not to suppress. Residual 3 — LINE AND NESTING BOUNDS, and this one always errs toward MORE findings: a sanitizer call broken across lines, or one whose arguments nest parentheses more than one level deep (`escapeHtml(a(b(c)))`), is not provably whole-value on a single line and therefore fires. Note: `security/taint-flow` already covers these same sinks, but only when a request-derived source (body/query/params/headers) co-occurs in the SAME function, and only in `.ts`/`.tsx` files; this rule needs no such source — component props/state passed down through the tree are the far more common XSS carrier in FE code — and it also covers `.js`/`.jsx`. Suppress a vetted case (value is provably sanitized upstream) with `// zzop-unsafe-html-sink-ok`.",
       "matcher": {
@@ -71,6 +58,7 @@
     },
     {
       "id": "javascript-url",
+      "axis": "defect",
       "severity": "warning",
       "message": "A `javascript:` scheme URL executes arbitrary script the moment the link is clicked or the resource is loaded — the browser treats everything after the scheme as code, not a navigation target. Never construct a link/image/script target from a `javascript:` scheme; if the target must be dynamic, validate the scheme against an http(s) allowlist before using it. Note most bundlers/linters miss this. Scope limit: this rule only catches the LITERAL `javascript:` form written directly in source (`href=\"javascript:...\"`, `.href = 'javascript:...'`, `setAttribute('href', 'javascript:...')`); a dynamic `href={someUrl}`/`.href = someUrl` whose value only turns out to be a `javascript:` URL at runtime is a different, harder taint-tracking class this rule does not attempt — see `location-assign-dynamic` for the closest DSL approximation of a dynamic-value sink.",
       "matcher": {
@@ -89,6 +77,7 @@
     },
     {
       "id": "location-assign-dynamic",
+      "axis": "defect",
       "severity": "warning",
       "message": "A navigation sink (`location`/`location.href` assignment, or `location.assign(...)`/`location.replace(...)`) whose value is not a plain literal — an open-redirect or DOM-XSS surface if that value is influenced by the URL, a query param, or any other untrusted input, since the browser will navigate to (or in some cases parse-and-execute) whatever string ends up there. Validate the target against an allowlist (a known set of paths, or a same-origin check) before navigating. Boundary note: `security/open-redirect` covers the SERVER-side sink (`res.redirect(req.*)`); this rule covers the CLIENT-side navigation sink instead — the two never overlap. A literal URL string (`location.href = '/login'`, `location.href = \"https://x.com\"`) stays silent, as does a bare `const location = ...` declaration (e.g. React Router's `useLocation()` result). A `base + '/path'` concat where a string path-literal (`+ '/...'`) is appended is also vetoed: prepending a base pins the origin/path, so the trailing dynamic segment is a path component, not a scheme/origin sink (the common `getBaseUrl() + '/admin/' + filename` idiom) — but a query-suffix concat (`base + '?next=' + q`) or a bare dynamic value (`location.href = returnUrl`) still fires, since neither pins the destination. Also receiver-aware like `no-document-write`: only the bare global `location`/`window.location` is flagged, so an arbitrary domain object's own `.location` field (`user.location = ...`, `job.location.assign(...)`) is never matched.",
       "matcher": {
@@ -107,6 +96,7 @@
     },
     {
       "id": "jquery-html-sink",
+      "axis": "defect",
       "severity": "warning",
       "message": "A jQuery HTML-insertion method (`.html()`, `.append()`, `.prepend()`, `.after()`, `.before()`, `.wrapAll()`) called with a non-literal argument — the same DOM-XSS surface as `.innerHTML`, since jQuery parses a string argument to these methods as HTML and inserts it. Use `.text()` for plain text, or sanitize the string first (e.g. DOMPurify) if HTML must genuinely be inserted. Boundary note: distinct from `unsafe-html-sink`, which covers the native `.innerHTML`/`.outerHTML`/`insertAdjacentHTML`/`dangerouslySetInnerHTML` sinks, not jQuery's own API surface. Gated on the file mentioning `jquery` or a `$(` call so a same-named method on an unrelated object (e.g. a custom `.append()`) doesn't fire in a non-jQuery codebase. Known imprecision: a DOM-element/jQuery-object argument (e.g. `.append($('<div>'))`) is lexically indistinguishable from an HTML string argument, so it also fires there — accepted as the FP-safe subset's price of admission, kept as a warning rather than critical.",
       "matcher": {
@@ -121,8 +111,9 @@
     },
     {
       "id": "vue-v-html",
+      "axis": "defect",
       "severity": "warning",
-      "message": "Vue's `v-html` directive renders its bound expression as raw HTML — the Vue analog of React's `dangerouslySetInnerHTML` — so it is XSS if the bound value is influenced by user input (a route param, API response, user-submitted content, etc.). Prefer `{{ }}` text interpolation, or sanitize the value (e.g. DOMPurify) before binding it.",
+      "message": "Vue's `v-html` directive renders its bound expression as raw HTML — the Vue analog of React's `dangerouslySetInnerHTML` — so it is XSS if the bound value is influenced by user input (a route param, API response, user-submitted content, etc.). Prefer `{{ }}` text interpolation, or sanitize the value (e.g. DOMPurify) before binding it. Suppressing a vetted case is the awkward part here: the marker window is the finding’s own line or the one directly above it, which inside a `.vue` `<template>` is markup, not code — a `// zzop-vue-v-html-ok` there renders as visible text in the page, and one placed in the `<script>` block does not suppress at all (measured). For a template hit, narrow the rule through the `rules` config entry (a path `exclude` on it, or `off`) instead; the marker is only writable when the finding is on a `.ts`/`.js` line.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|js|jsx|vue)$",
@@ -135,6 +126,7 @@
     },
     {
       "id": "markdown-and-html-sink-unsanitized",
+      "axis": "defect",
       "severity": "warning",
       "message": "A markdown-to-HTML render call (`marked`, `markdown-it`, `md.render`, `remark`, `showdown`) whose output reaches an HTML sink (`innerHTML`/`outerHTML`/`dangerouslySetInnerHTML`/`v-html`) in the same function/component with no sanitizer (`DOMPurify`/`sanitize`/`sanitizeHtml`/`xss`) anywhere in that same span — markdown renderers emit raw HTML by default, so piping their output straight into an HTML sink is stored XSS (a real corpus shape: `marked(article.body)` rendered via a sibling `v-html`). Run the output through DOMPurify/sanitize-html, or enable the renderer's own sanitize option if it has one. This is method-scan (co-occurrence within one function/component span): if the render call and the HTML sink live in different spans (e.g. render happens in a composable, the sink in the consuming component) this rule will not co-fire. It also cannot see across `.vue` single-file components today — this engine has no symbol/span parser for `.vue` yet (see `docs/rules/dsl-reference.md`'s method-scan doc), so the exact fe-vue corpus shape (`marked()` in `<script>`, `v-html` in the same file's `<template>`) is NOT caught by this rule despite `.vue` being in its file pattern for forward-compatibility; only same-file `.ts`/`.tsx`/`.js`/`.jsx` co-occurrence is caught.",
       "matcher": {

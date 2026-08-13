@@ -138,7 +138,9 @@ fn header(counts: &[BucketCount], scope: Option<&str>, top: usize) -> String {
     );
     out.push_str(
         "%% NOT rendered by this surface: crossLayerFindings (the drift/near-miss VERDICTS — findings \
-         about the join, not members of it), hostRekeyCounts, warnings/configWarnings/disclosure.\n",
+         about the join, not members of it), hostRekeyCounts, wildcardRoutePartitions (a route lifted \
+         OUT of the join for being an ANT pattern — it is in no bucket, so it is in no node either), \
+         warnings/configWarnings/disclosure.\n",
     );
     out
 }

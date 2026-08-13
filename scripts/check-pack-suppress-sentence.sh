@@ -26,8 +26,8 @@
 #     it. Its finding renders correctly today: `suppress_hint` opts out when the author already named
 #     the marker, so the engine appends nothing and there is no duplication to remove. Folding it
 #     would MOVE the sentence to the tail, i.e. change bytes for no gain.
-#   * FALSE POSITIVE on the four `call-scan` rules (`reliability/console-in-be`,
-#     `reliability/console-in-loop`, `reliability/env-outside-config`, `security/weak-password-hash`).
+#   * FALSE POSITIVE on the four `call-scan` rules (`code-hygiene/console-in-be`,
+#     `code-hygiene/console-in-loop`, `code-hygiene/env-outside-config`, `security/weak-password-hash`).
 #     They end with the `#`-disclosing variant, which IS a sentence the engine can emit — but each of
 #     them names its marker a SECOND time earlier in the message, so the opt-out fires and the engine
 #     appends nothing. Delete their tail sentence and the finding LOSES it. Their copy is load-bearing.

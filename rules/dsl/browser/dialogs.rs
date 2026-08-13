@@ -1,39 +1,9 @@
+//! `no-document-write` — the half of this file that stayed. `no-system-dialogs` was exported to
+//! `examples/packs/code-hygiene.json` on 2026-08-12 (`axis: opinion`); its tests live at
+//! `examples/packs/tests/system_dialogs.rs`, and the two fixtures that judged BOTH rules at once are
+//! duplicated there rather than cut, so neither side's negative lost what it was measured against.
+
 use crate::{scan, TempDir};
-
-#[test]
-fn bare_confirm_alert_prompt_each_flagged_no_system_dialogs() {
-    let dir = TempDir::new("zzop-browser");
-    dir.write(
-        "ui.ts",
-        "export function ask() {\n  const ok = confirm(\"sure?\");\n  if (ok) {\n    alert(\"done\");\n  }\n  return prompt(\"name\");\n}\n",
-    );
-    let out = scan(&dir);
-    let hits: Vec<_> = out
-        .findings
-        .iter()
-        .filter(|f| f.rule_id == "browser/no-system-dialogs")
-        .collect();
-    assert_eq!(hits.len(), 3, "expected 3 hits, got: {:?}", out.findings);
-    assert!(hits.iter().all(|f| f.file == "ui.ts"));
-}
-
-#[test]
-fn window_confirm_and_globalthis_alert_flagged_with_receiver() {
-    let dir = TempDir::new("zzop-browser");
-    dir.write(
-        "g.ts",
-        "export function f() {\n  window.confirm(\"a\");\n  globalThis.alert(\"b\");\n}\n",
-    );
-    let out = scan(&dir);
-    let hits: Vec<_> = out
-        .findings
-        .iter()
-        .filter(|f| f.rule_id == "browser/no-system-dialogs")
-        .collect();
-    assert_eq!(hits.len(), 2, "expected 2 hits, got: {:?}", out.findings);
-    assert!(hits.iter().any(|f| f.line == 2));
-    assert!(hits.iter().any(|f| f.line == 3));
-}
 
 #[test]
 fn document_write_and_writeln_each_flagged_no_document_write() {
@@ -51,6 +21,10 @@ fn document_write_and_writeln_each_flagged_no_document_write() {
     assert_eq!(hits.len(), 2, "expected 2 hits, got: {:?}", out.findings);
 }
 
+/// Receiver-awareness, from this pack's side: a dialog-shaped call on an unrelated object leaves the
+/// WHOLE pack silent. The `code-hygiene` copy of this fixture asserts the exported dialog rule declined
+/// it specifically; this one is the broader claim, and stays broad on purpose — it is also what catches
+/// an unrelated browser rule firing on the shape.
 #[test]
 fn member_call_on_unrelated_object_is_not_flagged() {
     let dir = TempDir::new("zzop-browser");
@@ -79,6 +53,11 @@ fn clean_frontend_file_has_zero_findings() {
         .all(|f| !f.rule_id.starts_with("browser/")));
 }
 
+/// The suppression fixture carries one marker per rule, and the markers are deliberately distinct — a
+/// shared one would let suppressing one rule silently suppress the other (the `rule_contracts`
+/// meta-test checks this). Kept whole here: the `zzop-no-system-dialogs-ok` line is what proves this
+/// pack's marker does not swallow the other rule's finding, which is only visible while both are in the
+/// file. `examples/packs/tests/system_dialogs.rs` holds the other half.
 #[test]
 fn browser_ok_comment_on_or_above_the_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-browser");
@@ -132,46 +111,8 @@ fn bare_document_write_still_flagged() {
     assert_eq!(hits[0].line, 2);
 }
 
-/// Interface/type-literal method signatures shaped like dialogs (`prompt(input: string): Promise<...>;`)
-/// are declarations, not calls, and are never flagged.
-#[test]
-fn dialog_shaped_interface_signatures_are_not_calls() {
-    let dir = TempDir::new("zzop-browser");
-    dir.write(
-        "api.ts",
-        "export interface NanoSession {\n  prompt(input: string): Promise<string>;\n  alert(msg: string): void;\n}\nexport function ask(s: NanoSession) {\n  return s.prompt(\"hi\");\n}\n",
-    );
-    let out = scan(&dir);
-    assert!(
-        !out.findings
-            .iter()
-            .any(|f| f.rule_id == "browser/no-system-dialogs"),
-        "{:?}",
-        out.findings
-    );
-}
-
-/// The signature-exclude pattern must not swallow a one-line method that has a body — the `{` keeps the
-/// line eligible, so a genuine `alert(` call inside it still fires.
-#[test]
-fn one_line_method_body_with_a_dialog_call_still_fires() {
-    let dir = TempDir::new("zzop-browser");
-    dir.write(
-        "cls.ts",
-        "export class Notifier {\n  warn(msg: string): void { alert(msg); }\n}\n",
-    );
-    let out = scan(&dir);
-    let hits: Vec<_> = out
-        .findings
-        .iter()
-        .filter(|f| f.rule_id == "browser/no-system-dialogs")
-        .collect();
-    assert_eq!(hits.len(), 1, "{:?}", out.findings);
-    assert_eq!(hits[0].line, 2);
-}
-
-// Both rules use `skip_comment_lines` plus a shared test-path `file_exclude_pattern`: `document.write`
-// in a test fixture path is not shipped browser code.
+// `no-document-write` uses `skip_comment_lines` plus the shared test-path `file_exclude_pattern`:
+// `document.write` in a test fixture path is not shipped browser code.
 
 #[test]
 fn document_write_inside_a_test_fixture_path_is_not_flagged() {

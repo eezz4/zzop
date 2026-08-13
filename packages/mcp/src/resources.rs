@@ -109,7 +109,7 @@ mod tests {
     /// `docs/contracts/rule-pack.schema.json`, as JSON that names every matcher kind — the
     /// machine-readable twin of the `validate_rule_pack` tool. The kind list below is DERIVED from
     /// nothing, so it is the one place a new matcher must be added by hand; the compiler-backed twin
-    /// (`zzop_facade`'s `every_struct_in_the_matcher_source_is_covered_by_the_parity_pin`) is what
+    /// (`zzop_facade`'s `every_struct_in_the_pack_definition_source_has_a_schema_mirror`) is what
     /// actually forces the schema definition to exist.
     #[test]
     fn rule_pack_schema_resource_is_the_dsl_pack_shape_contract() {

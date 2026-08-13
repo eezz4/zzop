@@ -93,12 +93,15 @@ pub use graph::{
 pub use manifest::{diff_manifests_json, manifest_json};
 pub use output::{FindingFilters, RunKnobs};
 // Verbatim `zzop-facade` entry points, re-exported (never wrapped) so a host product needs only this
-// crate: `explain`, `version` and `version_string` are pure reads over engine/rule data the facade owns,
+// crate: the two `explain` forms, `version` and `version_string` are pure reads over engine/rule data the
+// facade owns (`explain_with_config` reads the config file too — it widens which PACKS are read, not what
+// this crate does with the answer, so it re-exports on the same terms as its bundled-only twin),
 // and the two validators are structure-only checks with no shaping of this crate's own. Only what a host
 // actually calls is re-exported; `version_string` (the diagnostic form: version + every parser
 // fingerprint) earned its place back on 2026-07-27, when `zzop version --verbose` and
 // `zzop-mcp version --verbose` became its first host callers — this crate had been reaching it directly
 // for the `tool` field of `manifest`/`facts`/`graph` while both binaries could only report the bare form.
 pub use zzop_facade::{
-    explain, validate_envelope_only_json, validate_rule_pack_json, version, version_string,
+    explain, explain_with_config, validate_envelope_only_json, validate_rule_pack_json, version,
+    version_string,
 };

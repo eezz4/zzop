@@ -5,9 +5,11 @@
 // corpus/oss/fe-vue/src/services/api.ts: a class property's whole object literal projects as ONE
 // symbol span, so `method:"GET"` on line 434 paired with a `body:` under `method:"POST"` 47 lines
 // away. That is not a rule defect — it is the span boundary. The open question was never "is it
-// real" but "how many rules ride on the same shape", and 60 rules use this matcher while only a
-// handful fire on the corpus we have. A rule that is silent is not thereby correct; it is
-// unmeasured. This script separates those two.
+// real" but "how many rules ride on the same shape", and a large fraction of the bundle does, while
+// only a handful fire on the corpus we have. A rule that is silent is not thereby
+// correct; it is unmeasured. This script separates those two. The size is deliberately not written
+// here — it read `60` against a bundle that had since exported five method-scan rules, and this script
+// PRINTS the live figure on every run from the same `rules/dsl` walk the claim would have described.
 //
 // THE AXIS HAS TWO DIRECTIONS, and reading only the first undercounts it by more than half:
 //   FP — two or more `patterns` mis-paired across an oversized span (get-and-body's shape).

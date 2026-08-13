@@ -25,7 +25,7 @@ fn config_with_global_excludes(global_excludes: Vec<GlobalExclude>) -> EngineCon
 #[test]
 fn segment_bound_glob_matching_nothing_warns_with_double_star_hint() {
     let config = config_with(vec![Suppression {
-        rule: "browser/no-system-dialogs".to_string(),
+        rule: "code-hygiene/no-system-dialogs".to_string(),
         path: None,
         glob: Some("*.stories.tsx".to_string()),
     }]);
@@ -39,7 +39,7 @@ fn segment_bound_glob_matching_nothing_warns_with_double_star_hint() {
 #[test]
 fn segment_bound_glob_matching_a_root_file_warns_nothing() {
     let config = config_with(vec![Suppression {
-        rule: "browser/no-system-dialogs".to_string(),
+        rule: "code-hygiene/no-system-dialogs".to_string(),
         path: None,
         glob: Some("*.stories.tsx".to_string()),
     }]);

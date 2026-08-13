@@ -62,16 +62,21 @@ pub fn marker_channel(matcher: &Matcher) -> MarkerChannel {
 /// append nothing. 106 shipped rules spelled the `PerFileText` sentence into their own pack `message`
 /// by hand — byte-for-byte the same string, carrying no rule-specific information — until it moved
 /// here; the bytes below are therefore a PIN, not a wording choice (the append runs before the findings
-/// cache, so one changed byte rewrites 106 messages and invalidates every warm cache).
+/// cache, so one changed byte rewrites every message the fold now carries and invalidates every warm
+/// cache). That count is the HISTORICAL one and is left in the past tense on purpose: what the byte
+/// change would rewrite today is whatever is loaded today, which is not the same set — v0.30.0 moved
+/// part of it to `examples/packs/`.
 ///
 /// Three ways to get `None`, and only the third is about the author:
 /// - `NoAnchorLine` — no comment can suppress a symbol-scan finding, so offering one would be a lie.
 /// - `ReReadAnchorLine` — an io-scan marker is inert in envelope mode; the two shipped io-scan rules
 ///   spell that limitation out themselves at length, and a future one that does not must still never
 ///   get a flat "add this comment".
-/// - The author already named the marker. That is what makes the fold byte-safe: the 33 rules whose
+/// - The author already named the marker. That is what makes the fold byte-safe: the rules whose
 ///   wording says something this sentence cannot (a `#` leader, a carve-out, the envelope caveat) keep
-///   their own text and never get a second sentence bolted on after it.
+///   their own text and never get a second sentence bolted on after it. How many is not written here —
+///   it read `33` until the export and the `.py` marker widening both moved it, and the predicate in
+///   [`suppress_hint`]'s body (`rule.message.contains(&marker)`) is the only owner that cannot rot.
 ///
 /// The `PerFileText` sentence names `//` only, and deliberately does not try to name the widenings —
 /// `--` is per FILE (`.sql`) and `#` is per file family (`super::marker_leaders_for_path`'s hash

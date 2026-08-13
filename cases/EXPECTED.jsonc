@@ -5,6 +5,38 @@
   // isolated worktree so no other agent's rebuild could move it mid-run). The previous file predated the
   // v0.23.0 rule renaming and could not be scored at all.
   //
+  // ⚠ 2026-08-12: five `axis: opinion` rules of the `sql` pack left the BUNDLE for
+  // `examples/packs/sql-preferences.json` (`select-star`, `like-leading-wildcard`,
+  // `query-logic-density`, both `app-side-aggregation-*`). 18 expectations naming them were removed here
+  // and the coverage floor lowered by hand — a default run no longer loads those rules, so scoring them
+  // would report a permanent false negative. The FIXTURES stayed: every line they anchored is still in
+  // the corpus, so re-bundling a rule (or scoring a run that loads the pack) needs only the labels back.
+  // The prose below marks each place that assumed them.
+  //
+  // A SIXTH rule, `destructive-migration`, was exported in the same batch and RE-BUNDLED the same day,
+  // so its three labels below were removed and put back — see the `alembic/versions/` block.
+  //
+  // ⚠ 2026-08-12 (second export the same day): the LAST eight `axis: opinion` rules left the bundle for
+  // `examples/packs/code-hygiene.json` — `browser/no-system-dialogs`,
+  // `egress/localhost-url-literal-committed`, and `reliability`'s `env-nonnull-assert`,
+  // `process-exit-in-lib`, `console-in-be`, `console-in-loop`, `env-outside-config`,
+  // `promise-race-no-cancel`. 41 rule ids across 32 keys were removed here (29 keys emptied and dropped,
+  // 3 TRIMMED because they were co-fires with a rule that stayed), and the coverage floor lowered by hand
+  // in `scripts/detection-expected-baseline.txt`, whose header carries the per-tree numbers.
+  //
+  // The FIXTURES stayed, same as above, and one of them is worth naming because its whole reason for
+  // existing ran through these rules: `testconv` (cases/trees/test-conventions) exists to prove each
+  // language's idiomatic TEST path is declined while its production twin REPORTS, and the console rules
+  // were most of what reported. Every production file there still carries at least one bundled
+  // expectation, so the three benign test-path controls still prove something instead of passing
+  // vacuously — which is the only reason the tree was not left half-measuring itself.
+  //
+  // The one key that survived as EVIDENCE rather than as a leftover is `xfe/consumes.ts:7`. It expected
+  // `cross-layer/external-ip-literal` and `egress/localhost-url-literal-committed` on the same line, and
+  // that pair IS the partition: the native rule excludes only LOOPBACK, the DSL rule claimed loopback and
+  // every private range, and a private-range IP fired both. The native half stays scored; the other half
+  // is now in the exported pack, and a default run reports the line once instead of twice.
+  //
   // KEY FORMAT: "<sourceId>/<tree-relative path>:<line>" -> [ruleId, ...]. The sourceId prefix is
   // load-bearing (see scripts/measure/benchmark.mjs): tree-relative keys collapse locations in different
   // trees onto one key, silently turning a miss in one tree into a hit from another.
@@ -43,10 +75,12 @@
   //     verdict at most of those anchors and were checked to agree.
   //   * A `good` export is a negative control for THAT MODULE'S rule only. A few findings land in a
   //     `good` region under a DIFFERENT rule and are kept as true positives, because each verdict is
-  //     independently correct there: sql/select-star at raw-query-interpolation.ts:14 (the safe
-  //     `$queryRaw` tagged template still selects `*`), and cross-layer/unconsumed-endpoint on the
-  //     good routes of protected-path-no-auth-evidence/dev-path-no-guard-hint
-  //     (those routes really have no consumer).
+  //     independently correct there: cross-layer/unconsumed-endpoint on the good routes of
+  //     protected-path-no-auth-evidence/dev-path-no-guard-hint (those routes really have no
+  //     consumer). The other worked example used to be sql/select-star at
+  //     raw-query-interpolation.ts:14 — the safe `$queryRaw` tagged template still selects `*` —
+  //     and it is no longer scored: that rule left the bundle on 2026-08-12. The RULING it
+  //     illustrated is unchanged, and the line in the fixture is unchanged; only the label is gone.
   //
   // RESOLVED 2026-07-26 -- THE ONE WITHHELD FIRING IS GONE. `http/protected-path-no-auth-evidence` used to
   // fire inside `export function good()` of api/api/http.protected-path-no-auth-evidence.ts, and was
@@ -136,44 +170,23 @@
   // (and Rust for env-read only), so the language lanes below are planted per language rather than
   // discovered — each callee spelling is that platform's own (fmt.Println / System.out.println /
   // Console.WriteLine), and the structured-logger near-misses live in decoy/lib/ as benign controls.
-  "api/services/be-reliability.console-in-be.cs:7": ["reliability/console-in-be"],
-  "api/services/be-reliability.console-in-be.cs:11": ["reliability/console-in-be"],
-  "api/services/be-reliability.console-in-be.go:14": ["reliability/console-in-be"],
-  "api/services/be-reliability.console-in-be.go:18": ["reliability/console-in-be"],
-  "api/services/be-reliability.console-in-be.ts:5": ["reliability/console-in-be"],
-  "api/services/be-reliability.console-in-loop.cs:8": ["reliability/console-in-be","reliability/console-in-loop"],
-  "api/services/be-reliability.console-in-loop.cs:16": ["reliability/console-in-be"],
-  "api/services/be-reliability.console-in-loop.go:11": ["reliability/console-in-be","reliability/console-in-loop"],
-  "api/services/be-reliability.console-in-loop.go:19": ["reliability/console-in-be"],
   // Co-fire on purpose, not a labeling accident: the file sits under services/ and the call is a
   // console.log, so console-in-be's premise (WHERE the write is) and console-in-loop's (how many times it
   // runs) both hold on the same line. The decoy at decoy/lib/reliability.console-in-loop.decoy.ts is the
   // control that separates them — a console write in a function that also has a loop, but outside it.
-  "api/services/be-reliability.console-in-loop.ts:12": ["reliability/console-in-be","reliability/console-in-loop"],
   "api/services/be-reliability.debug-true-committed.ts:2": ["reliability/debug-true-committed"],
-  "api/services/be-reliability.env-nonnull-assert.ts:4": ["reliability/env-nonnull-assert","reliability/env-outside-config"],
-  "api/services/be-reliability.env-outside-config.ts:4": ["reliability/env-outside-config"],
   // The two bracket-key reads, added when env-outside-config moved from a line regex to the projected
   // call-site channel. `\bprocess\.env\.[A-Za-z0-9_]+` required a dot and a bare identifier, so a quoted
   // key (:18) and a computed key (:19) were both invisible to it; they are the entire measured widening
   // of that migration on this corpus, and they are planted rather than discovered so the widening has a
   // named home instead of showing up as drift somewhere else.
-  "api/services/be-reliability.env-outside-config.ts:18": ["reliability/env-outside-config"],
-  "api/services/be-reliability.env-outside-config.ts:19": ["reliability/env-outside-config"],
   // The four W2 language lanes of env-outside-config live in THIS tree (not their own language trees)
   // because only api-be declares the env-config-module attribute the rule is gated on. The Rust file's
   // two findings on two lines are the same function under two spellings (std::env::var / env::var) —
   // the channel's original-spelling contract; its env!() line is deliberately unlabeled and silent
   // (compile-time, not a process-environment read).
-  "api/services/be-reliability.env-outside-config.cs:7": ["reliability/env-outside-config"],
-  "api/services/be-reliability.env-outside-config.go:10": ["reliability/env-outside-config"],
-  "api/services/be-reliability.env-outside-config.go:14": ["reliability/env-outside-config"],
-  "api/services/be-reliability.env-outside-config.java:7": ["reliability/env-outside-config"],
-  "api/services/be-reliability.env-outside-config.rs:9": ["reliability/env-outside-config"],
-  "api/services/be-reliability.env-outside-config.rs:13": ["reliability/env-outside-config"],
   "api/services/be-reliability.interval-no-clear.ts:7": ["reliability/interval-no-clear"],
   "api/services/be-reliability.json-parse-no-try.ts:7": ["reliability/json-parse-no-try"],
-  "api/services/be-reliability.process-exit-in-lib.ts:5": ["reliability/process-exit-in-lib"],
   "api/services/be-reliability.promise-all-writes.ts:7": ["reliability/promise-all-and-writes"],
   "api/services/be-reliability.sync-fs-in-handler.ts:8": ["reliability/sync-fs-in-handler"],
   "api/services/be-security.api-key-in-url.ts:4": ["security/api-key-in-url"],
@@ -229,8 +242,7 @@
   "api/services/be-security.mass-assignment.ts:8": ["security/mass-assignment"],
   "api/services/be-security.open-redirect.ts:6": ["security/open-redirect"],
   "api/services/be-security.path-traversal.ts:9": ["security/path-traversal"],
-  "api/services/be-security.raw-query-interpolation.ts:10": ["security/raw-query-unsafe-api","sql/select-star"],
-  "api/services/be-security.raw-query-interpolation.ts:14": ["sql/select-star"],
+  "api/services/be-security.raw-query-interpolation.ts:10": ["security/raw-query-unsafe-api"],
   "api/services/be-security.ssrf-user-url.ts:7": ["security/ssrf-user-url"],
   "api/services/be-security.timing-unsafe-compare.ts:5": ["security/timing-unsafe-compare"],
   // W4 of the call-site channel (2026-08-03): weak-password-hash became a call-scan over `hash-call`
@@ -247,13 +259,9 @@
   "api/services/be-security.weak-password-hash.py:10": ["security/weak-password-hash","security/weak-crypto"],
   "api/services/be-security.weak-password-hash.ts:6": ["security/weak-password-hash","security/weak-crypto"],
   "api/services/be-security.weak-token-random.ts:5": ["security/weak-token-random"],
-  "api/services/fullstack.localhost-egress-committed.ts:3": ["egress/localhost-url-literal-committed"],
   "api/services/fullstack.ws-no-auth.ts:6": ["egress/ws-no-auth"],
   "api/services/perf.api-in-loop.ts:6": ["perf/api-in-loop"],
   "api/services/security.taint-flow.ts:8": ["security/taint-flow"],
-  "api/services/sql.app-side-aggregation-filter-length.ts:11": ["sql/app-side-aggregation-filter-length"],
-  "api/services/sql.app-side-aggregation-reduce.ts:10": ["sql/app-side-aggregation-reduce"],
-  "api/services/sql.query-logic-density.ts:3": ["sql/query-logic-density"],
 
   // ==== THE METHOD-SCAN SPAN-BOUNDARY AXIS (trees/api-be/spans/, added 2026-08-08) ==================
   // Read `trees/api-be/spans/README.md` first — it owns the mechanism. In one line: a TypeScript class
@@ -283,6 +291,17 @@
   // db/empty-catch-and-write — FP-PROBE at :23 (silent since the repair; the empty catch belongs to a
   // socket teardown, the write to another member). TP-CONTROL at :33.
   "api/spans/db.empty-catch-and-write.span.ts:33": ["db/empty-catch-and-write"],
+  // ACCESSOR ANCHOR at :51 (added 2026-08-13). A same-name get/set pair used to project ONE leaf, so
+  // the getter's span made `drop_outer_spans` discard the class span and the SETTER's body — a real
+  // swallowed write — sat in no span at all. This line is the FN that repair recovers: revert
+  // `symbol_shapes::class`'s `(is_static, name, is_setter)` dedup key and this key alone goes red.
+  "api/spans/db.empty-catch-and-write.span.ts:51": ["db/empty-catch-and-write"],
+  // OVERLOAD ANCHOR at :71 (added 2026-08-13). Same dedup line, worse outcome: of three same-named
+  // `archive` members the key kept the FIRST — an overload SIGNATURE with no body — so the leaf shipped
+  // with NO span while the sibling `flush` leaf still dropped the class span. This line is the FN that
+  // repair recovers: make the dedup key keep the first member again, instead of the one that has a
+  // body, and this key alone goes red.
+  "api/spans/db.empty-catch-and-write.span.ts:71": ["db/empty-catch-and-write"],
   // db/multi-write-no-tx — FP-PROBE at :25 (silent since the repair; outbox insert and seat-count
   // stamp are two members, two unrelated jobs). TP-CONTROL at :32.
   "api/spans/db.multi-write-no-tx.span.ts:32": ["db/multi-write-no-tx"],
@@ -441,7 +460,9 @@
   "island/deadB.ts:1": ["unreachable"],
   "island/orphan.ts:1": ["unreachable"],
   // ---- THE JAVA LANE OF FOUR MULTI-LANGUAGE RULES (added 2026-07-29) -----------------------------
-  // Fifteen `security` rules admit `.java`. Eleven had a Java fixture (UnsafeController/UserRepository
+  // AS OF THAT DATE fifteen `security` rules admitted `.java` (today's count is 18 and lives in one
+  // place, docs/rules/catalog.md's `security` header — do not restate it here). Eleven of the fifteen
+  // had a Java fixture (UnsafeController/UserRepository
   // below); these four admitted `.java` in their file_pattern but were only ever exercised on TypeScript,
   // so the Java half of each regex shipped unmeasured. Adjudicated by reading each anchored line — every
   // one sits on a planted defect whose `good` counterpart is the next line and correctly does NOT fire.
@@ -454,8 +475,6 @@
   // already sit under a src/main/java layout and the fixture only needs a services/ path segment for
   // console-in-be's backend-path gate; the env-read lane cannot live here (no env-config-module
   // attribute is declared for this tree, so env-outside-config does not run — see the api-be twin).
-  "java/src/main/java/com/example/svc/services/ConsoleHygiene.java:9": ["reliability/console-in-be"],
-  "java/src/main/java/com/example/svc/services/ConsoleHygiene.java:14": ["reliability/console-in-be","reliability/console-in-loop"],
   "java/src/main/java/com/example/svc/CredentialsConfig.java:14": ["security/hardcoded-secret"],
   "java/src/main/java/com/example/svc/CredentialsConfig.java:19": ["security/conn-string-credentials"],
   "java/src/main/java/com/example/svc/CredentialsConfig.java:24": ["security/api-key-in-url"],
@@ -498,16 +517,19 @@
   // arms read the transform string rather than merely co-occurring with the word `Cipher`.
   "java/src/main/java/com/example/svc/PayloadCipher.java:19": ["security/weak-cipher"],
   "java/src/main/java/com/example/svc/PayloadCipher.java:27": ["security/weak-cipher"],
-  // TWO labels since 2026-08-10, and the pairing is the CO-FIRE RULING for this line rather than an
-  // accident of widening. `sql/select-star` gained `.java` in that batch, and this line — `"SELECT * FROM
-  // users WHERE name = '" + name + "'"` — is genuinely both defects at once: the concatenation is the
-  // injection (warning, fix = bind the parameter) and the `*` is the over-fetch (info, fix = name the
-  // columns). Neither repair performs the other, and neither rule's silence would imply the other's, so
-  // this is the weak-crypto / weak-password-hash ruling one domain over — a general and a specific judge
-  // reading the same line for different reasons is the answer, not a duplicate. The three DESTRUCTIVE
-  // siblings cannot reach this line at all: they veto on exactly the `" + ident` concatenation
-  // `security/sql-string-concat` requires, so those four partition rather than share.
-  "java/src/main/java/com/example/svc/UnsafeController.java:19": ["security/sql-string-concat","sql/select-star"],
+  // ONE label since 2026-08-12, and it was TWO between 2026-08-10 and then. The pairing was the
+  // CO-FIRE RULING for this line rather than an accident of widening: `sql/select-star` gained `.java`
+  // in that batch, and this line — `"SELECT * FROM users WHERE name = '" + name + "'"` — is genuinely
+  // both defects at once. The concatenation is the injection (warning, fix = bind the parameter) and
+  // the `*` is the over-fetch (info, fix = name the columns); neither repair performs the other, and
+  // neither rule's silence would imply the other's — the weak-crypto / weak-password-hash ruling one
+  // domain over. That ruling still stands and the source line is untouched. What changed is only
+  // which rules a DEFAULT run holds: `select-star` moved to `examples/packs/sql-preferences.json`, so
+  // the second label would now score a permanent FN. Score a run that loads that pack and the pair
+  // comes back. The three DESTRUCTIVE siblings still cannot reach this line at all: they veto on
+  // exactly the `" + ident` concatenation `security/sql-string-concat` requires, so they partition
+  // rather than share.
+  "java/src/main/java/com/example/svc/UnsafeController.java:19": ["security/sql-string-concat"],
   "java/src/main/java/com/example/svc/UnsafeController.java:25": ["security/weak-crypto"],
   "java/src/main/java/com/example/svc/UnsafeController.java:30": ["security/cmd-injection"],
   "java/src/main/java/com/example/svc/UnsafeController.java:35": ["security/hardcoded-password"],
@@ -550,7 +572,6 @@
   // the SAME reason its TypeScript fixture cannot be committed — see the `untracked` note above. Its Rust
   // lane is therefore extension-widened but corpus-unmeasured, and this paragraph is that disclosure.
   "rust/src/config.rs:6": ["egress/http-url-literal"],
-  "rust/src/config.rs:11": ["egress/localhost-url-literal-committed"],
   "rust/src/config.rs:16": ["security/cors-wildcard"],
   "rust/src/config.rs:30": ["reliability/debug-true-committed"],
   // 2026-08-02 (U62): csp-weak-or-disabled widened to `.rs` — its unsafe-inline / default-src-wildcard
@@ -593,26 +614,44 @@
   // client and must stay silent.
   "rust/src/handlers.rs:43": ["reliability/reqwest-no-timeout"],
   "rust/src/handlers.rs:47": ["reliability/reqwest-no-timeout"],
+  // 2026-08-11: the same method-scan shape inside an INLINE `mod`. A method-scan rule rides
+  // `SourceSymbol` body spans, and until `zzop_parser_rust::lang::symbols` qualified nested items
+  // (`file.rs#legacy::run_report`) it emitted no symbol for them at all — so an inline module's whole
+  // body sat in no span and this pair was invisible while the identical one at file top level scored.
+  // The two anchors are not redundant: reverting the `Item::Mod` walk takes this line and leaves :11.
+  "rust/src/handlers.rs:76": ["security/command-and-interpolation"],
+  // 2026-08-13: the same method-scan shape as a `trait` DEFAULT body. Until `lang::symbols` walked a
+  // trait's associated items it emitted only the trait's own span-less `Interface` symbol, so a default
+  // body — code that RUNS unless an impl overrides it — sat in no span. This is an EXTRACTION-SCOPE gap
+  // rather than a leaf hole: the trait's span is `None`, so nothing was being discarded, the region was
+  // simply never projected. Three anchors, three walks: reverting the trait walk takes this line and
+  // leaves :11 and :76. The trait's body-LESS signature (`fn label`) carries no span at all and its good
+  // twin sits in the same trait, so a single span over the whole item list does not satisfy this either.
+  "rust/src/handlers.rs:104": ["security/command-and-interpolation"],
   // `inline_fixtures.rs` scores the test-region gate in BOTH directions, out of one `#[cfg(test)] mod
   // tests`. THREE of its four literals must stay unscored — `sql/select-star`, `sql/delete-no-where`,
-  // `egress/localhost-url-literal-committed` judge code that RUNS, and the gate
+  // `code-hygiene/localhost-url-literal-committed` judge code that RUNS, and the gate
   // (`zzop_parser_rust::extract_test_spans` -> `SourceFile::test_spans` -> `dsl::eval`) is what keeps
-  // them out; a gate that stops working turns them into three FALSE POSITIVES here rather than into
-  // silence somewhere nobody reads. Seen red on purpose — removing BOTH test attributes takes this run
-  // from FP 0 to FP 3 (removing only the `cfg` one does NOT, which is a trap that file's own header
-  // records). The FOURTH is scored below: `security/hardcoded-secret` declares `scan_test_regions`
-  // (2026-08-02), because a credential at rest is leaked by the commit and no test attribute un-commits
-  // it — so its silence would be an FN, not a pass. That line was deliberately unlabeled before the flag
-  // existed, which is precisely the wrong half of the behavior this corpus was pinning. `:43` is the
-  // SHIPPED control in the same file: without it, a rule that simply died on `.rs` would look identical
-  // to a working gate.
-  "rust/src/inline_fixtures.rs:43": ["sql/select-star"],
+  // them out; a gate that stops working turns them into FALSE POSITIVES here rather than into
+  // silence somewhere nobody reads. Seen red on purpose — removing BOTH test attributes used to take
+  // this run from FP 0 to FP 3 (removing only the `cfg` one does NOT, which is a trap that file's own
+  // header records). It is FP 1 now: `sql/select-star` and then
+  // `code-hygiene/localhost-url-literal-committed` left the bundle on 2026-08-12 (two separate exports
+  // the same day), so TWO of the three in-test literals are judged by no default-loaded rule and only
+  // `sql/delete-no-where` still exercises the gate from this file. The FOURTH is scored below:
+  // `security/hardcoded-secret` declares `scan_test_regions` (2026-08-02), because a credential at rest
+  // is leaked by the commit and no test attribute un-commits it — so its silence would be an FN, not a
+  // pass. That line was deliberately unlabeled before the flag existed, which is precisely the wrong
+  // half of the behavior this corpus was pinning.
+  // ⚠ `:43` WAS the shipped control in the same file (a production `SELECT *` outside the test region),
+  // and it is gone with `select-star`. That control answered "is this rule alive on `.rs` at all?", so
+  // a `select-star` that simply died on `.rs` and a working gate now look identical HERE. The question
+  // is not unanswered — `rust/src/queries.rs:23/32/41` are three live `.rs` positives from the same
+  // language lane — but it is no longer answered by this rule, which is the cost of the export.
   "rust/src/inline_fixtures.rs:53": ["security/hardcoded-secret"],
-  "rust/src/queries.rs:13": ["sql/select-star"],
   "rust/src/queries.rs:23": ["sql/delete-no-where"],
   "rust/src/queries.rs:32": ["sql/update-no-where"],
   "rust/src/queries.rs:41": ["sql/truncate-in-app-code"],
-  "rust/src/queries.rs:47": ["sql/like-leading-wildcard"],
   "rust/src/queries.rs:57": ["security/sql-format-interpolation"],
   // The partition pin (see the fixture's own header): an UPDATE template whose `{}` sits between
   // inner `'` quotes. ONE label on purpose — `sql/update-no-where` co-firing here (it once did: the
@@ -662,11 +701,15 @@
   // without that arm this widening would have shipped three critical false positives on deliberate
   // one-time writes. A silent-only fixture could not tell that apart from the disclosure rule quietly
   // dropping `.py`, which is why both halves are labeled.
+  //
+  // ⚠ These three labels were DELETED on 2026-08-12 when `destructive-migration` was exported to
+  // `examples/packs/sql-preferences.json`, and restored the same day when it came back. That deletion was
+  // correct given the export — a default run cannot score a rule it does not load — which is exactly why
+  // it is worth recording: the gate went green on a fixture reduced to the half this comment had already
+  // said must never stand alone. What caught the export was the CORPUS, not this file.
   "sqllang/Api/Queries.cs:7": ["sql/delete-no-where"],
   "sqllang/Api/Queries.cs:12": ["sql/update-no-where"],
   "sqllang/Api/Queries.cs:17": ["sql/truncate-in-app-code"],
-  "sqllang/Api/Queries.cs:22": ["sql/select-star"],
-  "sqllang/Api/Queries.cs:27": ["sql/like-leading-wildcard"],
   "sqllang/Api/Queries.cs:35": ["sql/delete-no-where"],
   "sqllang/alembic/versions/0001_backfill_ids.py:23": ["sql/destructive-migration"],
   "sqllang/alembic/versions/0001_backfill_ids.py:24": ["sql/destructive-migration"],
@@ -674,22 +717,15 @@
   "sqllang/services/queries.go:9": ["sql/delete-no-where"],
   "sqllang/services/queries.go:14": ["sql/update-no-where"],
   "sqllang/services/queries.go:19": ["sql/truncate-in-app-code"],
-  "sqllang/services/queries.go:24": ["sql/select-star"],
-  "sqllang/services/queries.go:29": ["sql/like-leading-wildcard"],
   "sqllang/services/queries.go:37": ["sql/delete-no-where"],
-  "sqllang/services/queries.go:53": ["sql/like-leading-wildcard"],
   "sqllang/services/queries.py:12": ["sql/delete-no-where"],
   "sqllang/services/queries.py:21": ["sql/update-no-where"],
   "sqllang/services/queries.py:30": ["sql/truncate-in-app-code"],
-  "sqllang/services/queries.py:39": ["sql/select-star"],
-  "sqllang/services/queries.py:48": ["sql/like-leading-wildcard"],
   "sqllang/services/queries.py:61": ["sql/delete-no-where"],
   "sqllang/services/queries.py:87": ["sql/update-no-where"],
   "sqllang/src/main/java/com/example/sqllangs/Queries.java:16": ["sql/delete-no-where"],
   "sqllang/src/main/java/com/example/sqllangs/Queries.java:21": ["sql/update-no-where"],
   "sqllang/src/main/java/com/example/sqllangs/Queries.java:26": ["sql/truncate-in-app-code"],
-  "sqllang/src/main/java/com/example/sqllangs/Queries.java:31": ["sql/select-star"],
-  "sqllang/src/main/java/com/example/sqllangs/Queries.java:36": ["sql/like-leading-wildcard"],
   // ---- end sql-langs lane --------------------------------------------------------------------------
   // ---- test-conventions lane (added 2026-08-10) ----------------------------------------------------
   // THE PRODUCTION HALVES OF THREE PAIRS. Each of the six rows below has a byte-identical twin on the
@@ -707,11 +743,8 @@
   // `line_pattern` requires a credential word on the anchored line itself, which is one line down. The
   // Python twin at `services/login.py:13` has both on one line and carries both, which is what makes
   // the C# row's single entry a measurement rather than an omission.
-  "testconv/Api/UserService.cs:14": ["reliability/console-in-loop","reliability/console-in-be"],
   "testconv/Api/UserService.cs:20": ["security/weak-crypto"],
-  "testconv/services/handler.go:12": ["go/goroutine-in-loop","reliability/console-in-loop","reliability/console-in-be"],
-  "testconv/services/handler.go:13": ["reliability/console-in-loop","reliability/console-in-be"],
-  "testconv/services/login.py:9": ["reliability/console-in-loop","reliability/console-in-be"],
+  "testconv/services/handler.go:12": ["go/goroutine-in-loop"],
   "testconv/services/login.py:13": ["security/weak-crypto","security/weak-password-hash"],
   // ---- end test-conventions lane -------------------------------------------------------------------
   "trpc/router.ts:9": ["cross-layer/unconsumed-procedure"],
@@ -723,17 +756,12 @@
   // per-source change this line reported nothing and `api` alone carried the whole finding.
   "worker/jobs.ts:8": ["cross-layer/db-table-name-in-multiple-sources"],
   "web/rules/be-security.localstorage-jwt.ts:6": ["security/localstorage-jwt"],
-  "web/rules/be-security.secret-env-in-fe.tsx:3": ["reliability/env-outside-config","security/secret-env-in-fe"],
+  "web/rules/be-security.secret-env-in-fe.tsx:3": ["security/secret-env-in-fe"],
   "web/rules/browser.no-document-write.ts:3": ["browser/no-document-write"],
-  "web/rules/browser.no-system-dialogs.ts:5": ["browser/no-system-dialogs"],
   "web/rules/dead.orphan.tsx:1": ["dead-candidates"],
   "web/rules/dead.orphan.tsx:4": ["unimported-export"],
   "web/rules/fullstack.get-with-body.ts:5": ["egress/get-and-body"],
   "web/rules/fullstack.mixed-content-egress.ts:2": ["egress/http-url-literal"],
-  "web/rules/typescript.as-cast.tsx:2": ["typescript/as-cast","typescript/no-explicit-any"],
-  "web/rules/typescript.async-handler-no-try.tsx:6": ["typescript/async-handler-no-try"],
-  "web/rules/typescript.no-explicit-any.ts:2": ["typescript/no-explicit-any"],
-  "web/rules/typescript.unhandled-promise-use-effect.tsx:8": ["typescript/use-effect-async-callback"],
   // The consumed->CRITICAL half of cross-layer/sensitive-response-field: xfe/consumesSession.ts
   // fetches GET /session/report, so the declared sessionToken response field escalates. Anchored at
   // the PROVIDE side (the DTO is what gets fixed), so no unconsumed-endpoint co-fire here.
@@ -761,7 +789,7 @@
   // MERGED KEYS (were "<cross>/consumes.ts:{7,8}"): the cross-layer external-* rule and the per-tree rule
   // land on the same consume line -- 10.0.0.5 is both an IP literal and private-range egress; the vendor
   // URL carries both a secret query param (cross) and an api key (per-tree).
-  "xfe/consumes.ts:7": ["cross-layer/external-ip-literal","egress/localhost-url-literal-committed"],
+  "xfe/consumes.ts:7": ["cross-layer/external-ip-literal"],
   // `external-host-in-multiple-sources` is the xfe half of the vendor.example.com pair; `xbe/provides.ts:18`
   // above is the other. Same one-copy-per-participating-source change as duplicate-route, and the reason
   // it matters here is that the two calling sites live in DIFFERENT trees — a single anchor made the
@@ -831,8 +859,6 @@
     "decoy/lib/sql.app-side-aggregation.decoy.ts",
     "decoy/lib/sql.no-where.decoy.ts",
     "decoy/lib/sql.select-star.decoy.ts",
-    "decoy/lib/typescript.as-cast.decoy.ts",
-    "decoy/lib/typescript.parseint-no-radix.decoy.ts",
     "decoy/services/reliability.fetch-no-timeout.decoy.ts",
     "decoy/services/reliability.json-parse-no-try.decoy.ts",
     "decoy/web/security.secret-env-in-fe.decoy.ts",

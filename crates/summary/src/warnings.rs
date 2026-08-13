@@ -1,9 +1,15 @@
-//! The TWO honesty-channel merge helpers every query lane stamps on its reply — `configWarnings`
-//! ([`facade_config_warnings`]) and the engine's own `warnings` ([`engine_warnings`]) — with one
-//! definition of each merge contract (and of its absent-field degradation guarantee) instead of a copy
-//! per lane.
+//! The honesty channels a reply carries — MERGE helpers that gather them
+//! ([`facade_config_warnings`]/[`tree_config_warnings`] for `configWarnings`, [`engine_warnings`] for
+//! the engine's own), each holding one definition of its merge contract and its absent-field
+//! degradation guarantee instead of a copy per lane — plus one helper that PRODUCES a warning rather
+//! than merging one ([`unknown_rule_filter_warning`]).
 //!
-//! Both helpers read the MULTI-tree `analyzeTrees` document, and both read it PER TREE. That is the
+//! ⚠ This header opened "the TWO merge helpers" until 2026-08-12, when the producer landed and made
+//! that sentence describe less than the file held. Left on the record because the commit that did it
+//! was one of ten that day fixing prose which had outlived its code: adjacency is not the property
+//! that keeps prose true. The producer moved to [`rule_filter`] in the same edit, for the line cap.
+//!
+//! The merge helpers read the MULTI-tree `analyzeTrees` document, and both read it PER TREE. That is the
 //! shape of the document, not a preference: `MultiAnalyzeOutputView` carries `warnings` at its top level
 //! for the join's own self-reports and carries no `configWarnings` there at all, so a lane that reads
 //! either channel off the root alone contributes nothing on every run and publishes `[]` — which in this
@@ -68,6 +74,10 @@ pub(crate) fn tree_config_warnings(analysis: &serde_json::Value) -> Vec<serde_js
         .flat_map(|t| facade_config_warnings(&t["output"]))
         .collect()
 }
+
+mod rule_filter;
+
+pub(crate) use rule_filter::unknown_rule_filter_warning;
 
 #[cfg(test)]
 mod tests {

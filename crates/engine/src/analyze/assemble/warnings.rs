@@ -17,6 +17,8 @@ use std::collections::BTreeMap;
 /// `AnalyzeOutput::warnings`' documented stability, not correctness (each tripwire is independent). S5
 /// and S7 are now per-app censuses: each may contribute MULTIPLE entries (one per below-floor app-root,
 /// in sorted `app_roots` order) plus an optional tree-wide fallback, all of S5's before all of S7's.
+/// S15 is appended LAST and is the one entry that detects nothing: it rides whichever of the others
+/// fired, so it can only be decided once they all have.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn framework_silence_warnings(
     root: &std::path::Path,
@@ -29,6 +31,11 @@ pub(super) fn framework_silence_warnings(
     loc_by_path: &std::collections::HashMap<String, u32>,
     // The run's declared `vocabulary.fetchWrapperExportNames` — S7's wrapper-module recognizer.
     wrapper_export_names: &[&str],
+    // The run's rule gate — S15's ONLY use, and the reason this function takes config at all: its
+    // disclosure NAMES rule ids, and naming a rule the user switched off is a worse answer than
+    // naming none. Deliberately `&RuleConfig` and not the whole `EngineConfig`: no other tripwire
+    // here reads config, so widening the parameter would advertise a coupling that does not exist.
+    rule_gate: &zzop_core::RuleConfig,
 ) -> Vec<String> {
     let mut warnings = Vec::new();
 
@@ -41,9 +48,15 @@ pub(super) fn framework_silence_warnings(
     candidate_rels.extend(java_rels.iter().cloned());
     candidate_rels.sort();
     candidate_rels.dedup();
+    // `provide_side_alarm`/`consume_side_alarm` below record WHICH sibling already told the user a
+    // channel came up empty — S15 at the bottom rides them rather than gating itself, because "the
+    // channel is empty" and "an empty channel here is a surprise" are different judgments and the
+    // siblings own the second one. A frontend tree with no routes is not a gap.
+    let mut provide_side_alarm = false;
     if let Some(w) =
         crate::framework_silence::controller_silence_warning(root, &candidate_rels, http_count)
     {
+        provide_side_alarm = true;
         warnings.push(w);
     }
 
@@ -54,6 +67,7 @@ pub(super) fn framework_silence_warnings(
     if let Some(w) =
         crate::framework_silence::server_framework_import_warning(package_import_files, http_count)
     {
+        provide_side_alarm = true;
         warnings.push(w);
     }
 
@@ -63,10 +77,12 @@ pub(super) fn framework_silence_warnings(
     // records — keyed AND unresolved — per `client_library_import_warning`'s own doc on why. Pure map
     // lookup over `package_import_files`, no disk IO, so unconditional.
     let http_consumes_count = io_consumes.iter().filter(|c| c.kind == "http").count();
+    let mut consume_side_alarm = false;
     if let Some(w) = crate::framework_silence::client_library_import_warning(
         package_import_files,
         http_consumes_count,
     ) {
+        consume_side_alarm = true;
         warnings.push(w);
     }
 
@@ -193,6 +209,7 @@ pub(super) fn framework_silence_warnings(
         // `fetch(` call sites within an app whose keyed http consumes stay near-zero. May push multiple
         // per-app entries + an optional tree-wide fallback. Additive to S1-S4 above.
         if census_gate {
+            let before = warnings.len();
             warnings.extend(crate::framework_silence::builtin_fetch_census(
                 root,
                 &all_walked_rels,
@@ -207,6 +224,33 @@ pub(super) fn framework_silence_warnings(
                 &keyed_by_root,
                 &roots,
                 wrapper_export_names,
+            ));
+            // Both censuses are consume-side alarms like S4 — counted by whether they PUSHED, since
+            // each may emit any number of per-app entries (or none).
+            consume_side_alarm |= warnings.len() > before;
+        }
+    }
+
+    // S15 — empty-channel consequence, appended last (see this function's doc). Two independent
+    // gates, one per channel: a sibling must have raised the alarm AND the channel must be EXACTLY
+    // empty. The siblings fire at NEAR-zero (`MIN_PROVIDES_FLOOR`), and "these rules can produce no
+    // finding" is only true at zero — a tree that kept two extracted routes still has two for them to
+    // judge, so quoting the measurement there would be the same half-truth in the other direction.
+    for (alarm, empty, channel) in [
+        (
+            provide_side_alarm,
+            http_count == 0,
+            zzop_core::rule_channels::reads::HTTP_PROVIDES,
+        ),
+        (
+            consume_side_alarm,
+            http_consumes_count == 0,
+            zzop_core::rule_channels::reads::HTTP_CONSUMES,
+        ),
+    ] {
+        if alarm && empty {
+            warnings.extend(crate::framework_silence::channel_consequence_warning(
+                channel, rule_gate,
             ));
         }
     }

@@ -116,6 +116,38 @@ pub(super) fn emit_type(
     let Some(body) = node.child_by_field_name("body") else {
         return; // structurally required by the grammar — defensive, never guessed on an ERROR subtree.
     };
+
+    // `crates/core/src/ir.rs`'s body-span contract: `None` is the POSITIVE claim that this declaration
+    // encloses nothing scannable, and it names "a TS `type`/`interface`" and a Rust `trait` as exactly
+    // that. An `interface` / `@interface` body is a SIGNATURE list; a span over it makes
+    // `drop_outer_spans` treat it as scannable and claim a per-member containment the language does not
+    // have. Measured 2026-08-11 on the reference corpus BEFORE this gate: java/interface/span 24,
+    // cs/interface/span 4, against ts 79 / tsx 17 / rs 1 all correctly NONE — the same IR `kind` meant
+    // two different things depending on which parser produced it, which is what an external adapter
+    // author would have copied.
+    //
+    // Java interfaces MAY carry `default`/`static` bodies, and those keep their own leaves: measured on
+    // `interface N { String getCursor(); default String both() {...} }` -> `N.both` projects 5..7 while
+    // the abstract pair is correctly `none`. So nothing becomes unreachable here. The container span was
+    // only ever surviving `drop_outer_spans` in the case where the interface had NO default method at
+    // all — i.e. exactly when it covered nothing.
+    //
+    // ENUM DELIBERATELY KEEPS ITS SPAN, and the reason is the leaf obligation rather than symmetry: a
+    // Java enum body holds real method bodies, and its CONSTANT bodies (`A { void hidden() {...} }`) are
+    // NOT projected as leaves — measured, `E.hidden` gets no symbol. Removing the container span would
+    // delete the only cover for a region with no leaf, which is the opposite of what the contract asks.
+    // That missing leaf is the real gap and is tracked separately; a Rust `enum` is `None` because it
+    // has no bodies to cover at all, not because "enum" is the same word.
+    let is_signature_list = matches!(
+        node.kind(),
+        "interface_declaration" | "annotation_type_declaration"
+    );
+    let (body_start, body_end) = if is_signature_list {
+        (None, None)
+    } else {
+        (Some(line), Some(end_line_of(body)))
+    };
+
     out.push(SourceSymbol {
         id: format!("{rel}#{qualified_name}"),
         file: rel.to_string(),
@@ -124,8 +156,8 @@ pub(super) fn emit_type(
         line,
         exported,
         is_default: false,
-        body_start: Some(line),
-        body_end: Some(end_line_of(body)),
+        body_start,
+        body_end,
         write_sites: Vec::new(),
     });
 

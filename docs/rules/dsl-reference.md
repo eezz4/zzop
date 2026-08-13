@@ -18,7 +18,6 @@ names a label no `patterns` entry declares).
 ```json
 {
   "id": "sql",
-  "framework": "any",
   "schema_version": 1,
   "fragments": { "sql-where-veto": "(?i)\\bWHERE\\b|\\$\\{|\\+\\s*[\"'`]|[\"'`]\\s*(?:\\.to_(?:string|owned)\\(\\)\\s*)?\\+" },
   "rules": [ /* RuleDef[] */ ]
@@ -28,9 +27,9 @@ names a label no `patterns` entry declares).
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `id` | string | — | Pack id; a finding's `rule_id` is `"{id}/{rule.id}"`. |
-| `framework` | string | `"any"` | Declared target environment (`"any"` \| `"react"` \| `"prisma"` \| ...). Currently informational: it is parsed and carried on the loaded pack, but no engine code path filters on it today — nothing in the engine decides "what target is this tree", so there is no target gating for it to feed. The per-file pre-filter that does run is path-based (`pack_loader::applies_to`, over each rule's `file_pattern`), not framework-based. |
 | `schema_version` | u32 | `1` | DSL schema this pack was authored against — see [Schema version policy](#schema-version-policy). |
 | `fragments` | `{ name: regex }` | `{}` | Named regex fragments this pack can reference by `${NAME}` — see [Fragments (`${NAME}` references)](#fragments-name-references). |
+| `exported_from` | `{ zzop_version, contract }` \| absent | absent | Retrieval stamp, never authored by hand — see [Retrieval stamp](#retrieval-stamp-exported_from). |
 | `rules` | `RuleDef[]` | — | The pack's rules. |
 
 ## Fragments (`${NAME}` references)
@@ -89,6 +88,7 @@ factored out the duplication, it never changed which files any rule scans.
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `id` | string | — | Rule id within the pack. |
+| `axis` | `"defect"` \| `"opinion"` | `"defect"` | What KIND of claim this rule makes — see [Axis](#axis-defect-vs-opinion) below. |
 | `severity` | `"critical"` \| `"warning"` \| `"info"` | — | Default severity (overridable per-id via `RuleConfig::severity_overrides`). |
 | `message` | string | — | Human-facing cause/fix-hint, copied verbatim into every finding — but NOT the whole of what ships: the engine auto-appends TWO sentences at runtime, the suppress-marker line and the disable hint (see the note right below this table). |
 | `matcher` | `Matcher` | — | One of the matcher shapes below (`type` tag, kebab-case). |
@@ -96,6 +96,56 @@ factored out the duplication, it never changed which files any rule scans.
 There is **no `suppress_marker` field** — the inline ok-marker is DERIVED as `zzop-<id>-ok`
 (`RuleDef::suppress_marker()`), so it is never authored or stored. See
 [Suppress-marker semantics](#suppress-marker-semantics).
+
+### Axis: defect vs opinion
+
+`axis` answers a question `severity` does not: **is this rule reporting something wrong, or something
+you might simply disagree with?**
+
+- `defect` — wrong regardless of house taste. Nobody deliberately ships it. SQL injection, a committed
+  credential, an unauthenticated mutating route.
+- `opinion` — a convention. A project that deliberately does the flagged thing **is not wrong**; it
+  disagrees. Barrel discipline, `SELECT *`, `console.log` in a backend directory, eager ORM relations.
+
+**Why not just read `severity`?** Because it answers a different question — CONFIDENCE × BLAST RADIUS —
+and the two were measured to disagree. The `info` band holds `mutating-route-no-auth` (a real
+unauthenticated write, capped at `info` because the call-graph evidence is one-hop) beside `select-star`
+(pure preference); the `warning` band holds opinions like `jpa-eager-fetch`. Reading severity as the axis
+is wrong in both directions, and
+`rule_contracts::rule_axis::the_severity_band_does_not_reproduce_the_axis` holds that measurement so it
+cannot quietly stop being true.
+
+**Authoring rule.** If you set `opinion`, you must be able to name the case where the flagged shape is
+the RIGHT call — and the rule's `message` should say so, the way `sql/destructive-migration` does
+(*"Committed destructive migrations are usually deliberate, so this is info-level review-time
+disclosure, not a CI gate"*). If you cannot name that case, the rule is a `defect` and should say so.
+
+⚠ **`opinion` is not a shipping decision.** That same rule was exported to
+`examples/packs/sql-preferences.json` on the strength of this field alone and re-bundled the same day:
+`sql/delete-no-where`, `sql/update-no-where` and `sql/truncate-in-app-code` exclude migration paths
+*because* it discloses them, so removing it turned three deliberate exclusions into silence and a real
+destructive migration in the dogfood corpus went unreported. Its axis was never wrong and still reads
+`opinion`. Before exporting on this field, ask the second question the field does not answer: does any
+rule that STAYS narrow itself because this one runs?
+
+**The default is `defect`, deliberately.** A pack written before this field (and every third-party pack)
+keeps loading unchanged, and a rule that forgot to declare reads as the STRONGER claim — one that gets
+argued down in review rather than quietly demoted to "just an opinion". Packs SHIPPED FROM THIS REPO may
+not rely on that default — bundled and exported alike:
+`rule_contracts::rule_axis::every_shipped_rule_declares_its_axis` reads the pack JSON TEXT
+(a serde default is invisible after parsing, so only the text can tell a declaration from a silence).
+⚠ Silence is not "no axis". It is `defect`, loaded and printed as such, and indistinguishable after
+parsing from a deliberate one — which is why the twelve undeclared rules of `examples/packs/`'s
+`typescript` pack were described BACKWARDS by two different documents inside two days before that
+contract reached them.
+
+`zzop explain <rule-id>` prints the axis directly under `pack`, next to `severity`, because those are the
+two lines a reader conflates.
+
+**Not on findings.** A finding does not carry its axis today, and the reason is a boundary rather than an
+oversight: native analyses (`circular`, `cross-layer/*`, `schema/*`) register through a registry that
+holds ids and nothing else, so they cannot declare one. An axis riding only DSL findings would publish a
+complete-looking split over a subset of the findings.
 
 **Write the cause and the fix. Write neither of the two sentences the engine appends.** At runtime
 `crates/engine/src/pipeline/findings.rs::append_hints` adds them to every DSL finding's `message`, after
@@ -198,8 +248,18 @@ Span semantics:
 - Before per-span evaluation, a whole-file necessary-condition pre-skip applies: every `patterns` entry
   must match *somewhere* in the file's full text, or the file is skipped entirely (a strict subsumption
   of the per-span check — see the [authoring guide](authoring-guide.md#performance-require_filerequire_file_all-rare-token-first) for why this mattered for a real hotspot).
-- A symbol with no body span (e.g. a `type`/`interface`, or a parser that couldn't project one) is not
-  scannable and is skipped.
+- A symbol with no body span is not scannable and is skipped — and an absent span is a POSITIVE CLAIM
+  by the producer that the declaration encloses nothing scannable (a `type`/`interface`, a field, a
+  trait, a Go `type X struct`, an abstract method declared with `;`), never "the parser could not
+  project one". The distinction matters to a rule author because it is the difference between "there is
+  nothing here to find" and "we were blind here": only the first is true. Until 2026-08-11 this line
+  offered "or a parser that couldn't project one" as an alternative reading, which contradicted the
+  contract it is derived from — `crates/core/src/ir.rs`'s "Body span contract" section is that
+  contract's single owner, and this bullet is a pointer to it rather than a second copy.
+- `body_start` is the line the DECLARATION begins on, its leading decorators/annotations/attributes
+  INCLUDED — not the line the body block opens on. This is what makes a portable method-scan concept
+  writable at all: `async`, `@Transactional`, `[HttpGet]`, `#[get(...)]` and parameter names all live on
+  the declaration line, so `patterns` and `absent` both see them.
 - **Loop spans** (`trigger_in_loop`'s substrate): alongside `symbols`, the parser projects each file's
   `loop_spans` — 1-based, inclusive line ranges covering every statement loop
   (`for`/`for-of`/`for-in`/`foreach`/`while`/`do-while`/`loop`, header line included) plus
@@ -608,12 +668,14 @@ having an anchor line, and a hand-kept list of honoring matchers would be wrong 
   comment (only whitespace between the leader and the token) and terminated by an ATTACHED `:` or by the
   end of the line (`// as-ok: reason`, `// as-ok`). "Line comment" means exactly the leaders that could
   have SUPPRESSED this finding in the first place: `//` for the per-file matchers, plus `--` in a `.sql`
-  file and `#` in a config file, and `//` or `#` for the multi-language channels, whose anchor lines can
+  file and `#` in a file whose comment leader is `#` (the roster below), and `//` or `#` for the
+  multi-language channels, whose anchor lines can
   come from any language at once (`markers::marker_leaders_for_path` and `markers::marker_channel` are
   the two owners of that split — the file axis and the matcher axis, and neither answers for the other)
-  — a leader that never had suppression power is never blamed for failing to use it, so a Python
-  `# foo-ok` above a `line-scan` finding is silent, exactly as it is for suppression. Python is not in
-  the config-file family; that gap is deliberate and recorded at the table. A `-ok` word inside a sentence is never accused
+  — a leader that never had suppression power is never blamed for failing to use it, so a `# foo-ok`
+  above a `line-scan` finding in a `.ts` file is silent, exactly as it is for suppression. The same
+  comment above a `.py` `line-scan` finding IS named, because near-miss disclosure mirrors suppression by
+  construction and `#` gained suppression power in Python on 2026-08-12. A `-ok` word inside a sentence is never accused
   (`// half-ok for now, revisit`, `// TODO: not-ok yet`, `// NOT-ok:`), but a comment that is ONLY a
   hyphenated lowercase `-ok` word (`// half-ok`) IS reported — by shape it is indistinguishable from a
   bare marker, and a bare marker is a legal spelling, so there is nothing left to discriminate on.
@@ -626,15 +688,33 @@ having an anchor line, and a hand-kept list of honoring matchers would be wrong 
   `line-scan`/`method-scan` only:
   - `.sql` (case-insensitive) also honors `-- <marker>` / `-- <marker>: <reason>`, same lookback window and
     escaping rules. Gated to `.sql` because `--` is a line comment in SQL but a decrement in JS/TS.
-  - the **config-file family** (`.properties`, `.yaml`, `.yml`, `.toml`, `.ini`, `.conf`, `.cfg`, `.env`)
-    also honors `# <marker>`. This landed because a rule that matches those files was telling its readers
+  - the **`#`-comment family** — the config formats (`.properties`, `.yaml`, `.yml`, `.toml`, `.ini`,
+    `.conf`, `.cfg`, `.env`, plus `.env.local`-style siblings matched by file NAME) **and `.py`** — also
+    honors `# <marker>`. The config half landed because a rule that matches those files was telling its readers
     to write `# zzop-<id>-ok` while the engine read `//` only — and `//` is not a comment in any of those
-    formats, so a dotenv reader or YAML parser sees a stray line. `.py`/`.sh`/`.rb` are deliberately NOT
-    in the family (a recorded gap, not an oversight — see `marker_leaders_for_path`).
+    formats, so a dotenv reader or YAML parser sees a stray line. `.py` joined on 2026-08-12 for the same
+    reason one degree worse: `//` is a SyntaxError in Python, so the shipped `line-scan` rules that admit
+    `.py` had no writable marker at all.
+    `.sh`/`.rb` are deliberately still OUT, and that is measured rather than assumed — ZERO shipped rules
+    admit either extension, so an entry for them would advertise a leader for files no rule reads.
+    ⚠ **Do not retype this roster from here.** `markers::HASH_COMMENT_EXTENSIONS` owns it and
+    `markers::marker_widening_prose` derives the sentence `zzop explain` prints, so the list in this
+    paragraph is a second copy that goes stale the day an extension is added — it already did, for the
+    19 hours between `d00b6ad` adding `.py` and this correction. Recount with
+    `zzop explain <any line-scan rule id>`, or read the constant.
 
   Both widenings are additive, so no marker that suppressed before stops suppressing. They are the MARKER
   axis only: `skip_comment_lines` reads a **different** table that does not include `#`, because a
   commented-out secret is still a committed secret.
+  That asymmetry is deliberate and stays: `skip_comment_lines` is a bool, not a per-rule leader set, so a
+  `#`-commented-out statement in a `.py` file is read as live code by every rule that sets it. A rule that
+  genuinely wants those lines ignored spells it **for itself**, with no new field:
+  `"exclude_pattern": "^\\s*#"` vetoes a matched line whose trimmed start is `#`. Two costs to know before
+  reaching for it. `^\s*#` cannot see the file's language, and outside Python a leading `#` is live code
+  (a Rust attribute `#[...]`, a C# preprocessor directive, a TS private field), so a rule using it should
+  say so in its message. And a `${NAME}` fragment reference resolves only as a WHOLE value, so a rule whose
+  `exclude_pattern` is already `${some-fragment}` cannot append `|^\\s*#` to it — inline the fragment, or
+  give the pack its own fragment spelling both halves.
 - An `io-scan` finding anchors at the matched provide/consume's own `file:line` — not a line the matcher
   scanned itself, but the entry's own source location. The marker is honored on that anchor line, or the
   single line directly above it, same 1-line lookback window as `line-scan`/`method-scan`. Recognition
@@ -657,6 +737,38 @@ having an anchor line, and a hand-kept list of honoring matchers would be wrong 
   with `#[serde(default)]`), so an old pack's JSON already deserializes correctly against a newer schema.
 - Bump `SUPPORTED_DSL_SCHEMA_VERSION` only for a genuinely incompatible schema revision — ordinary new
   optional fields don't need it.
+
+## Retrieval stamp (`exported_from`)
+
+A **different fact from `schema_version`**, and the two are easy to confuse. `schema_version` is the
+pack FORMAT's version: which shape the file is written against, and the one thing that can get a pack
+rejected. `exported_from` records which zzop **build** handed you the bytes. It gates nothing, rejects
+nothing, and exists so that one specific silence can end.
+
+The silence: an exported pack (`examples/packs/*.json`, retrieved by name from any binary — see
+[examples/packs/README.md](../../examples/packs/README.md)) is saved to `<tree>/zzop/rules/` and then
+runs its rules unchanged forever. Two kinds of staleness already fail loudly — an unknown `${NAME}`
+fragment and a too-new `schema_version` — but a copy simply carrying an *older rule set* than the
+engine looked exactly like a current one.
+
+```json
+"exported_from": { "zzop_version": "<the serving build's version>", "contract": "example-pack-orm-eager" }
+```
+
+- **Do not write it yourself.** It is spliced into the bytes a shipped binary serves for an exported
+  pack (`crates/config/build.rs`), from that build's own `CARGO_PKG_VERSION`. The committed
+  `examples/packs/*.json` files carry none — a version typed into a tracked file is a value someone has
+  to keep true at every release.
+- **Absent is normal and silent.** Hand-written packs, bundled packs, and copies taken from a source
+  checkout have no stamp. Nobody derived a provenance for them, so nothing is claimed about them.
+- **Present and different is one `warnings` line per run**, naming both versions and the contract
+  resource to re-read (`zzop_core::pack_export_staleness`, surfaced through
+  `zzop_facade::config`'s pack assembly, so the tree lane and the envelope lane both get it). The pack
+  still loads whole and no rule is skipped: keeping an older rule set on purpose is a legitimate choice,
+  and the warning says so.
+- Comparison is a plain string match, so a **patch**-level difference is reported too. Rules move
+  between packs by ordinary commit here, not on minor-version boundaries — a comparison that ignored the
+  patch digit would be silent about the drift it was built to name.
 
 ## RegexSet prefilter (pure optimization)
 

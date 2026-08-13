@@ -15,10 +15,7 @@
 //!
 //! ## Static-asset veto
 //! Static-asset fetches (`public/` JSON, `.svg` icons, ...) are not API consumption, so the veto has two
-//! tiers. [`ALWAYS_VETO_EXTENSION_PATTERN`] vetoes static-asset-shaped extensions unconditionally, anchored
-//! to end-of-path. [`ASSET_DIR_GATED_EXTENSION_PATTERN`] (`json`/`xml`) also legitimately names a real API
-//! shape (`GET /api/users.json`), so it is gated on the run's DECLARED API-ish path segment instead — see
-//! [`vocab`] for what that gate does and does not cover, including an undeclared one.
+//! tiers — both vocabularies and the whole gate rationale live in [`vocab`], next to the values.
 //!
 //! A related residual gap: raw-Worker manual dispatch (`export default { fetch }` comparing `url.pathname`
 //! against literals) IS extracted by the evidence-gated `pathname_dispatch` adapter, but shapes outside its
@@ -52,6 +49,12 @@
 //!   — so its failure to match proves nothing about this tree's routes, and reporting it would fabricate
 //!   an internal contract out of an extraction gap. The multi-tree linker buckets the same key as
 //!   `unresolvedConsumes`; this rule has nowhere to move it, so it vetoes.
+//! - **Wildcard route partition** — [`zzop_core::wildcard_route_covers`], asked (like route identity) only
+//!   of a key that matched nothing. A route whose path is an ANT PATTERN (`GET /files/**`) is not an exact
+//!   key: comparing it literally made a live catch-all read as a dead route AND made every call beneath it
+//!   read as a missing one. The verb must still match, so a `POST` under a `@GetMapping("/files/**")` keeps
+//!   firing. Same predicate as the multi-tree linker's, which partitions such a route out of the join
+//!   entirely — this rule has no bucket to move it to, so it vetoes, exactly as it does for route identity.
 //! - **Test-file classification** — `zzop_core::is_test_file`, the same predicate the cross-tree join's
 //!   input filter (`filter_join_io`, D11) applies; see the consume loop's own comment.
 //!
@@ -92,25 +95,9 @@ use std::collections::{BTreeSet, HashSet};
 
 use regex::Regex;
 
+mod fold;
 mod message;
-use message::individual_finding;
-
-/// Always-veto extension vocabulary — see module doc "Static-asset veto". Anchored to end-of-path
-/// (optionally followed by a query string or fragment), not merely appearing anywhere in the key.
-/// Members complete the families already present (images/fonts/scripts) rather than opening a new class —
-/// none of them can name an API route shape (unlike `json`/`xml`, gated below).
-const ALWAYS_VETO_EXTENSION_PATTERN: &str =
-    r"(?i)\.(svg|png|jpe?g|gif|ico|bmp|avif|css|txt|webp|woff2?|ttf|otf|eot|map|[mc]?js)([?#]|$)";
-
-/// API-segment-gated extension vocabulary — see module doc "Static-asset veto". Vetoed unless
-/// [`API_SEGMENT_PATTERN`] also matches (inverted gate: absence of an API-ish segment is the veto signal).
-const ASSET_DIR_GATED_EXTENSION_PATTERN: &str = r"(?i)\.(json|xml)([?#]|$)";
-
-/// Fold threshold for "foreign" unprovided consumes (first path segment outside the tree's provided key
-/// space). Same rationale as `MIN_PREFIX_DRIFT_GROUP` in the cross-layer crate: 2 can be coincidence, 3+ is
-/// a pattern (here: a partial-provider tree, e.g. a monorepo where only one app's routes are extracted).
-/// Crate boundary prevents symbol sharing — the relationship is pinned by an equality test in the engine.
-pub const MIN_FOREIGN_UNPROVIDED_GROUP: usize = 3;
+pub use fold::MIN_FOREIGN_UNPROVIDED_GROUP;
 
 /// First `/`-delimited non-empty path segment of a `"METHOD /path"` key — the unit "foreign-vs-overlapping"
 /// grouping compares (module doc). `None` when the path carries no segment (`"GET /"`), which the caller
@@ -124,7 +111,7 @@ fn first_path_segment(key: &str) -> Option<&str> {
 /// `key` is the JOIN key: for a declared-host absolute URL that is the re-keyed internal path, with the
 /// original spelling kept in `raw` (module doc "Structural gates"), mirroring the linker's own
 /// bucket invariant that nothing past the re-key ever carries a scheme.
-struct UnmatchedConsume<'a> {
+pub(super) struct UnmatchedConsume<'a> {
     key: std::borrow::Cow<'a, str>,
     raw: Option<&'a str>,
     file: &'a str,
@@ -162,8 +149,17 @@ pub fn unprovided_consume_findings(
         .filter(|p| first_path_segment(&p.key).is_some())
         .count();
 
-    let always_veto_re = Regex::new(ALWAYS_VETO_EXTENSION_PATTERN).unwrap();
-    let asset_dir_gated_re = Regex::new(ASSET_DIR_GATED_EXTENSION_PATTERN).unwrap();
+    // ANT wildcard routes never enter `provided_keys` above as usable exact keys, so they are collected
+    // separately and asked as a PATTERN below — the same partition the multi-tree linker performs, via
+    // the same shared predicate, so the two axes cannot answer differently (module doc "Structural gates").
+    let wildcard_route_keys: Vec<&str> = io_provides
+        .iter()
+        .filter(|p| p.kind == "http" && zzop_core::wildcard_route_path(&p.key).is_some())
+        .map(|p| p.key.as_str())
+        .collect();
+
+    let always_veto_re = Regex::new(vocab::ALWAYS_VETO_EXTENSION_PATTERN).unwrap();
+    let asset_dir_gated_re = Regex::new(vocab::ASSET_DIR_GATED_EXTENSION_PATTERN).unwrap();
     let api_segment_re = vocab::api_segment_re(api_segment_pattern);
 
     let mut overlapping: Vec<UnmatchedConsume> = Vec::new();
@@ -195,6 +191,12 @@ pub fn unprovided_consume_findings(
         if provided_keys.contains(key_str) {
             continue;
         }
+        if wildcard_route_keys
+            .iter()
+            .any(|r| zzop_core::wildcard_route_covers(r, key_str))
+        {
+            continue; // an ANT catch-all in THIS tree serves this call — module doc "Structural gates"
+        }
         if !zzop_core::key_carries_route_identity(key_str) {
             continue; // all-`{}` path names no route — the linker's own gate, same predicate; module doc
         }
@@ -225,72 +227,14 @@ pub fn unprovided_consume_findings(
         }
     }
 
-    let mut findings: Vec<zzop_core::Finding> = overlapping
-        .iter()
-        .map(|u| individual_finding(&u.key, u.raw, u.file, u.line))
-        .collect();
-
-    if foreign.len() >= MIN_FOREIGN_UNPROVIDED_GROUP {
-        let mut anchor_order: Vec<&UnmatchedConsume> = foreign.iter().collect();
-        anchor_order.sort_by(|a, b| {
-            a.file
-                .cmp(b.file)
-                .then(a.line.cmp(&b.line))
-                .then(a.key.cmp(&b.key))
-        });
-        let anchor = anchor_order[0];
-
-        let mut routes: Vec<&str> = foreign.iter().map(|u| u.key.as_ref()).collect();
-        routes.sort_unstable();
-        routes.dedup();
-        // A folded entry is enumerated under its JOIN key, so a declared-host consume shows an internal
-        // path the author cannot grep for. Carry the absolute spellings alongside, present only when a
-        // re-key actually happened (module doc "Structural gates").
-        let mut raws: Vec<&str> = foreign.iter().filter_map(|u| u.raw).collect();
-        raws.sort_unstable();
-        raws.dedup();
-
-        let n = foreign.len();
-        let m = contributing_provide_count;
-        let example_segments: Vec<&str> = provide_first_segments.iter().copied().take(3).collect();
-        // Only the first 3 provided first-segments are rendered inline; when more exist, append an ellipsis
-        // so the message doesn't imply the tree provides only these 3 path families.
-        let example_segments_str = if provide_first_segments.len() > 3 {
-            format!("{}, …", example_segments.join(", "))
-        } else {
-            example_segments.join(", ")
-        };
-        // Edge case: a tree whose only http provides are root-path (`GET /`) contributes zero
-        // first-segments (`first_path_segment` returns `None` for `/` — see this fn's own doc), so
-        // `example_segments_str` is empty and `m` is 0. The normal "{m} provide(s) under {segments}"
-        // clause would then dangle a trailing "under" with nothing after it. Reword just that clause when
-        // there are no segments; the test-pinned wording below is unchanged whenever a segment exists.
-        let path_space_clause = if provide_first_segments.is_empty() {
-            "provides at least one route, but none under a named path prefix (e.g. only `GET /`)"
-                .to_string()
-        } else {
-            format!("{m} provide(s) under {example_segments_str}")
-        };
-
-        findings.push(message::aggregate_finding(message::Aggregate {
-            call_count: n,
-            routes: &routes,
-            raws: &raws,
-            path_space_clause: &path_space_clause,
-            provide_first_segments: &provide_first_segments,
-            file: anchor.file,
-            line: anchor.line,
-        }));
-    } else {
-        findings.extend(
-            foreign
-                .iter()
-                .map(|u| individual_finding(&u.key, u.raw, u.file, u.line)),
-        );
-    }
-
-    findings.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
-    findings
+    // How the surviving set is SAID — one finding each, or one aggregate replacing N — is the fold's
+    // job, not this function's (module doc "Foreign-vs-overlapping fold"; the split is in `fold`).
+    fold::findings(
+        &overlapping,
+        &foreign,
+        &provide_first_segments,
+        contributing_provide_count,
+    )
 }
 
 mod vocab;

@@ -73,6 +73,30 @@ const CASES: &[Case] = &[
         },
     },
     Case {
+        // The MUST every advertised revision states: an EMPTY result, not an error. Pinned as a
+        // value rather than "no error", because a client using ping as a keepalive reads anything
+        // else as a dead server and kills the process — the failure this case exists to make loud.
+        what: "ping answers with an empty result (base-protocol MUST, not capability-gated)",
+        line: r#"{"jsonrpc":"2.0","id":9,"method":"ping"}"#,
+        check: |reply| {
+            let r = reply.expect("ping must be answered");
+            assert_eq!(r["id"], 9);
+            assert!(r.get("error").is_none(), "ping is never an error: {r}");
+            let result = r["result"].as_object().expect("result must be an object");
+            assert!(result.is_empty(), "ping's result is empty, got: {r}");
+        },
+    },
+    Case {
+        // The other half of the contract: methods whose CAPABILITY this server never advertises are
+        // still rejected. Without this pair, "answer ping" could be satisfied by answering anything.
+        what: "an unadvertised capability's method is still -32601",
+        line: r#"{"jsonrpc":"2.0","id":10,"method":"logging/setLevel","params":{"level":"debug"}}"#,
+        check: |reply| {
+            let r = reply.expect("an unknown method still gets a reply");
+            assert_eq!(r["error"]["code"], -32601, "got: {r}");
+        },
+    },
+    Case {
         what: "tools/list returns the tool table under result.tools",
         line: r#"{"jsonrpc":"2.0","id":4,"method":"tools/list"}"#,
         check: |reply| {

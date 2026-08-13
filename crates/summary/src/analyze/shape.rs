@@ -62,7 +62,21 @@ pub(super) fn shape_analyze_output(
         "findings".to_string(),
         output::shape_findings(&findings, filters),
     );
-    summary.insert("warnings".to_string(), output_view["warnings"].clone());
+    // The engine's own warnings, plus one this LAYER owns: a `rule` filter that can be proven to match
+    // no rule this run could report (see `crate::warnings::unknown_rule_filter_warning`). It is
+    // appended here rather than merged into `configWarnings` because the filter is not config — it is a
+    // question asked of one reply, and the channel split this crate publishes is exactly that
+    // (`configWarnings` = how the config was handled, `warnings` = what happened in this run).
+    let mut warnings = output_view["warnings"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    if let Some(rule) = filters.rule.as_deref() {
+        if let Some(note) = crate::warnings::unknown_rule_filter_warning(output_view, rule) {
+            warnings.push(serde_json::Value::String(note));
+        }
+    }
+    summary.insert("warnings".to_string(), serde_json::Value::Array(warnings));
     // Per-tree structural coverage census, forwarded whole (a handful of scalars) — carries the
     // `joinContributionZero` blindness ASSERTION; a summary that drops the engine's own "this
     // tree contributed nothing to the join" fact is not a disclosure.
@@ -153,6 +167,14 @@ fn architecture_summary(output_view: &serde_json::Value) -> Option<serde_json::V
     // same degradation contract every other field in this shaper uses.
     let measured_weight = health.get("measuredWeight").cloned();
     let total_weight = health.get("totalWeight").cloned();
+    // `pain`'s AXIS SPLIT travels with it for the same reason its denominator does, and the omission was
+    // worse: measured 2026-08-12, 80.6% of the weight table is structural OPINION and rule findings
+    // contribute NOTHING — adding 20 `$queryRawUnsafe` files to a tree moved `critical` 1 -> 21 and left
+    // `pain` byte-identical. A reader was being handed one number that looks like a verdict on the code
+    // and is mostly a verdict on the code's STYLE. Forwarded whole (`defect`/`opinion`/`history`, each on
+    // `pain`'s own scale and summing to it) rather than as a second scalar, so no consumer has to know
+    // which axes exist to read it.
+    let axis_pain = health.get("axisPain").cloned();
     let top_recommendation = output_view["recommendations"]
         .as_array()
         .and_then(|recs| recs.first())
@@ -181,18 +203,28 @@ fn architecture_summary(output_view: &serde_json::Value) -> Option<serde_json::V
     if let Some(total_weight) = total_weight {
         architecture.insert("painTotalWeight".to_string(), total_weight);
     }
+    if let Some(axis_pain) = axis_pain {
+        architecture.insert("painByAxis".to_string(), axis_pain);
+    }
     architecture.insert(
         "painMeaning".to_string(),
         serde_json::json!(
             "Composite structural debt over the metrics that HAD something to measure, renormalized \
              onto the full weight table (0 = clean, higher = worse, ~186 = every weighted metric at \
-             its worst). `painMeasuredWeight` / `painTotalWeight` is how much of that table was \
-             actually measurable on this tree: read a low ratio as \"this number describes a minority \
-             of the structure\", not as a better score. `pain: null` means NO metric had a population \
-             — absence of data, never 0. Renormalizing is what stops an unmeasurable axis (a metric \
-             defined over a convention this tree never adopted) from making the repo look healthier by \
-             silently scoring 100. The per-metric populations behind it ride `scores.*` in the direct \
-             zzop-facade output."
+             its worst). THIS NUMBER CONTAINS NO RULE FINDINGS: it is computed from structural scores \
+             alone, so a tree full of SQL injection scores exactly what the same tree scores with none \
+             — read `findings` and `findings.bySeverity` for defects, never this. Most of it is not \
+             even a defect claim about structure: `painByAxis` splits it into `defect` (import cycles \
+             only), `opinion` (barrel discipline, FSD layering, Robert Martin's SDP/Main Sequence, \
+             Newman modularity, LOC ceilings — a project that deliberately does the opposite is not \
+             wrong, it scores low) and `history` (rename churn, bus factor), each on this same scale \
+             and summing to `pain`. `painMeasuredWeight` / `painTotalWeight` is how much of the table \
+             was actually measurable on this tree: read a low ratio as \"this number describes a \
+             minority of the structure\", not as a better score. `pain: null` means NO metric had a \
+             population — absence of data, never 0. Renormalizing is what stops an unmeasurable axis (a \
+             metric defined over a convention this tree never adopted) from making the repo look \
+             healthier by silently scoring 100. The per-metric populations behind it ride `scores.*` in \
+             the direct zzop-facade output."
         ),
     );
     architecture.insert("topRecommendation".to_string(), top_recommendation.into());

@@ -6,7 +6,7 @@
 //! against the real `zzop` binary in `packages/cli-bin/tests/cli.rs` — this file exists only for the lanes
 //! that binary can never exercise.
 
-use super::explain_over;
+use super::{explain_over, Corpus};
 use zzop_core::parse_dsl_pack;
 
 const LINE_SCAN_PACK: &str = r#"{"id": "alpha", "rules": [
@@ -29,7 +29,8 @@ fn fabricated_packs() -> Vec<zzop_core::RulePackDef> {
 #[test]
 fn a_bare_id_shared_by_two_packs_is_ambiguous_and_lists_both_full_ids() {
     let packs = fabricated_packs();
-    let err = explain_over(&packs, &[], "dup").expect_err("shared bare id must not resolve");
+    let err = explain_over(&packs, &[], "dup", Corpus::Bundled)
+        .expect_err("shared bare id must not resolve");
     assert!(err.contains("ambiguous"), "got: {err}");
     assert!(err.contains("alpha/dup"), "got: {err}");
     assert!(err.contains("beta/dup"), "got: {err}");
@@ -38,8 +39,8 @@ fn a_bare_id_shared_by_two_packs_is_ambiguous_and_lists_both_full_ids() {
 #[test]
 fn the_full_id_form_resolves_even_though_the_bare_id_is_ambiguous() {
     let packs = fabricated_packs();
-    let out =
-        explain_over(&packs, &[], "alpha/dup").expect("full id must resolve deterministically");
+    let out = explain_over(&packs, &[], "alpha/dup", Corpus::Bundled)
+        .expect("full id must resolve deterministically");
     assert!(out.contains("id: alpha/dup"), "got: {out}");
     assert!(out.contains("suppress marker: zzop-dup-ok"), "got: {out}");
 }
@@ -47,7 +48,8 @@ fn the_full_id_form_resolves_even_though_the_bare_id_is_ambiguous() {
 #[test]
 fn a_whole_pack_id_is_a_hint_not_a_rule() {
     let packs = fabricated_packs();
-    let err = explain_over(&packs, &[], "alpha").expect_err("a pack id names no single rule");
+    let err = explain_over(&packs, &[], "alpha", Corpus::Bundled)
+        .expect_err("a pack id names no single rule");
     assert!(err.contains("PACK"), "got: {err}");
     assert!(err.contains("alpha/dup"), "got: {err}");
 }
@@ -55,8 +57,13 @@ fn a_whole_pack_id_is_a_hint_not_a_rule() {
 #[test]
 fn a_native_id_is_named_as_native_not_unknown() {
     let packs = fabricated_packs();
-    let err = explain_over(&packs, &["circular".to_string()], "circular")
-        .expect_err("a native analysis id carries no DSL rule data");
+    let err = explain_over(
+        &packs,
+        &["circular".to_string()],
+        "circular",
+        Corpus::Bundled,
+    )
+    .expect_err("a native analysis id carries no DSL rule data");
     assert!(err.contains("native analysis id"), "got: {err}");
     assert!(err.contains("rule-catalog"), "got: {err}");
 }
@@ -72,7 +79,8 @@ fn a_symbol_scan_rule_reports_no_exclusion_field_and_no_usable_marker() {
          "matcher": {"type": "symbol-scan", "file_pattern": "\\.tsx$", "name_pattern": "^[A-Z]"}}
     ]}"#;
     let packs = vec![parse_dsl_pack(SYMBOL_SCAN_PACK).expect("fixture pack must parse")];
-    let out = explain_over(&packs, &[], "gamma/pascal").expect("full id must resolve");
+    let out =
+        explain_over(&packs, &[], "gamma/pascal", Corpus::Bundled).expect("full id must resolve");
     assert!(out.contains("matcher: symbol-scan"), "got: {out}");
     assert!(
         out.contains("exclusions: none (symbol-scan carries no exclusion field)"),
@@ -94,7 +102,8 @@ fn a_symbol_scan_rule_reports_no_exclusion_field_and_no_usable_marker() {
 #[test]
 fn a_line_scan_rule_with_no_exclusions_still_names_both_fields_it_could_have() {
     let packs = fabricated_packs();
-    let out = explain_over(&packs, &[], "alpha/dup").expect("full id must resolve");
+    let out =
+        explain_over(&packs, &[], "alpha/dup", Corpus::Bundled).expect("full id must resolve");
     assert!(out.contains("\nexclude_pattern: no"), "got: {out}");
     assert!(out.contains("\nfile_exclude_pattern: no"), "got: {out}");
 }
@@ -111,7 +120,7 @@ fn a_schema_issue_id_answers_in_both_the_namespaced_and_the_bare_form() {
         "schema/unreferenced-model-name".to_string(),
     ];
     for query in ["schema/unreferenced-model-name", "unreferenced-model-name"] {
-        let err = explain_over(&packs, &native, query)
+        let err = explain_over(&packs, &native, query, Corpus::Bundled)
             .expect_err("a native analysis carries no DSL rule data");
         assert!(err.contains("native analysis id"), "{query}: {err}");
         assert!(
@@ -131,8 +140,13 @@ fn a_schema_issue_id_answers_in_both_the_namespaced_and_the_bare_form() {
 #[test]
 fn a_bare_native_tail_needs_its_id_in_the_registry() {
     let packs = fabricated_packs();
-    let err = explain_over(&packs, &["circular".to_string()], "unreferenced-model-name")
-        .expect_err("no registered schema id means no bare lane");
+    let err = explain_over(
+        &packs,
+        &["circular".to_string()],
+        "unreferenced-model-name",
+        Corpus::Bundled,
+    )
+    .expect_err("no registered schema id means no bare lane");
     assert!(err.contains("unknown rule id"), "got: {err}");
 }
 
@@ -142,8 +156,13 @@ fn a_bare_native_tail_needs_its_id_in_the_registry() {
 fn a_schema_namespaced_non_id_still_falls_to_the_unknown_lane() {
     let packs = fabricated_packs();
     let native = vec!["schema-usage".to_string(), "schema/god-model".to_string()];
-    let err = explain_over(&packs, &native, "schema/not-an-issue-label")
-        .expect_err("an unregistered id must fail");
+    let err = explain_over(
+        &packs,
+        &native,
+        "schema/not-an-issue-label",
+        Corpus::Bundled,
+    )
+    .expect_err("an unregistered id must fail");
     assert!(err.contains("unknown rule id"), "got: {err}");
 }
 
@@ -157,7 +176,8 @@ fn an_exact_native_id_beats_a_namespaced_sibling_with_the_same_tail() {
         "duplicate-route".to_string(),
         "cross-layer/duplicate-route".to_string(),
     ];
-    let err = explain_over(&packs, &native, "duplicate-route").expect_err("native, not DSL data");
+    let err = explain_over(&packs, &native, "duplicate-route", Corpus::Bundled)
+        .expect_err("native, not DSL data");
     assert!(
         !err.contains("ambiguous"),
         "an exactly-registered id must not be reported ambiguous: {err}"
@@ -177,7 +197,8 @@ fn a_bare_tail_shared_by_two_namespaces_is_reported_ambiguous() {
         "cross-layer/route-shadowing".to_string(),
         "schema/route-shadowing".to_string(),
     ];
-    let err = explain_over(&packs, &native, "route-shadowing").expect_err("ambiguous bare tail");
+    let err = explain_over(&packs, &native, "route-shadowing", Corpus::Bundled)
+        .expect_err("ambiguous bare tail");
     assert!(err.contains("ambiguous"), "got: {err}");
     assert!(err.contains("cross-layer/route-shadowing"), "got: {err}");
     assert!(err.contains("schema/route-shadowing"), "got: {err}");
@@ -196,7 +217,8 @@ fn an_io_scan_marker_is_printed_with_its_native_parse_only_condition() {
          "matcher": {"type": "io-scan", "file_pattern": "\\.ts$", "direction": "provides"}}
     ]}"#;
     let packs = vec![parse_dsl_pack(IO_SCAN_PACK).expect("fixture pack must parse")];
-    let out = explain_over(&packs, &[], "delta/provide-scan").expect("full id must resolve");
+    let out = explain_over(&packs, &[], "delta/provide-scan", Corpus::Bundled)
+        .expect("full id must resolve");
     assert!(out.contains("matcher: io-scan"), "got: {out}");
     assert!(
         out.contains("suppress marker: zzop-provide-scan-ok"),
@@ -207,7 +229,8 @@ fn an_io_scan_marker_is_printed_with_its_native_parse_only_condition() {
         "an io-scan marker must not be printed as unconditionally usable: {out}"
     );
 
-    let line_scan = explain_over(&fabricated_packs(), &[], "alpha/dup").expect("must resolve");
+    let line_scan =
+        explain_over(&fabricated_packs(), &[], "alpha/dup", Corpus::Bundled).expect("must resolve");
     assert!(
         !line_scan.contains("NATIVE-PARSE RUNS ONLY"),
         "a line-scan marker IS read from the scanned file — the condition would be false here: {line_scan}"
@@ -217,7 +240,7 @@ fn an_io_scan_marker_is_printed_with_its_native_parse_only_condition() {
 #[test]
 fn a_truly_unknown_id_points_at_the_catalog() {
     let packs = fabricated_packs();
-    let err = explain_over(&packs, &[], "no-such-rule-anywhere")
+    let err = explain_over(&packs, &[], "no-such-rule-anywhere", Corpus::Bundled)
         .expect_err("an unrecognized id must fail");
     assert!(err.contains("unknown rule id"), "got: {err}");
     assert!(err.contains("rule-catalog"), "got: {err}");
@@ -229,8 +252,13 @@ fn a_truly_unknown_id_points_at_the_catalog() {
 /// analysis's own output ranked, and only the native id is a thing a caller can toggle.
 #[test]
 fn an_id_that_is_both_native_and_a_recommendation_answers_as_native() {
-    let err = explain_over(&fabricated_packs(), &["circular".to_string()], "circular")
-        .expect_err("a native id carries no DSL rule data");
+    let err = explain_over(
+        &fabricated_packs(),
+        &["circular".to_string()],
+        "circular",
+        Corpus::Bundled,
+    )
+    .expect_err("a native id carries no DSL rule data");
     assert!(err.contains("native analysis id"), "got: {err}");
     assert!(!err.contains("RECOMMENDATION id"), "got: {err}");
 }
@@ -240,7 +268,7 @@ fn an_id_that_is_both_native_and_a_recommendation_answers_as_native() {
 /// and fabricated packs, because it is answered from the live disclosure registry, not from either.
 #[test]
 fn an_output_id_is_answered_after_every_rule_lane_misses() {
-    let err = explain_over(&fabricated_packs(), &[], "stale-cache")
+    let err = explain_over(&fabricated_packs(), &[], "stale-cache", Corpus::Bundled)
         .expect_err("a disclosure class is not a rule");
     assert!(err.contains("coverage-DISCLOSURE class id"), "got: {err}");
     assert!(!err.contains("unknown rule id"), "got: {err}");

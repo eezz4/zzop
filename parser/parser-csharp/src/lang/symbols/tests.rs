@@ -220,3 +220,37 @@ fn static_constructor_projects_a_span() {
 fn parse_symbols_empty_on_parse_failure() {
     assert!(parse_symbols("f.cs", "\u{0}\u{1}not csharp{{{{").is_empty());
 }
+
+/// Twin of `parser-java-21`'s `an_interface_carries_no_body_span_while_its_default_method_keeps_one`.
+/// `crates/core/src/ir.rs` makes an absent span the positive claim "nothing scannable in here", and an
+/// `interface` body is a SIGNATURE list. Measured on the reference corpus 2026-08-11: cs/interface/span
+/// 4 while TypeScript's 79 interfaces were correctly `None` — the same IR `kind` meaning two things
+/// depending on the producer is what an external adapter author would have copied.
+#[test]
+fn an_interface_carries_no_body_span_while_its_default_member_keeps_one() {
+    let src = "public interface I {\n  void M();\n  void D() { System.Console.WriteLine(1); }\n}\n";
+    let syms = parse_symbols("f.cs", src);
+
+    let iface = syms.iter().find(|s| s.name == "I").unwrap();
+    assert_eq!(
+        (iface.body_start, iface.body_end),
+        (None, None),
+        "an interface body is a signature list, not a region: {iface:?}"
+    );
+
+    let default_member = syms.iter().find(|s| s.name == "I.D").unwrap();
+    assert!(
+        default_member.body_start.is_some(),
+        "a C# 8 default implementation keeps its own leaf: {default_member:?}"
+    );
+}
+
+/// The control: a class body IS a region, so the change above is scoped to interfaces and not a blanket
+/// "declaration_list means nothing".
+#[test]
+fn a_class_still_carries_its_body_span_after_the_interface_gate() {
+    let src = "public class C {\n  void M() {}\n}\n";
+    let syms = parse_symbols("f.cs", src);
+    let class = syms.iter().find(|s| s.name == "C").unwrap();
+    assert!(class.body_start.is_some(), "{class:?}");
+}

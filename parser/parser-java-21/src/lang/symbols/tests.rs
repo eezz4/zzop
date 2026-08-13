@@ -318,3 +318,64 @@ fn annotation_type_elements_are_not_extracted_as_methods() {
     assert_eq!(symbols.len(), 1);
     assert_eq!(symbols[0].name, "Ann");
 }
+
+// --- INTERFACE / @interface: a SIGNATURE list is not a scannable region ---
+
+/// `crates/core/src/ir.rs`'s span contract makes `None` the positive claim "this declaration encloses
+/// nothing scannable", naming a TS `interface` and a Rust `trait` as exactly that. Java projected a span
+/// anyway, so the same IR `kind` meant two different things depending on the producer — measured on the
+/// reference corpus 2026-08-11: java/interface/span 24 and cs/interface/span 4 against ts 79 / tsx 17 /
+/// rs 1 all correctly `None`.
+///
+/// The `default` body is the half that must NOT regress: dropping the container span is only safe
+/// because such members keep their own leaves.
+#[test]
+fn an_interface_carries_no_body_span_while_its_default_method_keeps_one() {
+    let src = "public interface N {\n  String getCursor();\n  default String both() {\n    return getCursor();\n  }\n}\n";
+    let symbols = parse_symbols("N.java", src);
+
+    let iface = find(&symbols, "N");
+    assert_eq!(iface.kind, SourceSymbolKind::Interface);
+    assert_eq!(
+        (iface.body_start, iface.body_end),
+        (None, None),
+        "an interface body is a signature list, not a region: {iface:?}"
+    );
+
+    let abstract_method = find(&symbols, "N.getCursor");
+    assert_eq!(
+        (abstract_method.body_start, abstract_method.body_end),
+        (None, None)
+    );
+
+    let default_method = find(&symbols, "N.both");
+    assert!(
+        default_method.body_start.is_some(),
+        "a default method has a real body and must keep its leaf, or the interface's regions become \
+         unreachable when the container span goes: {default_method:?}"
+    );
+}
+
+/// An `@interface` body is the same shape and takes the same answer.
+#[test]
+fn an_annotation_type_carries_no_body_span() {
+    let src = "public @interface Marker {\n  String value();\n}\n";
+    let symbols = parse_symbols("Marker.java", src);
+    let ann = find(&symbols, "Marker");
+    assert_eq!((ann.body_start, ann.body_end), (None, None), "{ann:?}");
+}
+
+/// The CONTROL for both cases above, and the reason this is not "every type-ish declaration is None":
+/// a Java `enum` body holds real method bodies, so it keeps its span. A Rust `enum` is `None` because it
+/// has nothing to cover, not because the word matches.
+#[test]
+fn an_enum_keeps_its_body_span_because_a_java_enum_body_holds_real_bodies() {
+    let src = "enum Color {\n  RED, GREEN;\n  String pretty() { return name(); }\n}\n";
+    let symbols = parse_symbols("Color.java", src);
+    let e = find(&symbols, "Color");
+    assert_eq!(e.kind, SourceSymbolKind::Class);
+    assert!(
+        e.body_start.is_some(),
+        "a java enum body is scannable: {e:?}"
+    );
+}

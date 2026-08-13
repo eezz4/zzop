@@ -37,9 +37,10 @@ fn severity_rank(s: Severity) -> u8 {
 /// definition, and the only fields a merge-layer fold COULD group on (`file`, `line`) are precisely the
 /// ones that make a finding actionable. Folding therefore lives in the rules, where the meaning of "the
 /// same cause" is known: `MIN_PREFIX_DRIFT_GROUP` (`rules-cross-layer/prefix_drift.rs:28`),
-/// `MIN_FOREIGN_UNPROVIDED_GROUP` (`rules-http/unprovided_consume.rs:119`), and
-/// `MAX_LISTED_PER_SOURCE` (`rules-cross-layer/unconsumed_endpoint.rs`) are the three that exist. A new
-/// measured volume case gets a fourth one in ITS rule — not a fifth concept here.
+/// `MIN_FOREIGN_UNPROVIDED_GROUP` (`rules-http/unprovided_consume/fold.rs:19`, re-exported from
+/// `unprovided_consume.rs`), and `MAX_LISTED_PER_SOURCE` (`rules-cross-layer/unconsumed_endpoint.rs`)
+/// are the three that exist. A new measured volume case gets a fourth one in ITS rule — not a fifth
+/// concept here.
 pub fn merge_findings(sources: Vec<Vec<Finding>>, config: &RuleConfig) -> Vec<Finding> {
     let mut merged: Vec<Finding> = sources
         .into_iter()

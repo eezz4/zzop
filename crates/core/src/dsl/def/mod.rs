@@ -1,7 +1,8 @@
 //! Rule-pack definition types — the serde surface that deserializes `rules/dsl/*.json`.
 //!
-//! This module holds the pack/rule envelope (`RulePackDef`, `RuleDef`) plus the `${NAME}` fragment
-//! expansion logic (`RulePackDef::expand_fragments` and its private `resolve_*` helpers). The four
+//! This module holds the pack/rule envelope (`RulePackDef`, `RuleDef`). The `${NAME}` fragment
+//! expansion applied to that envelope lives in the sibling `expand` submodule, and the defect/opinion
+//! axis a rule declares in `axis` — both split off for the per-file line cap. The four
 //! matcher shapes (`Matcher` + `LineScan`/`MethodScan`/`SymbolScan`/`IoScan` + `LabeledPattern`/
 //! `IoDirection`) live in the sibling `matcher` submodule purely to keep each file under the repo's
 //! per-file line cap; they are re-exported below so every external path
@@ -11,24 +12,42 @@ use std::collections::BTreeMap;
 
 use serde::Deserialize;
 
-use super::fragments::{fragment_ref_name, shared_fragments, FragmentError};
 use crate::Severity;
 
+mod axis;
+mod expand;
 mod matcher;
 mod pattern_fields;
+mod provenance;
 
+pub use axis::RuleAxis;
 pub use matcher::{
     CallScan, IoDirection, IoScan, LabeledPattern, LineScan, LiteralScan, Matcher, MethodScan,
     SymbolScan,
 };
 pub(crate) use pattern_fields::for_each_pattern_field;
+pub use provenance::PackExport;
 
 /// A rule pack (DSL) — maps to one `rules/dsl/<id>.json`. Independently shipped and versioned.
+///
+/// ## The removed `framework` key (2026-08-11)
+/// This struct carried a `framework: String` (default `"any"`) until 1.0 preparation. It was deleted
+/// rather than frozen, and the reason is the one this repo keeps applying: **it had no reader.** Every
+/// shipped pack wrote the same single value `"any"`, no engine code path ever consulted it, and
+/// `docs/rules/dsl-reference.md` said so out loud — so it was a documented no-op, not a working knob.
+/// 1.0 freezes the third-party pack schema; a key with nothing behind it would have become a promise
+/// this engine could not keep until 2.0. Same shape as v0.30.0's `typeSafety`/`lod` deletion, with one
+/// asymmetry worth naming: those were OUTPUT fields, so removal could not touch anyone's file, while
+/// this is an INPUT key a third party may have written.
+///
+/// **That asymmetry is why removal is safe here specifically**: this struct does NOT use
+/// `#[serde(deny_unknown_fields)]`, so a pack still declaring `"framework": "react"` keeps loading and
+/// the key is ignored. `tests::a_pack_still_declaring_the_removed_framework_key_loads` pins exactly
+/// that — the compatibility claim is machine-held, so adding `deny_unknown_fields` later cannot
+/// silently break every pack written before this deletion.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RulePackDef {
     pub id: String,
-    #[serde(default = "any_framework")]
-    pub framework: String,
     /// DSL schema version this pack was authored against (see `docs/rules/dsl-reference.md`). Defaults to
     /// `1` when absent, so packs predating this field keep loading. `pack_loader::load_dsl_packs` rejects a
     /// pack whose version exceeds `pack_loader::SUPPORTED_DSL_SCHEMA_VERSION` as a mismatch, not new data to
@@ -45,15 +64,17 @@ pub struct RulePackDef {
     /// entry mid-request). Empty (the default) for a pack that references only shared fragments, or none.
     #[serde(default)]
     pub fragments: BTreeMap<String, String>,
+    /// RETRIEVAL stamp — which zzop build served these bytes, and under which contract resource. Present
+    /// only on a pack obtained through a shipped binary's contract lane; absent (and silent) on every
+    /// hand-written or source-checkout copy. Read by `pack_loader::pack_export_staleness`, which turns a
+    /// version difference into a run warning. NOT a second `schema_version`: see [`PackExport`] for why
+    /// the format's version and the serving build's version are different facts with different jobs.
+    pub exported_from: Option<PackExport>,
     pub rules: Vec<RuleDef>,
     /// PACK-SCOPED compiled-regex memo — never deserialized, never part of a pack's identity. See
     /// [`crate::dsl::RegexCache`] for why the evaluator needs one and why its lifetime is the pack's.
     #[serde(skip)]
     pub regex_cache: crate::dsl::RegexCache,
-}
-
-fn any_framework() -> String {
-    "any".into()
 }
 
 /// Default `RulePackDef::schema_version` for packs predating the field — always `1` (the oldest schema),
@@ -62,135 +83,13 @@ fn current_dsl_schema_version() -> u32 {
     1
 }
 
-/// Resolves a single pattern-bearing `String` field in place, if (and only if) its ENTIRE value is a
-/// `${NAME}` fragment reference (see `fragments::fragment_ref_name`'s doc for why this whole-value-only
-/// shape is collision-safe). A value that merely CONTAINS `${...}` as a substring is left untouched — no
-/// inline substring composition in this pass.
-fn resolve_field(
-    value: &mut String,
-    merged: &BTreeMap<String, String>,
-    rule_id: &str,
-    field: &str,
-) -> Result<(), FragmentError> {
-    let Some(name) = fragment_ref_name(value) else {
-        return Ok(());
-    };
-    let Some(text) = merged.get(name) else {
-        return Err(FragmentError::Unknown {
-            rule: rule_id.to_string(),
-            field: field.to_string(),
-            name: name.to_string(),
-        });
-    };
-    if fragment_ref_name(text).is_some() {
-        return Err(FragmentError::Nested {
-            rule: rule_id.to_string(),
-            field: field.to_string(),
-            name: name.to_string(),
-        });
-    }
-    *value = text.clone();
-    Ok(())
-}
-
-impl RulePackDef {
-    /// Resolves every whole-value `${NAME}` fragment reference across every pattern-bearing field in this
-    /// pack — the field set is not restated here, it is walked by
-    /// [`pattern_fields::for_each_pattern_field`], whose exhaustive destructuring is what makes "every"
-    /// true (see that module's header) — then CLEARS `self.fragments` to empty — so a
-    /// pack that never referenced a fragment at all, and a pack that resolved every `${NAME}` ref, end up
-    /// `Debug`/hash-identical to each other (and to the equivalent pack authored with the patterns spelled
-    /// out inline). This is what makes the migration in this pass projection-neutral: `{pack:?}` — the
-    /// cache fingerprint input (`crates/engine/src/cache.rs`) — is byte-for-byte unchanged for every pack
-    /// this expansion touches, so no cache-schema/interpreter-fingerprint bump rides with it.
-    /// (Byte-identity is intra-version: adding the `fragments` field itself makes the derived `Debug`
-    /// emit `fragments: {}`, which a PRIOR release without the field did not — so upgrading across this
-    /// change is a one-time, harmless cache cold-start for every pack, recomputing to identical findings.
-    /// That is a field-addition effect, not a migration effect, and needs no bump for correctness.)
-    ///
-    /// Reference names resolve against `self.fragments` merged UNDER the shared bundled set
-    /// (`dsl::fragments::shared_fragments`) — a per-pack name wins a collision against a shared one of the
-    /// same name.
-    ///
-    /// This is a SINGLE pass, deliberately not recursive: a fragment's own resolved text is never itself
-    /// re-scanned for further `${NAME}` refs. A fragment whose value is itself a whole-value `${...}`
-    /// reference is a hard [`FragmentError::Nested`], not a silently-inert passthrough or a chained
-    /// expansion — same "fail the load, don't guess" contract an unknown name gets
-    /// ([`FragmentError::Unknown`]). Call this at every `RulePackDef` deserialize boundary BEFORE the pack
-    /// is hashed or evaluated: `pack_loader::parse_dsl_pack` (disk load, the `validate_rule_pack`
-    /// validator, and bundled-pack parsing all funnel through it) and the inline `packDefs` wire path
-    /// (`zzop-facade`'s `base_engine_config`, which owns every `RulePackDef` deserialized directly off an
-    /// `AnalyzeRequest`/`EnvelopeAnalyzeRequest` — a boundary `parse_dsl_pack` never sees, since serde
-    /// deserializes those `Vec<RulePackDef>` fields directly, not through pack JSON *text*).
-    ///
-    /// Idempotent: calling this again on an already-expanded pack (`fragments` empty, no `${NAME}` values
-    /// remaining) is a no-op — safe for a pack that reaches this call twice across two merged sources
-    /// (e.g. a bundled pack, already expanded via `parse_dsl_pack`, folded into the same `pack_defs` list
-    /// `base_engine_config` re-expands every entry of).
-    pub fn expand_fragments(&mut self) -> Result<(), FragmentError> {
-        let merged: BTreeMap<String, String> = if self.fragments.is_empty() {
-            shared_fragments().clone()
-        } else {
-            let mut merged = shared_fragments().clone();
-            merged.extend(self.fragments.iter().map(|(k, v)| (k.clone(), v.clone())));
-            merged
-        };
-
-        for rule in &mut self.rules {
-            let rid = rule.id.clone();
-            for_each_pattern_field(rule, &mut |field, value| {
-                resolve_field(value, &merged, &rid, field)
-            })?;
-        }
-
-        self.fragments.clear();
-        Ok(())
-    }
-
-    /// ADDS `extra` (one already-validated regex source) to every rule in this pack whose
-    /// `file_exclude_pattern` is the shared `${test-paths…}` vocabulary, rewriting it to
-    /// `(?:<shared>)|(?:<extra>)`. Returns how many rules were rewritten, so a caller can self-report a
-    /// declaration that moved nothing. Call it AFTER [`expand_fragments`] — before expansion the value
-    /// is still a `${NAME}` reference and nothing matches.
-    ///
-    /// ## Why this is ADDITIVE, when every other declared vocabulary REPLACES
-    /// `zzop_engine::VocabularyConfig`'s standing contract is per-key whole replacement, and its default
-    /// for an absent key is "the judgment is NOT MADE" — an under-report the caller chose. Test paths
-    /// invert both halves, and the reason is the direction of the failure, not a preference:
-    /// * A test convention is fixed by the LANGUAGE, not chosen by the project. `_test.go` is what the
-    ///   Go toolchain compiles as a test; asking a Go user to declare it is asking them to restate the
-    ///   toolchain, and it breaks zero-config for every language whose convention we already know.
-    /// * With no default, an undeclared vocabulary means the engine judges test code as production.
-    ///   That is a WRONG CLAIM, not an abstention — the opposite failure direction from every other key
-    ///   here, where silence merely means we say less. Different direction, different policy.
-    /// * Replacement would be a trap: a project adding `it/` for its integration tests would silently
-    ///   lose `_test.go`, `test_*.py` and `*Tests.cs` in the same edit, and the loss would show up as
-    ///   findings rather than as an error.
-    ///
-    /// So the built-in conventions are floor, never ceiling, and a declaration can only widen what is
-    /// declined. Narrowing is deliberately not expressible here: `rules: { "<id>": "off" }` turns a rule
-    /// off, and that is the knob for "I want to be judged on this path after all".
-    pub fn extend_test_path_exclusions(&mut self, extra: &str) -> usize {
-        let mut extended = 0usize;
-        for rule in &mut self.rules {
-            let _ =
-                for_each_pattern_field::<std::convert::Infallible>(rule, &mut |field, value| {
-                    if field == "file_exclude_pattern"
-                        && crate::dsl::fragments::is_shared_test_path_vocabulary(value)
-                    {
-                        *value = format!("(?:{value})|(?:{extra})");
-                        extended += 1;
-                    }
-                    Ok(())
-                });
-        }
-        extended
-    }
-}
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct RuleDef {
     pub id: String,
+    /// Defect or opinion — see [`RuleAxis`] for what the two mean, why `severity` is not this axis,
+    /// and why the default is the one it is.
+    #[serde(default)]
+    pub axis: RuleAxis,
     pub severity: Severity,
     /// Human-facing message (cause / fix hint).
     pub message: String,
@@ -250,5 +149,41 @@ impl RuleDef {
     /// but left one shipped description advertising the retired bare form.
     pub fn suppress_marker_for_id(id: &str) -> String {
         format!("zzop-{id}-ok")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The compatibility half of the `framework` deletion (this module's doc). A pack written before
+    /// 2026-08-11 may still declare the key, and it must keep loading — the deletion removes a no-op,
+    /// it does not invalidate anyone's file. This test is what makes that claim survive: adding
+    /// `#[serde(deny_unknown_fields)]` to `RulePackDef` later would break every such pack silently,
+    /// and it turns this red instead (verified by planting exactly that attribute).
+    #[test]
+    fn a_pack_still_declaring_the_removed_framework_key_loads() {
+        let json = r#"{
+            "id": "legacy",
+            "framework": "react",
+            "schema_version": 1,
+            "rules": []
+        }"#;
+        let pack: RulePackDef =
+            serde_json::from_str(json).expect("a pre-deletion pack must still load");
+        assert_eq!(pack.id, "legacy");
+        assert_eq!(pack.schema_version, 1);
+        assert!(pack.rules.is_empty());
+    }
+
+    /// The other direction: a pack that never declared it loads too, which is what every shipped pack
+    /// now looks like. Without this the test above would also pass on a struct that had gained a
+    /// REQUIRED `framework` field.
+    #[test]
+    fn a_pack_omitting_it_entirely_loads() {
+        let pack: RulePackDef =
+            serde_json::from_str(r#"{ "id": "modern", "rules": [] }"#).expect("must load");
+        assert_eq!(pack.id, "modern");
+        assert_eq!(pack.schema_version, current_dsl_schema_version());
     }
 }

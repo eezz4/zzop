@@ -109,7 +109,7 @@ pub(crate) fn unmatched_global_exclude_warnings(
 /// The count is over SCANNED FILES the filter matched, which is deliberately not the same set as
 /// "judged subjects removed" — several scores additionally require source-ness and `loc > 0`, so a match
 /// on an unparseable file removes nothing from them. Naming the smaller number would mean picking one
-/// metric's subject set to speak for all seventeen; the message says "matched N scanned files" and lets
+/// metric's subject set to speak for all of them; the message says "matched N scanned files" and lets
 /// the sentence after it carry which figures actually move.
 pub(crate) fn scoring_scope_warning(config: &EngineConfig, rels: &[&str]) -> Option<String> {
     if config.rule_config.global_excludes.is_empty() {

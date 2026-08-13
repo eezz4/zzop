@@ -173,17 +173,21 @@ fn common_ir(ir: &serde_json::Value) -> serde_json::Value {
 }
 
 /// The whole `CrossLayerResult` verbatim, with every bucket materialized (see [`project`]'s §0 note).
-/// `hostRekeyCounts` is the only genuinely skip-if-empty field on the type; the other six are
-/// materialized defensively so the guarantee is "all seven, always", not "six always and one usually".
+/// `hostRekeyCounts` and `wildcardRoutePartitions` are the genuinely skip-if-empty fields on the type;
+/// the other six are materialized defensively so the guarantee is "all eight, always", not "six always
+/// and two usually".
 ///
 /// This is what makes the surface adequate: `unconsumedProvides` + `unresolvedConsumes` + `edges` are
 /// exactly the inputs `cross-layer/unconsumed-endpoint` reads, so that rule (and its siblings) can be
-/// re-implemented outside zzop rather than only inspected.
+/// re-implemented outside zzop rather than only inspected. `wildcardRoutePartitions` is part of that
+/// adequacy and not an extra: a re-implementer who cannot see which routes left the join would rebuild
+/// the exact three false findings the partition removed — an empty array says "no pattern route here",
+/// where an absent key would have said nothing at all.
 fn cross_layer(cl: &serde_json::Value) -> serde_json::Value {
     let mut map = cl.as_object().cloned().unwrap_or_default();
     for bucket in std::iter::once("edges")
         .chain(crate::output::KEY_BUCKETS)
-        .chain(std::iter::once("hostRekeyCounts"))
+        .chain(["hostRekeyCounts", "wildcardRoutePartitions"])
     {
         if !map.get(bucket).is_some_and(serde_json::Value::is_array) {
             map.insert(bucket.to_string(), serde_json::json!([]));

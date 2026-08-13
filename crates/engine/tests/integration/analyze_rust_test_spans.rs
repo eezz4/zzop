@@ -14,10 +14,17 @@
 //! twice — once inside a test region, once in shipped code — and asserts one finding, on the shipped
 //! line. A regression in either direction (gate too wide, gate absent) fails.
 //!
-//! `sql/select-star` is the probe rule throughout: a plain `line-scan` whose `file_pattern` admits `.rs`,
-//! whose trigger is a string literal (so the same text is a violation in any language), and whose
-//! `${test-paths}` path exclusion does NOT match the fixture paths — so a finding that disappears here
-//! disappeared because of the SPAN, never because of a path.
+//! `sql/delete-no-where` is the probe rule throughout: a plain `line-scan` whose `file_pattern` admits
+//! `.rs` and `.ts` alike, whose trigger is a closed string literal (so the same text is a violation in
+//! any language), and whose `${test-paths-migrations}` path exclusion does NOT match the fixture paths
+//! — so a finding that disappears here disappeared because of the SPAN, never because of a path.
+//!
+//! It was `sql/select-star` until 2026-08-12, when that rule left the bundle for
+//! `examples/packs/sql-preferences.json` and `all_shipped_packs()` below — which loads `rules/dsl` and
+//! nothing else — stopped finding it, turning all six tests red at once. The replacement is
+//! deliberately another BUNDLED rule rather than the exported one: the subject here is the span
+//! channel, and pointing the probe at a pack the default configuration does not load would couple this
+//! proof to a retrieval step that has nothing to do with what it measures.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -103,7 +110,7 @@ const FIXTURE_LINE: u32 = 8;
 /// firing half of the claim would be untestable.
 fn source(gate: &str) -> String {
     format!(
-        "pub fn ship() -> &'static str {{\n    \"SELECT * FROM accounts\"\n}}\n\n{gate}\nmod tests {{\n    fn t() {{\n        let _ = \"SELECT * FROM accounts\";\n    }}\n}}\n"
+        "pub fn ship() -> &'static str {{\n    \"DELETE FROM accounts\"\n}}\n\n{gate}\nmod tests {{\n    fn t() {{\n        let _ = \"DELETE FROM accounts\";\n    }}\n}}\n"
     )
 }
 
@@ -115,7 +122,7 @@ fn a_violation_inside_cfg_test_is_silent_while_the_same_violation_outside_still_
     let out = analyze_tree(dir.path(), &config());
 
     assert_eq!(
-        hit_lines(&out, "sql/select-star", "src/lib.rs"),
+        hit_lines(&out, "sql/delete-no-where", "src/lib.rs"),
         vec![SHIPPED_LINE],
         "exactly the SHIPPED literal must be judged; the one inside `#[cfg(test)] mod tests` must not"
     );
@@ -132,7 +139,7 @@ fn the_same_file_without_the_cfg_test_attribute_fires_twice() {
     let out = analyze_tree(dir.path(), &config());
 
     assert_eq!(
-        hit_lines(&out, "sql/select-star", "src/lib.rs"),
+        hit_lines(&out, "sql/delete-no-where", "src/lib.rs"),
         vec![SHIPPED_LINE, FIXTURE_LINE],
         "with no `#[cfg(test)]` there is no test region, so BOTH literals must be judged"
     );
@@ -145,13 +152,13 @@ fn a_bare_test_attribute_on_a_free_function_also_silences_only_that_function() {
     let dir = TempDir::new("zzop-engine-rust-test-spans-bare");
     dir.write(
         "src/lib.rs",
-        "pub fn ship() -> &'static str {\n    \"SELECT * FROM accounts\"\n}\n\n#[test]\nfn t() {\n    let _ = \"SELECT * FROM accounts\";\n}\n",
+        "pub fn ship() -> &'static str {\n    \"DELETE FROM accounts\"\n}\n\n#[test]\nfn t() {\n    let _ = \"DELETE FROM accounts\";\n}\n",
     );
 
     let out = analyze_tree(dir.path(), &config());
 
     assert_eq!(
-        hit_lines(&out, "sql/select-star", "src/lib.rs"),
+        hit_lines(&out, "sql/delete-no-where", "src/lib.rs"),
         vec![SHIPPED_LINE]
     );
 }
@@ -163,12 +170,15 @@ fn cfg_not_test_code_is_shipped_code_and_stays_judged() {
     let dir = TempDir::new("zzop-engine-rust-test-spans-not");
     dir.write(
         "src/lib.rs",
-        "#[cfg(not(test))]\npub fn ship() -> &'static str {\n    \"SELECT * FROM accounts\"\n}\n",
+        "#[cfg(not(test))]\npub fn ship() -> &'static str {\n    \"DELETE FROM accounts\"\n}\n",
     );
 
     let out = analyze_tree(dir.path(), &config());
 
-    assert_eq!(hit_lines(&out, "sql/select-star", "src/lib.rs"), vec![3]);
+    assert_eq!(
+        hit_lines(&out, "sql/delete-no-where", "src/lib.rs"),
+        vec![3]
+    );
 }
 
 #[test]
@@ -179,13 +189,13 @@ fn a_typescript_file_is_untouched_by_the_gate() {
     let dir = TempDir::new("zzop-engine-rust-test-spans-ts");
     dir.write(
         "src/query.ts",
-        "export function ship() {\n  return \"SELECT * FROM accounts\";\n}\n\ndescribe(\"x\", () => {\n  it(\"y\", () => {\n    const q = \"SELECT * FROM accounts\";\n  });\n});\n",
+        "export function ship() {\n  return \"DELETE FROM accounts\";\n}\n\ndescribe(\"x\", () => {\n  it(\"y\", () => {\n    const q = \"DELETE FROM accounts\";\n  });\n});\n",
     );
 
     let out = analyze_tree(dir.path(), &config());
 
     assert_eq!(
-        hit_lines(&out, "sql/select-star", "src/query.ts"),
+        hit_lines(&out, "sql/delete-no-where", "src/query.ts"),
         vec![2, 7],
         "a `describe`/`it` block is not a parser-proved test region — TS test exclusion is the PATH's \
          job, and this file's path is not a test path"
@@ -207,14 +217,14 @@ fn the_gate_survives_a_warm_cache() {
 
     let cold = analyze_tree(dir.path(), &cfg);
     assert_eq!(
-        hit_lines(&cold, "sql/select-star", "src/lib.rs"),
+        hit_lines(&cold, "sql/delete-no-where", "src/lib.rs"),
         vec![SHIPPED_LINE],
         "cold run"
     );
 
     let warm = analyze_tree(dir.path(), &cfg);
     assert_eq!(
-        hit_lines(&warm, "sql/select-star", "src/lib.rs"),
+        hit_lines(&warm, "sql/delete-no-where", "src/lib.rs"),
         vec![SHIPPED_LINE],
         "warm run — a cache that lost `test_spans` would report the fixture line here"
     );

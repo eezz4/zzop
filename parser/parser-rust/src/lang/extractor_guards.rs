@@ -107,15 +107,27 @@ fn walk_item(rel: &str, item: &Item, vocab: &RustGuardVocab, out: &mut Vec<RawCa
                 }
             }
         }
-        // Same file-scoped, v1-flat symbol model `lang::calls` uses: an inline `mod` block's items are
-        // still THIS file's symbols.
-        Item::Mod(m) => {
-            if let Some((_, items)) = &m.content {
-                for inner in items {
-                    walk_item(rel, inner, vocab, out);
-                }
-            }
-        }
+        // `Item::Mod` is deliberately NOT walked, for exactly the reason `lang::calls`'s module doc
+        // records — this file was the last dissenter from a premise that module MEASURED to be false.
+        //
+        // The premise was "an inline `mod` block's items are still THIS file's symbols". They are not:
+        // `parse_symbols` mints no symbol for a nested item, so a guard extracted from one had no symbol
+        // of its own and borrowed the id a top-level item of the same name WOULD have. The failure ran
+        // in the false-negative direction and is reproduced by the most ordinary Rust file there is:
+        //
+        //     pub async fn create_user(body: String) -> String { body }        // the deployed handler
+        //     Router::new().route("/api/users", post(create_user))             // unguarded
+        //     #[cfg(test)] mod tests { async fn create_user(user: AuthUser) {} }
+        //
+        // Measured 2026-08-11 through the real engine: `mutating-route-no-auth` fires on that tree
+        // WITHOUT the test module and is silent WITH it — a test-only helper cleared an open mutating
+        // route, and no warning, blindSpot or disclosure class said so. Renaming the nested fn restores
+        // the finding, which is what proves the homonym is the whole mechanism.
+        //
+        // The recall cost is the same one `lang::calls` states: a guard written only inside an inline
+        // `mod` is not seen. Under-reporting a guard costs a false POSITIVE the reader can dismiss;
+        // inventing one costs a false negative on an auth rule, and this seam must not trade the second
+        // for the first. Reopening it needs qualified nested ids (`file.rs#outer::inner`), not a walk.
         _ => {}
     }
 }

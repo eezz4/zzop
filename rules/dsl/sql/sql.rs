@@ -2,22 +2,31 @@
 //! `Matcher::MethodScan` rules run against real parser-derived `SourceSymbol` body spans. See `sql.json` for
 //! each rule's exact matcher shape and message.
 //!
-//! `query-logic-density` counts CASE-WHEN branches within one SQL literal via a whole-file `require_file`
-//! gate (an SQL anchor keyword plus two `WHEN`s) paired with a `line_pattern` on the literal's `CASE` line,
-//! since `Matcher::LineScan` has no cross-line aggregation.
+//! ⚠ This pack was thirteen rules until 2026-08-12. Five of the six that declared `axis: opinion` —
+//! `query-logic-density`, both `app-side-aggregation-*`, `select-star` and `like-leading-wildcard` —
+//! left for `examples/packs/sql-preferences.json`, and their tests went with them
+//! (`examples/packs/tests/`, wired as its own `[[test]]` target). Three of the modules here were
+//! SHARED and were split rather than moved: `aggregation.rs`, `suppression.rs` and `language_scope.rs`
+//! each kept the staying rules' fixtures and handed the rest over.
 //!
-//! `app-side-aggregation-reduce`/`-filter-length` and `race-condition-toctou` are co-occurrence
-//! approximations: method-scan has no variable-binding memory, so they don't verify the same variable is
-//! on both sides of the pattern (a guard/receiver anywhere in the function body counts).
+//! The SIXTH, `destructive-migration`, was exported that same day and brought back the same day, and the
+//! reason is worth keeping: its `axis: opinion` judgment was and is correct, but `delete-no-where`,
+//! `update-no-where` and `truncate-in-app-code` exclude migration paths *because* it discloses them.
+//! Exporting it turned that exclusion from a handoff into a silence — measured, not feared: a real
+//! `DROP TABLE` on a populated table sat unreported in the dogfood corpus. It is the one bundled rule
+//! that declares `opinion`, and that is the shape of the lesson: what axis a rule argues on and whether
+//! a default run makes sense without it are two different questions.
+//!
+//! `race-condition-toctou` is a co-occurrence approximation: method-scan has no variable-binding
+//! memory, so it doesn't verify the same variable is on both sides of the pattern (a guard/receiver
+//! anywhere in the function body counts).
 //!
 //! Out of scope (a check that can't be expressed accurately ships as nothing, not half-right):
 //! cache-invalidation-on-write (needs cross-file key-vocabulary resolution) and hardcoded-record-ref
 //! detection (needs AST-structural object-literal traversal) — both beyond the DSL's four matcher shapes.
 //!
 //! Every rule's `// <marker>-ok:` suppression case is covered below, using the fixed "finding's own line
-//! OR the single line directly above" window (`MARKER_LOOKBACK_LINES`). `destructive-migration` also
-//! recognizes a `--`-comment marker in `.sql` files specifically (`dsl.rs::leaders_for_path`), since real
-//! migrations of this pack's target class are commonly raw `.sql`, not `.ts`/`.js`.
+//! OR the single line directly above" window (`MARKER_LOOKBACK_LINES`).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -31,9 +40,7 @@ mod destructive_migration;
 mod language_scope;
 mod no_where;
 mod nplus1;
-mod query_logic_density;
 mod raw_sql_check_then_write;
-mod select_like;
 mod suppression;
 mod toctou;
 mod truncate;
@@ -79,10 +86,13 @@ impl Drop for TempDir {
 /// exactly like they do at real load time — a raw struct deserialize would leave the literal
 /// `"${sql-where-veto}"` string in place, which is not a valid regex and would silently no-op every
 /// affected rule.
-/// The pack this file's tests scan with. The disk load below reads and parses ALL 12 pack JSONs and
-/// throws away 11, so doing it per test cost this binary that work once per test; the `OnceLock` makes
-/// it once per binary. The clone is cheap and — importantly — SHARES the pack's compiled-regex memo
-/// (`zzop_core::dsl::RegexCache`), so the second test onward also skips recompiling every pattern.
+/// The pack this file's tests scan with. The disk load below parses EVERY pack JSON in the directory
+/// and throws all but this one away, so doing it per test cost this binary that work once per test; the
+/// `OnceLock` makes it once per binary. How many packs that is is not written here: it moved inside one
+/// release (v0.30.0 exported a whole pack) and the sentence needs no size to make its point — the same
+/// spelling `examples/packs/tests/sql_preferences.rs` already uses. The clone is cheap and — importantly
+/// — SHARES the pack's compiled-regex memo (`zzop_core::dsl::RegexCache`), so the second test onward
+/// also skips recompiling every pattern.
 fn sql_pack() -> RulePackDef {
     static PACK: std::sync::OnceLock<RulePackDef> = std::sync::OnceLock::new();
     PACK.get_or_init(sql_pack_uncached).clone()
@@ -95,19 +105,19 @@ fn sql_pack_uncached() -> RulePackDef {
     zzop_core::parse_dsl_pack(&text).expect("parse sql.json")
 }
 
-fn config() -> EngineConfig {
+fn config(packs: Vec<RulePackDef>) -> EngineConfig {
     EngineConfig {
         source_id: "sql-fixture".to_string(),
         dispatch: DispatchConfig::default(),
         size_cap: DEFAULT_SIZE_CAP,
         rule_config: Default::default(),
-        packs: vec![sql_pack()],
+        packs,
         ..EngineConfig::default()
     }
 }
 
 fn scan(dir: &TempDir) -> AnalyzeOutput {
-    analyze_tree(dir.path(), &config())
+    analyze_tree(dir.path(), &config(vec![sql_pack()]))
 }
 
 fn hits<'a>(out: &'a AnalyzeOutput, rule: &str) -> Vec<&'a zzop_core::Finding> {

@@ -12,8 +12,33 @@ pub use feature_sliced_design::{
 };
 use serde::{Deserialize, Serialize};
 
-/// Fallback Single-File-Component LOC limit for a role with no `loc_limits` entry.
-/// A pure normalization constant — not user-tunable.
+/// Fallback LOC limit for a role with no `loc_limits` entry — the cap `fileSizeCompliance` scores
+/// against, and (at [`GodFileThresholds::loc_multiplier`]x) the one `godFile` scores against. A pure
+/// normalization constant — not user-tunable.
+///
+/// It said "Single-File-Component LOC limit" until 2026-08-13, which was the same Vue-`SFC` reading
+/// that got the score itself renamed `sfc` -> `fileSizeCompliance` (see
+/// [`crate::scores::meanings`]); the sibling `loc_limits` doc had already been corrected and this one
+/// had not. The limit applies to every source file, not to component files.
+///
+/// # Every file a native parser dispatches rides this cap, `.sql`/`.prisma` included
+///
+/// The subject gate is `is_source` — "does a parser claim this extension" — so schema and migration
+/// files sit in the `fileSizeCompliance`/`godFile` denominators next to hand-written code, and a
+/// large generated migration would be judged by a ceiling written for hand-edited source.
+///
+/// **Measured 2026-08-13 over the 17-repo corpus and left alone**: across every `.sql`/`.prisma` file
+/// in those trees, the largest is well under this constant — so not one of them reaches the
+/// compliance cap, let alone the `godFile` threshold at twice it. The concern is real in shape and
+/// has ZERO instances in the corpus, which is evidence ABSENT rather than evidence against; carving
+/// an extension class out of the denominator on that basis would move scores on a guess. Recount by
+/// running an analysis over `corpus/oss/zzop.config.jsonc` and comparing each `.sql`/`.prisma` node's
+/// `loc` against this value.
+///
+/// Retest trigger for reopening this: a real tree carrying a migration or schema file past this cap,
+/// which would turn the zero-instance finding above into a real one. Until then the decision stands —
+/// keep every parser-claimed extension in the denominator, because excluding a class of file from a
+/// ratio is itself a scoring change and this one has no measurement behind it.
 pub const DEFAULT_LOC_LIMIT: u32 = 150;
 
 /// busFactor: min changeCount for a file to count as "live" (knowledge-isolation gate).

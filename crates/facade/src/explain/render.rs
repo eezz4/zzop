@@ -6,7 +6,7 @@
 //! for that same line cap and carrying the reasoning for which field lands in which block.
 
 use zzop_core::dsl::{marker_channel, MarkerChannel};
-use zzop_core::{Matcher, RuleDef, RulePackDef, Severity};
+use zzop_core::{Matcher, RuleAxis, RuleDef, RulePackDef, Severity};
 
 use super::scope::{presentation_lines, scope_lines};
 
@@ -21,6 +21,12 @@ pub(super) fn render(pack: &RulePackDef, rule: &RuleDef) -> String {
     let mut lines = vec![
         format!("id: {}/{}", pack.id, rule.id),
         format!("pack: {}", pack.id),
+        // The AXIS sits directly above `severity` on purpose: they are the two questions a reader
+        // conflates, and putting them adjacent is what makes the difference legible. `severity` is
+        // confidence x blast radius; `axis` is whether the rule states a defect at all. A reader who
+        // saw only `severity: info` on `select-star` had no way to tell it from `info` on
+        // `mutating-route-no-auth`, which is a real unauthenticated write.
+        format!("axis: {}", axis_str(rule.axis)),
         format!("severity: {}", severity_str(rule.severity)),
         format!("message: {}", rule.message),
         format!("suppress marker: {}", suppress_marker_str(rule)),
@@ -51,6 +57,16 @@ fn test_region_line(rule: &RuleDef) -> String {
     "scan_test_regions: no (a finding on a line a parser proved is compiled out of the shipping build \
      — Rust `#[cfg(test)]` today — is dropped after this matcher runs)"
         .to_string()
+}
+
+/// The rule's own claim about what KIND of judgment it makes (`zzop_core::RuleAxis`) — printed
+/// because it is the one property of a rule a reader cannot infer from anything else this command
+/// shows. `opinion` means a project that deliberately does the flagged thing is not wrong.
+fn axis_str(axis: RuleAxis) -> &'static str {
+    match axis {
+        RuleAxis::Defect => "defect (wrong regardless of house taste)",
+        RuleAxis::Opinion => "opinion (a convention — a project may deliberately disagree)",
+    }
 }
 
 fn severity_str(severity: Severity) -> &'static str {

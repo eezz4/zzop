@@ -1,4 +1,5 @@
-/* Generate site/rules.html's rule ROWS from docs/rules/catalog.md, the machine-pinned SSOT.
+/* Generate site/rules.html's rule ROWS from docs/rules/catalog.md, the machine-pinned SSOT, and its
+ * TABLE OF CONTENTS from the page's own sections.
  *
  * WHY THIS EXISTS
  * The public site mirrored the catalog BY HAND. Every row was a second copy of a fact whose first
@@ -11,13 +12,17 @@
  * guard.
  *
  * WHAT IS GENERATED, AND WHAT IS NOT
- * Only the `<tbody>` contents of the tables inside `<section id="pack-*">` and
- * `<section id="native-analyses">`. Everything else on that page stays hand-written: the intro
- * paragraphs, the native-analyses prose, the matcher glossary table (`<section id="matchers">` -- its
- * rows are Matcher VARIANTS, not rules, and have no catalog row to derive from), the custom-pack
- * example, and the table of contents. Section scaffolding is NOT generated either; a catalog pack
- * with no `<section id="pack-<id>">` on the site is a hard error here that prints the scaffold to
- * paste, because inventing a section would also mean inventing its TOC entry.
+ * Two things. (1) The `<tbody>` contents of the tables inside `<section id="pack-*">` and
+ * `<section id="native-analyses">`, from the catalog. (2) The `<aside class="docs-toc">` entries,
+ * from the page's own `<section id>`/`<h2>` pairs -- see `spliceToc` for why that moved from
+ * hand-written to derived on 2026-08-12.
+ *
+ * Everything else on that page stays hand-written: the intro paragraphs, the native-analyses prose,
+ * the matcher glossary table (`<section id="matchers">` -- its rows are Matcher VARIANTS, not rules,
+ * and have no catalog row to derive from), and the custom-pack example. Section scaffolding is NOT
+ * generated; a catalog pack with no `<section id="pack-<id>">` on the site is a hard error here that
+ * prints the scaffold to paste. Inventing a section would mean inventing its prose -- but no longer
+ * its TOC entry, which the scaffold now gets for free once the section exists.
  *
  * USAGE
  *   node scripts/gen-site-rules.mjs            # rewrite site/rules.html in place
@@ -259,7 +264,8 @@ function spliceSite(html, { packs, native }) {
       const pack = packs.find((p) => p.id === packId);
       if (!pack) {
         die(`site/rules.html has <section id="${id}"> but docs/rules/catalog.md ships no '${packId}' pack.\n` +
-            `  Delete the section and its table-of-contents entry -- the catalog is the SSOT.`);
+            `  Delete the section -- the catalog is the SSOT. Its table-of-contents entry goes with it\n` +
+            `  automatically; the TOC is derived from the sections that exist.`);
       }
       rows = pack.rules.map(dslRow);
     }
@@ -275,7 +281,7 @@ function spliceSite(html, { packs, native }) {
   for (const p of packs) {
     if (seen.has(`pack-${p.id}`)) continue;
     die(`docs/rules/catalog.md ships pack '${p.id}' and site/rules.html has no <section id="pack-${p.id}">.\n` +
-        `  Sections are hand-written (heading + table-of-contents entry), so add this shell and re-run:\n\n` +
+        `  Sections are hand-written (heading + prose), so add this shell and re-run:\n\n` +
         [`    <section id="pack-${p.id}">`,
          `      <h2><code>${p.id}</code></h2>`,
          `      <div class="table-scroll">`,
@@ -289,10 +295,72 @@ function spliceSite(html, { packs, native }) {
          `      </div>`,
          `    </section>`,
          ``,
-         `  ...plus <a href="#pack-${p.id}" class="docs-toc__link">${p.id}</a> in the page's docs-toc.`].join("\n"));
+         `  The table-of-contents entry is NOT yours to add: it is derived from this section's own`,
+         `  <h2> once the section exists, so paste the shell and re-run.`].join("\n"));
   }
   if (!seen.has("native-analyses")) die("site/rules.html has no <section id=\"native-analyses\"> to fill");
-  return out;
+  return spliceToc(out, eol);
+}
+
+/* The table of contents, DERIVED from the sections rather than kept beside them (2026-08-12).
+ *
+ * WHY IT MOVED HERE
+ * Sections were already pinned in both directions -- a catalog pack with no section is a hard error
+ * above, and a section with no catalog pack is a hard error too. The TOC was not, and the two die()
+ * messages above both ended with a sentence asking a human to remember it ("...plus <a href=...> in
+ * the page's docs-toc", "Delete the section and its table-of-contents entry"). An instruction in an
+ * error message is not a check: nothing failed if you did the section and skipped the link, and the
+ * `typescript` pack's removal on 2026-08-11 had to get that right by hand. The two ways it goes wrong
+ * are silent in opposite directions -- a stale entry is a DEAD ANCHOR on the public page, a missing
+ * one makes a whole pack unreachable from the page's own navigation.
+ *
+ * WHY GENERATION RATHER THAN AN ASSERTION
+ * Everything the TOC says is already on the page: the href is the section id, and the label is the
+ * section's own <h2> (`<code>db</code>` -> `db`, `Native analyses` -> `Native analyses`). An
+ * assertion would keep the second copy and watch it; deriving deletes it. Order follows document
+ * order, which is what a "On this page" list means.
+ *
+ * SCOPE: every <section id="..."> inside <main>, not just the pack-* ones -- the hand-written tail
+ * (native-analyses, matchers, custom-packs) is derived by the same rule, so a new hand-written
+ * section joins the TOC by existing. A section with no <h2> is a hard error rather than a skipped
+ * entry: silently dropping it would recreate exactly the "unreachable from navigation" half. */
+function spliceToc(html, eol) {
+  // `\r?\n` throughout, not a bare `\n`: this page ships with CRLF terminators, and a `\n`-only anchor
+  // matched nothing at all — which the die() below correctly reported as "no TOC to fill", a true
+  // statement about a false premise. The eol the caller measured is what gets WRITTEN back.
+  const tocRe = /(<aside class="docs-toc">[\s\S]*?<div class="docs-toc__label">[^<]*<\/div>\r?\n)([\s\S]*?)(\r?\n[ \t]*<\/aside>)/;
+  const m = tocRe.exec(html);
+  if (!m) {
+    die("site/rules.html has no <aside class=\"docs-toc\"> with a docs-toc__label to fill -- the page's\n" +
+        "  navigation is derived from its sections, so this anchor is load-bearing. Re-point it rather\n" +
+        "  than dropping the TOC.");
+  }
+
+  const main = html.slice(0, html.indexOf('<aside class="docs-toc">'));
+  const entries = [];
+  for (const s of main.matchAll(/<section id="([a-z0-9-]+)">([\s\S]*?)<\/section>/g)) {
+    const h2 = /<h2>([\s\S]*?)<\/h2>/.exec(s[2]);
+    if (!h2) {
+      die(`site/rules.html: <section id="${s[1]}"> has no <h2> to take a table-of-contents label from.\n` +
+          `  Give it one -- a section with no heading would silently vanish from the page's navigation.`);
+    }
+    // The label is the heading's text: `<code>db</code>` -> `db`. Only <code> wrapping is modeled,
+    // because that is the only markup the headings use; anything else is a hard error rather than a
+    // silently stripped tag, on the same "say so instead of shipping something odd" rule the cell
+    // transform above follows.
+    const label = h2[1].trim().replace(/^<code>([^<]*)<\/code>$/, "$1");
+    if (/[<>]/.test(label)) {
+      die(`site/rules.html: <section id="${s[1]}">'s <h2> carries markup this generator does not model ` +
+          `(${h2[1].trim().slice(0, 80)}).\n  Model it here or simplify the heading -- do not let the TOC ` +
+          `label ship as raw markup.`);
+    }
+    entries.push(`    <a href="#${s[1]}" class="docs-toc__link">${label}</a>`);
+  }
+  if (entries.length < 5) {
+    die(`site/rules.html: derived only ${entries.length} table-of-contents entr(ies) from the page's ` +
+        `sections.\n  The section scan lost its anchor; writing that TOC would delete the page's navigation.`);
+  }
+  return html.replace(tocRe, (_w, head, _body, tail) => head + entries.join(eol) + tail);
 }
 
 /* ---------- main ------------------------------------------------------------------------------ */
@@ -308,7 +376,8 @@ const after = spliceSite(before, catalog);
 
 const dslCount = catalog.packs.reduce((n, p) => n + p.rules.length, 0);
 const total = dslCount + catalog.native.length;
-const census = `${catalog.packs.length} packs, ${dslCount} DSL rows, ${catalog.native.length} native rows`;
+const tocEntries = (after.match(/class="docs-toc__link"/g) || []).length;
+const census = `${catalog.packs.length} packs, ${dslCount} DSL rows, ${catalog.native.length} native rows, ${tocEntries} toc entries`;
 
 if (!check) {
   if (before !== after) fs.writeFileSync(SITE, after);
@@ -317,8 +386,27 @@ if (!check) {
 }
 
 if (before === after) {
-  console.log(`gen-site-rules: OK -- site/rules.html rule rows are exactly what docs/rules/catalog.md generates (${census})`);
+  console.log(`gen-site-rules: OK -- site/rules.html rule rows and table of contents are exactly what the catalog and its own sections generate (${census})`);
   process.exit(0);
+}
+
+/* The TOC is diffed on its OWN, before the row diff, and that separation is not cosmetic: a
+ * TOC-only drift leaves every rule row identical, so the row reporter below would have printed
+ * "FAILED -- 0 of N rule rows are not what the catalog generates" and listed nothing. A failure
+ * whose message names no subject is the shape that gets re-run, shrugged at, and worked around. */
+const tocOf = (s) => (s.match(/^[ \t]*<a href="#[a-z0-9-]+" class="docs-toc__link">.*$/gm) || []).map((l) => l.trim());
+const oldToc = tocOf(before);
+const newToc = tocOf(after);
+if (oldToc.join("\n") !== newToc.join("\n")) {
+  const stale = oldToc.filter((l) => !newToc.includes(l));
+  const missing = newToc.filter((l) => !oldToc.includes(l));
+  console.error("gen-site-rules: FAILED -- site/rules.html's table of contents is not what its own sections generate.");
+  for (const l of stale) console.error(`  STALE (points at no section, i.e. a dead anchor on the public page): ${l}`);
+  for (const l of missing) console.error(`  MISSING (a section unreachable from the page's navigation):        ${l}`);
+  if (!stale.length && !missing.length) console.error("  same entries, different ORDER — the TOC follows document order.");
+  console.error("");
+  console.error("  The TOC is GENERATED from the page's own <section id>/<h2> pairs. Run: node scripts/gen-site-rules.mjs");
+  process.exit(1);
 }
 
 /* A whole-file diff would be unreadable here (a single row runs past 3500 columns), so the failure

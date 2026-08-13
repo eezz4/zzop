@@ -1,10 +1,10 @@
-//! Public API — ratio of cross-module imports that bypass another module's index barrel (deep-path imports). A
+//! Public API ??ratio of cross-module imports that bypass another module's index barrel (deep-path imports). A
 //! module's index/barrel file is its public contract; reaching past it into internal files couples callers to
 //! implementation details that are free to change.
 
 use super::config::ScoresConfig;
 use super::detail_cap::{cap_and_count_dropped, MAX_EDGE_ROWS_LISTED};
-use super::shared::{is_external, is_index_barrel, module_root, round};
+use super::shared::{is_external, module_root, round};
 use super::types::{DeepImport, PublicApiScore};
 use zzop_core::DepGraph;
 
@@ -21,7 +21,7 @@ pub fn compute_public_api(
 
     // Deterministic traversal: HashMap iteration order is unspecified, so sorting by the importer path
     // gives a stable, reproducible order.
-    // Subject here is the IMPORTER (`from`), never the target — see `ScoresInput::is_scored`.
+    // Subject here is the IMPORTER (`from`), never the target ??see `ScoresInput::is_scored`.
     let mut froms: Vec<&String> = dep.keys().filter(|from| is_scored(from)).collect();
     froms.sort();
 
@@ -67,8 +67,29 @@ pub fn compute_public_api(
     }
 }
 
-/// True when `to` resolves to `module`'s barrel/index or a top-level file directly under it (its public surface),
-/// false when it reaches into a subdirectory (a deep import).
+/// True when `to` resolves to a file sitting DIRECTLY under `module` ??its barrel/index or any other
+/// top-level file, all of which count as the module's public surface ??false when it reaches into a
+/// subdirectory (a deep import).
+///
+/// # The `is_index_barrel` call that used to be here was provably dead (removed 2026-08-12)
+///
+/// The test read `is_index_barrel(after_root) || !after_root.contains('/')`, which looks like "a barrel,
+/// or a root-level file". It was one test: `is_index_barrel`'s regex is fully anchored
+/// (`^index\.(?:tsx?|jsx?|mjs|cjs)$`), so every string it accepts is free of `/` and therefore already
+/// satisfies the right-hand side. No input could reach the second operand having failed the first, and
+/// nothing this crate can be handed would change that. Deleting it changes no verdict ??the deletion was
+/// landed on that basis, not on a measurement, because there is nothing to measure.
+///
+/// What the dead clause LOOKED like it did is the real gap, and it is deliberately still open: a NESTED
+/// barrel (`pkg/sub/index.ts`) is judged a deep import here. The sibling metric disagrees ??/// `shared::is_upward_import` (hierarchy) applies the identical `is_index_barrel` to the BASENAME
+/// (`shared.rs`, `to.rsplit('/')`), so the same file is a barrel there and a deep import here. Widening
+/// this side to match was considered and deferred (2026-08-12 user decision): it MOVES scores, and the
+/// evidence to move them is missing rather than negative ??across seven JS/TS corpus repos the metric
+/// produced 10 cross-module edges in total, because `module_root` collapses to the first path segment
+/// and a single-`src/` layout therefore has almost no cross-module imports to judge. A widening decided
+/// on a sample that small would be a guess wearing a measurement's clothes. Note also that the
+/// disagreement is not JS-specific: `pkg/sub/__init__.py` and `pkg/sub/mod.rs` are read as deep imports
+/// by BOTH metrics, since the regex knows only the JS/TS spellings.
 fn is_root_import(to: &str, module: &str) -> bool {
     let stripped = strip_leading_dotdot(to);
     let prefix = format!("{}/", module);
@@ -77,7 +98,7 @@ fn is_root_import(to: &str, module: &str) -> bool {
         debug_assert_eq!("src/".len(), SRC_PREFIX_LEN);
         after_root = rest;
     }
-    is_index_barrel(after_root) || !after_root.contains('/')
+    !after_root.contains('/')
 }
 
 fn strip_leading_dotdot(p: &str) -> &str {
@@ -88,84 +109,11 @@ fn strip_leading_dotdot(p: &str) -> &str {
     s
 }
 
+// Two test modules, in their own files since 2026-08-13 (per-file line cap). The split is by
+// SUBJECT, which is the separation this file already maintained inline: `tests` asks what the metric
+// computes, `legend_tests` asks whether the sentence shipped beside the number still describes that
+// computation. Same shape as the crate's `health.rs`/`health/tests.rs` pairing.
 #[cfg(test)]
-mod tests {
-    //! Covers the empty-graph baseline, same-module imports not counting as cross-module, barrel/root-file
-    //! imports not being flagged as deep, a deep import bypassing the barrel being flagged, and a mixed
-    //! case with one deep import among three cross-module imports.
-    use super::*;
-
-    fn dep(pairs: &[(&str, &[&str])]) -> DepGraph {
-        pairs
-            .iter()
-            .map(|(k, vs)| (k.to_string(), vs.iter().map(|s| s.to_string()).collect()))
-            .collect()
-    }
-
-    fn cfg() -> ScoresConfig {
-        ScoresConfig::default()
-    }
-
-    #[test]
-    fn empty_graph_score_100() {
-        let r = compute_public_api(&DepGraph::new(), &cfg(), &|_| true);
-        assert_eq!(r.score, 100.0);
-        assert_eq!(r.total_cross_module_imports, 0);
-        assert!(r.deep_imports.is_empty());
-    }
-
-    #[test]
-    fn same_module_imports_are_not_cross_module_score_100() {
-        let d = dep(&[
-            ("features/auth/login.ts", &["features/auth/util.ts"]),
-            ("features/auth/util.ts", &[]),
-        ]);
-        let r = compute_public_api(&d, &cfg(), &|_| true);
-        assert_eq!(r.total_cross_module_imports, 0);
-        assert_eq!(r.score, 100.0);
-    }
-
-    #[test]
-    fn cross_module_import_via_barrel_or_root_file_is_not_deep() {
-        // afterRoot = "index.ts" (barrel) and "login.ts" (no slash) -> both root imports
-        let d = dep(&[(
-            "features/cart/cart.ts",
-            &["features/auth/index.ts", "features/auth/login.ts"],
-        )]);
-        let r = compute_public_api(&d, &cfg(), &|_| true);
-        assert_eq!(r.total_cross_module_imports, 2);
-        assert!(r.deep_imports.is_empty());
-        assert_eq!(r.score, 100.0);
-    }
-
-    #[test]
-    fn deep_cross_module_import_bypasses_barrel_is_flagged() {
-        // afterRoot = "ui/Btn.ts" -> has slash, not a barrel -> deep
-        let d = dep(&[("features/cart/cart.ts", &["features/auth/ui/Btn.ts"])]);
-        let r = compute_public_api(&d, &cfg(), &|_| true);
-        assert_eq!(r.total_cross_module_imports, 1);
-        assert_eq!(r.deep_imports.len(), 1);
-        assert_eq!(r.deep_imports[0].from, "features/cart/cart.ts");
-        assert_eq!(r.deep_imports[0].to, "features/auth/ui/Btn.ts");
-        assert_eq!(r.deep_imports[0].to_module, "features/auth");
-        assert_eq!(r.score, 0.0);
-    }
-
-    #[test]
-    fn one_deep_of_three_cross_module_imports_score_67() {
-        let d = dep(&[(
-            "features/cart/cart.ts",
-            &[
-                "features/auth/index.ts",  // root (barrel)
-                "features/auth/ui/Btn.ts", // deep
-                "features/auth/login.ts",  // root (no slash)
-                "react",                   // external, skipped
-            ],
-        )]);
-        let r = compute_public_api(&d, &cfg(), &|_| true);
-        assert_eq!(r.total_cross_module_imports, 3);
-        assert_eq!(r.deep_imports.len(), 1);
-        // 100 - (1/3)*100 = 66.67 -> 67
-        assert_eq!(r.score, 67.0);
-    }
-}
+mod legend_tests;
+#[cfg(test)]
+mod tests;

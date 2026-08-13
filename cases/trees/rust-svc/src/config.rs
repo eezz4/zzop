@@ -6,7 +6,7 @@
 pub const REPORTS_BASE: &str = "http://reports.internal.example.com/v1";
 pub const GOOD_REPORTS_BASE: &str = "https://reports.internal.example.com/v1";
 
-/// egress/localhost-url-literal-committed — a loopback URL committed to source. Loopback is also what
+/// code-hygiene/localhost-url-literal-committed — a loopback URL committed to source. Loopback is also what
 /// keeps `egress/http-url-literal` off this same line.
 pub const DEV_BASE: &str = "http://localhost:8080/health";
 

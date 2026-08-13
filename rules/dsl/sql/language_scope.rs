@@ -1,12 +1,24 @@
-//! The LANGUAGE-SCOPE half of the five quote-anchored `sql` rules — `delete-no-where`,
-//! `update-no-where`, `truncate-in-app-code`, `select-star`, `like-leading-wildcard`.
+//! The LANGUAGE-SCOPE half of the quote-anchored `sql` rules that stayed in the bundle —
+//! `delete-no-where`, `update-no-where`, `truncate-in-app-code`.
 //!
-//! None of the five carries one character of host-language syntax: each is a quote character, a SQL
-//! keyword, a table name and a closing quote. All five were nonetheless gated to `.ts/.tsx/.js/.mjs/.cjs`
+//! It used to own five. `select-star` and `like-leading-wildcard` left for
+//! `examples/packs/sql-preferences.json` on 2026-08-12, and their halves of every fixture below moved
+//! to that pack's own `language_scope.rs` — including the printf-exclusion pair, which is
+//! `like-leading-wildcard`'s alone. Nothing was dropped; the fixture SOURCES are duplicated across the
+//! two files on purpose, because each side must be able to fail on its own.
+//!
+//! None of the three carries one character of host-language syntax: each is a quote character, a SQL
+//! keyword, a table name and a closing quote. All were nonetheless gated to `.ts/.tsx/.js/.mjs/.cjs`
 //! and (since 2026-08-02) `.rs`, so `conn.execute("DELETE FROM users")` was CRITICAL in TypeScript and
 //! SILENT in Python, Go, C# and Java — measured byte-for-byte before the widening. The sibling modules in
 //! this directory own each rule's matcher semantics; this one owns only the question "does the file's
 //! LANGUAGE change the verdict", in both directions.
+//!
+//! The migration HANDOFF is asserted here in ONE pack again. `destructive-migration` was exported
+//! alongside the other two on 2026-08-12 and came back on the same day: the three rules below exclude
+//! migration paths *because* it discloses them, so exporting the disclosure turned that exclusion into a
+//! silence on a default run. The axis judgment (`opinion`) was never the error and is unchanged — the
+//! export decision was. See `destructive_migration.rs` for the rule's own tests.
 //!
 //! The corpus half of the same claim is `cases/trees/sql-langs/` (four production/test pairs plus an
 //! Alembic migration twin). These unit pins exist because that gate needs a release build and a 25-tree
@@ -16,7 +28,8 @@ use crate::{hits, scan, TempDir};
 
 /// One production file per newly-admitted language, each holding the SAME five statements. The tuple is
 /// (path, source), and every source is a whole file so the parser dispatch is realistic rather than a
-/// bare fragment.
+/// bare fragment. Two of the five statements are now the exported pack's subjects; they stay in the
+/// fixture because deleting them would change what the remaining three are measured AGAINST.
 const PRODUCTION: [(&str, &str); 4] = [
     (
         "services/queries.py",
@@ -48,21 +61,15 @@ const TEST_TWINS: [(&str, &str); 4] = [
     ),
 ];
 
-const FIVE: [&str; 5] = [
-    "delete-no-where",
-    "update-no-where",
-    "truncate-in-app-code",
-    "select-star",
-    "like-leading-wildcard",
-];
+const CRITICAL_THREE: [&str; 3] = ["delete-no-where", "update-no-where", "truncate-in-app-code"];
 
 #[test]
-fn every_newly_admitted_language_fires_all_five_quote_anchored_rules() {
+fn every_newly_admitted_language_fires_all_three_quote_anchored_rules() {
     for (path, src) in PRODUCTION {
         let dir = TempDir::new("zzop-sql");
         dir.write(path, src);
         let out = scan(&dir);
-        for rule in FIVE {
+        for rule in CRITICAL_THREE {
             assert_eq!(
                 hits(&out, rule).len(),
                 1,
@@ -82,7 +89,7 @@ fn every_newly_admitted_language_stays_silent_on_its_own_test_path() {
         let dir = TempDir::new("zzop-sql");
         dir.write(path, src);
         let out = scan(&dir);
-        for rule in FIVE {
+        for rule in CRITICAL_THREE {
             assert!(
                 hits(&out, rule).is_empty(),
                 "{rule} fired on the test path {path}: {:?}",
@@ -156,68 +163,6 @@ fn every_multi_line_statement_form_is_the_disclosed_residual_and_stays_silent() 
     }
 }
 
-// --- the printf exclusion on like-leading-wildcard, both directions ----------------------------------
-
-#[test]
-fn a_printf_conversion_after_like_is_a_placeholder_not_a_wildcard_and_is_excluded() {
-    // `%s` here is substituted at runtime, so the pattern this rule would be describing is text it never
-    // sees. Go's Sprintf, Java's String.format and Python's `%`-formatting all write it this way; only the
-    // `.ts`/`.rs` lanes were free of the shape, which is why the widening is what surfaced it.
-    let cases: [(&str, &str); 3] = [
-        (
-            "services/q.go",
-            "package services\n\nimport \"fmt\"\n\nfunc Q(t string) string {\n\treturn fmt.Sprintf(\"SELECT id FROM users WHERE name LIKE '%s'\", t)\n}\n",
-        ),
-        (
-            "src/main/java/com/example/Q.java",
-            "public class Q {\n    static String q(String t) {\n        return String.format(\"SELECT id FROM users WHERE name LIKE '%s'\", t);\n    }\n}\n",
-        ),
-        (
-            "q.py",
-            "def q(t):\n    return \"SELECT id FROM users WHERE name LIKE '%(term)s'\" % {\"term\": t}\n",
-        ),
-    ];
-    for (path, src) in cases {
-        let dir = TempDir::new("zzop-sql");
-        dir.write(path, src);
-        let out = scan(&dir);
-        assert!(
-            hits(&out, "like-leading-wildcard").is_empty(),
-            "the printf placeholder in {path} must not be read as a leading wildcard: {:?}",
-            out.findings
-        );
-    }
-}
-
-#[test]
-fn the_printf_exclusion_does_not_become_a_blanket_veto_on_percent() {
-    // The other direction, which is what keeps the exclusion from silently eating the rule in the printf
-    // languages: an ESCAPED `%%` really is a wildcard, and a wildcard followed by more pattern text
-    // (`'%sale%'`) only starts with a conversion letter by coincidence. The exclusion requires the quote
-    // to close IMMEDIATELY after the letter, which is exactly what separates these from the case above.
-    let cases: [(&str, &str); 2] = [
-        (
-            "services/q.go",
-            "package services\n\nimport \"fmt\"\n\nfunc Q(t string) string {\n\treturn fmt.Sprintf(\"SELECT id FROM users WHERE name LIKE '%%%s%%'\", t)\n}\n",
-        ),
-        (
-            "services/q2.go",
-            "package services\n\nconst Q2 = \"SELECT id FROM users WHERE name LIKE '%sale%'\"\n",
-        ),
-    ];
-    for (path, src) in cases {
-        let dir = TempDir::new("zzop-sql");
-        dir.write(path, src);
-        let out = scan(&dir);
-        assert_eq!(
-            hits(&out, "like-leading-wildcard").len(),
-            1,
-            "the genuine leading wildcard in {path} must still fire: {:?}",
-            out.findings
-        );
-    }
-}
-
 #[test]
 fn a_bound_percent_s_between_set_and_the_closing_quote_is_a_value_not_an_open_statement() {
     // Deliberately NOT treated the way `{}`/`${}` are. A psycopg `%s` is the bound-parameter spelling —
@@ -248,7 +193,7 @@ fn an_alembic_versions_backfill_is_destructive_migration_turf_not_critical() {
         "def upgrade():\n    op.execute(\"UPDATE accounts SET migrated = 1\")\n    op.execute(\"DELETE FROM staging\")\n    op.execute(\"TRUNCATE TABLE scratch\")\n",
     );
     let out = scan(&dir);
-    for rule in ["delete-no-where", "update-no-where", "truncate-in-app-code"] {
+    for rule in CRITICAL_THREE {
         assert!(
             hits(&out, rule).is_empty(),
             "{rule} must not fire under alembic/versions/: {:?}",
@@ -267,18 +212,22 @@ fn an_alembic_versions_backfill_is_destructive_migration_turf_not_critical() {
 
 #[test]
 fn destructive_migration_admits_every_extension_its_critical_siblings_exclude() {
-    // The invariant behind the handoff, read off the pack itself rather than restated: the three critical
-    // rules EXCLUDE migration paths and tell the reader `sql/destructive-migration` covers them, so an
-    // extension one of them admits in app code and the other does not admit under `migrations/` is a
-    // message promising a disclosure nobody emits. That asymmetry shipped for `.rs` from 2026-08-02 and
-    // would have shipped again for `.py`/`.cs` today; this is the check that would have caught both.
+    // The invariant behind the handoff, read off the pack itself rather than restated: the three
+    // critical rules EXCLUDE migration paths and tell the reader `sql/destructive-migration` covers them,
+    // so an extension one of them admits in app code and the disclosure does not admit under
+    // `migrations/` is a message promising a disclosure nobody emits. That asymmetry shipped for `.rs`
+    // from 2026-08-02 and would have shipped again for `.py`/`.cs`; this is the check that caught both.
+    //
+    // ONE pack again since the 2026-08-12 re-bundling. While the disclosure sat in `sql-preferences` this
+    // test read both packs — and it was the thing that would have gone quiet first had the export ALSO
+    // narrowed the file set, which is why it was never allowed to shrink to one side.
     let pack = crate::sql_pack_uncached();
     let extensions = |id: &str| -> Vec<String> {
         let rule = pack
             .rules
             .iter()
             .find(|r| r.id == id)
-            .unwrap_or_else(|| panic!("no rule {id} in the sql pack"));
+            .unwrap_or_else(|| panic!("no rule {id} in pack {}", pack.id));
         let zzop_core::dsl::Matcher::LineScan(line_scan) = &rule.matcher else {
             panic!("{id} is not a line-scan rule; this invariant is about their file_pattern")
         };
@@ -297,13 +246,14 @@ fn destructive_migration_admits_every_extension_its_critical_siblings_exclude() 
     };
 
     let disclosure = extensions("destructive-migration");
-    for id in ["delete-no-where", "update-no-where", "truncate-in-app-code"] {
+    for id in CRITICAL_THREE {
         for ext in extensions(id) {
             assert!(
                 disclosure.contains(&ext),
                 "`sql/{id}` admits `.{ext}` in app code and excludes migration paths, but \
-                 `sql/destructive-migration` does not admit `.{ext}` — so that rule's message promises a \
-                 disclosure that is never emitted for `.{ext}` migrations. Disclosure extensions: {:?}",
+                 `sql/destructive-migration` does not admit `.{ext}` — so that rule's message promises \
+                 a disclosure that is never emitted for `.{ext}` migrations. \
+                 Disclosure extensions: {:?}",
                 disclosure,
             );
         }

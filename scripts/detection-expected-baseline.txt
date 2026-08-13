@@ -28,28 +28,28 @@
 # That mode GROWS ONLY. Lowering a number, or removing a row, is a hand edit — on purpose, so that
 # giving up a detection is an act with an author and a reason in the diff, never a side effect of
 # regenerating the answer key against a degraded engine.
-api 130 0 0
+api 101 0 0
 bearticles 0 0 0
 beinvoices 0 0 0
 callgraph 5 0 0
 cata 4 0 0
 catb 4 0 0
-decoy 0 44 0
+decoy 0 42 0
 depedge 0 0 0
 feaxios 2 0 0
 fecat 1 0 0
 fegensdk 2 0 0
 graph 7 0 0
 island 4 0 0
-java 27 0 0
-rust 31 1 0
+java 23 0 0
+rust 29 1 0
 sdk 1 0 0
-sqllang 28 4 0
-testconv 12 3 0
+sqllang 19 4 0
+testconv 4 3 0
 trpc 1 0 0
 unresolved 2 0 0
-web 14 0 0
+web 7 0 0
 worker 1 0 0
 xbe 7 0 0
 xbe2 4 0 0
-xfe 14 0 0
+xfe 13 0 0

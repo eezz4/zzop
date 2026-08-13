@@ -70,7 +70,7 @@ mod test_region_promise_tests;
 
 pub use analyze::{analyze_json, analyze_trees_json};
 pub use envelope::{analyze_envelope_json, validate_envelope_only_json};
-pub use explain::explain;
+pub use explain::{explain, explain_with_config, native_analysis_ids};
 pub use query::query_io_json;
 pub use query_coverage::query_coverage_json;
 pub use query_file::{query_file_json, FILE_VERDICTS};
@@ -101,3 +101,10 @@ pub use zzop_core::DEP_GRAPH_RESOLVED_ONLY;
 /// (`zzop_engine::BLINDNESS_REGISTRY`), which is what lets the reply carry counts while the text ships
 /// once: a second owner of either would be a tally that can drift from the prose it summarizes.
 pub use zzop_engine::{disclosure_contract_text, disclosure_counts};
+
+/// Re-exported for the same reason as the two above: a surface that wants to SAY how many health
+/// scores there are must read the registry, not retype the number. It was retyped, and v0.30.0's
+/// removal of `typeSafety`/`lod` left `zzop graph --domain risk` printing "the 17 structural health
+/// scores" over a table of 15 — with a test pinning the literal, so the guard protected the lie.
+/// `crates/summary` has no `zzop-metrics` dependency of its own and does not need one for this.
+pub use zzop_metrics::SCORE_MEANINGS;

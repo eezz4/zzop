@@ -1,45 +1,143 @@
 /* ==========================================================================
-   zzop documentation site — shared design system
-   Plain CSS, no build step. Dark theme only (fixed, no toggle).
+   zzop documentation site — shared design system (Modernist)
+
+   Plain CSS, no build step, no external requests. One light ground (#f3f2f2),
+   one ink (#201e1d), one accent (#ec3013). Corners are square everywhere,
+   structure is drawn with 2px solid dividers rather than shadows, and every
+   text and button label is flush left.
+
+   WHY THE STYLESHEET MOVED FIRST, ALONE
+   All seven pages share one class vocabulary, and three of them
+   (rules · graph · architecture) are partly written by generators that match on
+   markup they own. Re-skinning through the stylesheet moves the whole site
+   without editing a single generated anchor, so the risk of the design change
+   and the risk of a page rewrite never have to be paid at the same time.
+
+   THE TOKENS ARE THE CONTRACT
+   `--color-*`, `--font-*`, `--space-*`, `--radius-*` are the system. The
+   `--bg`/`--text`/`--accent` family below them is a COMPATIBILITY LAYER: the
+   graph page carries its own scoped <style> written against those older names,
+   so they are kept as aliases onto the tokens rather than deleted out from
+   under a page this batch does not touch. New rules use the `--color-*` names.
+
+   TYPEFACE — Archivo IS ASKED FOR AND NEVER FETCHED
+   The reference loads Archivo over @font-face. This site does not, on purpose:
+   site/README.md states the site makes no external requests and is `file://`
+   -safe (the same promise that forces graph.html's data to be inline), so a
+   Google Fonts <link> would break a documented invariant, and self-hosting the
+   woff2 files would add binaries plus a third-party licence obligation for a
+   batch that is only meant to move styles. The family is still NAMED first, so
+   a reader who has Archivo installed gets the intended face and a later
+   decision to self-host is a one-line change with no other edit.
    ========================================================================== */
 
 :root {
-  /* --- surfaces --- */
-  --bg: #0f1115;
-  --bg-alt: #171a20;
-  --bg-deep: #0a0b0e;
-  --bg-raised: #1e222b;
+  /* --- ground, ink, accent: three colours, and no others are invented --- */
+  --color-bg: #f3f2f2;
+  --color-surface: #eae9e9;
+  /* The ground the 1120px column SITS ON, so the column reads as paper on a desk
+     rather than as an invisible crop of one flat field. It is a step of the
+     neutral ramp below, not a fourth colour: the palette is still ground, ink and
+     accent, and this is the ground one step darker. See the `html` rule. */
+  --color-ground: var(--color-neutral-300);
+  /* The tint: an alternating band, an inset panel, a hovered row — every surface
+     that means "one step off the page". It was `--color-neutral-100` (#f8f4f4),
+     which is LIGHTER than the #f3f2f2 the guide fixes as the ground, so every one
+     of those surfaces was a ~2% LIFT nobody could see: measured on
+     site/index.html, the `.section--alt` "Why zzop" band was distinguishable
+     from its neighbours only by the 2px rules that would have been there anyway,
+     and a `tr:hover` gave a reader almost no feedback. The design brief calls
+     for a neutral-100 tint on hover, and that instruction only reads as a TINT
+     if the value sits BELOW the ground — so the role now points one step down
+     the same ramp rather than one step up off it. Together with
+     `--color-ground` above the page finally uses three of its nine steps:
+     ground 300 · tint 200 · paper #f3f2f2. */
+  --color-tint: var(--color-neutral-200);
+  --color-text: #201e1d;
+  --color-accent: #ec3013;
+  --color-accent-2: #e15b47;
+  --color-divider: color-mix(in srgb, #201e1d 40%, transparent);
 
-  /* --- borders --- */
-  --border: #262b35;
-  --border-subtle: #1a1d24;
-  --input-border: #3a4150;
+  /* Tonal ramps — generated in OKLCH on one shared lightness scale, so the
+     same step of any role matches the others in visual value. */
+  --color-neutral-100: #f8f4f4;
+  --color-neutral-200: #eae7e7;
+  --color-neutral-300: #d7d3d3;
+  --color-neutral-400: #bab6b6;
+  --color-neutral-500: #9b9797;
+  --color-neutral-600: #7d7979;
+  --color-neutral-700: #605d5d;
+  --color-neutral-800: #444141;
+  --color-neutral-900: #2d2b2b;
 
-  /* --- text --- */
-  --text: #e8eaed;
-  --text-secondary: #a7adba;
-  --text-muted: #6b7280;
-  --text-on-accent: #06281d;
+  --color-accent-100: #fff2ef;
+  --color-accent-200: #ffe0d9;
+  --color-accent-300: #ffc4b8;
+  --color-accent-400: #ff9783;
+  --color-accent-500: #ff563c;
+  --color-accent-600: #dd2b0f;
+  --color-accent-700: #ae1800;
+  --color-accent-800: #7c1405;
+  --color-accent-900: #4d170e;
 
-  /* --- accent (mint) --- */
-  --accent: #34d399;
-  --accent-hover: #5eead4;
-  --accent-soft-bg: #113325;
-  --accent-soft-border: #1a4a35;
+  --color-accent-2-100: #fff2ef;
+  --color-accent-2-200: #ffe0da;
+  --color-accent-2-300: #ffc4b9;
+  --color-accent-2-400: #ff9784;
+  --color-accent-2-500: #ef6853;
+  --color-accent-2-600: #c94b39;
+  --color-accent-2-700: #9e3526;
+  --color-accent-2-800: #71261b;
+  --color-accent-2-900: #471d16;
 
   /* --- type --- */
-  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-heading: "Archivo", system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-heading-weight: 800;
+  --font-body: "Archivo", system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, "Cascadia Code", Menlo, Consolas, monospace;
 
-  /* --- layout widths --- */
-  --width-header: 1152px;
-  --width-hero: 1280px;
-  --width-docs: 1320px;
+  /* --- space --- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
 
-  /* --- misc --- */
-  --header-height: 56px;
-  --radius: 12px;
-  --radius-sm: 8px;
+  /* --- shape: square, and that is the whole rule --- */
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+
+  /* --- the frame --- */
+  --width-frame: 1120px;
+  --pad-x: 40px;
+  --rule: 2px solid var(--color-divider);
+
+  /* ── compatibility aliases (see the file header) ───────────────────────
+     site/graph.html's scoped <style> is written against these names. They
+     resolve to the tokens above so that page inherits this palette without
+     being edited; do not author new rules against them. */
+  --bg: var(--color-bg);
+  --bg-alt: var(--color-tint);
+  --bg-deep: var(--color-text);
+  --bg-raised: var(--color-surface);
+  --border: var(--color-divider);
+  --border-subtle: var(--color-neutral-300);
+  --input-border: var(--color-neutral-400);
+  --text: var(--color-text);
+  --text-secondary: var(--color-neutral-800);
+  --text-muted: var(--color-neutral-700);
+  --text-on-accent: var(--color-bg);
+  --accent: var(--color-accent);
+  --accent-hover: var(--color-accent-600);
+  --accent-soft-bg: var(--color-accent-100);
+  --accent-soft-border: var(--color-accent-300);
+  --font-sans: var(--font-body);
+  --width-header: var(--width-frame);
+  --width-hero: var(--width-frame);
+  --width-docs: var(--width-frame);
+  --radius: 0px;
 }
 
 /* --------------------------------------------------------------------------
@@ -52,18 +150,55 @@
   box-sizing: border-box;
 }
 
+/* THE PAGE IS TWO SURFACES, NOT ONE
+   `html` and `body` both painted `--color-bg`, so on any screen wider than
+   1120px the frame's inside and outside were the same #f3f2f2 and the two 2px
+   side rules were drawing a boundary between a thing and itself. The measured
+   symptom is the one a reader reports: a nine-step neutral ramp exists and the
+   page used exactly one value of it, so the whole window read as one flat white
+   field with a hairline down each side. The ground goes one ramp step darker and
+   the column keeps the light value, so the column reads as paper. No shadow does
+   this work — the guide asks for 2px rules instead of shadows, and a value
+   difference plus the rules that were already there is the whole device.
+
+   `color-scheme: light` STAYS. The reference and the design brief commit to a
+   single light ground (#f3f2f2) and a single ink (#201e1d), so a dark theme
+   would be a new decision rather than a fix; declaring `light` also keeps form
+   controls and scrollbars from being repainted by a viewer's OS preference into
+   colours this palette never chose. */
 html {
-  color-scheme: dark;
+  color-scheme: light;
+  background: var(--color-ground);
 }
 
+/* `body` IS the frame. The reference wraps every page in a `.wrap` element;
+   this site's seven pages have no such element and this batch does not add
+   markup to their bodies, so the same 1120px column with 2px side rules is
+   drawn by the body itself. Same picture, no page edited. */
 body {
-  margin: 0;
+  margin: 0 auto;
+  max-width: var(--width-frame);
   min-height: 100vh;
-  background: var(--bg);
-  color: var(--text);
-  font-family: var(--font-sans);
-  line-height: 1.5;
+  background: var(--color-bg);
+  color: var(--color-text);
+  border-left: var(--rule);
+  border-right: var(--rule);
+  font-family: var(--font-body);
+  font-size: 15px;
+  font-weight: 400;
+  line-height: 1.55;
   -webkit-font-smoothing: antialiased;
+  /* `break-word`, not `anywhere`: it inserts a break ONLY when a run would
+     otherwise overflow its line, and it does not change any box's intrinsic
+     min-content width, so nothing that already fits moves by a pixel. It is here
+     because the only horizontal overflow left on the site was a run of adjacent
+     inline `<code>` elements joined by slashes
+     (`id`/`source`/…/`inCycle` in usage.html) — a slash between two inline boxes
+     is not a break opportunity, so nine short tokens formed one 500px word that
+     pushed a 420px document sideways. Opting each such chain in by hand would
+     leave the next one to be found by a reader. `pre` is unaffected: it sets
+     `white-space: pre`, which disables wrapping outright. */
+  overflow-wrap: break-word;
 }
 
 img,
@@ -73,19 +208,32 @@ svg {
 }
 
 a {
-  color: inherit;
+  color: var(--color-accent-700);
   text-decoration: none;
+  text-underline-offset: 3px;
+}
+
+a:hover {
+  color: var(--color-accent);
 }
 
 ::selection {
-  background: var(--accent-soft-bg);
-  color: var(--text);
+  background: color-mix(in srgb, var(--color-accent) 30%, transparent);
 }
 
 h1,
 h2,
 h3,
 h4,
+h5,
+h6 {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  line-height: 1.12;
+  letter-spacing: -0.02em;
+}
+
 p,
 ul,
 ol {
@@ -96,6 +244,17 @@ button {
   font: inherit;
 }
 
+/* The browser's blue ring is replaced, never removed: keyboard users get a 2px
+   accent outline on exactly the elements a pointer would have highlighted. */
+:focus {
+  outline: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
 /* --------------------------------------------------------------------------
    Header
    -------------------------------------------------------------------------- */
@@ -104,64 +263,77 @@ button {
   position: sticky;
   top: 0;
   z-index: 50;
-  height: var(--header-height);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  background: rgba(15, 17, 21, 0.86);
-  border-bottom: 1px solid var(--border);
+  background: var(--color-bg);
+  border-bottom: var(--rule);
 }
 
 .site-header__inner {
-  max-width: var(--width-header);
-  height: 100%;
-  margin-inline: auto;
-  padding-inline: 24px;
   display: flex;
   align-items: center;
-  gap: 24px;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 18px var(--pad-x);
 }
 
 .brand {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   flex-shrink: 0;
+  margin-right: auto;
+  color: var(--color-text);
+}
+
+.brand:hover {
+  color: var(--color-text);
+}
+
+/* Ink box, accent letter. Drawn from text rather than an SVG so it inherits the
+   heading face and needs no second colour outside the palette. */
+.brand__mark {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-text);
+  color: var(--color-accent);
+  font-family: var(--font-heading);
+  font-weight: 800;
+  font-size: 14px;
+  line-height: 1;
 }
 
 .brand__wordmark {
-  font-family: var(--font-mono);
-  font-weight: 700;
-  font-size: 1.25rem;
-  color: var(--text);
+  font-family: var(--font-heading);
+  font-weight: 800;
+  font-size: 20px;
+  letter-spacing: -0.02em;
+  color: var(--color-text);
 }
 
-/* `min-width: 0` is load-bearing, not tidying. A flex item's min-width defaults to `auto`, which
-   floors it at its CONTENT width — so `flex: 1` could grow this nav but never shrink it, and below
-   ~470px the header pushed the whole document wider than the viewport on every page (measured
-   2026-07-29: 552px scrollWidth against a 469px client width, on graph, index and usage alike, with
-   this nav as the widest offender). With the floor removed the nav can shrink, and the narrow branch
-   below turns the leftover into a scroll rather than a clip. */
 .site-nav {
   display: flex;
-  gap: 24px;
-  flex: 1;
+  gap: 22px;
   min-width: 0;
 }
 
 .site-nav__link {
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: var(--text-secondary);
-  transition: color 0.15s ease;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--color-neutral-700);
+  border-bottom: 2px solid transparent;
+  padding-bottom: 2px;
 }
 
 .site-nav__link:hover {
-  color: var(--text);
+  color: var(--color-text);
 }
 
 .site-nav__link.is-active {
-  font-weight: 600;
-  color: var(--accent);
+  color: var(--color-text);
+  border-bottom-color: var(--color-accent);
 }
 
 .site-header__actions {
@@ -174,20 +346,71 @@ button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: var(--radius-sm);
-  color: var(--text-secondary);
-  transition: background 0.15s ease, color 0.15s ease;
+  width: 34px;
+  height: 34px;
+  color: var(--color-neutral-700);
 }
 
 .icon-btn:hover {
-  background: #232833;
-  color: var(--text);
+  background: var(--color-tint);
+  color: var(--color-text);
+}
+
+/* ── hamburger: a checkbox, and no script ──────────────────────────────────
+   Six links plus a GitHub button do not fit a phone. The previous answer was a
+   horizontally scrolling nav, which kept every destination reachable at the
+   cost of a swipe nobody is told about; this is the reference's answer — a
+   :checked sibling selector, so the menu works with JavaScript off, which is
+   the same promise the rest of this site makes. The toggle and its label are
+   siblings of the nav ON PURPOSE: `~` only reaches forward among siblings. */
+/* Hidden with `opacity`, NOT `display: none`: a display-none checkbox leaves the
+   tab order, and since a <label> is not focusable the menu would then be
+   openable by pointer only. This way Space toggles it and the rule below draws
+   the focus ring on the burger the reader can actually see. Above the
+   breakpoint the control does nothing, so there it leaves the tab order too. */
+.menu-toggle {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+@media (min-width: 861px) {
+  .menu-toggle { display: none; }
+}
+
+.burger {
+  display: none;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border: 2px solid var(--color-text);
+  cursor: pointer;
+}
+
+.burger span {
+  display: block;
+  width: 16px;
+  height: 2px;
+  background: var(--color-text);
+}
+
+.menu-toggle:checked ~ .burger {
+  background: var(--color-text);
+}
+
+.menu-toggle:checked ~ .burger span {
+  background: var(--color-bg);
+}
+
+.menu-toggle:focus-visible ~ .burger {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
 }
 
 /* --------------------------------------------------------------------------
-   Buttons
+   Buttons — flush left, square, never centred
    -------------------------------------------------------------------------- */
 
 .btn-row {
@@ -199,153 +422,119 @@ button {
 .btn {
   display: inline-flex;
   align-items: center;
-  height: 48px;
-  padding-inline: 22px;
-  border-radius: var(--radius-sm);
-  font-weight: 600;
-  font-size: 0.9375rem;
-  border: 1px solid transparent;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  justify-content: flex-start;
+  gap: 6px;
+  padding: 11px 20px;
+  border: 2px solid transparent;
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: 15px;
+  line-height: 1.2;
+  color: var(--color-text);
+  cursor: pointer;
 }
 
 .btn--primary {
-  background: var(--accent);
-  color: var(--text-on-accent);
-  box-shadow: 0 4px 14px -4px rgba(52, 211, 153, 0.25);
+  background: var(--color-accent);
+  color: #fff;
+  border-color: var(--color-accent);
 }
 
 .btn--primary:hover {
-  background: var(--accent-hover);
+  background: var(--color-accent-600);
+  border-color: var(--color-accent-600);
+  color: #fff;
 }
 
 .btn--outline-accent {
-  background: transparent;
-  border-color: var(--accent);
-  color: var(--accent);
+  border-color: var(--color-accent);
+  color: var(--color-accent-700);
 }
 
 .btn--outline-accent:hover {
-  background: var(--accent-soft-bg);
+  background: var(--color-accent-100);
+  color: var(--color-accent-700);
 }
 
 .btn--outline {
-  background: transparent;
-  border-color: var(--input-border);
-  color: var(--text);
+  border-color: var(--color-text);
+  color: var(--color-text);
 }
 
 .btn--outline:hover {
-  background: #232833;
+  background: var(--color-tint);
+  color: var(--color-text);
 }
 
 /* --------------------------------------------------------------------------
-   Eyebrow / kicker label
+   Eyebrow / kicker label — one of the four places accent is allowed
    -------------------------------------------------------------------------- */
 
 .eyebrow {
-  display: inline-block;
-  font-family: var(--font-mono);
-  font-size: 0.875rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--accent);
+  color: var(--color-accent-700);
   margin-bottom: 16px;
 }
 
 .eyebrow--sm {
-  font-size: 0.75rem;
-  margin-bottom: 12px;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  margin-bottom: 10px;
 }
 
 /* --------------------------------------------------------------------------
-   Hero (editorial variant)
+   Hero — two cells split by a rule, not a gap
    -------------------------------------------------------------------------- */
 
 .hero {
-  padding: 136px 24px 88px;
-  max-width: var(--width-hero);
-  margin-inline: auto;
   display: grid;
-  grid-template-columns: 1.05fr 0.95fr;
-  gap: 64px;
-  align-items: start;
+  grid-template-columns: 1.05fr 1fr;
+  border-bottom: var(--rule);
+}
+
+/* `min-width: 0` on both cells is load-bearing, not tidying: a grid item's
+   min-width defaults to its CONTENT width, so the widest shell line in the code
+   panel would size the whole column and push the page wider than the viewport
+   (measured 2026-07-29 on the old layout: 805px of content inside a 469px
+   client). With the floor gone, `pre { overflow: auto }` below finally gets the
+   overflow it asks for and the panel scrolls instead of the document. */
+.hero__text {
+  min-width: 0;
+  padding: 56px var(--pad-x);
+  border-right: var(--rule);
 }
 
 .hero__title {
-  margin: 0 0 24px;
-  font-size: 4rem;
-  font-weight: 700;
-  line-height: 1.02;
+  margin: 0 0 18px;
+  font-size: clamp(32px, 4.5vw, 46px);
   letter-spacing: -0.03em;
-  color: var(--text);
-  font-family: var(--font-mono);
+  line-height: 1.05;
 }
 
 .hero__lead {
-  margin: 0 0 40px;
-  font-size: 1.25rem;
-  color: var(--text-secondary);
+  margin: 0 0 28px;
+  font-size: 17px;
   line-height: 1.6;
-  max-width: 520px;
+  color: var(--color-neutral-800);
+  text-wrap: pretty;
 }
 
-/* The `min-width: auto` floor is DELIBERATELY left in place here, and zeroed only in the single-column
-   branch below. On the two-column desktop hero the floor is what keeps the code panel at its natural
-   width; removing it unconditionally makes the grid honour its declared 1.05fr/0.95fr, which is
-   narrower than the shell lines and clips them behind a scrollbar nobody asked for (measured, and
-   reverted). Below 960px the grid is one column and the same floor is a defect — see that branch. */
+.hero__lead strong {
+  color: var(--color-text);
+}
+
 .hero__code {
-  position: sticky;
-  top: 96px;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 20px;
-}
-
-/* --------------------------------------------------------------------------
-   Stat band / chips
-   -------------------------------------------------------------------------- */
-
-.stat-band {
-  background: var(--bg-deep);
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-  padding: 36px 24px;
-}
-
-.stat-band__inner {
-  max-width: var(--width-hero);
-  margin-inline: auto;
-  display: flex;
-  flex-wrap: wrap;
-}
-
-.stat-chip {
-  padding-right: 48px;
-  border-right: 1px solid var(--border);
-  margin-right: 48px;
-  display: flex;
-  align-items: baseline;
-}
-
-.stat-chip:last-child {
-  padding-right: 0;
-  border-right: none;
-  margin-right: 0;
-}
-
-.stat-chip__value {
-  font-family: var(--font-mono);
-  font-size: 2.25rem;
-  font-weight: 700;
-  color: var(--text);
-}
-
-.stat-chip__label {
-  font-size: 0.8125rem;
-  color: var(--text-muted);
-  margin-left: 10px;
+  gap: 12px;
+  justify-content: center;
+  padding: 36px var(--pad-x);
+  background: var(--color-tint);
 }
 
 /* --------------------------------------------------------------------------
@@ -353,103 +542,111 @@ button {
    -------------------------------------------------------------------------- */
 
 .section {
-  padding: 100px 24px;
+  padding: 44px var(--pad-x);
+  border-bottom: var(--rule);
 }
 
 .section--alt {
-  background: var(--bg-alt);
+  background: var(--color-tint);
 }
 
 .section__inner {
-  max-width: 900px;
-  margin-inline: auto;
-}
-
-.section__inner--wide {
-  max-width: 1000px;
-}
-
-.section__inner--narrow {
   max-width: 820px;
 }
 
-.section-title {
-  margin: 0 0 48px;
-  font-size: 2.5rem;
-  font-weight: 700;
-  line-height: 1.15;
-  letter-spacing: -0.01em;
-  color: var(--text);
+.section__inner--wide {
+  max-width: none;
 }
 
-.section-title--tight {
-  margin-bottom: 32px;
+.section-title {
+  margin: 0 0 24px;
+  font-size: 28px;
+  letter-spacing: -0.02em;
 }
 
 /* prominent prose block ("Why zzop") */
 
 .prose-block {
-  font-size: 1.125rem;
-  color: var(--text-secondary);
-  line-height: 1.75;
-  max-width: 760px;
+  margin: 0 0 20px;
+  font-size: 15.5px;
+  line-height: 1.65;
+  color: var(--color-neutral-800);
+  max-width: 860px;
+  text-wrap: pretty;
+}
+
+.prose-block:last-child {
+  margin-bottom: 0;
 }
 
 .prose-block strong {
-  color: var(--text);
+  color: var(--color-text);
 }
 
 /* --------------------------------------------------------------------------
-   Card grid
+   Card grid — cells divided by rules, never floated on shadows
    -------------------------------------------------------------------------- */
 
+/* The rules BETWEEN cells are the grid's 2px gap showing through, not borders
+   on the cards. With `auto-fit` the last card in a row is not the last card in
+   the DOM, so a `:last-child { border-right: none }` would draw a stray rule at
+   a different place on every viewport width; a gap cannot be wrong about which
+   cell is where. */
 .card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 24px;
+  gap: 2px;
+  background: var(--color-divider);
+  border-top: var(--rule);
+  border-bottom: var(--rule);
 }
 
 .card {
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
   padding: 24px;
-  transition: border-color 0.15s ease, transform 0.15s ease;
+  background: var(--color-bg);
 }
 
+.section--alt .card {
+  background: var(--color-tint);
+}
+
+/* One step past `--color-tint`, because a card in a `.section--alt` is ALREADY
+   sitting on the tint — hovering it onto the same value would be a hover that
+   does nothing on exactly half the pages that have cards. */
 a.card:hover {
-  border-color: var(--accent);
-  transform: translateY(-2px);
+  background: var(--color-neutral-300);
 }
 
 .card h3 {
-  margin: 0 0 10px;
-  font-size: 1.25rem;
-  font-weight: 600;
-  color: var(--text);
+  margin: 0;
+  font-size: 19px;
 }
 
 .card p {
   margin: 0;
-  font-size: 0.875rem;
-  color: var(--text-secondary);
-  line-height: 1.7;
+  font-size: 14.5px;
+  line-height: 1.55;
+  color: var(--color-neutral-800);
+}
+
+.card-grid + .prose-block {
+  margin-top: 24px;
 }
 
 /* --------------------------------------------------------------------------
-   CTA band
+   Poster band — the one full-accent strip a page is allowed
    -------------------------------------------------------------------------- */
 
 .cta-band {
-  background: var(--accent-soft-bg);
-  border-top: 1px solid var(--accent-soft-border);
-  border-bottom: 1px solid var(--accent-soft-border);
-  padding: 64px 24px;
+  background: var(--color-accent);
+  padding: 44px var(--pad-x);
+  border-bottom: var(--rule);
 }
 
 .cta-band__inner {
-  max-width: var(--width-hero);
-  margin-inline: auto;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -458,104 +655,93 @@ a.card:hover {
 }
 
 .cta-band__title {
-  margin: 0 0 8px;
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: var(--text);
+  margin: 0 0 6px;
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  font-size: 30px;
+  letter-spacing: -0.02em;
+  color: #fff;
 }
 
 .cta-band__lead {
   margin: 0;
-  color: var(--text-secondary);
-  font-size: 0.9375rem;
+  font-size: 15px;
+  color: color-mix(in srgb, #fff 82%, var(--color-accent));
+}
+
+/* Accent on accent is invisible, so the buttons invert inside the band. */
+.cta-band .btn--primary {
+  background: #fff;
+  border-color: #fff;
+  color: var(--color-accent-700);
+}
+
+.cta-band .btn--primary:hover {
+  background: var(--color-accent-100);
+  border-color: var(--color-accent-100);
+  color: var(--color-accent-700);
+}
+
+.cta-band .btn--outline {
+  border-color: #fff;
+  color: #fff;
+}
+
+.cta-band .btn--outline:hover {
+  background: color-mix(in srgb, #fff 16%, transparent);
+  color: #fff;
 }
 
 /* --------------------------------------------------------------------------
-   Doc link rows (end-of-page "explore the docs")
+   Code — ink ground, light type
    -------------------------------------------------------------------------- */
 
-.link-rows {
-  display: flex;
-  flex-direction: column;
-}
-
-.link-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  padding: 28px 8px;
-  border-top: 1px solid var(--border);
-  transition: background 0.15s ease;
-}
-
-.link-rows > .link-row:last-child {
-  border-bottom: 1px solid var(--border);
-}
-
-.link-row:hover {
-  background: var(--bg-alt);
-}
-
-.link-row h3 {
-  margin: 0 0 6px;
-  font-size: 1.375rem;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.link-row p {
+pre {
   margin: 0;
-  font-size: 0.9375rem;
-  color: var(--text-secondary);
+  padding: 18px 20px;
+  overflow: auto;
+  background: var(--color-text);
+  color: #f3f2f2;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.8;
 }
 
-.link-row__arrow {
-  font-size: 1.5rem;
-  color: var(--accent);
-  flex-shrink: 0;
-}
-
-/* --------------------------------------------------------------------------
-   Code blocks / panels
-   -------------------------------------------------------------------------- */
+/* The two spans a terminal transcript needs: a comment and a call-out. */
+pre .c { color: #8a8683; }
+pre .r { color: #ec5a3f; }
 
 .code-panel {
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  overflow: hidden;
-  background: var(--bg-deep);
-}
-
-.hero__code .code-panel {
-  box-shadow: 0 18px 32px -16px rgba(0, 0, 0, 0.55);
+  min-width: 0;
+  border: var(--rule);
+  background: var(--color-text);
 }
 
 .code-panel__tab {
   padding: 8px 16px;
   font-family: var(--font-mono);
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  background: var(--bg-alt);
-  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-neutral-500);
+  background: var(--color-text);
+  border-bottom: 1px solid var(--color-neutral-800);
 }
 
 .code-block {
   margin: 0;
-  padding: 16px;
-  overflow-x: auto;
-}
-
-.hero__code .code-block {
-  padding: 20px;
 }
 
 .code-block code {
   font-family: var(--font-mono);
-  font-size: 0.8125rem;
-  line-height: 1.75;
-  color: var(--text);
+  font-size: 13px;
+  line-height: 1.8;
+  color: inherit;
   white-space: pre;
+}
+
+.section .code-panel {
+  margin-bottom: 20px;
 }
 
 /* inline code, everywhere */
@@ -566,14 +752,16 @@ code {
 
 .docs-content code,
 .prose-block code,
-p code {
-  background: var(--bg-raised);
-  padding: 2px 5px;
-  border-radius: 4px;
-  font-size: 0.85em;
+.card code,
+p code,
+li code {
+  background: var(--color-neutral-200);
+  padding: 1px 5px;
+  font-size: 0.88em;
 }
 
 .code-block code,
+pre code,
 h1 code,
 h2 code,
 h3 code {
@@ -581,54 +769,104 @@ h3 code {
   padding: 0;
 }
 
+/* A chip on a tinted surface, one step further down.
+   The chip's tile IS `--color-neutral-200`, which is the step `--color-tint` now
+   takes, so on an alternating band, inside an inset panel or on a hovered row
+   the chip and its ground would be the same value and the chip would vanish —
+   the exact defect the tint was moved to fix, one layer in. Named by container
+   rather than applied to every `code`: on the paper the chip is already right,
+   and this is only about the surfaces that moved. Selectors reach `p`/`li` and
+   `.card`/`.prose-block` deliberately and never bare `code`, so the index
+   components that turn their chip OFF (`.cmd-row code`, `.def-list__grid code`)
+   keep it off — several of those live inside a `.design-notes__body`. */
+.section--alt p code,
+.section--alt li code,
+.section--alt .prose-block code,
+.section--alt .card code,
+.docs-content blockquote code,
+.design-notes__body p code,
+.design-notes__body li code,
+.docs-content tbody tr:hover code {
+  background: var(--color-neutral-300);
+}
+
 /* --------------------------------------------------------------------------
    Footer
    -------------------------------------------------------------------------- */
 
 .site-footer {
-  border-top: 1px solid var(--border);
-  background: var(--bg-alt);
+  border-top: var(--rule);
 }
 
 .site-footer__inner {
-  max-width: var(--width-header);
-  margin-inline: auto;
-  padding: 32px 24px;
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 16px;
+  gap: 8px 20px;
   align-items: baseline;
-  color: var(--text-muted);
-  font-size: 0.75rem;
+  padding: 16px var(--pad-x);
+  color: var(--color-neutral-700);
+  font-size: 13px;
 }
 
 .site-footer__brand {
-  font-family: var(--font-mono);
+  font-family: var(--font-heading);
   font-weight: 700;
-  color: var(--text-secondary);
+  color: var(--color-text);
 }
 
 .site-footer__gh {
-  color: var(--text-muted);
-  text-decoration: underline;
+  color: var(--color-accent-700);
 }
 
 .site-footer__gh:hover {
-  color: var(--text);
+  color: var(--color-accent);
 }
 
 /* --------------------------------------------------------------------------
-   3-column docs layout
+   Docs layout — one shell, three column counts
+   --------------------------------------------------------------------------
+   THE SHELL OWNS THE PAGE'S MARGINS, and that is why the variants below exist
+   rather than each page inventing its own padding. Two pages had opted out and
+   both showed it: privacy.html put `.docs-content` straight in the body, and
+   `.docs-content` carries only `min-width: 0` — every pixel of gutter comes from
+   here — so its prose ran into the 2px side rule with a measured 0px of padding.
+   graph.html went the other way and declared its own `max-width`/`margin`/
+   `padding: 40px 24px 72px` inside its scoped <style>, so it was the one page
+   whose gutter (24px) disagreed with `--pad-x` and the one page with no left
+   nav. A page that needs a different COLUMN COUNT now says so with a modifier
+   and keeps the site's gutters, header clearance and bottom lead-out.
    -------------------------------------------------------------------------- */
 
 .docs-layout {
-  max-width: var(--width-docs);
+  max-width: var(--width-frame);
   margin-inline: auto;
-  padding: 40px 24px 120px;
+  padding: 32px var(--pad-x) 96px;
   display: grid;
-  grid-template-columns: minmax(180px, 230px) minmax(320px, 1fr) minmax(150px, 220px);
+  grid-template-columns: minmax(180px, 220px) minmax(320px, 1fr) minmax(150px, 210px);
   gap: 32px;
   align-items: start;
+}
+
+/* TWO columns: cross-page nav, then everything else. For a page whose body is a
+   picture rather than prose — the right-hand TOC indexes `section[id]` headings
+   and site/graph.html has one heading below the fold, so a TOC there would be a
+   one-item list charging a 210px column to a canvas that reads better wide. */
+.docs-layout--wide {
+  grid-template-columns: minmax(180px, 220px) minmax(320px, 1fr);
+}
+
+/* ONE column, for a standalone page that is neither in the docs set nor the home
+   page: privacy.html is reached from the footer, is not in either nav, and is
+   short enough that a sidebar would be scaffolding around four headings. The
+   measure is capped rather than left at the full 1040px column — the same reason
+   `.docs-content-header p` caps at 720px, and a legal page is the last place to
+   make someone track a 1040px line back to its left edge. */
+.docs-layout--solo {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.docs-layout--solo .docs-content {
+  max-width: 760px;
 }
 
 .docs-nav-toggle {
@@ -637,73 +875,60 @@ h3 code {
   gap: 8px;
   width: 100%;
   margin-bottom: 16px;
-  padding: 10px 14px;
-  border-radius: var(--radius-sm);
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
-  color: var(--text);
-  font-size: 0.8125rem;
-  font-weight: 600;
+  padding: 9px 14px;
+  background: transparent;
+  border: 2px solid var(--color-text);
+  color: var(--color-text);
+  font-family: var(--font-heading);
+  font-size: 13px;
+  font-weight: 700;
+  text-align: left;
   cursor: pointer;
+}
+
+.docs-nav-toggle:hover {
+  background: var(--color-tint);
 }
 
 /* left: cross-page nav */
 
 .docs-nav {
   position: sticky;
-  top: 80px;
+  top: 88px;
   align-self: start;
-  max-height: calc(100vh - 100px);
+  max-height: calc(100vh - 110px);
   overflow-y: auto;
 }
 
 .docs-nav__group {
-  margin-bottom: 24px;
-  padding: 0 2px;
-}
-
-.docs-nav__group--current {
-  background: var(--accent-soft-bg);
-  border: 1px solid var(--accent-soft-border);
-  border-radius: 10px;
-  padding: 14px 16px;
+  margin-bottom: 22px;
 }
 
 .docs-nav__group-label {
-  font-size: 0.6875rem;
+  font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--text-muted);
+  color: var(--color-neutral-700);
   margin-bottom: 8px;
-}
-
-.docs-nav__group--current .docs-nav__group-label {
-  color: var(--accent);
 }
 
 .docs-nav__link {
   display: block;
   padding: 5px 0;
-  font-size: 0.8125rem;
-  color: var(--text-secondary);
+  font-size: 13.5px;
+  color: var(--color-neutral-800);
 }
 
 .docs-nav__link:hover {
-  color: var(--text);
+  color: var(--color-text);
 }
 
 .docs-nav__link.is-active {
-  color: var(--accent);
-  font-weight: 600;
-}
-
-.docs-nav__group--current .docs-nav__link {
-  color: #dfe2e8;
-}
-
-.docs-nav__group--current .docs-nav__link:hover {
-  color: #ffffff;
+  color: var(--color-text);
+  font-weight: 700;
+  box-shadow: inset 2px 0 0 var(--color-accent);
+  padding-left: 8px;
 }
 
 /* center: article content */
@@ -713,33 +938,33 @@ h3 code {
 }
 
 .docs-content-header {
-  margin-bottom: 48px;
+  margin-bottom: 40px;
+  padding-bottom: 24px;
+  border-bottom: var(--rule);
 }
 
 .docs-content-header .eyebrow {
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 .docs-content-header h1 {
   margin: 0 0 12px;
-  font-size: 2.5rem;
-  font-weight: 700;
-  line-height: 1.1;
-  letter-spacing: -0.02em;
-  color: var(--text);
+  font-size: clamp(30px, 4vw, 38px);
+  letter-spacing: -0.03em;
 }
 
 .docs-content-header p {
   margin: 0;
-  font-size: 1rem;
-  color: var(--text-secondary);
-  line-height: 1.7;
-  max-width: 640px;
+  font-size: 15.5px;
+  line-height: 1.6;
+  color: var(--color-neutral-800);
+  max-width: 720px;
+  text-wrap: pretty;
 }
 
 .docs-content section {
-  scroll-margin-top: 80px;
-  margin-bottom: 64px;
+  scroll-margin-top: 96px;
+  margin-bottom: 56px;
 }
 
 .docs-content section:last-child {
@@ -747,25 +972,22 @@ h3 code {
 }
 
 .docs-content h2 {
-  margin: 0 0 20px;
-  font-size: 1.75rem;
-  font-weight: 700;
-  color: var(--text);
-  letter-spacing: -0.01em;
+  margin: 0 0 16px;
+  padding-bottom: 8px;
+  border-bottom: var(--rule);
+  font-size: 24px;
 }
 
 .docs-content h3 {
-  margin: 32px 0 12px;
-  font-size: 1.25rem;
-  font-weight: 600;
-  color: var(--text);
+  margin: 28px 0 10px;
+  font-size: 19px;
 }
 
 .docs-content p {
-  margin: 0 0 20px;
-  font-size: 0.9375rem;
-  color: var(--text-secondary);
-  line-height: 1.75;
+  margin: 0 0 18px;
+  font-size: 14.5px;
+  line-height: 1.7;
+  color: var(--color-neutral-800);
 }
 
 .docs-content p:last-child {
@@ -775,45 +997,48 @@ h3 code {
 .docs-content ul,
 .docs-content ol {
   list-style: none;
-  margin: 0 0 20px;
+  margin: 0 0 18px;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
 }
 
 .docs-content li {
-  padding-left: 20px;
+  padding-left: 18px;
   position: relative;
-  color: var(--text-secondary);
+  color: var(--color-neutral-800);
   line-height: 1.65;
-  font-size: 0.875rem;
+  font-size: 14px;
 }
 
+/* A square, because nothing on this site is round. */
 .docs-content li::before {
   content: "";
   position: absolute;
   left: 0;
-  top: 0.55em;
+  top: 0.6em;
   width: 6px;
   height: 6px;
-  border-radius: 999px;
-  background: var(--accent);
+  background: var(--color-accent);
 }
 
 .docs-content li strong {
-  color: var(--text);
+  color: var(--color-text);
 }
 
 .docs-content blockquote {
-  margin: 0 0 20px;
-  padding: 14px 20px;
-  border-left: 3px solid var(--accent);
-  background: var(--bg-alt);
-  border-radius: 0 8px 8px 0;
-  color: var(--text-secondary);
-  font-size: 0.9375rem;
-  line-height: 1.7;
+  margin: 0 0 18px;
+  padding: 12px 16px;
+  border-left: 3px solid var(--color-accent);
+  background: var(--color-tint);
+  color: var(--color-neutral-800);
+  font-size: 14.5px;
+  line-height: 1.6;
+}
+
+.docs-content pre {
+  margin-bottom: 18px;
 }
 
 /* tables: horizontal-scroll wrapper, body never scrolls */
@@ -827,18 +1052,18 @@ h3 code {
   border-spacing: 0;
   border-collapse: collapse;
   width: 100%;
-  font-size: 0.875rem;
+  font-size: 14px;
   min-width: 560px;
 }
 
 .docs-content th {
   padding: 8px 12px 8px 0;
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.05em;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--text-muted);
-  border-bottom: 1px solid var(--border);
+  color: var(--color-neutral-700);
+  border-bottom: var(--rule);
   text-align: left;
   white-space: nowrap;
 }
@@ -850,7 +1075,7 @@ h3 code {
 }
 
 .docs-content th.is-sortable:hover {
-  color: var(--text-secondary);
+  color: var(--color-text);
 }
 
 .docs-content th.is-sortable::after {
@@ -862,7 +1087,7 @@ h3 code {
 
 .docs-content th[aria-sort="ascending"],
 .docs-content th[aria-sort="descending"] {
-  color: var(--accent);
+  color: var(--color-accent-700);
 }
 
 .docs-content th[aria-sort="ascending"]::after {
@@ -876,11 +1101,15 @@ h3 code {
 }
 
 .docs-content td {
-  padding: 12px 12px 12px 0;
-  border-bottom: 1px solid var(--border-subtle);
-  color: var(--text-secondary);
+  padding: 10px 12px 10px 0;
+  border-bottom: 1px solid var(--color-neutral-300);
+  color: var(--color-neutral-800);
   line-height: 1.6;
   vertical-align: top;
+}
+
+.docs-content tbody tr:hover {
+  background: var(--color-tint);
 }
 
 .docs-content td:first-child,
@@ -889,31 +1118,24 @@ h3 code {
 }
 
 .docs-content td code {
-  color: var(--accent);
+  color: var(--color-accent-700);
   white-space: nowrap;
-}
-
-.docs-content a {
-  color: var(--accent);
-}
-
-.docs-content a:hover {
-  text-decoration: underline;
 }
 
 /* definition-style two-column block (e.g. Finding field list) */
 
 .def-list {
-  background: var(--bg-alt);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 20px 24px;
+  background: var(--color-tint);
+  border-left: 2px solid var(--color-accent);
+  padding: 18px 22px;
+  margin-bottom: 20px;
 }
 
 .def-list__title {
-  font-size: 0.8125rem;
-  font-weight: 600;
-  color: var(--text);
+  font-family: var(--font-heading);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text);
   margin-bottom: 12px;
 }
 
@@ -921,33 +1143,34 @@ h3 code {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 8px 16px;
-  font-size: 0.8125rem;
+  font-size: 13.5px;
 }
 
 .def-list__grid code {
-  color: var(--accent);
+  color: var(--color-accent-700);
   background: none;
   padding: 0;
 }
 
 .def-list__grid span {
-  color: var(--text-secondary);
+  color: var(--color-neutral-800);
 }
 
 /* right: in-page table of contents */
 
 .docs-toc {
   position: sticky;
-  top: 80px;
+  top: 88px;
   align-self: start;
+  border-left: var(--rule);
 }
 
 .docs-toc__label {
-  font-size: 0.6875rem;
+  font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--text-muted);
+  color: var(--color-neutral-700);
   margin-bottom: 10px;
   padding-left: 12px;
 }
@@ -955,45 +1178,94 @@ h3 code {
 .docs-toc__link {
   display: block;
   padding: 6px 0 6px 12px;
-  font-size: 0.8125rem;
+  font-size: 13.5px;
   border-left: 2px solid transparent;
-  color: var(--text-secondary);
+  margin-left: -2px;
+  color: var(--color-neutral-800);
   font-weight: 400;
 }
 
 .docs-toc__link:hover {
-  color: var(--text);
+  color: var(--color-text);
+  background: var(--color-tint);
 }
 
 .docs-toc__link.is-active {
-  border-left-color: var(--accent);
-  color: var(--accent);
-  font-weight: 600;
+  border-left-color: var(--color-accent);
+  color: var(--color-text);
+  font-weight: 700;
 }
 
 /* --------------------------------------------------------------------------
    Responsive
    -------------------------------------------------------------------------- */
 
-@media (max-width: 960px) {
+@media (max-width: 860px) {
+  :root {
+    --pad-x: 24px;
+  }
+
+  /* The header's own breakpoint, and the reason the nav is a checkbox: the six
+     links leave the row entirely and stack under it, so nothing has to shrink
+     below its content width and the document never gets wider than the screen.
+     `order` (not DOM order) puts the GitHub button back on the top row — the
+     nav is a sibling of the toggle it is driven by, and that ordering is what
+     the `~` selector needs. */
+  .burger {
+    display: flex;
+    order: 3;
+  }
+
+  .site-header__actions {
+    order: 2;
+  }
+
+  .site-nav {
+    display: none;
+    order: 4;
+    flex-basis: 100%;
+    flex-direction: column;
+    gap: 0;
+    padding: 6px 0 2px;
+  }
+
+  .menu-toggle:checked ~ .site-nav {
+    display: flex;
+  }
+
+  .site-nav__link {
+    padding: 11px 0;
+    font-size: 15px;
+    border-bottom: 1px solid var(--color-neutral-300);
+  }
+
+  /* Still 2px, still accent: the stacked links use a 1px neutral separator, and
+     letting the current page inherit that width would quietly demote the one
+     signal that says where you are. */
+  .site-nav__link.is-active {
+    border-bottom: 2px solid var(--color-accent);
+  }
+
+  .site-nav__link:last-child {
+    border-bottom: none;
+  }
+
   .hero {
     grid-template-columns: 1fr;
-    gap: 40px;
-    padding: 96px 24px 64px;
   }
 
-  /* One column now, so the code panel no longer sits beside the prose — and the `min-width: auto`
-     floor that sized it on desktop becomes the thing that sizes the PAGE. `.code-block` already asks
-     to scroll its own overflow; the floor on this grid item and on the flex item inside it meant the
-     request never reached it, and the widest shell line set the document width instead: 805px inside
-     a 469px viewport, on the landing page, measured 2026-07-29. */
-  .hero__code {
-    position: static;
-    min-width: 0;
+  .hero__text {
+    padding: 40px var(--pad-x);
+    border-right: none;
+    border-bottom: var(--rule);
   }
 
-  .hero__code .code-panel {
-    min-width: 0;
+  .card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cta-band__inner {
+    align-items: flex-start;
   }
 
   .docs-layout {
@@ -1010,7 +1282,7 @@ h3 code {
     display: none;
     margin-bottom: 24px;
     padding-bottom: 8px;
-    border-bottom: 1px solid var(--border);
+    border-bottom: var(--rule);
   }
 
   .docs-nav.is-open {
@@ -1023,42 +1295,16 @@ h3 code {
 }
 
 @media (max-width: 640px) {
-  /* Six nav links do not fit a phone, and the two ways to make them fit both lose something: a
-     hamburger hides every destination behind a tap, and dropping links makes pages unreachable from
-     the page you are on. Scrolling keeps all six reachable and costs only the discovery of a swipe —
-     the brand and the GitHub button stay pinned because they are not part of the scroller. The
-     scrollbar is hidden because a 3px bar under a 40px header reads as a rendering artifact, not a
-     control; the content is still reachable by swipe, wheel and keyboard. */
-  .site-header__inner {
-    padding-inline: 16px;
-    gap: 14px;
-  }
-
-  .site-nav {
-    gap: 18px;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-
-  .site-nav::-webkit-scrollbar {
-    display: none;
-  }
-
-  .site-nav__link {
-    white-space: nowrap;
-  }
-
   .hero__title {
-    font-size: 2.75rem;
+    font-size: 32px;
   }
 
   .section-title {
-    font-size: 2rem;
+    font-size: 24px;
   }
 
-  .stat-chip {
-    padding-right: 24px;
-    margin-right: 24px;
+  .cta-band__title {
+    font-size: 24px;
   }
 }
 
@@ -1107,31 +1353,34 @@ tr.is-filtered-out { display: none; }
 .table-search__input {
   flex: 1 1 260px;
   min-width: 0;
-  padding: 9px 12px;
-  background: var(--bg-deep);
-  border: 1px solid var(--input-border);
-  border-radius: var(--radius-sm);
-  color: var(--text);
+  min-height: 36px;
+  padding: 7px 10px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-divider);
+  color: var(--color-text);
+  caret-color: var(--color-accent);
   font: inherit;
-  font-size: 0.92rem;
+  font-size: 14px;
 }
 
-.table-search__input::placeholder { color: var(--text-muted); }
+.table-search__input::placeholder { color: var(--color-neutral-600); }
+
+.table-search__input:hover { border-color: var(--color-neutral-800); }
 
 .table-search__input:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-  border-color: var(--accent-soft-border);
+  outline: 2px solid var(--color-accent);
+  outline-offset: 0;
+  border-color: var(--color-accent);
 }
 
 .table-search__status {
   flex: none;
-  color: var(--text-muted);
-  font-size: 0.85rem;
+  color: var(--color-neutral-700);
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
 
-.table-search__status.is-zero { color: var(--accent-hover); }
+.table-search__status.is-zero { color: var(--color-accent-700); font-weight: 700; }
 
 /* ── long prose cells ──────────────────────────────────────────────────────
    The complaint that started this work: the `Detects` column carries
@@ -1170,16 +1419,15 @@ tr.is-filtered-out { display: none; }
   padding: 2px 0;
   background: none;
   border: 0;
-  color: var(--text-muted);
+  color: var(--color-neutral-700);
   cursor: pointer;
 }
 
-.cell-clamp__more:hover { color: var(--accent); }
+.cell-clamp__more:hover { color: var(--color-accent-700); }
 
 .cell-clamp__more:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--color-accent);
   outline-offset: 2px;
-  border-radius: 2px;
 }
 
 .cell-clamp__more::before {
@@ -1203,9 +1451,579 @@ tr.is-filtered-out { display: none; }
   content: "";
   flex: 1 1 auto;
   height: 1px;
-  background: var(--border-subtle);
+  background: var(--color-neutral-300);
 }
 
 @media (prefers-reduced-motion: reduce) {
   .cell-clamp__more::before { transition: none; }
+}
+
+/* --------------------------------------------------------------------------
+   Graph page — a dark stage inside a light site
+   --------------------------------------------------------------------------
+   site/graph.html carries its own scoped <style> and a viewer that paints node
+   labels in a fixed near-white and CLEARS the canvas rather than filling it, so
+   the stage's background is CSS's job and it has to stay ink or the drawing
+   disappears. That is compatible with this palette — an ink panel is what a
+   code block already is — but every piece of chrome floating over that panel
+   inherits `--text`/`--text-secondary`/`--border`, which are now ink and would
+   render dark-on-dark.
+
+   Rather than restate those rules (this batch does not edit that page), the
+   ALIASES are redefined for the subtree. Custom properties inherit, so a rule
+   written anywhere resolves them against this scope — the page's own
+   stylesheet keeps working, unedited, and reads light-on-ink.
+   -------------------------------------------------------------------------- */
+
+/* The page's own <style> used to give this element the site's job — a
+   `max-width`, a centring margin and a 24px gutter — which is exactly how it
+   ended up as the only page outside the site's spacing system and the only one
+   without a left nav. It is now a grid item of `.docs-layout--wide` above, and
+   all that is left to say here is the one thing a grid item must say: a grid
+   item's automatic minimum size is its CONTENT width, so without this the
+   widest command line inside `pre.graph-cmd` would set the column and the page
+   would grow past the frame instead of the `pre` scrolling. */
+.graph-page {
+  min-width: 0;
+}
+
+.graph-stage,
+.graph-cmd {
+  --bg: var(--color-text);
+  --text: #f3f2f2;
+  --text-secondary: var(--color-neutral-300);
+  --text-muted: var(--color-neutral-500);
+  --border: color-mix(in srgb, #f3f2f2 24%, transparent);
+  --border-subtle: color-mix(in srgb, #f3f2f2 14%, transparent);
+  --input-border: color-mix(in srgb, #f3f2f2 32%, transparent);
+  --accent: var(--color-accent-500);
+  --accent-hover: var(--color-accent-400);
+}
+
+/* --------------------------------------------------------------------------
+   Command index — for a table that had stopped being one
+   --------------------------------------------------------------------------
+   site/usage.html's subcommand table held 18 rows and 17,632 characters, one
+   cell of which (`zzop graph`) ran to 5,066 — 29% of every character in every
+   table on the page. That is a document typeset as a table: nothing scans, and
+   the widest cell decides the layout for the other seventeen rows.
+
+   So the index and the prose are separated. This component is the INDEX half:
+   one line per row — name, one-line answer, and a `¶` to the detail below —
+   grouped under accent band labels drawn with a 2px top rule. The prose lives
+   under its own headings after it, and the long design background inside a
+   `<details>` fold (`.design-notes`).
+
+   WHY NOT A `<table>`. Two reasons, and the second is behavioural rather than
+   aesthetic. Group bands have no honest row shape in a table — a `colspan`
+   header row is a row that is not data. And docs.js makes every
+   `.docs-content table` click-to-sort, which would interleave band labels with
+   the commands they label the first time a reader clicks a column. A grid has
+   no sort and needs none: the grouping IS the order.
+
+   Column widths live in `--cmd-cols` on the container rather than in each
+   rule, so a variant re-columns the whole component with one declaration and
+   the responsive collapse below has exactly one place to override.
+   -------------------------------------------------------------------------- */
+
+/* The docs column is ~546px wide (1120px frame, less both sidebars and the
+   gaps), so every pixel spent on a fixed column is taken from the one-line
+   summary. Measured on this page: at a 250px name column and a 44px anchor the
+   summaries wrapped to THREE lines, which is the wall this component exists to
+   remove. 215/22 fits the longest name (`zzop validate-rule-pack <json>`) on
+   one line and leaves the summaries two. */
+.cmd-index {
+  --cmd-cols: 215px 1fr 22px;
+  margin-bottom: 20px;
+}
+
+/* Tool index: the CLI twin rides UNDER the tool name rather than in a fourth
+   column. Four columns in 546px left the summary ~100px — a word per line. */
+.cmd-index--tools {
+  --cmd-cols: 175px 1fr 22px;
+}
+
+/* Flag/option lists inside a detail: no anchor column, nothing to point at. */
+.cmd-index--opts {
+  --cmd-cols: 200px 1fr;
+  border-top: var(--rule);
+}
+
+.cmd-index__head,
+.cmd-band,
+.cmd-row {
+  display: grid;
+  grid-template-columns: var(--cmd-cols);
+  gap: 14px;
+  align-items: baseline;
+}
+
+.cmd-index__head {
+  padding: 0 0 8px;
+  border-bottom: var(--rule);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-neutral-700);
+}
+
+.cmd-band {
+  padding: 18px 0 6px;
+  border-top: var(--rule);
+}
+
+/* The first band sits directly under the header's own 2px rule; a second one
+   immediately below it would read as a double line. */
+.cmd-index__head + .cmd-band {
+  border-top: none;
+  padding-top: 10px;
+}
+
+.cmd-band__label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--color-accent-700);
+}
+
+.cmd-row {
+  padding: 9px 0;
+  border-bottom: 1px solid var(--color-neutral-300);
+  font-size: 14px;
+}
+
+.cmd-row:hover {
+  background: var(--color-tint);
+}
+
+.cmd-row:last-child {
+  border-bottom: var(--rule);
+}
+
+.cmd-row__name {
+  color: var(--color-text);
+}
+
+.cmd-row__desc {
+  color: var(--color-neutral-800);
+}
+
+/* The CLI twin: a second line under the tool it mirrors, one step quieter. */
+.cmd-row__twin {
+  display: block;
+  margin-top: 3px;
+  font-size: 12px;
+}
+
+.cmd-row__twin code {
+  color: var(--color-neutral-600);
+}
+
+/* No chip in here. `.docs-content code` paints inline code on a neutral tile,
+   which is right in a paragraph and wrong in a column of monospace names — 18
+   stacked tiles read as a second grid fighting the real one. */
+.cmd-row code {
+  background: none;
+  padding: 0;
+  color: var(--color-accent-700);
+}
+
+.cmd-row__anchor {
+  font-weight: 700;
+  color: var(--color-accent-700);
+}
+
+.cmd-note {
+  font-size: 13px;
+  color: var(--color-neutral-700);
+}
+
+/* An `h3` is only an anchor target if it clears the sticky header, the same
+   96px `.docs-content section` already reserves. */
+.docs-content .cmd-detail {
+  scroll-margin-top: 96px;
+}
+
+/* Band separator inside the details half, so the four groups the index draws
+   are still visible once the reader has followed a `¶` down here. */
+.docs-content .cmd-details__label {
+  margin-top: 44px;
+  padding-top: 20px;
+  border-top: var(--rule);
+}
+
+.docs-content .cmd-details__label + .cmd-detail {
+  margin-top: 0;
+}
+
+/* --------------------------------------------------------------------------
+   Design notes — the fold for background that is true but not on the path
+   -------------------------------------------------------------------------- */
+
+.design-notes {
+  border-top: 1px solid var(--color-neutral-300);
+  border-bottom: 1px solid var(--color-neutral-300);
+  margin-bottom: 18px;
+}
+
+.design-notes > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 10px 0;
+}
+
+.design-notes > summary::-webkit-details-marker {
+  display: none;
+}
+
+.design-notes__hint {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--color-accent-700);
+}
+
+.design-notes__hint::before {
+  content: "\25B8\00A0"; /* right-pointing triangle: closed */
+}
+
+.design-notes[open] .design-notes__hint::before {
+  content: "\25BE\00A0"; /* down-pointing triangle: open */
+}
+
+.design-notes__body {
+  margin-bottom: 14px;
+  padding: 14px 18px;
+  background: var(--color-tint);
+  border-left: 3px solid var(--color-accent);
+}
+
+.docs-content .design-notes__body p {
+  margin-bottom: 12px;
+  font-size: 13.5px;
+}
+
+.docs-content .design-notes__body p:last-child {
+  margin-bottom: 0;
+}
+
+/* --------------------------------------------------------------------------
+   `.card` inside the docs column
+   --------------------------------------------------------------------------
+   The docs typography rules land LATER in this file than the card rules and
+   match at the same specificity, so `.docs-content h3`/`p` re-add margins
+   inside a cell that is already padded. Restated here at higher specificity
+   rather than by reordering the file, because the home page's cards must not
+   move a pixel to fix a page they do not appear on.
+   -------------------------------------------------------------------------- */
+
+.docs-content .card-grid {
+  margin-bottom: 20px;
+}
+
+.docs-content .card h3 {
+  margin: 0;
+}
+
+.docs-content .card p {
+  margin: 0;
+}
+
+/* --------------------------------------------------------------------------
+   Command index, narrow
+   --------------------------------------------------------------------------
+   Same breakpoint as the rest of the site. A 250px monospace column plus prose
+   cannot survive a phone, so the name keeps the row with its `¶` and every
+   other cell drops to its own full-width line. The column header goes with
+   them: "COMMAND / WHAT IT ANSWERS" labels a grid that no longer has columns.
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 860px) {
+  .cmd-index,
+  .cmd-index--tools,
+  .cmd-index--opts {
+    --cmd-cols: 1fr auto;
+  }
+
+  .cmd-index__head {
+    display: none;
+  }
+
+  /* Placed explicitly, not left to auto-flow: the anchor follows the summary in
+     the DOM (it is the summary's own footnote mark), so auto-placement would
+     push it onto a third row of its own once the summary spans both columns. */
+  .cmd-row__name {
+    grid-row: 1;
+    grid-column: 1;
+  }
+
+  .cmd-row__anchor {
+    grid-row: 1;
+    grid-column: 2;
+    text-align: right;
+  }
+
+  .cmd-row__desc {
+    grid-row: 2;
+    grid-column: 1 / -1;
+    margin-top: 4px;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Field index — the contract folded under its own row
+   --------------------------------------------------------------------------
+   The command index above split an index from its prose by sending the prose
+   BELOW the whole table, behind a `¶`. A field table wants the other shape,
+   and DESIGN-PROMPT §4 names it separately for that reason: a reader comparing
+   two config fields is scanning the index, not reading down a page, so the
+   contract belongs directly under the row it belongs to rather than 40 rows
+   away.
+
+   Measured on site/reference.html before this existed: 56 rows across three
+   tables, of which 9 read as one line. `AnalyzeRequest.vocabulary` alone ran to
+   1,999 characters in a single cell — the field table was the contract
+   document, typeset as a table.
+
+   So a field row is a `<details>` whose `<summary>` IS the row: one line
+   visible, the contract one click below it. The panel is `.design-notes__body`
+   REUSED rather than restyled — this site should have one fold, not two that
+   merely look alike. `<details>` needs no script, so the fold survives JS off.
+
+   The operations table on that page is a command index, not a field table, and
+   uses the component above unchanged (bands, one-liners, `¶`, details below).
+   Only the two field tables use this one.
+   -------------------------------------------------------------------------- */
+
+/* A path long enough to set the page's own minimum width. Measured before this
+   rule existed: the bare `crates/engine/tests/rule_contracts/surface_parity.rs`
+   in site/reference.html's opening operations paragraph is 399px wide, and made
+   that document scroll 434px inside a 420px viewport — the only horizontal
+   overflow anywhere on the site. Opt-in rather than applied to every inline
+   `code`, because breaking a short identifier mid-token is worse than the wrap
+   it would prevent. */
+.docs-content code.code-wrap {
+  overflow-wrap: anywhere;
+}
+
+.cmd-index--fields {
+  --cmd-cols: 200px 1fr;
+}
+
+/* The ops index writes plain words between its two surface names ("· no MCP
+   tool"), and the existing `.cmd-row__twin code` rule only quiets `<code>`
+   children. Scoped to this variant so no other page's twin line moves. */
+.cmd-index--ops .cmd-row__twin {
+  color: var(--color-neutral-600);
+}
+
+/* Type badge: a second line under the field name rather than a chip beside it.
+   Measured: the docs column is ~546px, so a `string | string[]` chip on the
+   name line pushes the longest field names (`ruleOverridesApplied`,
+   `severityOverrides`) into a wrap and costs the summary a column it needs
+   more. A shape too long to sit here (`git`, `parsers`, `routes`) opens the
+   fold instead, where it is the first line. */
+.cmd-row__type {
+  display: block;
+  margin-top: 3px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--color-neutral-600);
+}
+
+.cmd-row__req {
+  margin-left: 6px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-accent-700);
+}
+
+/* The affordance. It says `contract` rather than `more` because that is what
+   is behind it — a field's obligations, not extra reading. */
+.cmd-row__more {
+  margin-left: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-accent-700);
+  white-space: nowrap;
+}
+
+.cmd-row__more::after {
+  content: "\00A0\25B8"; /* right-pointing triangle: closed */
+}
+
+.cmd-fold[open] .cmd-row__more::after {
+  content: "\00A0\25BE"; /* down-pointing triangle: open */
+}
+
+.cmd-fold {
+  border-bottom: 1px solid var(--color-neutral-300);
+}
+
+/* A fold can be the last row of an index, and the index closes on a 2px rule
+   exactly as `.cmd-row:last-child` does. */
+.cmd-fold:last-child {
+  border-bottom: var(--rule);
+}
+
+.cmd-fold > summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.cmd-fold > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* Firefox draws the disclosure triangle through `::marker`, which
+   `list-style: none` alone does not always silence. */
+.cmd-fold > summary::marker {
+  content: "";
+}
+
+/* The row inside a summary is a row of the same index, so the separator is
+   drawn once — by the `<details>`, which is the element that wraps both the
+   row and its open panel. */
+.cmd-fold > summary > .cmd-row {
+  border-bottom: none;
+}
+
+.cmd-fold > summary:hover > .cmd-row,
+.cmd-fold[open] > summary > .cmd-row {
+  background: var(--color-tint);
+}
+
+/* The panel spans the whole index rather than being indented to the summary
+   column the way the design reference draws it. That reference page runs one
+   1040px column; this site's docs column is 546px, and indenting the panel to
+   the 200px name column left 296px of prose — the explanation would have been
+   narrower than the row it explains. The 3px accent border is what marks it as
+   subordinate, and it does that at any width. */
+.cmd-fold .design-notes__body {
+  margin-left: 0;
+}
+
+/* A definition block became an anchor target when the field index started
+   pointing at it instead of saying "see below", so it needs the same sticky-
+   header clearance `.docs-content section` and `.cmd-detail` already reserve. */
+.docs-content .def-list[id] {
+  scroll-margin-top: 96px;
+}
+
+/* --------------------------------------------------------------------------
+   Field index, narrow
+   --------------------------------------------------------------------------
+   Same breakpoint and the same collapse as the command index: the summary
+   drops to its own full-width line, and the fold's panel gives up its indent
+   because the column it was aligning to no longer exists.
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 860px) {
+  .cmd-index--fields {
+    --cmd-cols: 1fr;
+  }
+
+  /* Two-cell rows, so there is no anchor to keep on the first line — name and
+     summary simply stack. Stated explicitly because the shared narrow rules
+     above pin `.cmd-row__desc` to row 2, and a single-column grid would
+     otherwise leave row 1 to auto-flow. */
+  .cmd-index--fields .cmd-row__name {
+    grid-row: 1;
+    grid-column: 1;
+  }
+
+  .cmd-index--fields .cmd-row__desc {
+    grid-row: 2;
+    grid-column: 1;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Architecture-page index variants — three tables that were three documents
+   --------------------------------------------------------------------------
+   site/architecture.html carried three `<table>`s whose widest cells were 278,
+   352 and 1,545 characters. The 1,545 was the Python language row: a paragraph
+   about eight extraction channels, their resolution rules and their disclosed
+   gaps, typeset as a table cell — and, being the widest, it set the column
+   width every other language row was then read at.
+
+   The component is `.cmd-index` (added with site/usage.html, whose header
+   comment carries the full rationale, including why a `<table>` is the wrong
+   element once a group band exists). Only the column widths differ per page,
+   which is what `--cmd-cols` is for. Nothing above this line is edited.
+   -------------------------------------------------------------------------- */
+
+/* Pipeline stages: the names are prose, not identifiers, and the longest
+   ("Whole-tree assembly") sets the floor. */
+.cmd-index--stages {
+  --cmd-cols: 168px 1fr 22px;
+}
+
+/* `CommonIr` fields: four short monospace names (`dep`, `symbols`, `loc`,
+   `io`), so the name column gives almost everything back to the summary. */
+.cmd-index--ir {
+  --cmd-cols: 105px 1fr 22px;
+}
+
+/* Language rows carry a tier badge and an extension list under the name, so
+   this column is the widest of the three — but still narrower than the
+   longest language name plus its badge would need on one line, which is
+   deliberate: the badge wraps under the name rather than the summary losing a
+   column to it. */
+.cmd-index--langs {
+  --cmd-cols: 196px 1fr 22px;
+}
+
+/* The precision tier as a badge rather than a table column. It is a closed
+   vocabulary of five values, which is exactly what a badge is for and what a
+   third prose column was not: the tier ENGINE (swc, ruff, syn 2, which
+   tree-sitter grammar) is a different fact and rides the twin line with the
+   extensions instead. Neutral, never accent — a tier is not a warning, and
+   six of these stacked in the accent colour would read as an alarm. */
+.tier-badge {
+  display: inline-block;
+  padding: 1px 5px;
+  border: 1px solid var(--color-neutral-400);
+  background: var(--color-tint);
+  font-family: var(--font-body);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-neutral-800);
+  white-space: nowrap;
+}
+
+/* The twin line under a language name holds `<code>` extensions and plain
+   prose side by side; the shared `.cmd-row__twin code` rule quiets only the
+   code half, so the prose half is quieted here. Scoped to this variant so no
+   other page's twin line moves. */
+.cmd-index--langs .cmd-row__twin {
+  color: var(--color-neutral-600);
+}
+
+/* An extension list is the one place in this component where a break inside a
+   token is right: `.ts .tsx .js .jsx .mjs .cjs .mts .cts` cannot fit a 196px
+   column on one line, and the alternative is a horizontal overflow at 420px. */
+.cmd-index--langs .cmd-row__twin code {
+  overflow-wrap: anywhere;
+}
+
+/* --------------------------------------------------------------------------
+   Architecture-page index variants, narrow
+   --------------------------------------------------------------------------
+   The shared narrow rule lists its variants by name, so a variant added later
+   has to opt in here or it keeps three columns on a phone. Same breakpoint,
+   same collapse: the name keeps its row with the `¶`, the summary takes a
+   full-width row of its own.
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 860px) {
+  .cmd-index--stages,
+  .cmd-index--ir,
+  .cmd-index--langs {
+    --cmd-cols: 1fr auto;
+  }
 }

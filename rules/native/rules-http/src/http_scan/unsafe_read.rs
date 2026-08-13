@@ -48,8 +48,7 @@ pub fn scan_unsafe_read_endpoint(input: &ScanUnsafeReadEndpointInput) -> Vec<Fin
     }
 
     let name_index = build_name_index(input.symbols);
-    let symbols_by_id: HashMap<&str, &SourceSymbol> =
-        input.symbols.iter().map(|s| (s.id.as_str(), s)).collect();
+    let symbols_by_id = super::symbols_by_id(input.symbols);
 
     let site_at = |id: &str| -> Option<WriteSite> {
         symbols_by_id

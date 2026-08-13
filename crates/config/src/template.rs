@@ -14,6 +14,11 @@
 //! 2. **Its values are zzop's own suggestions, not a second set.** Every value below is read from the
 //!    symbol its consumer already owns (`VocabularyConfig::built_in`), so the starter file DOCUMENTS the
 //!    suggestions instead of quietly re-deciding them.
+//! 3. **Its "TypeScript/JavaScript files only" sentences stay true.** Added 2026-08-13 for the third
+//!    defect class this file has now paid for: a knob whose consumer is one-language-gated, written into
+//!    a Java/Go/Python/C# user's own repository with no sign of that. The pin reads the consuming rules'
+//!    OWN sightline declarations rather than a hand list, and it covers four of the eleven such keys —
+//!    the rest have no declaration to bind to, and the pin's doc names them instead of implying cover.
 //!
 //! This property used to be spelled "writing it changes nothing — every value below is the one a run
 //! already uses with no config file at all", and the prose in the template said the same to the user.
@@ -49,15 +54,20 @@ pub const CONFIG_TEMPLATE_JSONC: &str = r#"// zzop configuration. JSONC: comment
   // Rule packs — the DOMAIN-level on/off switch, and the one to reach for first: a pack is a whole
   // subject area, so turning one off is one line where the per-rule map below would be dozens.
   // The bundled pack ids are:
-  //     browser  db  egress  go  http  perf  react  redis  reliability  security  sql  typescript
+  //     browser  db  egress  go  http  perf  react  redis  reliability  security  sql
   // `packs.disabled` drops a pack whole, before any rule inside it is evaluated ("everything except").
   // `packs.only` is its opt-IN twin: name the packs you want and every OTHER bundled pack stays off,
   // so a repo that only cares about one subject writes one line instead of eleven. The two compose —
   // `only` selects, `disabled` still subtracts. Both are about PACKS: the native analyses
   // (dead-candidates, unimported-export, scores, and friends) are not packs and keep running; switch
   // those off by id in `rules` below.
-  // `packs.extraDirs` names directories holding rule packs you wrote, and REPLACES the default
-  // authored-pack location outright — the two are never merged, so a run's packs have one origin.
+  // Packs you wrote (or recovered) load from `zzop/rules/` beside this file, with no key at all — that
+  // is the default authored-pack location, used whenever it exists on disk. `packs.extraDirs` names
+  // other directories instead, and REPLACES that default outright rather than adding to it — the two
+  // are never merged, so a run's packs have one origin. An empty array is therefore the explicit
+  // opt-out. Recovering a rule that left a release? Save the pack under `zzop/rules/` and it loads —
+  // and its rules are then documented by the pack file you saved, not by the rule-catalog contract
+  // document, which covers the bundled packs.
   "packs": {
     "disabled": []
   },
@@ -102,6 +112,11 @@ pub const CONFIG_TEMPLATE_JSONC: &str = r#"// zzop configuration. JSONC: comment
   // judgment at all, so this block is what turns these questions on, and deleting a key turns one off.
   // Editing one key replaces that whole list or pattern; the keys you leave alone keep theirs.
   // Patterns are regular expressions matched case-insensitively via their own (?i).
+  // NOT EVERY KEY HERE ASKS ITS QUESTION OF EVERY LANGUAGE. Several are read only where a recognizer
+  // exists to read them — TypeScript/JavaScript, today — and in a tree of another language they are
+  // inert no matter what you write in them. That is a different thing from deleting a key, which stops
+  // a question that WAS being asked. Each comment below says which of the two it is, so a Java, Go,
+  // Python or C# reader can tell a knob that is theirs from one that only looks like it.
   "vocabulary": {
     // Names that prove a call is an auth check, matched against every symbol the mutating-route-no-auth
     // call graph walks. Narrow it and routes guarded by an unlisted name start reporting.
@@ -145,23 +160,30 @@ pub const CONFIG_TEMPLATE_JSONC: &str = r#"// zzop configuration. JSONC: comment
     "extraTestPathPatterns": [],
 
     // How you reach your ORM client, and which methods on a data-access receiver are writes. These
-    // decide which lines zzop calls a write site, so a project whose repositories are named some other
-    // way currently reports none.
+    // decide which lines zzop calls a write site. READ FOR TypeScript/JavaScript FILES ONLY: the
+    // write-site and query-call-site channels have one producer between them, so in a Java, Go, Python,
+    // C# or Rust tree these three keys change nothing and no renaming makes them apply. That is not the
+    // quiet under-report an undeclared key gives you — it is a blind channel, and the rules that read it
+    // declare that blindness themselves, so a coverage report names it per tree.
     "prismaClientGetter": "getPrisma",
     "ormReceiverPattern": "Repository$|Store$|^prisma$|^db$|^orm$|^tx$|^trx$",
     "ormWriteMethods": ["create","createMany","update","updateMany","delete","deleteMany","upsert","insert","save","remove"],
     // The helpers you wrap a call in to retry it — a write inside one is reported differently.
+    // TypeScript/JavaScript files only, same single-producer reason as the three keys above.
     "retryWrappers": ["pRetry","backOff","retryAsync","asyncRetry"],
 
     // Express/Hono route registration: which callees ARE a gate, which identifier tails mean
     // "sub-router, not a gate", which rejection verbs prefix a guard wrapper, and which words mean the
     // check is about the ENVIRONMENT rather than the caller. Widen the veto lists and fewer routes are
-    // cleared; widen the guard lists and more are.
+    // cleared; widen the guard lists and more are. TypeScript/JavaScript files only — the frameworks
+    // named are the scope. Spring, ASP.NET, Django/FastAPI, gin and axum routes are recognized by their
+    // own syntax and answer to none of the five keys below.
     "middlewareGuardCallees": ["passport.authenticate","expressjwt","requiresAuth","clerkMiddleware","ensureLoggedIn","checkJwt"],
     "routerNameVetoSuffixes": ["router","routes","route","controller","service","module","client","store","config","api"],
     "wrapperGuardPrefixes": ["require","ensure","protect","restrict"],
     "envAxisVetoSubstrings": ["env","prod","staging","local","dev","debug"],
-    // The header your API accepts as an idempotency key.
+    // The header your API accepts as an idempotency key. Read on the same TypeScript/JavaScript route
+    // registrations as the four keys above, not on every route zzop finds.
     "idempotencyHeaderNames": ["idempotency-key","x-idempotency-key"],
 
     // The Python side of the same guard question: what makes a dependency callable a gate, and the
@@ -196,7 +218,13 @@ pub const CONFIG_TEMPLATE_JSONC: &str = r#"// zzop configuration. JSONC: comment
     "schemaUsageSkipFields": ["id","createdAt","updatedAt"],
 
     // The names your own fetch wrapper exports, and the banners your code generators stamp. Both decide
-    // what zzop treats as machine-owned rather than hand-written.
+    // what zzop treats as machine-owned rather than hand-written, and both stop at the same border: a
+    // Java, Go, Python or C# file is reached by neither. The fetch-wrapper names are read for
+    // TypeScript/JavaScript files only. The banners are matched as TEXT, with no language syntax
+    // involved, so they LOOK language-neutral — but matching text is not reach: both analyses that
+    // consult a banner are extension-gated before any banner is opened (the unused-export check reads
+    // TypeScript/JavaScript sources only; the dead-file check drops .py/.pyi, .rs, .go, .java and .cs
+    // from candidacy outright, so the widest file it can ask about is a .vue/.svelte component).
     "fetchWrapperExportNames": ["get","post","put","del","delete_","patch","request","send","api","http","client"],
     "generatedFileMarkers": ["@generated","auto-generated","autogenerated","automatically generated","code generated by","this file is generated","this file was generated","openapi-generator"],
 
@@ -217,11 +245,20 @@ pub const CONFIG_TEMPLATE_JSONC: &str = r#"// zzop configuration. JSONC: comment
     "externallyFetchedPaths": ["/","/health","/healthz","/healthcheck","/livez","/readyz","/robots.txt","/sitemap.xml","/sitemap_index.xml","/rss.xml","/feed.xml","/atom.xml","/favicon.ico"],
 
     // The identifiers you give your own router values. A call on one of these is read as a route.
+    // TypeScript/JavaScript files only.
     "routerNames": ["apiRoutes"],
 
     // Directories that are shared infrastructure rather than a layer, so importing them upward is not a
     // layering violation. Separate from `vocabulary.featureSlicedDesign.shared` below on purpose: this one exempts, that
     // one names an FSD layer.
+    // UNLIKE THE KEYS ABOVE, THIS ONE JUDGES EVERY LANGUAGE — it filters the dependency graph, which is
+    // built for TypeScript, Python, Java, C#, Go and Rust alike, and it feeds the hierarchy,
+    // sibling-cross and layer-co-churn signals. The value written here is JS-shaped, because that is
+    // where the list came from: hooks, types, display and __test__ are React and Jest words, and a Java,
+    // Go, C# or Python tree spells its shared infrastructure differently (common, internal, pkg, util,
+    // Shared). Left as-is in such a tree it exempts nothing you have, so those signals judge your shared
+    // directories as ordinary layers. Replace the list with your own names — this is one of the few keys
+    // here whose suggested value is one ecosystem's convention rather than a language-neutral one.
     "hierarchySharedDirs": ["utils","types","helpers","hooks","constants","lib","display","__test__"],
 
     // Your Feature-Sliced Design layout, if you use one. The four keys answer one question together, so

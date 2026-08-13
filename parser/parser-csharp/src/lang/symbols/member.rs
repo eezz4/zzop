@@ -90,9 +90,24 @@ fn emit_ctor(rel: &str, node: Node, src: &str, path: &[String], out: &mut Vec<So
 /// the moment any sibling member projects a leaf, so the property's own expression was unreachable to
 /// every `.cs` method-scan rule. An expression-bodied METHOD was never in that hole, because
 /// `arrow_expression_clause` IS the `body` field there — which is exactly what made this one easy to
-/// miss. Both accessors of an accessor list still share ONE span rather than projecting a leaf each; a
-/// getter and a setter can therefore still pair patterns across each other, disclosed here rather than
-/// fixed, because splitting them needs a naming decision (`C.P.get`) that changes call-graph ids.
+/// miss. Both accessors of an accessor list still share ONE span rather than projecting a leaf each, so a
+/// getter and a setter COULD pair patterns across each other — a method-scan combines its
+/// `patterns`/`trigger`/`absent` within one span, so a trigger in the getter can pair with, or be vetoed
+/// by, text living only in the setter. That is disclosed here rather than fixed because splitting the
+/// accessors needs a naming decision (`C.P.get`) that changes call-graph ids.
+///
+/// It is LATENT, not live, and the difference is load-bearing enough to state: NO shipped method-scan rule
+/// admits `.cs` (measured 2026-08-13: 0 of 55), and the span-scoped `absent` veto that makes two patterns
+/// interact exists ONLY in method-scan rules. Nothing reading a `.cs` file combines patterns within a body
+/// span today, so the pairing above cannot currently occur — it is not rare here, it is unreachable.
+/// Auto-implemented properties (`{ get; set; }`) are outside the axis entirely, having no body to host a
+/// pattern; the whole dogfood corpus is 158 accessors, all of that form, and 0 bodied ones.
+///
+/// The moment a method-scan rule admits `.cs`, this becomes live and the deferred naming decision is due.
+/// That transition is pinned, so it cannot happen quietly:
+/// `rule_contracts::capability_matrix::no_method_scan_rule_admits_csharp_while_its_property_accessors_still_share_one_span`
+/// fails on the widening commit and states the choice. Do not widen a method-scan rule to C# and silence
+/// that test in the same breath — the test IS this paragraph's enforcement.
 fn emit_property(rel: &str, node: Node, src: &str, path: &[String], out: &mut Vec<SourceSymbol>) {
     let Some(name_node) = node.child_by_field_name("name") else {
         return;

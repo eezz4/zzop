@@ -81,10 +81,25 @@ the linker is an exact join on normalized keys, never AST matching).
 Field semantics (all mirror the Rust `zzop-core` serde types — those are the normative schema):
 
 - `loc` — raw physical line count (`text.split('\n').length` semantics, trailing newline adds one).
-- `symbols` — declarations. `body_start`/`body_end` (1-based, inclusive) power method-scan DSL rules;
-  a parser that cannot produce spans omits them and those rules silently skip the file (graceful
-  degrade, never an error). A lexical brace-matcher is an acceptable span source (zzop's own Java
-  projector worked exactly this way before its tree-sitter CST upgrade).
+- `symbols` — declarations. `body_start`/`body_end` (1-based, inclusive) power method-scan DSL
+  rules, and they carry a contract every producer owes — `crates/core/src/ir.rs`'s "Body span
+  contract" section is its single owner; this is a pointer, not a second copy. Three parts matter to
+  an external adapter:
+  - **`body_start` is the line the DECLARATION begins on, its leading decorators, annotations and
+    attributes INCLUDED** — not the line the body block opens on. Every portable method-scan concept
+    is anchored there (`async`, `@Transactional`, `[HttpGet]`, `#[get(...)]`, a parameter name), so a
+    span that starts at the `{` excludes the question the rule is asking. **A lexical brace-matcher is
+    therefore NOT a sufficient span source on its own** — it must back up to the declaration line. (An
+    earlier revision of this page endorsed one; that endorsement predates the contract and was wrong
+    from the day the contract landed.)
+  - **Omitting the pair is a positive claim, not a shrug.** `null`/absent means "this declaration
+    encloses nothing scannable" — a `type`/`interface`, a field, a Rust `trait`, a Go `type X struct`.
+    It does **not** mean "I could not compute one". A producer that omits spans it simply did not
+    measure tells the engine those regions are empty, and `drop_outer_spans` acts on that claim.
+  - **A container span obliges leaves.** `drop_outer_spans` discards a container span that strictly
+    contains another projected span, so a container's regions are reachable only through the leaves
+    its producer emits. If you give a class a span, you owe a leaf for every region a rule could need
+    to scan inside it — otherwise that region goes unreachable the instant any sibling projects a leaf.
 - `imports` — internal dependency edges are derived from these by the engine's resolver; a parser may
   instead pre-resolve and emit repo-relative specifiers.
 - `dynamic_imports` — OPTIONAL (`#[serde(default)]`; absent = empty), this file's dynamic-`import()`
@@ -701,7 +716,14 @@ callers can refer to either unambiguously.
     native binding and only names it never bound are added; `re_exports` and `dynamic_imports` have no
     key and so append minus exact duplicates (a type-only re-export stays distinct from an otherwise
     identical runtime one, since only the latter is an edge). A native fact is therefore never
-    overridden, but it no longer SILENCES the overlay either: before 2026-07-30 this was all-or-nothing
+    overridden by a merge — but the COMPOSITION downstream of the merge can still emit LESS than either
+    producer alone, and that is the one loss this page used to deny. If both producers describe the same
+    file’s router fragments, that file’s routers become ambiguous to the by-name composer, mounts below
+    it resolve to nothing, and the whole subtree emits no routes (measured: 19 provides → 0 when a
+    reference overlay was layered on a tree the native Python parser already read). The engine will not
+    pick a side it cannot verify, so it DISCLOSES instead — see the fragment-collision check below,
+    which names every such file and gives the two ways out. The merge itself no longer SILENCES the
+    overlay either: before 2026-07-30 this was all-or-nothing
     per FILE — one native binding discarded the overlay's entire dep-graph contribution for that file,
     which made an adapter's worth depend on what the native parser happened to leave empty rather than on
     what the adapter knows. Additive merging is what lets native and injected extraction combine on one
@@ -722,7 +744,7 @@ callers can refer to either unambiguously.
   exempts nothing. (`dead-candidates` only — `unreachable` has its own entry seed and does not read
   `is_entry`.)
 
-  **Self-disclosure: `source`, coverage, and synthetic entries.** Three checks run once per ACCEPTED
+  **Self-disclosure: `source`, coverage, and synthetic entries.** Four checks run once per ACCEPTED
   overlay, independent of the merge branch each `FileProjection` takes:
   - `source` is the overlay's own declared tree/source id, but every projection still merges onto
     whichever tree's `overlays`/`adapterOverlays` entry carried it, regardless of what `source` says.

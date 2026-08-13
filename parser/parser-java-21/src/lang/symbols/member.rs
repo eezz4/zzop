@@ -17,9 +17,9 @@ use crate::util::{end_line_of, has_modifier_keyword, line_of, modifiers_of, node
 
 /// The member names an initializer block takes. A class may legally hold several of each and they have
 /// no key at all, so the 2nd and later take a 1-based ordinal suffix — the exact scheme (and the exact
-/// reason for it) `zzop_parser_typescript`'s `symbol_shapes::class::STATIC_BLOCK` states: without the
-/// ordinal every block after the first would share one name and one id. The `-` is what makes the
-/// spelling collision-proof against a real member: it cannot appear in a Java identifier.
+/// reason for it) `zzop_parser_typescript`'s `symbol_shapes::class::members::STATIC_BLOCK` states:
+/// without the ordinal every block after the first would share one name and one id. The `-` is what
+/// makes the spelling collision-proof against a real member: it cannot appear in a Java identifier.
 const STATIC_BLOCK: &str = "static-block";
 const INSTANCE_BLOCK: &str = "instance-block";
 

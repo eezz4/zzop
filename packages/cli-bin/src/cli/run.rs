@@ -209,28 +209,48 @@ pub fn run_file_validate(args: &[String], usage_tail: &str, validate: fn(&str) -
     std::process::exit(if valid { 0 } else { 1 });
 }
 
-/// `explain <rule-id>`: the one-arg "call a `Result<String, String>` lookup and print" shape shared by
-/// any read-only subcommand that answers from in-process data rather than a file — today just
-/// `zzop_summary::explain`. Missing/extra/flag-shaped args exit 2 (same usage-error contract as
-/// every sibling subcommand); `Ok` prints to stdout and exits 0; `Err` prints `zzop: <message>` to
-/// stderr and exits 1 (a runtime lookup failure, never a usage error — the id was well-formed, just not
-/// explainable).
-pub fn run_lookup(
-    args: &[String],
-    usage_tail: &str,
-    lookup: fn(&str) -> Result<String, String>,
-) -> ! {
-    let usage = format!("usage: zzop {usage_tail}");
-    let Some(query) = args.get(2) else {
-        eprintln!("{usage}");
-        std::process::exit(2);
-    };
-    if args.len() > 3 {
-        eprintln!("{usage} (one id — got {})", args.len() - 2);
+/// `explain <rule-id> [--config <path>]`: a read-only rule lookup, over the packs compiled into this
+/// binary or — with `--config` — over the packs that config's trees actually load (`zzop_summary::
+/// explain` / `explain_with_config`; see the facade module's `from_config` doc for why the wider corpus
+/// is opt-in rather than the default).
+///
+/// Missing/extra/flag-shaped args exit 2 (same usage-error contract as every sibling subcommand); `Ok`
+/// prints to stdout and exits 0; `Err` prints `zzop: <message>` to stderr and exits 1 (a runtime lookup
+/// failure, never a usage error — the id was well-formed, just not explainable, and a config that
+/// cannot be read is the config's problem, not the caller's grammar).
+///
+/// This was a GENERIC `run_lookup(args, usage_tail, fn(&str) -> Result<String, String>)` until the
+/// `--config` form landed on 2026-08-12. It had exactly one caller the whole time, and the shape it
+/// abstracted — "one positional arg, no flags" — is precisely the shape that stopped being true, so
+/// keeping it would have meant a generic parameterized over a grammar no subcommand has.
+pub fn run_explain(args: &[String]) -> ! {
+    const USAGE: &str = "usage: zzop explain <rule-id> [--config <path>]";
+    let mut config: Option<&str> = None;
+    let mut ids: Vec<&str> = Vec::new();
+    let mut rest = args[2..].iter();
+    while let Some(arg) = rest.next() {
+        match arg.as_str() {
+            "--config" => {
+                let Some(path) = rest.next() else {
+                    eprintln!("{USAGE} (--config needs a path)");
+                    std::process::exit(2);
+                };
+                config = Some(path.as_str());
+            }
+            other => ids.push(other),
+        }
+    }
+    if ids.len() != 1 {
+        eprintln!("{USAGE} (one id — got {})", ids.len());
         std::process::exit(2);
     }
-    reject_flag_like_args([query.as_str()], &usage);
-    print_or_exit(lookup(query));
+    // Checked AFTER `--config <path>` is consumed, so a dash-shaped rule id is still refused while the
+    // flag's own value never reaches this gate.
+    reject_flag_like_args([ids[0]], USAGE);
+    print_or_exit(match config {
+        Some(path) => zzop_summary::explain_with_config(path, ids[0]),
+        None => zzop_summary::explain(ids[0]),
+    });
 }
 
 /// `diff <a.json> <b.json> [--allow-tool-drift]`: read two already-produced manifests and print their

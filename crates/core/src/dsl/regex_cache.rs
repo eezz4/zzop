@@ -8,7 +8,7 @@ use std::sync::Mutex;
 /// ## Why it exists
 ///
 /// The evaluator compiles a rule's regexes on every call, and `eval_pack_into` runs **once per file**.
-/// So a 2,000-file tree recompiles the same ~143 rules' patterns 2,000 times — and it is worse than one
+/// So a 2,000-file tree recompiles every loaded rule's patterns 2,000 times — and it is worse than one
 /// compile per pattern per file, because four independent places compile the SAME string:
 /// [`super::diagnostics::RuleDiag::compile`] (the one that keeps the result), `super::prefilter` (twice,
 /// discarding the result — it only asks `is_err()`), and `super::markers` (the derived suppress marker,

@@ -66,7 +66,12 @@ pub(super) fn disclosure_sites(
 }
 
 /// `http` provide sites across all trees, EXCLUDING `UNKNOWN_VERB` sentinels (which hold no witnessed
-/// method, so they are not exact-key provides and must never be counted as unconsumed dead routes).
+/// method, so they are not exact-key provides and must never be counted as unconsumed dead routes) and
+/// ANT wildcard routes (`GET /api/files/**`), which the linker already partitioned out of the join for
+/// the same reason: a PATTERN is not a key. This list is the provide UNIVERSE the near-miss family
+/// compares against (`route-near-miss`, `path-near-miss`, `method-mismatch`, `version-skew`,
+/// `route-shadowing`), and a suggestion computed off a pattern is nonsense in the loudest possible place
+/// — "did you mean `GET /api/files/**`?" is not a route anyone can call.
 pub(super) fn http_provide_sites(source_ios: &[SourceIo]) -> Vec<HttpProvideSite> {
     source_ios
         .iter()
@@ -74,7 +79,9 @@ pub(super) fn http_provide_sites(source_ios: &[SourceIo]) -> Vec<HttpProvideSite
             s.io.provides
                 .iter()
                 .filter(|p| {
-                    p.kind == "http" && zzop_core::unknown_verb_route_path(&p.key).is_none()
+                    p.kind == "http"
+                        && zzop_core::unknown_verb_route_path(&p.key).is_none()
+                        && zzop_core::wildcard_route_path(&p.key).is_none()
                 })
                 .map(move |p| HttpProvideSite {
                     source: s.source.clone(),

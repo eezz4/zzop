@@ -124,6 +124,26 @@ fn three_trees_in_one_repository_collect_git_history_exactly_once() {
         spawned >= 1,
         "git collection never ran — the census measured nothing, so its equality proves nothing"
     );
+    // ...and it ARRIVED, in each tree's own coordinates. The precondition above was a comment claiming
+    // this until 2026-08-13; it was false for every one of these three trees, because a shared
+    // collection speaks the repository's paths (`packages/alpha/index.ts`) while a tree's node ids
+    // speak its own (`index.ts`), so the join missed silently and all three read as never-changed. Now
+    // that the trees rebase their copy of the shared collection, this asserts BOTH halves at once: one
+    // collection, three correct answers — which is the only combination that makes the equality below
+    // worth having.
+    for (root, source_id, tree) in &out.trees {
+        let node = tree
+            .nodes
+            .iter()
+            .find(|n| n.id == "index.ts")
+            .unwrap_or_else(|| panic!("{source_id}: tree-relative node `index.ts` missing"));
+        assert_eq!(
+            node.change_count,
+            1,
+            "{source_id} ({}): the shared collection must reach this tree in ITS coordinates",
+            root.display()
+        );
+    }
 
     // THE gate. Three trees, one `.git`, one collection. `zzop_git::repo_root` resolves all three
     // tree roots to the same repository directory in-process (no `git rev-parse` — computing the

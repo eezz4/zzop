@@ -74,6 +74,16 @@ jobs:
         run: bash scripts/check-matcher-glossary-sync.sh
       - name: docs rule-id ↔ catalog sync guard
         run: bash scripts/check-docs-rule-ids.sh
+      - name: doc config-snippet key ↔ config-surface guard
+        run: bash scripts/check-doc-config-keys.sh
+      - name: prose rule-id ↔ shipped rule guard
+        run: bash scripts/check-prose-rule-ids.sh
+      - name: runtime-text rule-id guard (finding messages, native + packs)
+        run: bash scripts/check-runtime-text-rule-ids.sh
+      - name: marker-claim ↔ engine leader-table guard
+        run: bash scripts/check-marker-claims.sh
+      - name: packs.disabled/only pack-id guard
+        run: bash scripts/check-pack-id-values.sh
       - name: docs link-graph guard
         run: bash scripts/check-docs-link-graph.sh
       - name: io-key kind-vocabulary sync guard
@@ -113,6 +123,10 @@ jobs:
         run: bash scripts/check-deploy-facts-prose.sh
       - name: overclaim prose guard
         run: bash scripts/check-overclaim-prose.sh
+      - name: version-relative prose guard
+        # Three published sentences were false one release after v0.30.0 shipped with the whole fleet
+        # green; markdown was outside check-release-version-propagation.sh reach. See the script header.
+        run: bash scripts/check-version-relative-prose.sh
       - name: vendor-token literal guard
         # Scans the INDEX as well as the working tree (see its header): on a fresh checkout the two are
         # identical, so here it is reading exactly the blobs this ref would push — which is the surface

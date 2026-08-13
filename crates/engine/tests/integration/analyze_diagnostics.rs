@@ -323,3 +323,153 @@ fn tree_with_source_files_emits_no_input_scope_warning() {
         out.warnings
     );
 }
+
+/// The pack ALLOWLIST's unknown-id self-report, and the reason it exists as a `config_warning` rather
+/// than as a shape on `rule_overrides_applied`.
+///
+/// `packs.only` is the inverse of `disabled_rules`: a typo there does not under-suppress, it gates
+/// EVERY DSL rule off, because `registry::is_pack_enabled` admits a pack only when a non-empty
+/// allowlist names it. Until 2026-08-11 that state had no wire receipt. `AnalyzeOutput::
+/// rule_overrides_applied`'s doc claimed `only: []` was the signal — but that struct is `Some` whenever
+/// ANY of the three knobs is set, so `only: []` is equally what a run produces with no allowlist at all
+/// plus one `disabled_rules` entry. This test pins the mixed case specifically, because the bare case
+/// was never the broken one.
+#[test]
+fn an_all_typo_pack_allowlist_self_reports_even_when_another_override_is_also_set() {
+    let dir = TempDir::new("zzop-engine-diag-only-packs-typo");
+    dir.write(
+        "a.ts",
+        "import { b } from './b';\nexport function a() { return b(); }\n",
+    );
+    dir.write("b.ts", "export function b() { return 1; }\n");
+
+    // The second knob is what used to erase the distinction — `rule_overrides_applied` becomes `Some`
+    // because of THIS entry, so `only: []` no longer means "the allowlist matched nothing".
+    let cfg = EngineConfig {
+        source_id: "only-packs-fixture".to_string(),
+        rule_config: RuleConfig {
+            disabled_rules: vec!["dead-candidates".to_string()],
+            only_packs: vec!["typescript".to_string()],
+            ..RuleConfig::default()
+        },
+        ..EngineConfig::default()
+    };
+    let out = analyze_tree(dir.path(), &cfg);
+
+    let report: Vec<&String> = out
+        .config_warnings
+        .iter()
+        .filter(|w| w.contains("pack allowlist"))
+        .collect();
+    assert_eq!(
+        report.len(),
+        1,
+        "expected exactly one pack-allowlist self-report, got: {:?}",
+        out.config_warnings
+    );
+    let text = report[0];
+    assert!(
+        text.contains("typescript"),
+        "the report must NAME the entry that matched nothing — a warning that says only \
+         'some entry was wrong' cannot be acted on. Got: {text}"
+    );
+    assert!(
+        text.contains("EVERY DSL rule was gated off"),
+        "an allowlist where NO entry matched must state the consequence, not merely that the entry \
+         was unknown: the user's report looks empty and this sentence is the only thing that explains \
+         why. Got: {text}"
+    );
+    // Channel discipline, same as its three siblings — a config problem, never a degenerate-output one.
+    assert!(
+        !out.warnings.iter().any(|w| w.contains("pack allowlist")),
+        "must not duplicate into `warnings`, got: {:?}",
+        out.warnings
+    );
+}
+
+/// The other direction, and the non-vacuity control for the test above: an allowlist naming a REAL
+/// loaded pack must stay silent, and a partial typo must report without claiming the run lost its
+/// whole DSL surface. Without this, the assertion above would pass just as well against a warning that
+/// fired on every `packs.only` config.
+#[test]
+fn a_pack_allowlist_naming_a_loaded_pack_is_silent_and_a_partial_typo_is_worded_milder() {
+    let dir = TempDir::new("zzop-engine-diag-only-packs-real");
+    dir.write(
+        "a.ts",
+        "import { b } from './b';\nexport function a() { return b(); }\n",
+    );
+    dir.write("b.ts", "export function b() { return 1; }\n");
+
+    // A real loaded pack is what makes this a control rather than a second copy of the test above:
+    // `EngineConfig::default()` loads NO packs, so without this every allowlist entry is unknown by
+    // construction and the assertion below would pass against a warning that fires unconditionally.
+    let loaded = vec![diag_probe_pack()];
+
+    let all_real = EngineConfig {
+        source_id: "only-packs-real".to_string(),
+        packs: loaded.clone(),
+        rule_config: RuleConfig {
+            only_packs: vec!["diag-probe".to_string()],
+            ..RuleConfig::default()
+        },
+        ..EngineConfig::default()
+    };
+    let out = analyze_tree(dir.path(), &all_real);
+    assert!(
+        !out.config_warnings
+            .iter()
+            .any(|w| w.contains("pack allowlist")),
+        "a valid allowlist entry must not be reported as unknown, got: {:?}",
+        out.config_warnings
+    );
+
+    let partial = EngineConfig {
+        source_id: "only-packs-partial".to_string(),
+        packs: loaded,
+        rule_config: RuleConfig {
+            only_packs: vec!["diag-probe".to_string(), "typescript".to_string()],
+            ..RuleConfig::default()
+        },
+        ..EngineConfig::default()
+    };
+    let out = analyze_tree(dir.path(), &partial);
+    let text = out
+        .config_warnings
+        .iter()
+        .find(|w| w.contains("pack allowlist"))
+        .unwrap_or_else(|| {
+            panic!(
+                "a partial typo must still be reported — the entries that matched do not excuse the \
+                 one that did not. Got: {:?}",
+                out.config_warnings
+            )
+        });
+    assert!(
+        !text.contains("EVERY DSL rule was gated off"),
+        "a partial typo leaves the run working, so it must NOT borrow the total-typo sentence — that \
+         would teach the reader to distrust the wording in the case that actually matters. Got: {text}"
+    );
+}
+
+/// A minimal loaded pack, so a `packs.only` control can name something that actually exists.
+/// `EngineConfig::default()` carries no packs at all — the bundled set is assembled by the config
+/// front-end, not by the engine — so a test asserting "a VALID allowlist entry stays silent" has to
+/// supply the pack it names, or it is asserting nothing.
+fn diag_probe_pack() -> zzop_core::RulePackDef {
+    let json = r#"{
+        "id": "diag-probe",
+        "rules": [
+            {
+                "id": "probe",
+                "severity": "info",
+                "message": "Probe line found.",
+                "matcher": {
+                    "type": "line-scan",
+                    "file_pattern": "\\.ts$",
+                    "line_pattern": "PROBEMARKER"
+                }
+            }
+        ]
+    }"#;
+    serde_json::from_str(json).expect("parse inline diag-probe pack")
+}

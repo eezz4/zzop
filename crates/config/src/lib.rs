@@ -89,8 +89,14 @@ pub const DEFAULT_AUTHORED_PACKS_DIR: &str = "zzop/rules";
 /// warnings use the exact same key list as the engine's `rule_contracts` meta test.
 pub const CONFIG_SURFACE_JSON: &str = include_str!("../config-surface.json");
 
-// `BUNDLED_PACK_SOURCES: &[(&str, &str)]` — (relative path under rules/dsl, pack JSON source),
-// embedded at compile time. See build.rs.
+// Two generated tables, both embedded at compile time by build.rs:
+//   `BUNDLED_PACK_SOURCES: &[(&str, &str)]`         — (relative path under rules/dsl, pack JSON source)
+//   `EXAMPLE_PACK_CONTRACTS: &[(&str, &str, &str)]` — (contract-resource name, description, pack JSON
+//                                                      source) for every `examples/packs/*.json`
+// The second is a DISTRIBUTION concern rather than a config one, and it lives here for a plain reason:
+// this crate already owns the compile-time embedding of repo files, and `crates/summary` (which serves
+// the contract table) depends on it. The alternative was a second build script in a crate that has
+// none. See build.rs's `example_pack_contracts` for what the rows are for.
 include!(concat!(env!("OUT_DIR"), "/bundled_packs.rs"));
 
 /// Renders an `io::Error` as a fixed-vocabulary, English, deterministic label — `NotFound (os error

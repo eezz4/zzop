@@ -53,6 +53,27 @@ always [`docs/rules/catalog.md`](docs/rules/catalog.md).
 ⚠ `http/get-route-no-cache-marker` (renamed from `read-model-path`) was later REMOVED entirely and
 has **no replacement id** — a config naming either spelling gets the same unknown-rule-id warning.
 
+† The two `typescript` rows are a different case, and the difference matters: those ids were not
+removed, the whole `typescript` pack MOVED OUT OF THE BUNDLE on 2026-08-11 (it is now
+[`examples/packs/typescript-lint.json`](examples/packs/typescript-lint.json), shipped in the repository
+but not loaded by default). The new ids are still the right ids and the rule still fires — but only in a
+run that loads that pack, so on a default run a config naming one gets the unknown-rule-id warning,
+whose text suggests checking for a typo. It is not a typo — load the pack. How to point a run at a
+repository pack is [`examples/packs/README.md`](examples/packs/README.md)'s to say, and it is not
+restated here.
+
+‡ The three `orm-eager` rows are the same case as `typescript` above with one difference worth stating:
+the pack did NOT move whole. `perf` still exists and still ships `api-in-loop`; only the three rules that
+declare `"axis": "opinion"` left it, into
+[`examples/packs/orm-eager.json`](examples/packs/orm-eager.json). That is why these are RENAMES and the
+`typescript` ones were not — a rule id is `<pack>/<rule>`, so a rule that leaves one pack for another is
+renamed by construction, while a whole pack takes its id with it.
+
+**Your suppress markers are unaffected.** The marker is derived from the BARE rule id
+(`zzop-jpa-eager-fetch-ok`), not the pack-qualified one, so every marker already in your code keeps
+suppressing after the move. What breaks is a `disabledRules` / `severityOverrides` / `rules` entry naming
+the old full id: that gets the unknown-rule-id warning, and the fix is the new id plus loading the pack.
+
 | pack | old id | new id |
 |---|---|---|
 | `browser` | `unsanitized-markdown-html` | `markdown-and-html-sink-unsanitized` |
@@ -65,7 +86,6 @@ has **no replacement id** — a config naming either spelling gets the same unkn
 | `db` | `critical-write-default-isolation` | `money-tx-no-isolation-level` |
 | `egress` | `get-with-body` | `get-and-body` |
 | `egress` | `mixed-content-egress` | `http-url-literal` |
-| `egress` | `localhost-egress-committed` | `localhost-url-literal-committed` |
 | `http` | `read-model-path` | `get-route-no-cache-marker` |
 | `http` | `auth-gates` | `protected-path-no-auth-evidence` |
 | `http` | `route-exposure` | `dev-path-no-guard-hint` |
@@ -73,12 +93,87 @@ has **no replacement id** — a config naming either spelling gets the same unkn
 | `redis` | `keys-glob-scan` | `keys-command-in-code` |
 | `reliability` | `await-in-map` | `map-async-no-promise-all` |
 | `reliability` | `promise-all-writes` | `promise-all-and-writes` |
-| `reliability` | `promise-race-resource-leak` | `promise-race-no-cancel` |
 | `security` | `raw-query-interpolation` | `raw-query-unsafe-api` |
 | `security` | `sql-taint` | `sql-string-concat` |
 | `security` | `csp-disabled` | `csp-weak-or-disabled` |
-| `typescript` | `always-false-comparison` | `always-constant-comparison` |
-| `typescript` | `unhandled-promise-use-effect` | `use-effect-async-callback` |
+| `typescript` † | `always-false-comparison` | `always-constant-comparison` |
+| `typescript` † | `unhandled-promise-use-effect` | `use-effect-async-callback` |
+
+**Cross-pack moves** need their own table, because the two columns above assume one pack: a rule that
+leaves `perf` for `orm-eager` has a different pack on each side, so both sides are spelled in full.
+
+| old id | new id |
+|---|---|
+| `perf/eager-relation-declared` | `orm-eager/eager-relation-declared` |
+| `perf/jpa-eager-fetch` | `orm-eager/jpa-eager-fetch` |
+| `perf/sqlalchemy-eager-relationship` | `orm-eager/sqlalchemy-eager-relationship` |
+| `sql/query-logic-density` | `sql-preferences/query-logic-density` |
+| `sql/app-side-aggregation-reduce` | `sql-preferences/app-side-aggregation-reduce` |
+| `sql/app-side-aggregation-filter-length` | `sql-preferences/app-side-aggregation-filter-length` |
+| `sql/select-star` | `sql-preferences/select-star` |
+| `sql/like-leading-wildcard` | `sql-preferences/like-leading-wildcard` |
+| `browser/no-system-dialogs` | `code-hygiene/no-system-dialogs` |
+| `egress/localhost-url-literal-committed` ¶ | `code-hygiene/localhost-url-literal-committed` |
+| `reliability/env-nonnull-assert` | `code-hygiene/env-nonnull-assert` |
+| `reliability/process-exit-in-lib` | `code-hygiene/process-exit-in-lib` |
+| `reliability/console-in-be` | `code-hygiene/console-in-be` |
+| `reliability/console-in-loop` | `code-hygiene/console-in-loop` |
+| `reliability/env-outside-config` | `code-hygiene/env-outside-config` |
+| `reliability/promise-race-no-cancel` | `code-hygiene/promise-race-no-cancel` |
+| `egress/localhost-egress-committed` ¶¶ | `code-hygiene/localhost-url-literal-committed` |
+| `reliability/promise-race-resource-leak` | `code-hygiene/promise-race-no-cancel` |
+
+The five `sql-preferences` rows (2026-08-12) are the same shape as the `orm-eager` ones: `sql` did not
+move, it shed rules that declare `"axis": "opinion"` and still ships eight, so each of the five is
+renamed by construction. The pack is
+[`examples/packs/sql-preferences.json`](examples/packs/sql-preferences.json).
+
+A SIXTH rule, `sql/destructive-migration`, was exported the same day and returned the same day, and this
+table deliberately carries no row for it. A rename row exists to migrate a user, and no user could have
+been carrying the exported spelling: `sql/destructive-migration` is the id `v0.29.0` shipped, and no tag
+was cut in between — `git tag --list` still tops out at `v0.29.0`, so both the exporting commit and this
+one describe as `v0.29.0-<n>`, differing only in how far past that tag they sit. Listing a
+round trip nobody could observe would send readers to `disabledRules`/`suppressions` entries that never
+existed. The window this reasoning depends on closes the moment a tag lands — after that, a rename is
+shipped whether or not it is later undone, and BOTH hops belong here as the `¶¶` rows are spelled.
+Bundling it again also makes it the one bundled rule declaring `"axis": "opinion"`, so the
+`grep -c` count below is 0 everywhere except `rules/dsl/sql/sql.json`, where it is 1.
+
+The eight `code-hygiene` rows (2026-08-12) close the `axis: opinion` export — after them exactly ONE
+bundled rule declares that axis (`grep -c '"axis": "opinion"' rules/dsl/*/*.json` → 0 everywhere except
+`rules/dsl/sql/sql.json`, which is 1: the returned `destructive-migration` above). Unlike the
+two increments before it, this one draws from THREE packs at once; all three (`browser`, `egress`,
+`reliability`) stay bundled and keep shipping their defect rules, so every one of the eight is renamed
+by construction rather than carried along by a pack that moved. The pack is
+[`examples/packs/code-hygiene.json`](examples/packs/code-hygiene.json).
+
+¶¶ The last two rows are TWO-HOP and are here rather than in the same-pack table above for that reason.
+Both were ordinary within-pack renames first (`egress/localhost-egress-committed` →
+`localhost-url-literal-committed`; `reliability/promise-race-resource-leak` → `promise-race-no-cancel`),
+and then the renamed rule left its pack in the 2026-08-12 export. A reader migrating from the ORIGINAL
+id needs the destination that exists today, not the intermediate one — so each row spells the whole
+journey in one hop. That is also what keeps them checkable: `scripts/check-prose-rule-ids.sh` resolves
+every rename table's target against what this repo ships, and the intermediate spellings resolve to
+nothing.
+
+¶ `localhost-url-literal-committed` is this increment's row with a behavioural consequence beyond the
+id — the same shape that sent `destructive-migration` back to the bundle, and the reason that one is
+worth reading beside this one: there, the deferring siblings were CRITICAL rules whose exclusion of
+migration paths only made sense while the disclosure ran, and a real destructive statement went
+unreported in the dogfood corpus as a result. Here the deferring rules are themselves opinion-adjacent
+and no defect goes unreported, which is why this export stands and that one did not. TWO rules that stayed
+decline the localhost/private-IP case, each on its own scope grounds rather than on a premise about this
+one: `egress/http-url-literal` by an `exclude_pattern` naming loopback and private-range hosts outright
+(the exact regex is not restated here — `zzop explain egress/http-url-literal` prints it, and which
+addresses it covers is a question about the rule you are running, not about this release), and the native
+`cross-layer/external-ip-literal` by measuring whether a literal PINS AN ENVIRONMENT, which loopback does
+not. Both still ship and still decline — so on a default run a committed `http://localhost:3000` or
+`https://127.0.0.1/...` is now reported by nothing until you load `code-hygiene`. That is deliberate
+(whether a committed dev URL is wrong is a fact about the project, not about the line), but it is a real
+change in what a default run says about committed dev URLs, not just a change of id. The routing is
+pinned from both sides in `examples/packs/tests/egress_handoff.rs` and
+`rules/dsl/egress/http_shapes.rs`; why neither narrowing may name this rule by id is owned by
+[`examples/packs/README.md`](examples/packs/README.md), not restated here.
 
 Seven more renames land on the NATIVE analysis ids, which are not DSL rules and live in no pack. They
 are listed separately because the marker rule above does not reach them: **no native analysis derives
@@ -149,14 +244,13 @@ These change freely at any time, by design — do not build on them:
   the release version. Disk is bounded instead by a size cap that evicts the oldest entries, so the
   directory no longer grows without limit either (see
   [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#caching)).
-  **Which releases this holds for:** up to and including v0.29.1 — every version installable
-  today — the schema version led with the release number, so *every* upgrade wiped `cacheDir`
-  whether or not anything about the analysis had moved (`v0.29.0 -> v0.29.1` touched zero bytes of
-  the hashed closure and wiped every cache anyway). From the next release onward the key is a hash
-  of the sources that produce the cached bytes, so **an upgrade that changed nothing about what
-  gets extracted or stored will leave your warm cache warm.** The paragraph is written this way
-  rather than in the present tense because the fix landed after the v0.29.1 tag: a reader on a
-  released binary would otherwise test the promise and find it false.
+  **Which releases this holds for:** **v0.30.0 onward.** The key is a hash of the sources that produce
+  the cached bytes, so **an upgrade that changed nothing about what gets extracted or stored leaves your
+  warm cache warm.** Up to and including v0.29.1 the schema version led with the release number instead,
+  so *every* upgrade wiped `cacheDir` whether or not anything about the analysis had moved (`v0.29.0 ->
+  v0.29.1` touched zero bytes of the hashed closure and wiped every cache anyway) — that is what a reader
+  on an older pin will still see. This boundary is a released fact, not a promise about the next tag; it
+  was written in the future tense until 2026-08-11, which made it read as unshipped for a whole release.
 - **Exact finding sets, counts, and message wording** — detection is *total by default* and
   improves continuously, so which findings a run emits (and their exact text) shifts release
   to release. Gate CI by reading the severity/rule-id counts you care about from the JSON
@@ -190,9 +284,22 @@ schema field, or a rule row added here until a new binary ships.
 - `docs/contracts/rule-pack.schema.json`
 - `docs/contracts/example-envelope.json`
 - `docs/rules/catalog.md`
+- `examples/packs/typescript-lint.json`
+- `examples/packs/orm-eager.json`
+- `examples/packs/sql-preferences.json`
+- `examples/packs/code-hygiene.json`
 
 Every other file under `docs/` is read from the repository or the website and needs no release to
 reach a reader — the distinction is exactly "is it in the list above".
+
+The `examples/packs/*.json` entries are a different KIND of document and are listed for the same reason. An exported rule
+pack is shipped in the repository but not bundled, so its rules run only when a config points at
+them — and until 2026-08-12 no shipped artifact carried the file at all, which made "copy the pack
+back" an instruction whose first step needed a source checkout. It is baked now, served as the
+`example-pack-<stem>` contract resource, and the retrieval path is: print the resource, save it as
+`<stem>.json` under `<tree>/zzop/rules/`, done. Unlike the `docs/` entries above, these rows reach the
+table through a build script (`crates/config/build.rs`) rather than an `include_str!` in
+`contracts.rs`, which is why the guard reads `git ls-files 'examples/packs/*.json'` for this half.
 ## How versions are produced
 
 The version SSOT is the workspace `Cargo.toml`'s `[workspace.package] version` (2026-07-22 reform).

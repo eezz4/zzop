@@ -93,3 +93,38 @@ fn a_self_receiver_produces_no_edge() {
 fn an_unparseable_file_yields_nothing_rather_than_panicking() {
     assert!(parse_extractor_guards("a.rs", "fn f(:\n", &vocab()).is_empty());
 }
+
+/// The seam this module was the last dissenter on. A guard extracted from inside an inline `mod`
+/// borrows the symbol id a top-level item of the same name would have, because `parse_symbols` mints
+/// no symbol for a nested item — so it clears a route it never guards.
+///
+/// Measured end-to-end on 2026-08-11 before this arm was removed: a tree whose deployed
+/// `create_user(body: String)` checks nothing was flagged by `mutating-route-no-auth`, and adding an
+/// ordinary `#[cfg(test)] mod tests { async fn create_user(user: AuthUser) {} }` silenced it — with no
+/// warning, blindSpot or disclosure class saying so. `lang::calls`'s module doc records the same
+/// premise being measured false on its own axis first; this pins that the two files now agree.
+#[test]
+fn a_guard_inside_an_inline_mod_never_becomes_an_edge_out_of_a_top_level_homonym() {
+    let src = "\
+pub async fn create_user(body: String) -> String { body }
+#[cfg(test)]
+mod tests {
+    async fn create_user(user: AuthUser) {}
+}
+";
+    // The top-level handler's own parameter type still rides — this matcher emits every parameter
+    // type and lets the engine's vocabulary decide what counts as a guard. What must NOT appear is
+    // `AuthUser`, which exists only inside the nested module.
+    assert_eq!(
+        callees("a.rs", src),
+        vec!["String"],
+        "a nested homonym must contribute no guard edge — it would ride the top-level symbol's id"
+    );
+
+    // The control that makes the assertion above mean something: the SAME parameter at top level does
+    // produce the edge, so its absence is a scope decision and not a broken extractor.
+    assert_eq!(
+        callees("a.rs", "async fn create_user(user: AuthUser) {}\n"),
+        vec!["AuthUser"]
+    );
+}

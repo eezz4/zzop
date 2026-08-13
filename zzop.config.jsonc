@@ -114,7 +114,7 @@
   "packs": {
     "disabled": [
       "browser", "db", "egress", "go", "http", "perf",
-      "react", "redis", "reliability", "security", "sql", "typescript"
+      "react", "redis", "reliability", "security", "sql"
     ]
   }
 }

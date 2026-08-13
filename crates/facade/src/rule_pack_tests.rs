@@ -1,6 +1,6 @@
 //! Unit tests for `validate_rule_pack_json` (`crate::rule_pack`) — the pre-load, structure-only
 //! rule-pack check — plus the rule-pack JSON Schema's own parity with `zzop_core::dsl::def`'s
-//! matcher types (see the FIELD-AXIS PARITY PIN section at the bottom of this file).
+//! types (see the FIELD-AXIS PARITY PIN section at the bottom of this file).
 
 use std::collections::BTreeSet;
 
@@ -143,7 +143,7 @@ fn the_rule_pack_schema_parses_and_names_every_severity() {
         );
     }
     // The matcher discriminator vocabulary is pinned per-kind, against the Rust struct it tags, by
-    // `matcher_field_axis_matches_the_schema` below — not by a loose substring sweep here.
+    // `pack_field_axis_matches_the_schema` below — not by a loose substring sweep here.
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -151,7 +151,7 @@ fn the_rule_pack_schema_parses_and_names_every_severity() {
 // ---------------------------------------------------------------------------------------------
 //
 // WHY THIS EXISTS. `docs/contracts/rule-pack.schema.json` is a HAND-AUTHORED mirror of
-// `zzop_core::dsl::def`'s matcher structs, and `zzop-summary` embeds it verbatim
+// `zzop_core::dsl::def`'s serde structs, and `zzop-summary` embeds it verbatim
 // (`crates/summary/src/contracts.rs`) to serve as the MCP resource `zzop://contract/rule-pack-schema`.
 // An external pack author reads THAT, not the Rust source. Because the schema declares
 // `additionalProperties: true` everywhere, a field the schema forgot breaks no validator — it just
@@ -173,52 +173,75 @@ fn the_rule_pack_schema_parses_and_names_every_severity() {
 // authored; this pin makes the drift loud instead.
 //
 // HOW THE RUST SIDE IS DERIVED — one source, never a copied list. There is no reflection, and the
-// matcher structs derive `Deserialize` only (no `Serialize`), so the envelope-schema parity trick
+// pack types derive `Deserialize` only (no `Serialize`), so the envelope-schema parity trick
 // of serializing a fully-populated sample and diffing its keys (see
 // `crates/core/tests/envelope_schema_parity/`) is unavailable here. Instead the field axis is read
-// straight out of the matcher structs' SOURCE TEXT, read from the filesystem at test time —
-// `def/matcher.rs` plus the WHOLE `def/matcher/` directory, swept, never file-listed (see
-// `matcher_source`'s doc for why the file set itself must be derived: a hand-kept file list is the
-// same silent-drift class one level up, and it bit). That keeps the field list in exactly ONE
-// place (the struct definitions themselves); this file never restates it.
+// straight out of the structs' SOURCE TEXT, read from the filesystem at test time — the WHOLE
+// `crates/core/src/dsl/def/` tree, swept recursively, never file-listed (see `def_source`'s doc for
+// why the file set itself must be derived: a hand-kept subject list is the same silent-drift class
+// one level up, and it has now bitten twice). That keeps the field list in exactly ONE place (the
+// struct definitions themselves); this file never restates it.
 //
 // Serialization names, not Rust names, are the contract: a field-level `#[serde(rename = "...")]`
-// is honoured, and `alias`/`flatten`/struct-level `rename_all` — none present today — fail loudly
-// rather than being silently mis-mapped.
+// is honoured, `#[serde(skip)]` fields are excluded (they are never on the wire), and
+// `alias`/`flatten`/struct-level `rename_all` — none present today — fail loudly rather than being
+// silently mis-mapped.
 
-/// `zzop_core::dsl::def`'s matcher shapes, as TEXT — read at TEST TIME from the filesystem
-/// (`CARGO_MANIFEST_DIR`-relative; crates are plain workspace siblings): `def/matcher.rs` first,
-/// then EVERY `.rs` file under `def/matcher/`, in filename order.
+/// `zzop_core::dsl::def`'s pack shapes, as TEXT — read at TEST TIME from the filesystem
+/// (`CARGO_MANIFEST_DIR`-relative; crates are plain workspace siblings): EVERY `.rs` file anywhere
+/// under `crates/core/src/dsl/def/`, concatenated in sorted-path order.
 ///
-/// DERIVED, never hand-listed. This used to be a `concat!` of three `include_str!`s, each file
-/// named by hand — and that hand-list was itself the unguarded axis: when `LiteralScan` landed in a
-/// NEW file (`def/matcher/literal_scan.rs`), nothing here failed. The doc claimed "a struct in an
-/// unlisted file makes this pin fail loud … never silently unguarded", but every mechanism it named
-/// fires only for structs the list already knows about (`parse_struct_fields` panics on a missing
-/// header only when someone ASKS for that struct; the coverage pin below can only see structs in
-/// the text it was given) — a whole file outside the list is invisible to both, so the guard stayed
-/// green while the schema shipped without the new matcher. Deriving the input set from the
-/// directory closes that class structurally: a new matcher FILE is swept in with no edit here, its
-/// structs surface in the coverage pin's derived list, and the only remaining hand-step is the one
-/// that cannot be derived (naming the schema definition each struct mirrors, in
-/// `matcher_field_axis_matches_the_schema`).
+/// DERIVED, never hand-listed — and the subject set has had to be widened twice, both times for the
+/// same reason, which is why it is now the whole directory rather than anything narrower:
 ///
-/// Reads panic loudly (a moved/renamed directory must break this pin, not soften it), and the file
-/// order is sorted so the coverage pin's expected list is deterministic.
-fn matcher_source() -> &'static str {
+/// 1. It began as a `concat!` of three `include_str!`s, each file named by hand. When `LiteralScan`
+///    landed in a NEW file (`def/matcher/literal_scan.rs`), nothing here failed: every mechanism the
+///    doc pointed at fires only for structs the list already knows about (`parse_struct_fields`
+///    panics on a missing header only when someone ASKS for that struct; the coverage pin can only
+///    see structs in the text it was given), so a whole file outside the list was invisible to both.
+/// 2. The fix swept `def/matcher.rs` + `def/matcher/`, which was still an enumeration — it just
+///    spelled the subject set in DIRECTORIES instead of files. On 2026-08-12 `RuleDef` gained an
+///    `axis` field whose type moved into a new `def/axis.rs`, and the ENVELOPE structs
+///    (`RulePackDef`, `RuleDef` in `def/mod.rs`) had never been in scope at all — so the shipped
+///    schema documented five of `RuleDef`'s six fields and this pin was green. The v0.30.0 release
+///    audit found it by reading the schema, not by running anything.
+///
+/// The lesson both incidents teach is the repo's own rule about guards whose subject set is written
+/// down: the enumeration cannot grow when the topic does. The subject is now "the serde types that
+/// deserialize a rule pack", and the directory that holds them IS that set, so a new file — or a
+/// new struct in an existing one — joins this pin by existing. The only remaining hand-step is the
+/// one that cannot be derived: naming the schema node each struct mirrors, in
+/// [`pack_field_axis_matches_the_schema`], and the coverage pin below is what makes skipping that
+/// step impossible.
+///
+/// Reads panic loudly (a moved/renamed directory must break this pin, not soften it).
+fn def_source() -> &'static str {
     static SRC: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     SRC.get_or_init(|| {
+        fn collect(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            let entries = std::fs::read_dir(dir)
+                .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()));
+            for entry in entries {
+                let path = entry.expect("readable dir entry").path();
+                if path.is_dir() {
+                    collect(&path, out);
+                } else if path.extension().is_some_and(|ext| ext == "rs") {
+                    out.push(path);
+                }
+            }
+        }
         let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../core/src/dsl/def");
-        let root = base.join("matcher.rs");
-        let mut source = std::fs::read_to_string(&root)
-            .unwrap_or_else(|e| panic!("cannot read {}: {e}", root.display()));
-        let dir = base.join("matcher");
-        let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
-            .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()))
-            .map(|entry| entry.expect("readable dir entry").path())
-            .filter(|p| p.extension().is_some_and(|ext| ext == "rs"))
-            .collect();
+        let mut files = Vec::new();
+        collect(&base, &mut files);
         files.sort();
+        assert!(
+            files.len() >= 4,
+            "swept only {} .rs file(s) out of {} — the directory moved or the walk broke, and every \
+             comparison below would then be against a nearly empty text",
+            files.len(),
+            base.display()
+        );
+        let mut source = String::new();
         for file in files {
             source.push_str(
                 &std::fs::read_to_string(&file)
@@ -229,7 +252,7 @@ fn matcher_source() -> &'static str {
     })
 }
 
-/// One `pub` field of a matcher struct, as declared in [`matcher_source`]'s text.
+/// One `pub` field of a pack-definition struct, as declared in [`def_source`]'s text.
 struct RustField {
     /// The name this field carries in JSON — `#[serde(rename = "...")]` when present, else the
     /// Rust identifier.
@@ -249,19 +272,34 @@ fn serde_rename(attr: &str) -> Option<String> {
     Some(after.split_once('"')?.0.to_string())
 }
 
-/// Reads one `pub struct <name> { ... }` block out of [`matcher_source`]'s text and returns its
-/// `pub` fields. Deliberately a narrow line parser, not a Rust grammar: the matcher sources are
-/// flat files of plain struct declarations, and any shape this cannot read panics with the
-/// offending line instead of silently returning a short field list (which would weaken the pin to
-/// nothing).
+/// Whether a field's attribute block carries `#[serde(skip)]` — the field is not on the wire at
+/// all, so the schema must NOT document it (`RulePackDef::regex_cache` is the one today).
+///
+/// Matched as a whole serde word, never as a substring: `skip_serializing_if` (`MethodScan::after`
+/// carries it) says nothing about deserialization, and reading it as `skip` would silently drop a
+/// real authored field out of this pin's subject set — the same false-green shape this whole
+/// section exists to prevent.
+fn has_serde_skip(attr: &str) -> bool {
+    attr.match_indices("skip").any(|(i, m)| {
+        attr[i + m.len()..]
+            .chars()
+            .next()
+            .is_none_or(|c| !c.is_alphanumeric() && c != '_')
+    })
+}
+
+/// Reads one `pub struct <name> { ... }` block out of [`def_source`]'s text and returns its
+/// wire-visible `pub` fields. Deliberately a narrow line parser, not a Rust grammar: the pack
+/// definition sources are flat files of plain struct declarations, and any shape this cannot read
+/// panics with the offending line instead of silently returning a short field list (which would
+/// weaken the pin to nothing).
 fn parse_struct_fields(struct_name: &str) -> Vec<RustField> {
-    let source = matcher_source();
+    let source = def_source();
     let header = format!("pub struct {struct_name} {{");
     let start = source.find(&header).unwrap_or_else(|| {
         panic!(
-            "`{header}` not found in crates/core/src/dsl/def/matcher.rs or any file under \
-             def/matcher/ — was the struct renamed or moved outside that directory? This parity \
-             pin must be updated with it."
+            "`{header}` not found in any .rs file under crates/core/src/dsl/def/ — was the struct \
+             renamed or moved outside that directory? This parity pin must be updated with it."
         )
     });
 
@@ -318,6 +356,10 @@ fn parse_struct_fields(struct_name: &str) -> Vec<RustField> {
         let (name, ty) = decl
             .split_once(": ")
             .unwrap_or_else(|| panic!("unparsable field declaration in `{struct_name}`: {line}"));
+        if has_serde_skip(&pending_attr) {
+            pending_attr.clear();
+            continue;
+        }
         fields.push(RustField {
             json_name: serde_rename(&pending_attr).unwrap_or_else(|| name.to_string()),
             optional: ty.trim_end_matches(',').starts_with("Option<"),
@@ -347,24 +389,36 @@ fn schema_property_is_nullable(prop: &serde_json::Value) -> bool {
         || list_has_null("enum")
 }
 
-/// Compares one Rust matcher struct against the schema definition that mirrors it, on all three
-/// axes the schema's own header promises ("field names, required-ness, and defaults below mirror
-/// the Rust serde types field-for-field"): key NAMES both directions, REQUIRED-ness, NULLABILITY.
+/// Compares one Rust struct against the schema node that mirrors it, on all three axes the
+/// schema's own header promises ("field names, required-ness, and defaults below mirror the Rust
+/// serde types field-for-field"): key NAMES both directions, REQUIRED-ness, NULLABILITY.
+///
+/// `def_name` names the node under `definitions`; `None` targets the schema ROOT, which is what
+/// `RulePackDef` mirrors — the pack envelope is not a `definitions` entry, and treating "the root
+/// is not a definition" as a reason to leave it unpinned is how `RuleDef::axis` shipped
+/// undocumented (see [`def_source`]'s incident 2).
 ///
 /// `tag` is the `#[serde(tag = "type")]` discriminator value for the matcher kinds — a JSON
 /// key with no Rust struct field behind it, so it is excluded from the field diff and instead
-/// checked as a required `const` property. `None` for `LabeledPattern`, which is untagged.
-fn assert_field_axis_parity(struct_name: &str, def_name: &str, tag: Option<&str>) {
+/// checked as a required `const` property. `None` for the untagged shapes.
+fn assert_field_axis_parity(struct_name: &str, def_name: Option<&str>, tag: Option<&str>) {
     let schema: serde_json::Value =
         serde_json::from_str(RULE_PACK_SCHEMA).expect("rule-pack schema must be valid JSON");
-    let def = schema
-        .get("definitions")
-        .and_then(|d| d.get(def_name))
-        .unwrap_or_else(|| panic!("rule-pack schema is missing definitions.{def_name}"));
+    let at = def_name.map_or_else(
+        || "the schema root".to_string(),
+        |d| format!("definitions.{d}"),
+    );
+    let def = match def_name {
+        Some(d) => schema
+            .get("definitions")
+            .and_then(|defs| defs.get(d))
+            .unwrap_or_else(|| panic!("rule-pack schema is missing {at}")),
+        None => &schema,
+    };
     let props = def
         .get("properties")
         .and_then(serde_json::Value::as_object)
-        .unwrap_or_else(|| panic!("definitions.{def_name} has no `properties` object"));
+        .unwrap_or_else(|| panic!("{at} has no `properties` object"));
     let declared_required: BTreeSet<&str> = def
         .get("required")
         .and_then(serde_json::Value::as_array)
@@ -378,16 +432,16 @@ fn assert_field_axis_parity(struct_name: &str, def_name: &str, tag: Option<&str>
     if let Some(tag_value) = tag {
         let ty = props
             .get("type")
-            .unwrap_or_else(|| panic!("definitions.{def_name} must declare the `type` tag"));
+            .unwrap_or_else(|| panic!("{at} must declare the `type` tag"));
         assert_eq!(
             ty.get("const").and_then(serde_json::Value::as_str),
             Some(tag_value),
-            "definitions.{def_name}.properties.type must be `const: \"{tag_value}\"` — the \
-             kebab-case serde tag `zzop_core::dsl::def::Matcher` dispatches {struct_name} on"
+            "{at}.properties.type must be `const: \"{tag_value}\"` — the kebab-case serde tag \
+             `zzop_core::dsl::def::Matcher` dispatches {struct_name} on"
         );
         assert!(
             declared_required.contains("type"),
-            "definitions.{def_name} must list the `type` tag as required"
+            "{at} must list the `type` tag as required"
         );
     }
 
@@ -402,17 +456,18 @@ fn assert_field_axis_parity(struct_name: &str, def_name: &str, tag: Option<&str>
     let missing: Vec<&&str> = rust_keys.difference(&schema_keys).collect();
     assert!(
         missing.is_empty(),
-        "{struct_name} accepts field(s) {missing:?} that definitions.{def_name}.properties does \
-         NOT document. `additionalProperties: true` means no validator breaks — the knob is simply \
-         INVISIBLE to every pack author who reads the schema (including over MCP as \
-         zzop://contract/rule-pack-schema). Add them to docs/contracts/rule-pack.schema.json."
+        "{struct_name} accepts field(s) {missing:?} that {at}.properties does NOT document. \
+         `additionalProperties: true` means no validator breaks — the knob is simply INVISIBLE to \
+         every pack author who reads the schema (including over MCP as \
+         zzop://contract/rule-pack-schema, served from a copy baked into the shipped binary). Add \
+         them to docs/contracts/rule-pack.schema.json."
     );
     let stale: Vec<&&str> = schema_keys.difference(&rust_keys).collect();
     assert!(
         stale.is_empty(),
-        "definitions.{def_name}.properties documents field(s) {stale:?} that {struct_name} has no \
-         field for — a rename, a removed field, or a typo. Packs authored against them load and \
-         are silently ignored."
+        "{at}.properties documents field(s) {stale:?} that {struct_name} has no field for — a \
+         rename, a removed field, or a typo. Packs authored against them load and are silently \
+         ignored."
     );
 
     let rust_required: BTreeSet<&str> = fields
@@ -427,52 +482,79 @@ fn assert_field_axis_parity(struct_name: &str, def_name: &str, tag: Option<&str>
         .collect();
     assert_eq!(
         rust_required, schema_required,
-        "definitions.{def_name}.required disagrees with {struct_name}. The schema's own header \
-         states the rule: a field is required exactly when its Rust field has neither \
-         #[serde(default)] nor an Option type."
+        "{at}.required disagrees with {struct_name}. The schema's own header states the rule: a \
+         field is required exactly when its Rust field has neither #[serde(default)] nor an Option \
+         type."
     );
 
     for f in &fields {
         let prop = props
             .get(&f.json_name)
-            .unwrap_or_else(|| panic!("definitions.{def_name}.properties.{} missing", f.json_name));
+            .unwrap_or_else(|| panic!("{at}.properties.{} missing", f.json_name));
         assert_eq!(
             schema_property_is_nullable(prop),
             f.optional,
-            "definitions.{def_name}.properties.{} declares nullability the Rust field disagrees \
-             with — an Option<T> field must include \"null\" in its `type` array (or its `enum` \
-             list), and a non-Option field must not.",
+            "{at}.properties.{} declares nullability the Rust field disagrees with — an Option<T> \
+             field must include \"null\" in its `type` array (or its `enum` list), and a non-Option \
+             field must not.",
             f.json_name
         );
     }
 }
 
-/// The whole point: every `pub` field of every matcher struct, its required-ness, and its
-/// nullability must be visible in the schema an external pack author receives.
+/// Which schema node each pack-definition struct mirrors — `(struct, definitions entry, serde tag)`.
+///
+/// The ONE hand-written thing in this section, because it is the one thing no sweep can derive: the
+/// schema's node names are authored English (`lineScan`, `rule`), not a function of the Rust name.
+/// It is a MAPPING and never a subject list — the subject set is [`def_source`]'s directory sweep,
+/// and `every_struct_in_the_pack_definition_source_has_a_schema_mirror` below asserts this table
+/// covers exactly that set. A struct with no row here therefore fails the build instead of being
+/// quietly skipped, which is the property the previous shape lacked: the coverage pin used to
+/// compare the swept structs against a SECOND hand list of names, so deleting a row from the parity
+/// call site went unnoticed as long as the name list still matched.
+///
+/// `None` for the definitions entry targets the schema ROOT, which is what the pack envelope
+/// mirrors. `None` for the tag means the shape carries no `#[serde(tag = "type")]` discriminator.
+///
+/// The ENVELOPE rows (`RulePackDef`, `RuleDef`) were added on 2026-08-13 by the v0.30.0 release
+/// audit. Their absence is why `RuleDef::axis` — declared by EVERY shipped rule and enforced by
+/// `rule_contracts::rule_axis::every_shipped_rule_declares_its_axis` — reached a release candidate
+/// with no property in the schema baked into the binary.
+const SCHEMA_MIRRORS: &[(&str, Option<&str>, Option<&str>)] = &[
+    ("RulePackDef", None, None),
+    ("RuleDef", Some("rule"), None),
+    ("LineScan", Some("lineScan"), Some("line-scan")),
+    ("MethodScan", Some("methodScan"), Some("method-scan")),
+    ("SymbolScan", Some("symbolScan"), Some("symbol-scan")),
+    ("IoScan", Some("ioScan"), Some("io-scan")),
+    ("CallScan", Some("callScan"), Some("call-scan")),
+    ("LiteralScan", Some("literalScan"), Some("literal-scan")),
+    ("LabeledPattern", Some("labeledPattern"), None),
+    ("PackExport", Some("packExport"), None),
+];
+
+/// The whole point: every wire-visible `pub` field of every pack-definition struct, its
+/// required-ness, and its nullability must be visible in the schema an external pack author
+/// receives.
 #[test]
-fn matcher_field_axis_matches_the_schema() {
-    assert_field_axis_parity("LineScan", "lineScan", Some("line-scan"));
-    assert_field_axis_parity("MethodScan", "methodScan", Some("method-scan"));
-    assert_field_axis_parity("SymbolScan", "symbolScan", Some("symbol-scan"));
-    assert_field_axis_parity("IoScan", "ioScan", Some("io-scan"));
-    assert_field_axis_parity("CallScan", "callScan", Some("call-scan"));
-    assert_field_axis_parity("LiteralScan", "literalScan", Some("literal-scan"));
-    assert_field_axis_parity("LabeledPattern", "labeledPattern", None);
+fn pack_field_axis_matches_the_schema() {
+    for (struct_name, def_name, tag) in SCHEMA_MIRRORS {
+        assert_field_axis_parity(struct_name, *def_name, *tag);
+    }
 }
 
-/// Guards the pin itself: a NEW struct in the matcher sources must be added to
-/// [`matcher_field_axis_matches_the_schema`] above, or its fields go unguarded exactly the way
-/// `after`/`after_in_same_function` did. Derived from the same directory-swept source text as the
-/// field parser ([`matcher_source`]), so a struct in a brand-new `def/matcher/*.rs` file surfaces
-/// here with NO edit anywhere — the property the old three-file hand-list did not have, which is
-/// how `LiteralScan` shipped unguarded (see [`matcher_source`]'s doc for that incident).
+/// Guards the pin itself: a NEW struct in the pack-definition sources must gain a
+/// [`SCHEMA_MIRRORS`] row, or its fields go unguarded exactly the way `after`/`after_in_same_function`
+/// did, and `axis` did after them. Both directions — a struct with no row is unguarded, and a row
+/// naming a struct that no longer exists would make `parse_struct_fields` panic with a confusing
+/// message about a missing header.
 ///
-/// The expected list is in [`matcher_source`] concatenation order: `def/matcher.rs`'s structs
-/// first (in-file order), then each `def/matcher/*.rs` file's structs in filename order.
+/// Derived from the same directory-swept source text as the field parser ([`def_source`]), so a
+/// struct in a brand-new `def/**/*.rs` file surfaces here with NO edit anywhere.
 #[test]
-fn every_struct_in_the_matcher_source_is_covered_by_the_parity_pin() {
-    let source = matcher_source();
-    let declared: Vec<&str> = source
+fn every_struct_in_the_pack_definition_source_has_a_schema_mirror() {
+    let source = def_source();
+    let declared: BTreeSet<&str> = source
         .match_indices("pub struct ")
         .map(|(i, m)| {
             let rest = &source[i + m.len()..];
@@ -481,20 +563,124 @@ fn every_struct_in_the_matcher_source_is_covered_by_the_parity_pin() {
                 .expect("a struct name must be followed by a delimiter")]
         })
         .collect();
+    assert!(
+        declared.len() >= 7,
+        "swept only {} struct(s) out of crates/core/src/dsl/def/ — the `pub struct` needle stopped \
+         matching and this pin would vouch for a table it barely read",
+        declared.len()
+    );
+    let mirrored: BTreeSet<&str> = SCHEMA_MIRRORS.iter().map(|(s, _, _)| *s).collect();
     assert_eq!(
         declared,
-        [
-            "LabeledPattern",
-            "SymbolScan",
-            "IoScan",
-            "CallScan",
-            "LineScan",
-            "LiteralScan",
-            "MethodScan"
-        ],
-        "the matcher sources gained, lost, or reordered a struct. Add a new one to \
-         `matcher_field_axis_matches_the_schema` (with its schema definition in \
-         docs/contracts/rule-pack.schema.json) before updating this list — the list exists so that \
-         step cannot be skipped silently."
+        mirrored,
+        "crates/core/src/dsl/def/ and SCHEMA_MIRRORS disagree about which structs exist. Unmirrored \
+         (their fields are invisible to the parity pin, and so may be invisible to every pack \
+         author): {:?}. Mirrored but gone from the sources (a rename or a deletion): {:?}.",
+        declared.difference(&mirrored).collect::<Vec<_>>(),
+        mirrored.difference(&declared).collect::<Vec<_>>()
+    );
+}
+
+/// The VALUE axis of `RuleAxis`, which the field axis above cannot reach: `pack_field_axis_...`
+/// proves the schema has an `axis` property, not that it offers the right two words or the right
+/// default. Both halves of that are hand-copied prose in the schema, and both are load-bearing —
+/// the vocabulary is what a third-party author types, and the default is the difference between
+/// "this rule reports a bug" and "this rule reports a preference" for every rule that says nothing.
+///
+/// Derived from `def/axis.rs`'s source text via [`def_source`], the same way the shapes are: the
+/// kebab spelling is COMPUTED from each variant name, so the `rename_all = "kebab-case"` attribute
+/// that makes that computation correct is asserted rather than assumed (a switch to snake_case
+/// would otherwise leave this comparing against a spelling nothing accepts), and the schema's
+/// `default` is checked against whichever variant carries `#[default]` rather than against the word
+/// "defect".
+#[test]
+fn the_rule_axis_vocabulary_and_default_match_the_schema() {
+    let source = def_source();
+    let header = "pub enum RuleAxis {";
+    let start = source
+        .find(header)
+        .expect("`pub enum RuleAxis {` must exist under crates/core/src/dsl/def/");
+    assert!(
+        source[..start]
+            .lines()
+            .rev()
+            .take(3)
+            .any(|l| l.contains("rename_all = \"kebab-case\"")),
+        "`RuleAxis` no longer carries #[serde(rename_all = \"kebab-case\")] directly above it — \
+         every wire spelling below is DERIVED from a variant name on that assumption, and without \
+         it this test compares the schema against words nothing deserializes."
+    );
+
+    let body = &source[start + header.len()..];
+    let end = body.find("\n}").expect("`RuleAxis`'s body must terminate");
+    let mut variants: Vec<String> = Vec::new();
+    let mut default_variant: Option<String> = None;
+    let mut pending_default = false;
+    for raw in body[..end].lines() {
+        let line = raw.trim();
+        if line.starts_with("///") || line.is_empty() {
+            // Doc comments precede attributes, so a doc line can only mean "a new variant starts
+            // here" — drop anything staged for the previous one.
+            pending_default = false;
+            continue;
+        }
+        if line.starts_with("#[") {
+            pending_default |= line.contains("default");
+            continue;
+        }
+        let name = line.trim_end_matches(',');
+        assert!(
+            name.chars().all(|c| c.is_alphanumeric()),
+            "unparsable line in `RuleAxis`'s body (expected a doc comment, an attribute, or a \
+             bare variant): {line}"
+        );
+        let mut kebab = String::new();
+        for (i, ch) in name.char_indices() {
+            if ch.is_uppercase() {
+                if i > 0 {
+                    kebab.push('-');
+                }
+                kebab.extend(ch.to_lowercase());
+            } else {
+                kebab.push(ch);
+            }
+        }
+        if std::mem::take(&mut pending_default) {
+            default_variant = Some(kebab.clone());
+        }
+        variants.push(kebab);
+    }
+    assert!(
+        variants.len() >= 2,
+        "parsed {} variant(s) out of `RuleAxis` — the parser is broken, not the enum, and a \
+         comparison against a near-empty set would pass for the wrong reason",
+        variants.len()
+    );
+
+    let schema: serde_json::Value =
+        serde_json::from_str(RULE_PACK_SCHEMA).expect("rule-pack schema must be valid JSON");
+    let axis = &schema["definitions"]["rule"]["properties"]["axis"];
+    let schema_values: Vec<String> = axis["enum"]
+        .as_array()
+        .expect("definitions.rule.properties.axis must declare an `enum` list")
+        .iter()
+        .map(|v| {
+            v.as_str()
+                .expect("axis enum entries must be strings")
+                .to_string()
+        })
+        .collect();
+    assert_eq!(
+        variants, schema_values,
+        "definitions.rule.properties.axis.enum does not match `RuleAxis`'s variants in kebab-case. \
+         A word the schema omits is one no third-party author will ever write; a word it invents is \
+         one the loader rejects."
+    );
+    assert_eq!(
+        axis["default"].as_str().map(str::to_string),
+        default_variant,
+        "definitions.rule.properties.axis.default disagrees with the variant `RuleAxis` marks \
+         #[default]. That value is what EVERY rule which omits the field silently loads as, so a \
+         stale word here misreports the axis of every undeclared rule in every third-party pack."
     );
 }

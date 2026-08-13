@@ -120,7 +120,8 @@ fn every_json_at_any_depth(dir: &Path, out: &mut Vec<String>) {
 /// is deliberately shallow (see its doc) and that shallowness is PUBLISHED as the packsDir contract, so
 /// widening it is a public behavior change, and a depth-3 first-party pack would still behave
 /// differently embedded vs. loaded from disk. Pinning the tree to the published contract makes the three
-/// readers complete by construction and costs nothing today (12 packs, all depth 1 nested); the shipping
+/// readers complete by construction and costs nothing today — every committed pack is already depth-1
+/// nested, and the count belongs to the walk in the test below rather than to this prose. The shipping
 /// embed keeps its recursion, it simply can no longer reach anything the contract cannot express.
 ///
 /// The flat half of the contract is legal but effectively unused here, and one more reader is tighter

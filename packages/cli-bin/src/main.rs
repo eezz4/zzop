@@ -19,6 +19,7 @@
 //!   zzop init [<dir>] [--force]      — write the embedded starter zzop.config.jsonc into <dir> (default: the current directory).
 //!   zzop contract [<name>]           — list the embedded authoring contracts / print one to stdout.
 //!   zzop explain <rule-id>           — print one bundled DSL rule's compiled-in data to stdout.
+//!   zzop explain <id> --config <path> — same, over the packs that config's trees load (recovered packs included).
 //!   zzop version [--verbose]         — print this binary's version (equals the MCP serverInfo.version); `--verbose` adds every parser's fingerprint.
 //!   zzop <subcommand> --help | -h    — print that one subcommand's own elaboration (exit 0).
 //!   zzop help | --help | -h          — print the usage line plus one elaboration per subcommand (exit 0).
@@ -50,7 +51,7 @@ mod cli;
 /// documents itself as that set's one owner precisely so a new domain cannot ship with a usage line that
 /// omits it. This line spelled it by hand until 2026-08-06 and did omit one.
 pub(crate) fn usage() -> String {
-    format!("usage: zzop <analyze <path> | analyze --config <path> | analyze-envelope <envelope.json> | validate-envelope <envelope.json> | validate-rule-pack <pack.json> | cross <path>... | cross --config <path> | file <path> [--source-id <id>] <tree>... | file <path> [--source-id <id>] --config <path> | endpoint <pattern> <path>... | endpoint <pattern> --config <path> | manifest <path>... | manifest --config <path> | diff <a.json> <b.json> [--allow-tool-drift] | facts <path>... | facts --config <path> | coverage <path>... | coverage --config <path> | graph <path>... | graph --config <path> [--domain <{}>] [--format <mermaid|cosmograph-nodes|cosmograph-links>] [--scope <prefix>] [--top <n>] [--fold <n>] | init [<dir>] [--force] | contract [<name>] | explain <rule-id> | version [--verbose]> (analyze, analyze-envelope and cross also take [--severity <critical|warning|info>] [--rule <id>] [--limit <n>] [--profile-rules]; every subcommand takes --help)",
+    format!("usage: zzop <analyze <path> | analyze --config <path> | analyze-envelope <envelope.json> | validate-envelope <envelope.json> | validate-rule-pack <pack.json> | cross <path>... | cross --config <path> | file <path> [--source-id <id>] <tree>... | file <path> [--source-id <id>] --config <path> | endpoint <pattern> <path>... | endpoint <pattern> --config <path> | manifest <path>... | manifest --config <path> | diff <a.json> <b.json> [--allow-tool-drift] | facts <path>... | facts --config <path> | coverage <path>... | coverage --config <path> | graph <path>... | graph --config <path> [--domain <{}>] [--format <mermaid|cosmograph-nodes|cosmograph-links>] [--scope <prefix>] [--top <n>] [--fold <n>] | init [<dir>] [--force] | contract [<name>] | explain <rule-id> [--config <path>] | version [--verbose]> (analyze, analyze-envelope and cross also take [--severity <critical|warning|info>] [--rule <id>] [--limit <n>] [--profile-rules]; every subcommand takes --help)",
         zzop_summary::GraphDomain::WIRE_NAMES.join("|")
     )
 }
@@ -62,8 +63,8 @@ const BARE_INVOCATION_HINT: &str =
 
 use cli::analysis::{run_analyze, run_analyze_envelope, run_cross, run_endpoint, run_file};
 use cli::{
-    parse_trees_args, print_help, reject_flag_like_args, run_diff, run_file_validate, run_graph,
-    run_init, run_lookup,
+    parse_trees_args, print_help, reject_flag_like_args, run_diff, run_explain, run_file_validate,
+    run_graph, run_init,
 };
 
 fn main() {
@@ -183,13 +184,15 @@ fn main() {
                 }
             }
         },
-        // Read-only lookup over the DSL rule data compiled INTO this binary (`zzop_summary::explain`,
-        // never `docs/rules/catalog.md` prose — see that function's doc). Fixed arity (unlike
-        // `contract`'s optional name): a rule id is always required. Same two-lane contract as
-        // `contract`: a dash-shaped/missing/extra id is a usage error (exit 2, `run_lookup`); a
-        // real-but-unexplainable id (unknown, ambiguous, a whole pack, or a native analysis id) is a
-        // runtime lookup failure (exit 1, `explain`'s own `Err` message).
-        Some("explain") => run_lookup(&args, "explain <rule-id>", zzop_summary::explain),
+        // Read-only lookup over DSL rule data, never `docs/rules/catalog.md` prose (see that function's
+        // doc). The rule id is always required (unlike `contract`'s optional name); `--config <path>`
+        // is optional and widens WHICH packs are searched from "compiled into this binary" to "what
+        // that config's trees load" — the form a rule recovered into `zzop/rules/` needs, since such a
+        // rule runs and reports findings while being invisible to the bundled-only read. Same two-lane
+        // contract as `contract`: a dash-shaped/missing/extra id is a usage error (exit 2,
+        // `run_explain`); a real-but-unexplainable id (unknown, ambiguous, a whole pack, or a native
+        // analysis id) is a runtime lookup failure (exit 1, `explain`'s own `Err` message).
+        Some("explain") => run_explain(&args),
         // The version surface, in the two forms the one owner (`zzop_facade::version`) publishes: the
         // BARE version (`zzop_summary::version()` = `CARGO_PKG_VERSION`, the workspace release version
         // shared with the `zzop-mcp` binary and MCP `initialize`, so all three can never disagree), and

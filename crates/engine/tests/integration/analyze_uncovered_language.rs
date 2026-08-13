@@ -3,8 +3,9 @@
 //! `analyze::assemble` and `envelope::analyze_envelope` through `pack_scope_warnings`) is the only
 //! report that fires for it, and the gap it closes was measured on this repo: 987 of ~1400 files were
 //! `.rs`, not one of the 138 bundled DSL rules then carried a `.rs` `file_pattern` (that changed on
-//! 2026-08-02 — 19 of 140 do now, and this file's fixtures were deliberately built on a HAND-BUILT pack
-//! rather than the shipped ones, which is why none of them moved), and every other report
+//! 2026-08-02 — bundled rules do carry `.rs` patterns now; `scripts/measure/self-analysis-gate.mjs`'s DSL
+//! half owns that recount. This file's fixtures were deliberately built on a HAND-BUILT pack rather than
+//! the shipped ones, which is why none of them moved), and every other report
 //! stayed silent — `no_applicable_dsl_rule_warning` because the tree's `.ts` files DO match,
 //! `zero_scope_packs_warning` because most packs therefore have non-zero scope, and
 //! `unparsed_extension_warning` because `.rs` parses fine. "0 findings" read as "clean".

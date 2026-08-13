@@ -137,8 +137,8 @@ fn eval_pack_profiled_findings_match_eval_pack_exactly() {
 fn eval_pack_profiled_on_empty_pack_yields_no_timings() {
     let pack = RulePackDef {
         id: "empty".into(),
-        framework: "any".into(),
         schema_version: 1,
+        exported_from: None,
         fragments: Default::default(),
         rules: vec![],
         regex_cache: Default::default(),

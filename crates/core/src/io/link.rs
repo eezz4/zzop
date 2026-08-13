@@ -5,16 +5,16 @@
 //! with the single-tree `http/unprovided-consume` rule; the route-identity predicate (asked only of a
 //! provider MISS, so it is not part of that sequence) is [`super::key::key_carries_route_identity`].
 
-use std::collections::BTreeMap;
-
 use super::facts::{
     AmbiguousConsume, CrossLayerEdge, CrossLayerResult, EdgeFrom, EdgeTo, IoConsume, SourceIo,
-    TaggedConsume, TaggedProvide,
+    TaggedConsume,
 };
 use super::key::key_carries_route_identity;
+use super::wildcard::wildcard_route_covers;
 
 mod consume_join;
 mod host_rekey;
+mod provider_index;
 pub use consume_join::{classify_consume_join, ConsumeJoin};
 
 /// Injectable options for [`link_cross_layer_io`]. Mirrors `zzop_git::CollectOptions::commit_type_patterns`'s
@@ -41,39 +41,19 @@ pub struct LinkOptions {
 }
 
 /// Exact join of trees' IO on (kind, key), with the ambiguity/external/route-identity/low-confidence
-/// gates documented in this module's doc. Pure function (given `opts`).
+/// gates documented in this module's doc, plus the wildcard-route partition ([`super::wildcard`]) that
+/// keeps a route PATTERN from being compared as a key. Pure function (given `opts`).
+///
+/// The partition changes no edge: it removes a provide that could never join and the consumes that
+/// provide really serves, so `edges` is invariant BY CONSTRUCTION and the win reads only in the two
+/// residue buckets and in `wildcard_route_partitions`.
 pub fn link_cross_layer_io(trees: &[SourceIo], opts: &LinkOptions) -> CrossLayerResult {
-    // Index providers by (kind, key). Multiple providers for one key is legal (e.g. two services expose one topic).
-    let mut providers_by_key: BTreeMap<String, Vec<TaggedProvide>> = BTreeMap::new();
-    for SourceIo { source, io } in trees {
-        for p in &io.provides {
-            providers_by_key
-                .entry(id_key(&p.kind, &p.key))
-                .or_default()
-                .push(TaggedProvide {
-                    source: source.clone(),
-                    provide: p.clone(),
-                });
-        }
-    }
-
-    // Keys whose providers span 2+ DISTINCT source trees — ambiguous, never auto-linked. Computed once
-    // over `providers_by_key` (source-tree spread is a property of the key's provider set, independent of
-    // which consume is looking it up), then consulted per-consume below. NOTE: this set alone must NOT
-    // drive the `unconsumed_provides` exclusion — a multi-tree key nobody consumes is still dead; only keys
-    // an actual consume referenced ambiguously are exempt (tracked separately in `ambiguously_consumed_keys`).
-    let ambiguous_keys: std::collections::HashSet<String> = providers_by_key
-        .iter()
-        .filter(|(_, providers)| {
-            providers
-                .iter()
-                .map(|p| p.source.as_str())
-                .collect::<std::collections::HashSet<_>>()
-                .len()
-                >= 2
-        })
-        .map(|(k, _)| k.clone())
-        .collect();
+    // The whole provide side, computed before any consume is looked at — see `provider_index`.
+    let provider_index::ProviderIndex {
+        by_key: providers_by_key,
+        ambiguous_keys,
+        wildcard_routes: mut wildcard_route_partitions,
+    } = provider_index::build(trees, id_key);
 
     let mut edges = Vec::new();
     let mut unprovided_consumes = Vec::new();
@@ -151,6 +131,22 @@ pub fn link_cross_layer_io(trees: &[SourceIo], opts: &LinkOptions) -> CrossLayer
             };
             let k = id_key(&c.kind, key);
             let Some(providers) = providers_by_key.get(&k) else {
+                // Wildcard partition, asked ONLY of a miss — exactly like the route-identity gate below,
+                // and for the same reason: a consume that actually HIT an exact key is joined, and no
+                // pattern gets to reinterpret a join. A covered consume is not unprovided (the route DOES
+                // serve it); it is dropped here and its route's `covered_consumes` counts it, so the
+                // silence is a number the engine can self-report rather than an absence. Charged to the
+                // FIRST matching route in sorted order — one call can sit under two catch-alls, and
+                // splitting the charge would double-count the same call site.
+                if c.kind == "http" {
+                    if let Some(w) = wildcard_route_partitions
+                        .iter_mut()
+                        .find(|w| wildcard_route_covers(&w.key, key))
+                    {
+                        w.covered_consumes += 1;
+                        continue;
+                    }
+                }
                 // Route-identity gate (module doc). A key whose every path segment is `{}` names no
                 // route, so its MISS proves nothing about the contract space — only that the extractor
                 // lost the target. Calling that `unprovidedConsumes` INVENTS a missing internal route;
@@ -263,6 +259,7 @@ pub fn link_cross_layer_io(trees: &[SourceIo], opts: &LinkOptions) -> CrossLayer
         external_consumes,
         ambiguous_consumes,
         host_rekey_counts,
+        wildcard_route_partitions,
     }
 }
 

@@ -11,6 +11,7 @@ use crate::{AnalyzeOutput, EngineConfig};
 mod cross_tree_imports;
 mod join_io_filter;
 mod parallel_impl;
+mod wildcard_disclosure;
 
 pub use parallel_impl::MIN_PARALLEL_IMPL_SIGNALS;
 
@@ -146,6 +147,8 @@ pub fn analyze_trees(trees: &[(PathBuf, EngineConfig)]) -> MultiAnalyzeOutput {
             ));
         }
     }
+    // Wildcard-route partition disclosure — rationale in `wildcard_disclosure`'s module doc.
+    wildcard_disclosure::disclose(&mut outputs, &cross_layer.wildcard_route_partitions);
     // Cross-tree package-import disclosure — rationale in `cross_tree_imports`' module doc.
     cross_tree_imports::disclose(&mut outputs);
     let package_imports: Vec<zzop_rules_cross_layer::PackageImportSite> = outputs

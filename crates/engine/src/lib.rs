@@ -35,6 +35,7 @@
 
 mod analyze;
 mod cache;
+mod channel_direction;
 mod config;
 mod coverage;
 mod cross_layer_findings;
@@ -59,6 +60,9 @@ use std::path::Path;
 use zzop_core::RuleRegistry;
 
 pub use cache::surface::{engine_fingerprint, parser_fingerprints};
+pub use channel_direction::{
+    channel_directions, enabled_rules_directed, ChannelDirection, RuleChannelDirection,
+};
 pub use config::{EngineConfig, GitOptions, MountRule, PackSource};
 pub use coverage::CoverageCensus;
 pub use disclosure::{

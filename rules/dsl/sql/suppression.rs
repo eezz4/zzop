@@ -1,23 +1,10 @@
+//! The `// zzop-<rule>-ok` marker cases for the rules this pack still ships. Three more lived here
+//! until 2026-08-12 — `query-logic-density` and the two `app-side-aggregation-*` rules — and moved with
+//! their rules to `examples/packs/tests/suppression.rs` rather than being deleted.
+
 use crate::{hits, scan, TempDir};
 
 // --- marker-suppression cases ---
-
-#[test]
-fn query_logic_ok_marker_directly_above_the_case_line_suppresses_the_finding() {
-    // The marker sits directly above the `CASE` line itself; the marker check has no comment-syntax
-    // awareness, so a `//`-prefixed line inside a template literal works identically to a real comment.
-    let dir = TempDir::new("zzop-sql");
-    dir.write(
-        "ok.ts",
-        "export const q = `\n  SELECT id,\n  // zzop-query-logic-density-ok: legacy pricing view, owned by analytics\n  CASE WHEN a THEN 1 WHEN b THEN 2 END FROM t WHERE x\n`;\n",
-    );
-    let out = scan(&dir);
-    assert!(
-        hits(&out, "query-logic-density").is_empty(),
-        "{:?}",
-        out.findings
-    );
-}
 
 #[test]
 fn n_plus_1_ok_marker_above_the_store_call_whitelists_the_for_of_loop() {
@@ -51,38 +38,6 @@ fn count_in_loop_ok_marker_present_suppresses_the_finding() {
     );
     let out = scan(&dir);
     assert!(hits(&out, "count-in-loop").is_empty(), "{:?}", out.findings);
-}
-
-#[test]
-fn app_agg_ok_marker_suppresses_the_reduce_finding() {
-    let dir = TempDir::new("zzop-sql");
-    dir.write(
-        "ok2.ts",
-        "export async function total(store: any) {\n  const rows = await store.findMany();\n  // zzop-app-side-aggregation-reduce-ok: bounded to <=50 rows by upstream guard\n  return rows.reduce((s: number, r: any) => s + r.amount, 0);\n}\n",
-    );
-    let out = scan(&dir);
-    assert!(
-        hits(&out, "app-side-aggregation-reduce").is_empty(),
-        "{:?}",
-        out.findings
-    );
-}
-
-#[test]
-fn app_agg_filter_ok_marker_suppresses_the_filter_length_finding() {
-    // `app-side-aggregation-reduce` and `app-side-aggregation-filter-length` each need their own marker
-    // (`zzop-app-side-aggregation-reduce-ok` vs `zzop-app-side-aggregation-filter-length-ok`) so suppressing one can't silently suppress the other.
-    let dir = TempDir::new("zzop-sql");
-    dir.write(
-        "ok3.ts",
-        "export async function count(store: any) {\n  const rows = await store.findMany();\n  // zzop-app-side-aggregation-filter-length-ok: bounded to <=50 rows by upstream guard\n  return rows.filter((r: any) => r.active).length;\n}\n",
-    );
-    let out = scan(&dir);
-    assert!(
-        hits(&out, "app-side-aggregation-filter-length").is_empty(),
-        "{:?}",
-        out.findings
-    );
 }
 
 // --- skip_comment_lines + test-path file_exclude_pattern ---

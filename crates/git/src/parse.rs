@@ -232,7 +232,11 @@ fn build_stats(acc: BTreeMap<String, Acc>) -> GitStats {
 
 /// Derives the covered window from the parsed commits (dates are ISO, so string min/max is
 /// chronological under a consistent UTC-offset notation).
-fn build_window(commits: &[CommitFileSet], since: Option<String>) -> GitWindow {
+///
+/// `pub(crate)` for [`crate::rebase`], which re-derives the window after dropping the commits that fall
+/// outside an analyzed subtree — by calling THIS function rather than editing the window in place, so a
+/// rebased collection's window is produced by the same rule as a freshly parsed one.
+pub(crate) fn build_window(commits: &[CommitFileSet], since: Option<String>) -> GitWindow {
     let dates: Vec<&str> = commits.iter().filter_map(|c| c.date.as_deref()).collect();
     if dates.is_empty() {
         return GitWindow {

@@ -11,18 +11,27 @@ fn config_surface_path() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../config/config-surface.json")
 }
 
-/// Mirrors `config-surface.json`'s `configKeys` object.
-#[derive(serde::Deserialize)]
-pub(crate) struct ConfigKeysSurface {
-    pub(crate) top: Vec<String>,
-    pub(crate) packs: Vec<String>,
-    pub(crate) git: Vec<String>,
-    pub(crate) vocabulary: Vec<String>,
-    pub(crate) report: Vec<String>,
-    pub(crate) tree: Vec<String>,
-    #[serde(rename = "ruleObject")]
-    pub(crate) rule_object: Vec<String>,
-}
+/// `config-surface.json`'s `configKeys` object — scope name -> that scope's key names.
+///
+/// A MAP, not a struct with one field per scope, and that is the whole point (2026-08-12). This was a
+/// struct declaring seven scopes (`top`, `packs`, `git`, `vocabulary`, `report`, `tree`, `ruleObject`)
+/// while the file held THIRTEEN: `parsers`, `globOverride`, `featureSlicedDesign`, `topology`, `mount`
+/// and `route` were dropped on the floor by serde's ignore-unknown-fields default, so a message
+/// naming `` `globOverrides` `` or `` `mountedAt` `` as a bare word would have been reported as an
+/// unknown config key. Nothing failed, because no shipped message spells one that way today — the
+/// classic "the guard covers less than it claims, and its green is cited as coverage" shape
+/// (working-agreements §5.5). Deriving the scope set from the file means a scope added there is
+/// covered on the next run instead of on the next audit.
+///
+/// The sibling `crates/config/src/lib_tests.rs`'s `config_paths_are_derived_from_config_keys` already
+/// iterated the object generically and FAILS on a scope it does not know how to spell — so the file
+/// side was derived and only this consumer was not.
+///
+/// One coupling disappears with the struct: `config-surface.json`'s `_docs` noted that the empty
+/// `configKeys.report` scope had to survive only because this struct declared `report` as a required
+/// serde field. It no longer does; an empty scope now costs nothing and deleting it breaks nothing
+/// here.
+pub(crate) type ConfigKeysSurface = std::collections::BTreeMap<String, Vec<String>>;
 
 /// Mirrors `config-surface.json`'s top-level shape. `#[serde(rename_all = "camelCase")]` maps this
 /// struct's snake_case field names to the file's camelCase keys; the file's own `_docs` field is simply
@@ -193,28 +202,21 @@ pub(crate) fn extract_config_context_tokens(text: &str) -> Vec<String> {
 ///   `allowlistedTokens`, OR its first segment (split on `.`/`[`) is in `embedderFields` — an embedder field
 ///   can legitimately be written with its own dotted continuation in a message (none do today, but the
 ///   shape is allowed the same way a bare embedder field name is).
-/// - **Single word**: valid when it is a top-level config key, a nested key name from ANY of
-///   `packs`/`git`/`report`/`tree`/`ruleObject` (the nested scopes are flattened into one name set here —
-///   a message says `` `dir` `` or `` `since` `` without also repeating its parent, so there is no unambiguous
-///   way to check a nested key against only its OWN parent's scope from the token text alone), an embedder
-///   field, or an allowlisted token.
+/// - **Single word**: valid when it is a key name from ANY scope of `configKeys` (every scope is
+///   flattened into one name set here — a message says `` `dir` `` or `` `since` `` without also repeating
+///   its parent, so there is no unambiguous way to check a nested key against only its OWN parent's
+///   scope from the token text alone), an embedder field, or an allowlisted token. The scope SET is read
+///   from the file rather than named here — see [`ConfigKeysSurface`] for the six scopes a hand-written
+///   list had silently dropped.
 pub(crate) fn unknown_config_context_tokens(
     tokens: &[String],
     vocab: &ConfigSurface,
 ) -> Vec<String> {
     let shape = config_key_shape_regex();
 
-    let top: BTreeSet<&str> = vocab.config_keys.top.iter().map(String::as_str).collect();
-    let mut nested: BTreeSet<&str> = BTreeSet::new();
-    for scope in [
-        &vocab.config_keys.packs,
-        &vocab.config_keys.git,
-        &vocab.config_keys.vocabulary,
-        &vocab.config_keys.report,
-        &vocab.config_keys.tree,
-        &vocab.config_keys.rule_object,
-    ] {
-        nested.extend(scope.iter().map(String::as_str));
+    let mut known: BTreeSet<&str> = BTreeSet::new();
+    for scope in vocab.config_keys.values() {
+        known.extend(scope.iter().map(String::as_str));
     }
     let paths: BTreeSet<&str> = vocab.config_paths.iter().map(String::as_str).collect();
     let embedder: BTreeSet<&str> = vocab.embedder_fields.iter().map(String::as_str).collect();
@@ -241,8 +243,7 @@ pub(crate) fn unknown_config_context_tokens(
                 let first_seg = t.split(['.', '[']).next().unwrap_or(t.as_str());
                 !embedder.contains(first_seg)
             } else {
-                !(top.contains(t.as_str())
-                    || nested.contains(t.as_str())
+                !(known.contains(t.as_str())
                     || embedder.contains(t.as_str())
                     || allow.contains(t.as_str())
                     || mcp.contains(t.as_str()))
@@ -250,6 +251,39 @@ pub(crate) fn unknown_config_context_tokens(
         })
         .cloned()
         .collect()
+}
+
+/// The non-emptiness floor for the DERIVED scope set (working-agreements §5.5's third rule). Reading
+/// scopes out of the file instead of naming them is only an improvement while the read actually
+/// returns something: a `configKeys` that parsed to an empty map would make CHECK B accept every
+/// single-word token, and CHECK B would report a clean tree while checking nothing — the exact
+/// vacuous-green failure this repo has measured four times.
+///
+/// The floors are deliberately well under the live values (13 scopes / 91 names on 2026-08-12), so
+/// ordinary vocabulary edits never trip them; only a broken parse or a wholesale deletion does.
+/// A per-scope non-emptiness assert would be WRONG here — `report` is legitimately empty (its keys were
+/// retired 2026-07-26 and the scope kept as the record of that).
+#[test]
+fn the_derived_config_key_scope_set_is_not_vacuous() {
+    let vocab = load_config_surface();
+    assert!(
+        vocab.config_keys.len() >= 10,
+        "config-surface.json's configKeys parsed to {} scope(s) — CHECK B's single-word branch would \
+         accept almost everything. The scope set is read from the file (see `ConfigKeysSurface`); a \
+         near-empty read means the parse broke, not that the vocabulary shrank.",
+        vocab.config_keys.len()
+    );
+    let names: BTreeSet<&str> = vocab
+        .config_keys
+        .values()
+        .flat_map(|scope| scope.iter().map(String::as_str))
+        .collect();
+    assert!(
+        names.len() >= 60,
+        "config-surface.json's configKeys flattened to {} key name(s) — far under the live vocabulary. \
+         CHECK B would pass vacuously over a tree it barely judges.",
+        names.len()
+    );
 }
 
 /// `embedderFieldShapes` documents its own invariant ("keep its key set mirroring `embedderFields`

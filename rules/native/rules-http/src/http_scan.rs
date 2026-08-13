@@ -165,62 +165,13 @@ fn near_miss_res() -> &'static [Regex; 2] {
     })
 }
 
-// --- Shared helpers (name index / handler resolution / whitelist) ---
+mod symbol_index;
 
-fn ident_re() -> &'static Regex {
-    static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(r"[A-Za-z_$][\w$]*").unwrap())
-}
+pub(crate) use symbol_index::{
+    build_name_index, resolve_handler, resolve_handler_scoped, symbols_by_id,
+};
 
-/// Tail name (after the last `.`) -> symbol ids (`"file#name"`). `pub(crate)`: also used by `mutating_route_no_auth`.
-pub(crate) fn build_name_index(symbols: &[SourceSymbol]) -> HashMap<String, Vec<String>> {
-    let mut idx: HashMap<String, Vec<String>> = HashMap::new();
-    for s in symbols {
-        let tail = s.name.rsplit('.').next().unwrap_or(&s.name).to_string();
-        idx.entry(tail).or_default().push(s.id.clone());
-    }
-    idx
-}
-
-/// Resolves a handler reference string to a unique symbol id, stripping wrapper calls (`rateLimit(fn)`) and
-/// member access (`ctrl.list`). `None` when unknown or ambiguous (defined in multiple files) — never guessed.
-pub(crate) fn resolve_handler(handler: &str, idx: &HashMap<String, Vec<String>>) -> Option<String> {
-    resolve_handler_scoped(handler, idx, None)
-}
-
-/// [`resolve_handler`] with an optional route-FILE tie-break. When a handler name is ambiguous repo-wide
-/// (defined in multiple files), a `Some(route_file)` disambiguates to the candidate declared in that file:
-/// a decorator-routed handler (NestJS `@Delete() delete()`) is a METHOD of the controller class in the
-/// file its route `IoProvide` points at, so a bare method name colliding across controllers (`delete` in
-/// four controllers) still resolves uniquely once scoped to the route's own file. Only a UNIQUE in-file
-/// candidate resolves; two `delete`s in one file, or none, still yields `None` (do-not-guess). With
-/// `None` the behavior is identical to the original repo-wide-unique-or-nothing rule.
-pub(crate) fn resolve_handler_scoped(
-    handler: &str,
-    idx: &HashMap<String, Vec<String>>,
-    route_file: Option<&str>,
-) -> Option<String> {
-    let ids: Vec<&str> = ident_re().find_iter(handler).map(|m| m.as_str()).collect();
-    for ident in ids.iter().rev() {
-        match idx.get(*ident) {
-            Some(candidates) if candidates.len() == 1 => return Some(candidates[0].clone()),
-            Some(candidates) => {
-                // Ambiguous repo-wide. Tie-break to the route's own file, if one was given.
-                if let Some(file) = route_file {
-                    let mut in_file = candidates
-                        .iter()
-                        .filter(|id| id.split('#').next() == Some(file));
-                    if let (Some(one), None) = (in_file.next(), in_file.next()) {
-                        return Some(one.clone());
-                    }
-                }
-                return None; // still ambiguous — do not guess
-            }
-            None => continue,
-        }
-    }
-    None
-}
+// --- Shared helpers (marker window / whitelist) ---
 
 /// Runs `pick` over every line of the handler's marker lookback window, ascending, returning the first
 /// `Some`. THE window definition, for both the honored-marker check and the near-miss disclosure below —
@@ -232,19 +183,45 @@ pub(crate) fn resolve_handler_scoped(
 /// body-start line ITSELF plus [`OK_MARKER_LOOKBACK_ABOVE`] lines above it. A marker
 /// `OK_MARKER_LOOKBACK_LINES` lines above the body start is OUTSIDE it and never read; user-facing text
 /// must say "body-start line or up to 3 lines above", never "the 4 lines above".
+///
+/// EVERY declaration carrying `handler_symbol` is scanned, not just the first, because
+/// `SourceSymbol.id` is `file#name` and is NOT unique (see [`symbol_index::build_name_index`]). This was
+/// the FOURTH consumer of that constraint; `2c34e6e` (2026-08-11) fixed three and this one kept a bare
+/// `.find()`, so it read the window of whichever declaration happened to be parsed first. Measured on
+/// two same-id `touch` declarations where the SECOND carries the write: a correctly placed
+/// `// idempotent-ok:` on that second declaration did NOT suppress (1 finding, identical to the
+/// no-marker control), and — because [`with_ok_marker_near_miss`] scans through this same function —
+/// the near-miss disclosure that exists to say "your marker did nothing" was reading the wrong window
+/// too, so the author was told nothing either. A finding that cannot be silenced by the marker its own
+/// message prescribes is worse than either half alone.
+///
+/// A marker under ANY same-id declaration therefore suppresses. That is the honest reading rather than
+/// a convenience: the id genuinely cannot tell these declarations apart, so picking one and calling it
+/// "the handler" fabricates a distinction the data does not carry — the same stance
+/// [`symbol_index::symbols_by_id`] takes on the write-site axis. For the ordinary UNIQUE id there is
+/// exactly one declaration and one window, so behavior is unchanged by construction.
 fn scan_marker_window<T>(
     handler_symbol: &str,
     symbols: &[SourceSymbol],
     files: &HashMap<String, String>,
     mut pick: impl FnMut(&str) -> Option<T>,
 ) -> Option<T> {
-    let sym = symbols.iter().find(|s| s.id == handler_symbol)?;
-    let text = files.get(&sym.file)?;
-    let lines: Vec<&str> = text.split('\n').collect();
-    let decl_line = sym.body_start.unwrap_or(sym.line);
-    (decl_line.saturating_sub(OK_MARKER_LOOKBACK_LINES)..decl_line)
-        .filter_map(|i| lines.get(i as usize).copied())
-        .find_map(&mut pick)
+    for sym in symbols.iter().filter(|s| s.id == handler_symbol) {
+        // A declaration whose file text was not supplied is skipped rather than aborting the whole
+        // scan: with several same-id declarations, one missing file must not blind the others.
+        let Some(text) = files.get(&sym.file) else {
+            continue;
+        };
+        let lines: Vec<&str> = text.split('\n').collect();
+        let decl_line = sym.body_start.unwrap_or(sym.line);
+        let found = (decl_line.saturating_sub(OK_MARKER_LOOKBACK_LINES)..decl_line)
+            .filter_map(|i| lines.get(i as usize).copied())
+            .find_map(&mut pick);
+        if found.is_some() {
+            return found;
+        }
+    }
+    None
 }
 
 /// A `// idempotent-ok: <reason>` comment in that window suppresses the finding.

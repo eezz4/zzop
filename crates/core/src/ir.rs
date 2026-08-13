@@ -29,40 +29,9 @@ pub const DEP_GRAPH_RESOLVED_ONLY: &str =
      so every number derived from this graph counts in-tree edges only and a low one can mean \
      unresolved imports rather than few imports.";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum SourceSymbolKind {
-    Function,
-    Class,
-    Const,
-    Type,
-    Interface,
-}
+mod kinds;
 
-/// Classifies a store-write call as non-idempotent for `zzop_rules_http::http_scan`'s
-/// `non-idempotent-write` rule: a retry of any of these effects is not a no-op. `as_str` gives the
-/// wire/label form used both in `Finding::data.kind` and (via serde) in the cache.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum NonIdempotentKind {
-    /// `create`/`createMany`/`insert` — a retry inserts a duplicate row.
-    Create,
-    /// An `update`/`updateMany`/`upsert` whose data carries an atomic accumulation op
-    /// (`increment`/`decrement`/`push`/`multiply`) — a retry applies the delta again.
-    AtomicAccumulate,
-    /// A counter-store bump (`incr`/`incrby`/`decr`/`decrby`) — a retry bumps it again.
-    Counter,
-}
-
-impl NonIdempotentKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Create => "create",
-            Self::AtomicAccumulate => "atomic-accumulate",
-            Self::Counter => "counter",
-        }
-    }
-}
+pub use kinds::{NonIdempotentKind, SourceSymbolKind};
 
 /// One detected store-write (ORM/atomic/counter or raw-SQL) call site within a symbol's body span —
 /// computed once at parse time (TS only; see `zzop_parser_typescript`'s write-site detection module)
@@ -145,6 +114,28 @@ pub struct WriteSite {
 #[serde(rename_all = "camelCase")]
 pub struct SourceSymbol {
     /// "features/x/useFoo.ts#useFoo" — file + name combination id.
+    ///
+    /// **NOT UNIQUE, and that is the declared contract rather than a defect to be fixed later.** A
+    /// language distinguishes declarations this id does not: Java/C# overloads, TypeScript overload
+    /// signatures, and TS declaration merging (an `interface` and a `const` sharing a name) each
+    /// collapse onto one id. Measured on the reference corpus: 12 colliding groups over 28 symbols.
+    /// `docs/adapters/envelope.schema.json`'s `sourceSymbol.id` says the same thing in the same words
+    /// — the two must agree, because an external adapter reads only the schema and every producer
+    /// reads only this.
+    ///
+    /// **Treat it as a LABEL, not a key.** Making it unique was considered and declined for 1.0: the
+    /// disambiguating suffix would have to encode a signature, which is a type-layer fact this
+    /// workspace has no layer for, and every existing id would move. Adding one later is additive (a
+    /// new spelling for symbols that collide today), so nothing here forecloses it.
+    ///
+    /// ### What a consumer that must pick one owes
+    /// Keying a map by this id silently drops every colliding sibling, and WHICH one survives is then
+    /// decided by iteration order — a security verdict flipped on Java overloads and on TS declaration
+    /// merging exactly that way (2026-08-11, `2c34e6e`). One convention answers it and lives in
+    /// `zzop_rules_http::http_scan::symbols_by_id`: prefer the entry that carries `write_sites`,
+    /// otherwise keep the first. Any new consumer building an id-keyed map must call that function
+    /// rather than invent a second rule — two conventions in one engine is the defect, not the
+    /// collision itself.
     pub id: String,
     /// Normalized relative path.
     pub file: String,
@@ -199,45 +190,19 @@ pub struct QueryCallSite {
     pub call_text: String,
 }
 
-/// An import-declaration binding. Keyed by localName.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ImportBinding {
-    /// Verbatim specifier from the import "..." statement ("@/features/x", "./foo").
-    pub specifier: String,
-    /// Original exported name: default import = "default", namespace = "*".
-    pub original: String,
-    /// A CommonJS `require()` nested in a function body — a lazy import (does not affect module load order).
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub deferred: bool,
-    /// Type-only (`import type ...` or `import { type X }`). Erased by TS at compile time.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub type_only: bool,
-}
+mod imports;
 
-pub type ImportMap = std::collections::BTreeMap<String, ImportBinding>;
+pub use imports::{ImportBinding, ImportMap, ReExport};
 
-/// A re-export. `export { A as B } from "./y"` / `export * from "./y"`. A non-type-only re-export is a
-/// real dep-graph edge (`zzop_parser_typescript::lang::resolve::build_dep`/`build_dep_with_workspace`
-/// resolve+merge it into the same `resolved` vector an `ImportBinding` would); a type-only one
-/// (`export type { X } from "./y"` / per-specifier `export { type X } from "./y"`) is erased by TS at
-/// compile time and contributes no edge at all — mirrors `ImportBinding::type_only`'s
-/// erased-at-compile-time semantics, but for re-exports the effect is "no edge" rather than "edge that's
-/// excluded from circular only" since a re-export's only purpose in the dep graph is the edge itself.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ReExport {
-    /// Specifier from `export ... from "..."`.
-    pub specifier: String,
-    /// Original name in the source. star = "*".
-    pub original: String,
-    /// Name exposed in the current file. `export { A as B }` = B, star = "*".
-    pub local_alias: String,
-    /// Type-only (`export type { X } from "..."` or a per-specifier `export { type X } from "..."`).
-    /// Erased by TS at compile time — never a dep-graph edge.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub type_only: bool,
-}
-
-/// A Hono-style endpoint extracted from a backend route file.
+/// One route a backend file SERVES: `method` + `path` + the handler symbol that answers it.
+///
+/// The doc used to read "A Hono-style endpoint", which was true of the tree this type was written for
+/// and of nothing since: the `http` provide channel is fed by every server front end this repo parses
+/// (Express, Hono, Nest, FastAPI, Django, Spring, ASP.NET, gin, axum — the set the recognizers under
+/// `parser/*/src` actually name, not a list of frameworks that sound plausible), and an external
+/// Mode-A adapter can emit these for a framework zzop never heard of. Naming one framework
+/// in the type's own doc is how a reader concludes the channel is narrower than it is — the same
+/// TS-single-language residue the 2026-08-10 sweep was about, left in the IR's own vocabulary.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ApiEndpoint {
     pub method: String,

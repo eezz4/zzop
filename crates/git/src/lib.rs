@@ -12,6 +12,7 @@ mod error;
 mod iso_date;
 mod parse;
 mod process;
+mod rebase;
 mod subject;
 mod tags;
 
@@ -20,6 +21,7 @@ use std::path::Path;
 pub use error::GitError;
 pub use parse::parse_git_log;
 pub use process::{repo_root, spawn_log};
+pub use rebase::tree_prefix;
 pub use subject::compile_commit_subject_pattern;
 
 use zzop_core::{CommitFileSet, GitStats};
@@ -35,6 +37,12 @@ pub fn compile_commit_type_pattern(src: &str) -> Result<regex::Regex, regex::Err
 }
 
 /// One `git log --numstat` pass's output: per-file stats + per-commit file sets + the covered window.
+///
+/// **Every path in here is relative to the REPOSITORY root**, never to whatever directory the caller
+/// considers its tree — that independence is what makes one collection shareable across a run's trees
+/// (see [`CollectOptions`]). A caller whose own output speaks a subtree's coordinates must translate,
+/// and [`GitCollection::rebase_onto`] with [`tree_prefix`] is that translation; skipping it silently
+/// mixes two coordinate systems in one reply.
 #[derive(Debug, Clone, Default)]
 pub struct GitCollection {
     pub stats: GitStats,

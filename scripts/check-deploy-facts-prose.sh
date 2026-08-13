@@ -62,10 +62,46 @@
 #                                          -> that pack's rule count
 #   C. `N platforms` / `N platform sub-packages` / `N platform targets`  -> release platform count
 #   D. `N packages`, ONLY on a line that also mentions npm  -> npm package count
-#   E. `N DSL rules`                       -> total rules across all bundled packs
+#   E. `N DSL rules` / `N bundled DSL rules`  -> total rules across all bundled packs
+#   F. `all N bundled|shipped [DSL] packs|rules` -> pack count / rule total. The `all` is REQUIRED and
+#      is what makes this shape decidable without the `DSL` token; see the 2026-08-13 note below.
 # A bare `N packs` is deliberately NOT a claim shape: docs/rules/dsl-reference.md says "~90 rules across
 # 11 packs before this mechanism existed", a HISTORICAL statement about a past tree that is correct as
 # written and must never be rewritten to today's count.
+#
+# `bundled` moved INSIDE the packs/rules alternation on 2026-08-12, and that one token was a hole. The
+# needle read `[0-9]+ (bundled )?DSL packs?\b|...|[0-9]+ DSL rules?\b` — the optional `bundled` was
+# allowed only in front of `packs`, so the `<N> bundled DSL rules` spelling matched NEITHER alternative
+# and passed transparently, in the FILE-LEVEL prefilter as well as the claim pass. Measured the day it
+# was widened: two files carried that spelling and neither had ever been read by this guard. (The
+# numbers they carried are NOT quoted here, for the reason recorded at the subject-set floor below —
+# this guard cannot tell its own quotation from a live claim, and quoting one makes it fail itself.)
+#
+# HISTORICAL-CLAIM ANCHOR, needed by the same widening. One of those two spellings is honest — an
+# `analyze_uncovered_language.rs` module doc says "not one of the <N> bundled DSL rules THEN carried a
+# `.rs` file_pattern", a statement about a past tree that names its own tense and is followed two words
+# later by the date it stopped being true. Tense is the only thing that separates it from the live claim
+# in the other file, so the claim shape absorbs a trailing past-tense adverb (` then`, ` at the time`,
+# ` back then`, ` used to`, ` before that`) and a match that carries one is skipped. This is a
+# POSITIONAL test, not a list of blessed files: the adverb must be the words immediately after the noun
+# phrase, so a sentence can only claim the exemption by actually being written in the past tense. Its
+# limit is stated rather than hidden — a stale claim phrased in some OTHER past construction ("<N> DSL
+# rules existed at the time of writing") is exempted by nothing here and would be reported, while one
+# whose adverb sits before the number is not exempted either. The count of anchored skips is printed on
+# the clean line so the device cannot quietly stop applying to anything.
+#
+# `all <N> bundled|shipped ...` joined on 2026-08-13, and the reason it is worth a whole claim shape is
+# that the `DSL` token was the second hole of the same kind `590dd8d` had just closed on the first. A
+# release audit wrote `RuleDef::axis` is "declared by all <N> shipped rules" into
+# crates/facade/src/rule_pack_tests.rs with the pre-export total; nothing read it, because the noun
+# phrase says `shipped rules`, not `DSL rules`. Measured over every tracked file the day it was added:
+# TWO subjects carry this spelling, one of them that live defect and the other correct, and ZERO false
+# positives. Reverse-checked against seven trees from the v0.30.0 export series (`5d2050f`, `2de0399`,
+# `9a49080`, `105c52f`, `c0cc8ed`, `590dd8d`, `0009eff`): 0/0/0/1/1/1/2 subjects, every one of them
+# correct at its own commit except the defect above, which appears at `0009eff` and is caught there.
+#
+# The `all` is LOAD-BEARING and the broader spelling was measured and REJECTED — see the "does NOT
+# check" entry on bare `<N> bundled|shipped rules` below, which is where the numbers live.
 #
 # Zero carve-out: a match whose number is `0` is skipped everywhere. Every derived truth here is >= 1, and
 # `0` is this repo's standard way to describe the DEGENERATE case ("would degrade to 0 DSL rules with only
@@ -97,6 +133,36 @@
 #   - arrow/delta shapes such as `(bundled 2 -> replacement 1)` in a test's panic message. The two numbers
 #     on such a line belong to different sides of a comparison; no anchoring distinguishes them, and
 #     guessing wrong would fire on a correct sentence.
+#   - bare `<N> bundled rules` / `<N> shipped rules` — the same noun phrase as claim shape F WITHOUT the
+#     `all`. This is the widening that would actually cover the "bundle size stated in prose" class, and
+#     it was built, run and rejected on 2026-08-13 with numbers rather than with a feeling. Run over the
+#     scan surface at `0009eff`, the needle `[0-9]+ (bundled|shipped) (DSL )?(packs?|rules?)` produced 14
+#     subjects: 2 live defects, 3 already-covered correct claims, 3 skipped by the past-tense anchor, and
+#     SIX false positives on prose that is correct as written. All six are dated historical records, and
+#     the anchor cannot reach any of them, because this repo does not date a claim in one place:
+#       * `<N> of the <M> bundled rules (measured <date>) consult ...` — the date IS positionally right
+#         after the noun, so this one is anchorable; the other five are not.
+#       * `<N> of the <M> bundled rules consult the fragment (measured <date>)` — date at sentence end.
+#       * `<N> of the <M> bundled rules carry a <field> (recounted <date>, after ...)` — date after the
+#         verb phrase.
+#       * `Until <date>, <N> of <M> shipped rules ended ...` — date BEFORE the number, which the header
+#         above already records as unexempted by design.
+#       * two of the form `<N> shipped rules spelled|carried ... until it moved here` — the tense marker
+#         is a past-tense MAIN VERB, which no regex here decides.
+#     Exempting those needs either "a date anywhere on the line" or "any past-tense verb". The first is an
+#     escape hatch — every stale claim on a dated line would pass, and this file's own subject-set-floor
+#     note records what a guard that recites correct numbers while comparing nothing is worth. The second
+#     is not decidable by a shell regex. 2 true positives bought with 6 false alarms on correct sentences
+#     is the ratio that gets a pre-commit guard disabled, so the needle stays where it can be honest.
+#   - and therefore, explicitly: the six stale bundle-size claims the v0.30.0 audit found on 2026-08-13
+#     (`rules/dsl/*/*.rs` x11, `pack_scope/vetoed_files{,_tests}.rs`, `dsl/regex_cache.rs`,
+#     `analyze_uncovered_language.rs`, `analyze_test_path_vocabulary.rs`) were ALL invisible to this
+#     guard, before the widening and after it — measured, not assumed: the run on the unfixed tree that
+#     day was `clean`, 0 of 6. Not one of them spells `DSL`, and none is a totalizing `all <N>`; they say
+#     `<N> pack JSONs`, `<N> of the <M> bundled rules`, `~<N> rules`, `<N> of <M> do now`, `the <N> rules`.
+#     What that class needs is not a wider needle here but the fix those sites got: no number in the prose
+#     at all, or a recount command beside it. This entry exists so the next audit does not read this
+#     guard's green as coverage it never had.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -117,6 +183,7 @@ seen_platform_dirs=""
 abort() { echo "$SELF: $*" >&2; exit 1; }
 
 fail=0
+anchored=0
 report() { # $1=file $2=lineno $3=stated $4=expected $5=what
   echo "$SELF: $1:$2: states $3 $5, but the code says $4" >&2
   fail=1
@@ -306,7 +373,7 @@ fi
 
 # --- Scan tracked *.md / *.html / *.rs --------------------------------------------------------------
 bt='`'
-prefilter='[0-9]+ (bundled )?DSL packs|[0-9]+ packs shipped|[0-9]+ DSL rules|[0-9]+ platforms?|[0-9]+ packages|\([0-9]+ rules?\)|ships [0-9]+ rules?|[0-9]+-rule'
+prefilter='[0-9]+ (bundled )?DSL (packs|rules)|[0-9]+ packs shipped|[0-9]+ platforms?|[0-9]+ packages|\([0-9]+ rules?\)|ships [0-9]+ rules?|[0-9]+-rule|all [0-9]+ (bundled|shipped) (DSL )?(packs|rules)'
 
 candidate_files="$(tracked_files_matching "$prefilter" '*.md' '*.html' '*.rs' '.github/workflows/*.yml' 'scripts/*.sh')" \
   || abort "file enumeration failed"
@@ -318,10 +385,17 @@ done < <(git ls-files -- '*.md' '*.html' '*.rs' '.github/workflows/*.yml' 'scrip
 
 # Subject-set floor (2026-07-29). Every derivation above aborts loudly on a broken parse (zero packs,
 # zero platforms, a disagreeing inventory) — but the SCAN those numbers are compared against had no
-# such floor, so a pathspec that stopped matching printed "clean (0 files scanned; 12 DSL packs, 138
-# DSL rules, 5 platforms, 6 npm packages)" and exited 0. Measured 2026-07-29 by redirecting the globs
-# in a scratch copy. That green is the worst shape available here: it recites four correct derived
-# truths, which reads as proof, while having compared them against nothing.
+# such floor, so a pathspec that stopped matching printed a "clean (0 files scanned; ...)" line that
+# went on to recite that day's pack count, rule count, platform count and npm-package count, and
+# exited 0. Measured 2026-07-29 by redirecting the globs in a scratch copy. That green is the worst
+# shape available here: it recites four correct derived truths, which reads as proof, while having
+# compared them against nothing.
+#
+# The recited numbers are DELIBERATELY not quoted here any more (2026-08-11). Spelled out, they were a
+# frozen record of one 2026-07-29 run — but this guard's own needle cannot tell a historical quotation
+# from a live claim, so the day the pack count moved (12 -> 11, the `typescript` pack leaving the
+# bundled set) this file failed ITSELF. Rewriting the numbers would have falsified the record instead;
+# dropping them keeps the incident readable and leaves nothing for the needle to catch.
 if [ "$total_files" -eq 0 ]; then
   echo "$SELF: FAILED -- enumerated ZERO tracked *.md/*.html/*.rs files. The derived counts below were" >&2
   echo "  computed but compared against no prose at all, so this run proved nothing. An empty subject" >&2
@@ -336,7 +410,11 @@ fi
 pack_alt="$(printf '%s|' "${pack_ids[@]}")"
 pack_alt="${pack_alt%|}"
 q="[${bt}\"]" # a pack id in a per-pack claim is always backtick- or double-quote-delimited
-claim_pattern="[0-9]+ (bundled )?DSL packs?\\b|[0-9]+ packs shipped\\b|[0-9]+ DSL rules?\\b"
+# The trailing group is the historical-claim anchor documented in the header: it is absorbed into the
+# match so the classification loop can drop past-tense claims WITHOUT a second grep or a file list.
+hist_anchor="( then| at the time| back then| used to| before that)?"
+claim_pattern="all [0-9]+ (bundled|shipped) (DSL )?(packs?|rules?)\\b$hist_anchor"
+claim_pattern="$claim_pattern|[0-9]+ (bundled )?DSL (packs?|rules?)\\b$hist_anchor|[0-9]+ packs shipped\\b"
 claim_pattern="$claim_pattern|[0-9]+ platforms?\\b|[0-9]+ packages\\b"
 claim_pattern="$claim_pattern|${bt}($pack_alt)${bt} \\([0-9]+ rules?\\)"
 claim_pattern="$claim_pattern|${q}($pack_alt)${q} ships [0-9]+ rules?"
@@ -367,12 +445,18 @@ while IFS= read -r row; do
   # Zero carve-out -- see the header. `0 DSL rules` / `(0 rules)` describe the degenerate case.
   [ "$stated" -eq 0 ] && continue
 
+  # Historical-claim anchor -- see the header. The adverb is part of the match, so this costs nothing.
+  case "$text" in
+    *" then"|*" at the time"|*" back then"|*" used to"|*" before that")
+      anchored=$((anchored + 1)); continue ;;
+  esac
+
   expected=""
   noun=""
   case "$text" in
-    *"DSL pack"*|*"packs shipped"*)
+    *"DSL pack"*|*"packs shipped"*|*"bundled pack"*|*"shipped pack"*)
       expected="$pack_count"; noun="bundled DSL packs (tracked rules/dsl/**/*.json)" ;;
-    *"DSL rule"*)
+    *"DSL rule"*|*"bundled rule"*|*"shipped rule"*)
       expected="$rules_total"; noun="DSL rules across all bundled packs" ;;
     *platform*)
       expected="$platform_count"; noun="release platforms ($PREBUILD's build-job matrix)" ;;
@@ -408,4 +492,4 @@ if [ "$fail" -ne 0 ]; then
   exit 1
 fi
 
-echo "$SELF: clean ($total_files files scanned; $pack_count DSL packs, $rules_total DSL rules, $platform_count platforms, $npm_package_count npm packages)."
+echo "$SELF: clean ($total_files files scanned, $anchored past-tense claim(s) skipped; $pack_count DSL packs, $rules_total DSL rules, $platform_count platforms, $npm_package_count npm packages)."

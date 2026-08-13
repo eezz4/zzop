@@ -12,10 +12,11 @@ use crate::{Finding, RuleConfig, Severity};
 fn pack(matcher: LineScan) -> RulePackDef {
     RulePackDef {
         id: "p".to_string(),
-        framework: "any".to_string(),
         schema_version: 1,
+        exported_from: None,
         fragments: Default::default(),
         rules: vec![RuleDef {
+            axis: crate::RuleAxis::Defect,
             id: "r".to_string(),
             severity: Severity::Info,
             message: "m".to_string(),

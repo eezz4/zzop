@@ -85,10 +85,10 @@ fn eval_pack_impl(
     let candidates = prefilter
         .as_ref()
         .map(|p| p.compute_candidates(pack.rules.len(), ctx.files));
-    // Built once per pack rather than per rule: the answer is a property of the FILES, and 140 rules
-    // asking it 140 times would be 140 identical walks. `None` = no file in this context declares a
-    // test-only region, which is the case for every language but Rust today and therefore the path that
-    // must cost nothing.
+    // Built once per pack rather than per rule: the answer is a property of the FILES, so asking it
+    // inside the loop below would repeat one identical walk `pack.rules.len()` times. `None` = no file in
+    // this context declares a test-only region, which is the case for every language but Rust today and
+    // therefore the path that must cost nothing.
     let test_regions = TestRegions::build(ctx);
     for (rule_idx, rule) in pack.rules.iter().enumerate() {
         let start_len = out.len();
@@ -190,16 +190,20 @@ fn eval_pack_impl(
 /// almost all of them already want is the wiring nobody connects.
 ///
 /// ## Why it is nonetheless not UNCONDITIONAL — [`RuleDef::scan_test_regions`]
-/// "Almost every" is not "every", and the exception is not cosmetic. Seven credential rules in
-/// `rules/dsl/security/security.json` carry NO `file_exclude_pattern` on purpose, three of them
-/// `critical`, and `private-key-committed`'s shipped message says so outright: *"an actual PEM header
+/// "Almost every" is not "every", and the exception is not cosmetic. A family of credential rules in
+/// `rules/dsl/security/security.json` carries NO `file_exclude_pattern` on purpose — several of them
+/// `critical` — and `private-key-committed`'s shipped message says so outright: *"an actual PEM header
 /// sitting in a test fixture is still a committed key, so this rule scans test paths too, not just
 /// application code."* For that class the COMMIT is the leak — a `-----BEGIN RSA PRIVATE KEY-----` or a
 /// `postgres://user:pw@host` inside `#[cfg(test)] mod tests` is in git history, in every fork and every
 /// clone, and has to be rotated whether or not the surrounding code ships. An unconditional gate deleted
 /// exactly those findings and reported the run clean, which is this repo's cardinal failure. So the gate
 /// is a default with a declared opt-out, and the opt-out's consistency with what the rule PUBLISHES is
-/// itself guarded (`crates/facade/src/test_region_promise_tests.rs`), because a hand list is what rots.
+/// itself guarded (`crates/facade/src/test_region_promise_tests.rs`), because a hand list is what rots —
+/// which is why this paragraph names no size. The family is exactly what
+/// `grep -ho '"scan_test_regions": true' rules/dsl/*/*.json | wc -l` reports; the two counts that used to
+/// stand here (how many rules, how many of them `critical`) had BOTH gone stale by the time anyone reread
+/// them, and neither was load-bearing to the argument.
 ///
 /// ## What it deliberately does not cover
 /// - `Matcher::IoScan`, which is whole-tree (`ir_scan::eval_pack_io_scan`) and never sees a

@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://raw.githubusercontent.com/eezz4/zzop/main/docs/contracts/rule-pack.schema.json",
   "title": "zzop DSL rule pack v1",
-  "description": "The DSL rule-pack contract (docs/rules/dsl-reference.md; crates/core/src/dsl/def/ — the pack/rule envelope in mod.rs, the four matcher shapes in matcher.rs). Field names, required-ness, and defaults below mirror the Rust serde types field-for-field: a field is 'required' here exactly when its Rust struct field has neither #[serde(default)] nor an Option type; DSL pack fields are snake_case (packs are DSL-authored data files, not part of the camelCase JS-facing config boundary). Machine-check a pack without a schema validator via the validate_rule_pack MCP tool / `zzop validate-rule-pack <path>` — both run the engine's own loader judgments (structure only, never rule-quality semantics).",
+  "description": "The DSL rule-pack contract (docs/rules/dsl-reference.md; the serde types under crates/core/src/dsl/def/ — the WHOLE directory, never a named subset of it: this sentence used to list two files and a new one silently fell outside every claim made about the mirror). Field names, required-ness, and defaults below mirror the Rust serde types field-for-field: a field is 'required' here exactly when its Rust struct field has neither #[serde(default)] nor an Option type; DSL pack fields are snake_case (packs are DSL-authored data files, not part of the camelCase JS-facing config boundary). Machine-check a pack without a schema validator via the validate_rule_pack MCP tool / `zzop validate-rule-pack <path>` — both run the engine's own loader judgments (structure only, never rule-quality semantics).",
   "$comment": "TOLERANCE CONTRACT: additionalProperties is true at every object level — the engine's serde derive silently ignores fields it does not recognize (no deny_unknown_fields anywhere in dsl/def/), same tolerant-input philosophy as the envelope schema (docs/adapters/envelope.schema.json). A pack authored against a FUTURE additive field still loads on an older engine. Only an incompatible revision of the matcher/pack shape itself bumps schema_version (see pack_loader::SUPPORTED_DSL_SCHEMA_VERSION's gate).",
   "type": "object",
   "required": ["id", "rules"],
@@ -11,11 +11,6 @@
     "id": {
       "type": "string",
       "description": "Pack id — the prefix of every finding's ruleId (`<pack id>/<rule id>`) and the unit of same-id collision replacement across packDefs/packsDir layers."
-    },
-    "framework": {
-      "type": "string",
-      "default": "any",
-      "description": "Declared target environment (\"any\" | \"react\" | \"prisma\" | ...). Currently informational — parsed and carried on the loaded pack, but no engine code path filters on it today (see docs/rules/dsl-reference.md's Pack shape table). Default \"any\"."
     },
     "schema_version": {
       "type": "integer",
@@ -29,6 +24,11 @@
       "additionalProperties": { "type": "string" },
       "description": "Named regex fragments. A pattern-bearing field below (any field whose description ends '${NAME} fragment reference supported') can be spelled as a whole string EXACTLY `${NAME}` instead of a literal regex — the loader replaces it with the fragment's text before the pack is hashed or evaluated. Merged UNDER a shared bundled fragment set the engine ships (`zzop_core::dsl::fragments`, no filesystem dependency — resolved identically whether the pack arrives from a `packsDir` file or an inline `packDefs` entry): a name declared here WINS a collision against a shared fragment of the same name, letting a pack locally override a shared idiom. `${NAME}` is collision-safe as a sentinel: under the `regex` crate's syntax a bare `{` is only valid as a numeric repetition quantifier, so `${<kebab-case-name>}` can never simultaneously be a value a pack author would hand-write as a real pattern and compile as one. Resolution is single-pass, not recursive — a fragment whose own value is itself a `${...}` reference is a load error, not a silent no-op or a chained expansion. After resolution this map is CLEARED, so a pack authored with fragments and the equivalent pack authored with patterns spelled out inline are load-time indistinguishable (identical cache fingerprint, identical findings). An unresolved/unknown/malformed `${NAME}` reference fails the pack load outright — `zzop validate-rule-pack`/`validate_rule_pack` report it as an issue, same severity as a bad JSON body. Default `{}` for a pack that references only shared fragments, or none at all."
     },
+    "exported_from": {
+      "type": ["object", "null"],
+      "allOf": [{ "$ref": "#/definitions/packExport" }],
+      "description": "RETRIEVAL stamp — where this copy of the pack came from. NOT a version of the pack format and NOT a second schema_version: that field says which pack SHAPE the file is written against and gates loading, this one says which zzop BUILD served these bytes and gates nothing. Do not author it by hand. It is minted into the bytes a shipped binary serves for an exported pack (the example-pack-<stem> contract resource) and is absent from every hand-written pack and every copy taken from a source checkout — absence is the normal, silent state, never a defect. When it IS present and its zzop_version differs from the running engine's, each run emits one warnings entry naming both versions and the resource to re-read: a copy retrieved from an older build keeps running that build's rule set, and rules move between packs (and in and out of the bundle) from release to release, so the difference is worth saying even though nothing is skipped and the pack stays fully valid."
+    },
     "rules": {
       "type": "array",
       "items": { "$ref": "#/definitions/rule" },
@@ -36,12 +36,26 @@
     }
   },
   "definitions": {
+    "packExport": {
+      "$comment": "Deliberately declares no `type`: the referring property (exported_from) owns the object/null choice, and repeating \"type\": \"object\" here would make a null value fail this allOf branch. properties/required apply only to object instances, so a null passes vacuously.",
+      "required": ["zzop_version", "contract"],
+      "additionalProperties": true,
+      "properties": {
+        "zzop_version": { "type": "string", "description": "The zzop version whose binary served these bytes. Compared against the running engine's own version as a plain string — any difference is reported, patch-level included, because a rule moving between packs is an ordinary change rather than a minor-version event." },
+        "contract": { "type": "string", "description": "The contract-resource name these bytes were served under (example-pack-<stem>), so the remedy names something that actually resolves. Carried rather than derived from the pack id on purpose: examples/packs/typescript-lint.json declares its id as \"typescript\", so a name assembled from the id would point at nothing." }
+      }
+    },
     "rule": {
       "type": "object",
       "required": ["id", "severity", "message", "matcher"],
       "additionalProperties": true,
       "properties": {
-        "id": { "type": "string", "description": "Rule id — combined with the pack id as `<pack id>/<rule id>` in findings. Also the sole source of the rule's inline suppress marker, which is DERIVED as `zzop-<rule id>-ok` (never authored as a field): a `// zzop-<rule id>-ok` comment on the finding's line or the line above suppresses it (`-- zzop-<rule id>-ok` in .sql files; `#` is honored too on the channels whose anchor line can come from any language, so a Python `#` marker works there, AND — per file, on every channel — in the config-file family where `#` is the only comment leader: .properties/.yaml/.yml/.toml/.ini/.conf/.cfg plus `.env` and its `.env.*` siblings). Note the marker carries the `zzop-` tool prefix but NO pack prefix — rule `security/hardcoded-secret` suppresses on `// zzop-hardcoded-secret-ok`. Renaming a rule therefore renames its marker too." },
+        "id": { "type": "string", "description": "Rule id — combined with the pack id as `<pack id>/<rule id>` in findings. Also the sole source of the rule's inline suppress marker, which is DERIVED as `zzop-<rule id>-ok` (never authored as a field): a `// zzop-<rule id>-ok` comment on the finding's line or the line above suppresses it (`-- zzop-<rule id>-ok` in .sql files; `#` is honored too on the channels whose anchor line can come from any language, so a Python `#` marker works there, AND — per file, on every channel — in every extension whose ONLY comment leader is `#`: .properties/.yaml/.yml/.toml/.ini/.conf/.cfg, `.env` and its `.env.*` siblings, and .py. That roster is not authored here: `HASH_COMMENT_EXTENSIONS` in `crates/core/src/dsl/markers/path.rs` owns it, and this list is a copy that must be re-read against it — .py was added on 2026-08-12 and three shipped sentences went on denying it). Note the marker carries the `zzop-` tool prefix but NO pack prefix — rule `security/hardcoded-secret` suppresses on `// zzop-hardcoded-secret-ok`. Renaming a rule therefore renames its marker too." },
+        "axis": {
+          "enum": ["defect", "opinion"],
+          "default": "defect",
+          "description": "What KIND of claim this rule makes (zzop_core::dsl::RuleAxis, kebab-case serde form) — the question a reader needs answered before deciding whether a finding is a bug report or a style note. `defect`: wrong regardless of house taste, nobody deliberately ships it (SQL injection, a committed credential, an unauthenticated mutating route). `opinion`: a preference about how code is arranged, where a project that deliberately does the flagged thing is NOT wrong — it disagrees (barrel discipline, `SELECT *`, eager ORM relations). `severity` does NOT stand in for this and was measured not to: it encodes CONFIDENCE x BLAST RADIUS, a different question, so the `info` band holds a real unauthenticated write beside a pure preference and the `warning` band holds opinions. Defaults to `defect` when absent, for two reasons — a pack authored before this field (and every third-party pack) keeps loading unchanged, and a rule that FORGOT to declare should read as the STRONGER claim and be argued down in review rather than quietly demoted to \"just an opinion\". ⚠ THAT DEFAULT MAKES AN ABSENT FIELD AND A DELIBERATE `\"axis\": \"defect\"` INDISTINGUISHABLE ONCE THE PACK IS PARSED — no engine surface can tell them apart, so this field is optional but declaring it is the right call. Packs shipped from this repo may not rely on the default at all: `rule_contracts::rule_axis::every_shipped_rule_declares_its_axis` reads the pack JSON TEXT rather than the loaded rule, because only the text can distinguish a declaration from a silence. A third-party pack has no such test over it, which is exactly why writing the field by hand is worth it — twelve rules that stopped declaring it were described as axis-less by two documents in two days when they were in fact loading as `defect`. Declaring `opinion` carries one obligation: you must be able to name the case in which the flagged shape is the RIGHT call, and the rule's `message` should say so."
+        },
         "severity": {
           "enum": ["critical", "warning", "info"],
           "description": "Finding severity (zzop_core::Severity, lowercase serde form)."

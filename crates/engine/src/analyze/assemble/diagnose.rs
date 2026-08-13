@@ -76,6 +76,13 @@ pub(super) fn sweep(
     warnings.extend(pack_scope_warnings(config, &dsl_scope));
     warnings.extend(uncompilable_rule_warnings(&config.packs)); // dead rule != quiet rule
 
+    // Same subject as the line above — a property of the LOADED pack set, not of this tree — and the
+    // same reason it is disclosed rather than fixed by construction: two packs whose rules share a
+    // bare id derive the SAME `zzop-<id>-ok` marker, so one vetted suppression comment silently
+    // silences both. See `zzop_core::suppress_marker_collisions` for why the marker grammar is not
+    // namespaced away instead.
+    warnings.extend(zzop_core::suppress_marker_collisions(&config.packs));
+
     warnings.extend(super::warnings::framework_silence_warnings(
         input.root,
         io_provides,
@@ -86,6 +93,7 @@ pub(super) fn sweep(
         input.package_import_files,
         input.loc_by_path,
         &config.vocabulary.resolve().fetch_wrapper_export_names,
+        &config.rule_config,
     ));
 
     dsl_scope

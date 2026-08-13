@@ -92,6 +92,7 @@ fn base() -> CrossLayerResult {
         external_consumes: Vec::new(),
         ambiguous_consumes: Vec::new(),
         host_rekey_counts: Vec::new(),
+        wildcard_route_partitions: Vec::new(),
     }
 }
 

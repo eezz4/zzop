@@ -40,6 +40,6 @@ languages while it covered one.
 * **No high-entropy or secret-shaped literals.** Several security rules deliberately carry NO test-path
   exclusion (`scan_test_regions: true` — a credential at rest is committed either way), so a secret in a
   test twin would be a legitimate finding and would turn a control into a false positive against itself.
-* **`services/` is load-bearing** for the Go and Python pairs: `reliability/console-in-be` is gated on a
+* **`services/` is load-bearing** for the Go and Python pairs: `code-hygiene/console-in-be` is gated on a
   backend path segment, so those pairs would lose that rule's coverage anywhere else. The C# pair uses
   rules gated on the extension alone, which is what lets it sit at the idiomatic `Api.Tests/` location.

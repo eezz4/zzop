@@ -74,8 +74,17 @@ pub const SCORE_MEANINGS: &[(&str, &str)] = &[
     ),
     (
         "publicApi",
-        "Barrel discipline: the share of cross-module imports that go through a module's index rather \
-         than deep-pathing into its internals. Low means module boundaries are routinely bypassed.",
+        "Barrel discipline: the share of cross-module imports that land on another module's TOP LEVEL \
+         — its `index` barrel or any other file directly under it — rather than deep-pathing into a \
+         subdirectory. Low means module boundaries are routinely bypassed. This one is a convention, \
+         not a defect: a project that deliberately deep-imports is not wrong, it scores low. READ IT \
+         AGAINST `totalCrossModuleImports`, because a MODULE here is a declared feature-sliced slice \
+         or base directory, else the first path segment — so a repository that keeps all its code \
+         under one top-level directory (a single `src/`, a Maven `src/main/`) has almost no imports \
+         that cross a module at all, and scores 100 on an EMPTY denominator. A 100 beside \
+         `totalCrossModuleImports: 0` means this tree's layout gave the metric nothing to judge, \
+         never that its boundaries are clean; `health.contributors` says the same thing there by \
+         reporting `population: 0` and dropping the metric from `pain`.",
     ),
     (
         "fileSizeCompliance",

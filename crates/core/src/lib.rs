@@ -48,19 +48,20 @@ pub use schema::{FieldAttr, SchemaEnum, SchemaField, SchemaModel, SchemaUsage};
 
 pub use dsl::{
     apply_attr_gates, eval_pack, eval_pack_io_scan, FragmentError, IoDirection, IoScan,
-    IoScanTreeContext, LabeledPattern, LineScan, Matcher, MethodScan, RuleContext, RuleDef,
-    RulePackDef, SourceFile, SymbolScan, NEAR_MISS_MARKER_TOKEN_PATTERN,
+    IoScanTreeContext, LabeledPattern, LineScan, Matcher, MethodScan, RuleAxis, RuleContext,
+    RuleDef, RulePackDef, SourceFile, SymbolScan, NEAR_MISS_MARKER_TOKEN_PATTERN,
 };
 pub use dsl::{leaders_for_path, strip_comment_leader, Leaders};
 
 pub use finding::{disable_hint, Finding, RuleExplain, Severity};
 pub use graph::{circular_from_dep, circular_from_dep_excluding, find_cycles, ComponentEdge};
 pub use io::{
-    classify_consume_join, db_table_channel_casing, http_consume_interface_key, http_interface_key,
-    key_carries_route_identity, link_cross_layer_io, normalize_http_path, unknown_verb_route_path,
-    AmbiguousConsume, ConsumeBodyShape, ConsumeJoin, CrossLayerEdge, CrossLayerResult, IoConsume,
-    IoFacts, IoKind, IoProvide, LinkOptions, ProvideBodyField, ProvideBodyShape,
-    ProvideResponseShape, SourceIo, HTTP_KEY_VERBS, RULE_READ_IO_KINDS, UNKNOWN_VERB,
+    ant_path_matches, classify_consume_join, db_table_channel_casing, http_consume_interface_key,
+    http_interface_key, key_carries_route_identity, link_cross_layer_io, normalize_http_path,
+    unknown_verb_route_path, wildcard_route_covers, wildcard_route_path, AmbiguousConsume,
+    ConsumeBodyShape, ConsumeJoin, CrossLayerEdge, CrossLayerResult, IoConsume, IoFacts, IoKind,
+    IoProvide, LinkOptions, ProvideBodyField, ProvideBodyShape, ProvideResponseShape, SourceIo,
+    WildcardRoutePartition, HTTP_KEY_VERBS, RULE_READ_IO_KINDS, UNKNOWN_VERB,
 };
 pub use ir::{
     ApiEndpoint, CommonIr, DepGraph, ImportBinding, ImportMap, MinimalIr, NonIdempotentKind,
@@ -77,8 +78,9 @@ pub use normalized::{
     NORMALIZED_AST_FORMAT, SUPPORTED_NORMALIZED_AST_VERSION,
 };
 pub use pack_loader::{
-    applies_to, check_dsl_schema_version, load_dsl_packs, pack_regex_issues,
-    pack_retired_field_issues, parse_dsl_pack, LoadResult, PackLoadError,
+    applies_to, check_dsl_schema_version, load_dsl_packs, pack_export_staleness, pack_regex_issues,
+    pack_retired_field_issues, parse_dsl_pack, suppress_marker_collisions, LoadResult,
+    PackLoadError,
 };
 pub use paths::is_test_file;
 pub use recognizer::FrameworkRecognizer;

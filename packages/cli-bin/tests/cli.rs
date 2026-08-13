@@ -660,17 +660,46 @@ fn explain_reports_an_io_scan_rules_real_exclusion_fields() {
 /// The ATTRIBUTE-gate lane of the same contract. It matters more than the regex lanes: with
 /// `require_attr_declared` set and nothing declaring that key, the rule does not run AT ALL, so a reader
 /// who cannot see the field reads the resulting silence as a false negative — the exact misreading this
-/// section exists to prevent. `reliability/env-outside-config` is the shipped rule that lives on all
-/// three fields; it went silent-by-default in v0.24.0, which is when a reader most needs to be told why.
+/// section exists to prevent. `env-outside-config` is the rule that lives on all three fields; it went
+/// silent-by-default in v0.24.0, which is when a reader most needs to be told why.
 ///
 /// The rule moved from `line-scan` to `call-scan` in 2026-08-03's call-site wave, and the matcher kind is
 /// asserted here rather than left loose precisely because the three gates are declared SEPARATELY on each
 /// matcher struct: a migration that carried the rule across but dropped a gate would otherwise turn this
 /// rule permanently silent-or-permanently-loud with nothing red. `docs/rules/dsl-reference.md`'s
 /// attribute-gate table is where the two matchers' identical semantics are stated.
+///
+/// ⚠ THE SUBJECT LEFT THE BUNDLE on 2026-08-12 (`reliability/env-outside-config` ->
+/// `code-hygiene/env-outside-config`, `examples/packs/code-hygiene.json`, `axis: opinion`), and it was
+/// the ONLY bundled rule carrying attribute gates on a `call-scan` matcher — recounted at export time
+/// across all 11 bundled packs, the only other attribute-gated rule being `io-scan`'s
+/// `http/protected-path-no-auth-evidence`. So this test could not be repointed at a bundled sibling the
+/// way the `sql/select-star` probe was in the previous increment: there is none. It runs through the
+/// `--config` lane instead, over a tree that has RECOVERED the exported pack under `zzop/rules/` — which
+/// is the documented way to get the rule back, so the lane the proof rides is one a user actually walks.
+/// The per-field completeness sweep over every matcher struct (including kinds no pack ships) is
+/// independent of any shipped rule and lives in `crates/facade/src/explain/field_coverage_tests.rs`;
+/// this is the end-to-end half.
 #[test]
 fn explain_reports_a_call_scan_rules_attribute_gates() {
-    let out = run(&["explain", "reliability/env-outside-config"]);
+    let dir = TempDir::new("zzop-cli-explain-gates");
+    dir.write("zzop.config.jsonc", "{}");
+    let pack = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/packs/code-hygiene.json")
+        .canonicalize()
+        .expect("the exported pack must exist to be recovered");
+    let recovered = dir.path().join("zzop/rules");
+    std::fs::create_dir_all(&recovered).expect("create zzop/rules");
+    std::fs::copy(&pack, recovered.join("code-hygiene.json")).expect("recover the exported pack");
+
+    let config = dir.path().join("zzop.config.jsonc");
+    let cp = config.to_str().expect("temp path is UTF-8").to_string();
+    let out = run(&[
+        "explain",
+        "code-hygiene/env-outside-config",
+        "--config",
+        &cp,
+    ]);
     assert!(out.status.success(), "stderr: {}", stderr(&out));
     let text = stdout(&out);
     assert!(text.contains("matcher: call-scan"), "got: {text}");
@@ -685,6 +714,15 @@ fn explain_reports_a_call_scan_rules_attribute_gates() {
     }
     // Printed even when unset, same as the regex lanes: the reader learns which gates the matcher offers.
     assert!(text.contains("attr_present: no"), "got: {text}");
+
+    // The other half, and what makes the first worth having: the OLD id is gone from the bundle. Without
+    // this, a future re-bundling would leave the test above passing through a lane nobody needs.
+    let bundled = run(&["explain", "reliability/env-outside-config"]);
+    assert!(
+        !bundled.status.success(),
+        "if this id became bundled again, re-read this test's doc before simplifying it: {}",
+        stdout(&bundled)
+    );
 }
 
 /// The POSITIVE half, end to end, and the pin that other documents now rest on. Nine verbatim copies of
@@ -924,6 +962,89 @@ fn explain_usage_errors_exit_two() {
         !stderr(&flag_like).contains("unknown rule id"),
         "a dash-shaped arg must never be treated as a query: {}",
         stderr(&flag_like)
+    );
+
+    // `--config` is the one flag this subcommand takes, so its own grammar joins the usage lane: a
+    // dangling flag and a config with no id are both usage errors, not lookup failures.
+    let dangling = run(&["explain", "sql/nplus1", "--config"]);
+    assert_eq!(
+        dangling.status.code(),
+        Some(2),
+        "--config with no path is a usage error"
+    );
+    let no_id = run(&["explain", "--config", "zzop.config.jsonc"]);
+    assert_eq!(
+        no_id.status.code(),
+        Some(2),
+        "a config with no rule id is a usage error"
+    );
+    assert!(stderr(&no_id).contains("one id"), "got: {}", stderr(&no_id));
+}
+
+/// The RETRIEVAL loop's last step, at the wire, with the REAL exported pack: a rule that left the
+/// bundled set is saved under a tree's `zzop/rules/`, and `explain --config` answers about it while the
+/// bundled-only form of the identical command does not.
+///
+/// The pack and the rule id are read out of `examples/packs/` rather than written here, so this test
+/// follows whatever is actually exported today (it was the `typescript` pack on 2026-08-12) instead of
+/// pinning a name that the next pack move would falsify. Both halves are asserted: the bundled-only
+/// failure is what makes the config form worth having, and its message must be the thing that names
+/// the config form — otherwise a reader who hits it has nowhere to go.
+#[test]
+fn explain_config_reaches_a_recovered_pack_the_binary_does_not_carry() {
+    let exported = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/packs");
+    let mut packs: Vec<PathBuf> = std::fs::read_dir(&exported)
+        .expect("examples/packs must exist — it is the retrieval channel's source")
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x == "json"))
+        .collect();
+    packs.sort();
+    let Some(pack_path) = packs.first() else {
+        // Not a failure: an empty export directory means no rule has left the bundle yet, so there is
+        // no recovered rule for this lane to reach. `contracts_tests.rs` owns the floor that catches a
+        // BROKEN export walk; this lane simply has no subject.
+        return;
+    };
+    let source = std::fs::read_to_string(pack_path).expect("an exported pack is readable");
+    let pack = zzop_core::parse_dsl_pack(&source).expect("an exported pack must still load");
+    let rule = pack.rules.first().expect("an exported pack carries rules");
+    let full_id = format!("{}/{}", pack.id, rule.id);
+
+    let dir = TempDir::new("zzop-explain-recovered");
+    dir.write("zzop.config.jsonc", "{}");
+    dir.write(
+        &format!(
+            "zzop/rules/{}",
+            pack_path.file_name().unwrap().to_str().unwrap()
+        ),
+        &source,
+    );
+    let config = dir.path().join("zzop.config.jsonc");
+    let config = config.to_str().expect("temp path is UTF-8");
+
+    let with_config = run_in(dir.path(), &["explain", &full_id, "--config", config]);
+    assert!(
+        with_config.status.success(),
+        "a pack recovered into zzop/rules/ must be explainable through its config, stderr: {}",
+        stderr(&with_config)
+    );
+    assert!(
+        stdout(&with_config).contains(&full_id),
+        "the rendered rule must name the id asked for: {}",
+        stdout(&with_config)
+    );
+
+    let bundled_only = run_in(dir.path(), &["explain", &full_id]);
+    assert_eq!(
+        bundled_only.status.code(),
+        Some(1),
+        "an exported pack's rule is not compiled in — if this became exit 0, the pack came back into \
+         the bundle and this test's premise changed"
+    );
+    assert!(
+        stderr(&bundled_only).contains("--config"),
+        "the bundled-only failure is the only place a reader learns the config form exists: {}",
+        stderr(&bundled_only)
     );
 }
 
@@ -1277,7 +1398,7 @@ fn facts_is_byte_stable_and_carries_the_whole_join_for_multiple_trees() {
         "tree order follows the request, not a re-sort (the crossLayer buckets are accumulated in \
          that same order)"
     );
-    // All seven join buckets are materialized — the adequacy substrate. `unprovidedConsumes` carries
+    // All eight join buckets are materialized — the adequacy substrate. `unprovidedConsumes` carries
     // the fixture's dangling `/api/users` call, with the site a rule program would report.
     for bucket in [
         "edges",
@@ -1287,6 +1408,7 @@ fn facts_is_byte_stable_and_carries_the_whole_join_for_multiple_trees() {
         "externalConsumes",
         "ambiguousConsumes",
         "hostRekeyCounts",
+        "wildcardRoutePartitions",
     ] {
         assert!(
             v["crossLayer"][bucket].is_array(),
@@ -1683,7 +1805,12 @@ fn the_config_making_and_self_describing_lanes_still_run_without_a_config() {
     for argv in [
         vec!["contract"],
         vec!["contract", "config-template"],
-        vec!["explain", "no-explicit-any"],
+        // Any BUNDLED rule id works here — the subject is "explain needs no config", not this rule.
+        // It was `no-explicit-any` until 2026-08-11, when the `typescript` pack moved out of the
+        // bundled set to `examples/packs/` (that directory's README carries why), and `explain` then
+        // correctly answered "unknown rule id". Picked a `security` id because that pack is the least
+        // likely of the eleven to move.
+        vec!["explain", "hardcoded-secret"],
         vec!["version"],
         vec!["help"],
     ] {
@@ -1792,4 +1919,108 @@ fn file_source_id_without_a_value_is_a_usage_error() {
     let out = run(&["file", "index.ts", "--source-id"]);
     assert_eq!(out.status.code(), Some(2), "{}", stdout(&out));
     assert!(stderr(&out).contains("--source-id"), "{}", stderr(&out));
+}
+
+// ── the two lanes whose EXIT CODE is the product ──────────────────────────────────────────────
+//
+// `validate-envelope` and `validate-rule-pack` are documented as "exit 0 valid / 1 invalid" in five
+// places (`main.rs`, `help.rs` ×2, `packages/README.md`, `docs/recipes/write-an-adapter.md`), and until
+// 2026-08-11 the code computing that exit lived here with no test at any level. The validators
+// themselves are well covered in `crates/`; what was unguarded is `run_file_validate`'s reparse of its
+// own report plus the `.unwrap_or(false)` fallback that treats an unreadable report as invalid — a
+// change to the report's shape would have flipped EVERY envelope to exit 1 with the whole suite green.
+//
+// The third case is the one a CI author actually needs: exit 1 is overloaded, and stdout-emptiness is
+// the documented disambiguator (`docs/getting-started.md`'s exit-code table). Pinning it here is what
+// makes that table a checked claim rather than prose.
+
+#[test]
+fn validate_envelope_exits_zero_on_a_valid_document() {
+    let dir = TempDir::new("zzop-validate-ok");
+    let envelope = run(&["contract", "example-envelope"]);
+    assert_eq!(
+        envelope.status.code(),
+        Some(0),
+        "fixture must come from the shipped contract, not a hand-written copy"
+    );
+    dir.write("ok.json", &stdout(&envelope));
+
+    let out = run(&[
+        "validate-envelope",
+        dir.path().join("ok.json").to_str().unwrap(),
+    ]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stdout: {} stderr: {}",
+        stdout(&out),
+        stderr(&out)
+    );
+    assert!(
+        stdout(&out).contains("\"valid\""),
+        "the report still rides stdout: {}",
+        stdout(&out)
+    );
+}
+
+#[test]
+fn validate_envelope_exits_one_with_a_report_when_the_document_is_invalid() {
+    let dir = TempDir::new("zzop-validate-bad");
+    dir.write("bad.json", "{\"invalid\":true}");
+
+    let out = run(&[
+        "validate-envelope",
+        dir.path().join("bad.json").to_str().unwrap(),
+    ]);
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "an invalid document is exit 1, not 0"
+    );
+    let report = stdout(&out);
+    assert!(
+        !report.is_empty(),
+        "a JUDGED document puts its report on stdout — that emptiness is the CI disambiguator"
+    );
+    assert!(
+        report.contains("\"valid\":false") || report.contains("\"valid\": false"),
+        "{report}"
+    );
+}
+
+#[test]
+fn validate_envelope_exits_one_with_empty_stdout_when_the_file_cannot_be_read() {
+    let dir = TempDir::new("zzop-validate-missing");
+    let out = run(&[
+        "validate-envelope",
+        dir.path().join("nope.json").to_str().unwrap(),
+    ]);
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "unreadable shares exit 1 with invalid — by design"
+    );
+    assert!(
+        stdout(&out).is_empty(),
+        "NOTHING was judged, so nothing may ride stdout; this is the only signal separating the two meanings of exit 1: {}",
+        stdout(&out)
+    );
+    assert!(!stderr(&out).is_empty(), "the reason belongs on stderr");
+}
+
+#[test]
+fn validate_rule_pack_exits_one_with_a_report_when_the_pack_is_invalid() {
+    let dir = TempDir::new("zzop-validate-pack");
+    dir.write("bad.json", "{\"not\":\"a pack\"}");
+
+    let out = run(&[
+        "validate-rule-pack",
+        dir.path().join("bad.json").to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr(&out));
+    assert!(
+        !stdout(&out).is_empty(),
+        "the pack's issues ride stdout: {}",
+        stderr(&out)
+    );
 }

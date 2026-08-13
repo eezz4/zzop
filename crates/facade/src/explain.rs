@@ -1,9 +1,14 @@
-//! `zzop explain <rule-id>` — a read-only lookup straight from the DSL rule data compiled INTO this
-//! binary (`zzop_config::BUNDLED_PACK_SOURCES`, parsed with the same loader path the engine uses:
-//! `zzop_core::parse_dsl_pack`), so the answer can never drift from what the engine actually runs.
-//! NEVER reads `docs/rules/catalog.md` prose. CLI-only: MCP already reaches the same rule data through
-//! the `rule-catalog` embedded-contract resource (`zzop://contract/rule-catalog`,
-//! `zzop_summary::contracts`), so this has no `tools/call` twin.
+//! `zzop explain <rule-id> [--config <path>]` — a read-only lookup straight from the DSL rule data the
+//! engine itself would run, parsed with the same loader path (`zzop_core::parse_dsl_pack`), so the
+//! answer can never drift from what actually runs. NEVER reads `docs/rules/catalog.md` prose. CLI-only:
+//! MCP already reaches the same rule data through the `rule-catalog` embedded-contract resource
+//! (`zzop://contract/rule-catalog`, `zzop_summary::contracts`), so this has no `tools/call` twin.
+//!
+//! WHICH rule data is the [`Corpus`] axis, and it is the one thing a caller chooses. Bare [`explain`]
+//! reads the packs compiled into this binary (`zzop_config::BUNDLED_PACK_SOURCES`).
+//! [`explain_with_config`] reads the packs a CONFIG's trees actually load — the bundled ones plus every
+//! `zzop/rules/` and `packs.extraDirs` directory those trees name. See [`from_config`] for why the
+//! second form had to exist and why it is not the default.
 //!
 //! Accepted id forms: the full `<pack>/<rule>` id every finding's `ruleId` already carries, and a bare
 //! `<rule>` id when it is unambiguous across every bundled pack (checked in that order — a full-form
@@ -18,7 +23,9 @@
 //!   (`disclosure[].id` / `.group`) or a recommendation id (`architecture.topRecommendation.id`), all
 //!   three printed under a field literally named `id`/`group` in every analyze reply (see
 //!   [`output_ids`]);
-//! - the id is unknown outright — pointed at `zzop contract rule-catalog` for the full prose list.
+//! - the id is unknown outright — pointed at `zzop contract rule-catalog` for the full prose list, plus
+//!   the [`Corpus`]-specific tail (a bundled-only lookup names `--config`, because "unknown" there is
+//!   the exact answer a retrieved pack's rule id gets and the reader has no other way to learn why).
 //!
 //! ## The bare-native-id lane
 //! Two native families namespace their ids with a `/`: `cross-layer/*` and `schema/*`. A reader who types
@@ -57,21 +64,41 @@
 
 #[cfg(test)]
 mod field_coverage_tests;
+mod from_config;
 mod output_ids;
 mod render;
 mod scope;
 #[cfg(test)]
 mod tests;
 
+pub use from_config::explain_with_config;
 use render::render;
 use zzop_core::{RuleDef, RulePackDef, RuleRegistry};
 
+/// Which pack corpus a lookup searched. Read ONLY by the unknown-id lane, to shape its tail — every
+/// other lane's message is corpus-independent, because every other lane names something the query
+/// itself is (a pack, a native id, an output id) rather than something the search failed to contain.
+#[derive(Clone, Copy)]
+pub(crate) enum Corpus<'a> {
+    /// The packs compiled into this binary — [`explain`].
+    Bundled,
+    /// The packs a config's trees load — [`explain_with_config`]. Carries the config path so the
+    /// failure names the file whose pack set was actually searched, not "a config": pointing at the
+    /// wrong config is itself a way to get "unknown" for a rule that does load.
+    Config(&'a str),
+}
+
 /// `zzop explain <rule-id>` — `Ok` is the rendered rule text (print to stdout, exit 0), `Err` is a
-/// caller-facing message for one of the three lookup-failure lanes described in the module doc (print
+/// caller-facing message for one of the lookup-failure lanes described in the module doc (print
 /// to stderr, exit 1). Loads the real bundled packs and the real native-analysis registry fresh on
 /// every call — a single lookup is not worth caching across the process lifetime of a one-shot CLI run.
 pub fn explain(query: &str) -> Result<String, String> {
-    explain_over(&bundled_packs(), &native_analysis_ids(), query)
+    explain_over(
+        &bundled_packs(),
+        &native_analysis_ids(),
+        query,
+        Corpus::Bundled,
+    )
 }
 
 /// Every bundled DSL pack, parsed fresh with the exact loader path the engine itself uses
@@ -94,7 +121,14 @@ fn bundled_packs() -> Vec<RulePackDef> {
 /// ...) — read off the real registry `zzop_engine::register_all_native` populates, never a hand-copied
 /// list, so the "this id is native, not missing" lane can't drift from what the engine actually
 /// registers either.
-fn native_analysis_ids() -> Vec<String> {
+///
+/// `pub` since 2026-08-12 for a SECOND caller with the same question: `zzop-summary`'s findings-view
+/// filter has to tell "no findings for this rule" from "no such rule", and a bare (`/`-less) `--rule`
+/// argument can only ever be a native id — a DSL finding's `rule_id` is always `"<pack>/<rule>"`. The
+/// summary crate is layered above the facade and must not reach past it to `zzop-engine` (see
+/// `lib.rs`'s re-export doc for the same rule applied to `disclosure_counts`/`SCORE_MEANINGS`), so the
+/// registry read lives here and is exported rather than duplicated there.
+pub fn native_analysis_ids() -> Vec<String> {
     let mut registry = RuleRegistry::new();
     zzop_engine::register_all_native(&mut registry);
     registry.ids().to_vec()
@@ -120,6 +154,7 @@ fn explain_over(
     packs: &[RulePackDef],
     native_ids: &[String],
     query: &str,
+    corpus: Corpus<'_>,
 ) -> Result<String, String> {
     // Full `<pack>/<rule>` form, checked first: an exact `pack.id/rule.id` match resolves
     // deterministically even on a bare id that would also be ambiguous elsewhere.
@@ -211,6 +246,27 @@ fn explain_over(
     }
 
     Err(format!(
-        "unknown rule id {query:?} — see `zzop contract rule-catalog` for the full list of rule ids."
+        "unknown rule id {query:?} — see `zzop contract rule-catalog` for the full list of rule ids.{}",
+        match corpus {
+            // The tail that closes the retrieval loop. A rule that left the bundle and was recovered
+            // into `zzop/rules/` RUNS — it appears in `packsLoaded` and its findings carry this exact
+            // id — while this lookup, reading only compiled-in packs, calls the id unknown. Without
+            // this sentence the two surfaces simply disagree and the reader has nothing to go on.
+            Corpus::Bundled =>
+                " This searched only the packs compiled into this binary; a rule from a pack in \
+                 `zzop/rules/` or `packs.extraDirs` is not among them — re-run as `zzop explain \
+                 <rule-id> --config <path>` to search the packs a run over that config actually loads."
+                    .to_string(),
+            // The symmetric answer once they HAVE done that: the remaining ways to still miss are a
+            // config that names other trees, or a pack that failed to load (a warning the analyze
+            // reply carries and this lookup deliberately does not — see `bundled_packs`' doc).
+            // Backticks, not `{path:?}`: a Windows path debug-formats with every separator escaped
+            // (`C:\\Users\\...`), which is not a path the reader can copy back into a command.
+            Corpus::Config(path) => format!(
+                " The packs `{path}` loads were searched too — `packsLoaded` in that config's `zzop \
+                 analyze` reply names every pack that did load, and its `warnings` name any that \
+                 failed to."
+            ),
+        }
     ))
 }

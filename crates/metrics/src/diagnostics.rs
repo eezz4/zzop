@@ -87,6 +87,33 @@ pub struct DiagnosticsInput {
     /// `suppressions` entry's `rule` matched something, or when the caller has not wired this check.
     #[serde(default)]
     pub unknown_suppression_rule_ids: Vec<String>,
+    /// `RuleConfig::only_packs` entries that matched no LOADED pack id — the pack ALLOWLIST's own
+    /// unknown-id self-report, and the one member of this family whose failure is not "did nothing".
+    ///
+    /// `registry::is_pack_enabled` admits a pack only when a non-empty allowlist names it, so an
+    /// allowlist made entirely of typos admits NOTHING and **every DSL finding disappears at once** —
+    /// the opposite sign from `unknown_disabled_rule_ids`, where a typo under-suppresses. That makes
+    /// this the most dangerous of the four typos and, until 2026-08-11, the only one with no wire
+    /// receipt: `AnalyzeOutput::rule_overrides_applied`'s `only: []` was documented as the signal, but
+    /// it is also what a run produces when `only_packs` was never set and some OTHER knob was, so the
+    /// two states were byte-identical on the wire outside the bare case. Measured on identical source:
+    /// with `rules: {x: "off"}` also present, `packs.only: ["typo"]` and no allowlist at all differed
+    /// in no field but `findings`.
+    ///
+    /// The known-id set is the LOADED pack ids alone — not the `known_rule_ids` union the three fields
+    /// above use — because `is_pack_enabled` compares an entry against `pack.id` and nothing else, so a
+    /// `"<pack>/<rule>"` id or a native-analysis id here gates nothing and is genuinely unknown.
+    /// Empty (the default) when every entry named a loaded pack, when none were given, or when the
+    /// caller has not wired this check.
+    #[serde(default)]
+    pub unknown_only_pack_ids: Vec<String>,
+    /// Whether `only_packs` was non-empty AND *no* entry matched a loaded pack — the total-typo case,
+    /// where the allowlist silently gates every DSL rule off. Passed separately rather than derived
+    /// from `unknown_only_pack_ids.len()` because this module never sees how many entries were
+    /// REQUESTED: a partial typo (one good id, one bad) leaves the run working and deserves a milder
+    /// sentence than a run that just lost its whole DSL surface.
+    #[serde(default)]
+    pub only_packs_matched_nothing: bool,
 }
 
 /// Extends the counts of `DiagnosticsInput` with warnings. Rust has no struct inheritance, so the input is
@@ -120,7 +147,7 @@ impl std::ops::Deref for AnalysisDiagnostics {
 }
 
 /// Pluralizes a count ('1 entry' / 'N entries').
-fn entry_count(n: usize) -> String {
+pub(super) fn entry_count(n: usize) -> String {
     if n == 1 {
         "1 entry".to_string()
     } else {
@@ -212,58 +239,18 @@ pub fn build_diagnostics(i: DiagnosticsInput) -> AnalysisDiagnostics {
         }
     }
 
-    // Unlike every other check above, this one is not "empty/degenerate output" — it flags a config entry
-    // that had NO effect at all (a typo'd/stale `disabled_rules` id), which is otherwise indistinguishable
-    // from a working exclusion (see `unknown_disabled_rule_ids`'s doc). This is a CONFIG problem, not a
-    // degenerate-output signal, so it rides `config_warnings` (not `warnings`) — see `AnalysisDiagnostics::
-    // config_warnings`'s doc for why this module still computes it despite the split.
-    if !i.unknown_disabled_rule_ids.is_empty() {
-        let mut ids = i.unknown_disabled_rule_ids.clone();
-        ids.sort();
-        ids.dedup();
-        config_warnings.push(format!(
-            "disabled rules have {} matching no known rule id: {} — these did NOT disable anything (check for a typo; a valid id is a bare pack id, a native analysis id, or a \"<pack>/<rule>\" id; config dialect `rules: {{ \"<id>\": \"off\" }}` for a rule id, or `packs.disabled` for a bare pack id; embedders: `disabledRules`).",
-            entry_count(ids.len()),
-            ids.join(", ")
-        ));
-    }
-
-    // Same "config entry had NO effect at all" class as `unknown_disabled_rule_ids` above, over
-    // `severity_overrides` instead — see that field's doc and `unknown_severity_override_ids`'s doc for why
-    // the valid-id enumeration named here (no bare pack id) differs from the disabled-rules one. Also
-    // `config_warnings`, same reasoning as `unknown_disabled_rule_ids` just above.
-    if !i.unknown_severity_override_ids.is_empty() {
-        let mut ids = i.unknown_severity_override_ids.clone();
-        ids.sort();
-        ids.dedup();
-        config_warnings.push(format!(
-            "severity overrides have {} matching no known rule id: {} — these did NOT remap any finding's severity (check for a typo; a valid id is a native analysis id or a \"<pack>/<rule>\" id; config dialect `rules: {{ \"<id>\": \"<severity>\" }}`, embedders: `severityOverrides`).",
-            entry_count(ids.len()),
-            ids.join(", ")
-        ));
-    }
-
-    // Same "config entry had NO effect at all" class as the two checks above, over `suppressions` instead —
-    // see that field's doc for why this is a distinct failure from `unmatched_suppression_warnings`'s dead
-    // path/glob filter (bad rule id vs. dead file filter; both can fire for the same entry, and that is
-    // correct — they are orthogonal diagnostics over the same config entry).
-    if !i.unknown_suppression_rule_ids.is_empty() {
-        let mut ids = i.unknown_suppression_rule_ids.clone();
-        ids.sort();
-        ids.dedup();
-        warnings.push(format!(
-            "suppressions have {} whose rule matches no known rule id: {} — these did NOT suppress anything (check for a typo; a valid id is a native analysis id or a \"<pack>/<rule>\" id; config dialect `rules: {{ \"<id>\": {{ \"exclude\": [...] }} }}`, embedders: `suppressions`).",
-            entry_count(ids.len()),
-            ids.join(", ")
-        ));
-    }
-
+    // The unknown-config-id family — see diagnostics/config_reports.rs for why these four are not
+    // degenerate-output checks and why they land on two different channels.
+    config_warnings.extend(config_reports::config_channel_reports(&i));
+    warnings.extend(config_reports::warning_channel_reports(&i));
     AnalysisDiagnostics {
         input: i,
         warnings,
         config_warnings,
     }
 }
+
+mod config_reports;
 
 #[cfg(test)]
 mod tests;

@@ -110,16 +110,76 @@ fn read_repo_file(rel: &str) -> String {
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
 }
 
-/// The field names the page's `<h2>{ty}</h2>` table publishes in its first column.
+/// The container the page's `<h2>{ty}</h2>` field index lives in, sliced at its own closing tag.
+///
+/// Anchored on a PURPOSE-NAMED attribute the page carries for this pin (`data-wire-fields`, written
+/// last in the opening tag) rather than on the styling class that happens to lay the index out. A
+/// class is presentation and gets renamed by a redesign; this attribute exists only to say "the
+/// wire-field roster is inside me", so the next redesign carries it along or fails here loudly.
+/// It is a marker, not a second copy of the roster — every field name is still read from the one
+/// place a reader sees it.
+///
+/// Delimited by counting nested `<div>`s rather than by scanning to the next section marker: the
+/// index holds `<details>` folds whose bodies are divs, so "the first `</div>` after the opening
+/// tag" would cut the roster short at the first folded row, and this pin would read a three-row
+/// list and blame the struct.
+fn field_index_body<'a>(after: &'a str, heading: &str) -> &'a str {
+    const INDEX_ANCHOR: &str = "data-wire-fields>";
+    let start = after.find(INDEX_ANCHOR).unwrap_or_else(|| {
+        panic!("no `data-wire-fields` index container follows the `{heading}` heading")
+    });
+    let body_start = start + INDEX_ANCHOR.len();
+    let tag_start = after[..start]
+        .rfind('<')
+        .expect("the marker cannot appear before the first tag on the page");
+    assert!(
+        after[tag_start..].starts_with("<div ") && !after[tag_start..start].contains('>'),
+        "the `data-wire-fields` marker after `{heading}` is not the last attribute of a `<div>` \
+         opening tag, so the nesting walk below would start mid-markup and slice the wrong region"
+    );
+
+    let mut depth = 1usize;
+    let mut cursor = body_start;
+    let end = loop {
+        let next_open = after[cursor..].find("<div").map(|p| cursor + p);
+        let next_close = after[cursor..].find("</div>").map(|p| cursor + p);
+        match (next_open, next_close) {
+            (_, None) => panic!("the field index under `{heading}` is unterminated"),
+            (Some(open), Some(close)) if open < close => {
+                depth += 1;
+                cursor = open + "<div".len();
+            }
+            (_, Some(close)) => {
+                depth -= 1;
+                if depth == 0 {
+                    break close;
+                }
+                cursor = close + "</div>".len();
+            }
+        }
+    };
+    &after[body_start..end]
+}
+
+/// The field names the page's `<h2>{ty}</h2>` index publishes in its name column.
 ///
 /// Located by the TYPE NAME the deserializer reported, not by a hand-typed heading string: renaming
 /// the Rust struct then fails this pin at the anchor with a clear reason, instead of leaving it
 /// pointing at a heading that no longer describes anything.
 ///
-/// The extracted count is cross-checked against the number of rows in the same body, so a row whose
-/// first cell is not a bare `<code>name</code>` is a failure rather than a silent omission —
-/// otherwise a reformatted row would shrink the document side and the equality below would blame the
-/// struct.
+/// The needle follows the markup, and the markup changed: these two tables stopped being `<table>`s
+/// when the page split its index from its contract prose (the `AnalyzeRequest.vocabulary` cell had
+/// reached 1,999 characters, so the widest cell was setting the layout for twenty other rows).
+/// Every row is now a `.cmd-row` grid line whose name cell opens with a bare `<code>field</code>`,
+/// and a row long enough to need its contract carries that contract in a `<details>` fold directly
+/// underneath rather than in the cell.
+///
+/// The extracted count is cross-checked against the number of rows in the same container, so a row
+/// whose name cell is not a bare `<code>name</code>` is a failure rather than a silent omission —
+/// otherwise a reformatted row would shrink the document side and the equality below would blame
+/// the struct. Band labels (`.cmd-band`) and the column header (`.cmd-index__head`) are not rows and
+/// are not counted; the `class="cmd-row"` needle carries its closing quote so it cannot match the
+/// `cmd-row__name` / `cmd-row__desc` cells inside a row.
 fn documented_fields(page: &str, ty: &str) -> BTreeSet<String> {
     let heading = format!("<h2>{ty}</h2>");
     let occurrences = page.matches(&heading).count();
@@ -128,24 +188,19 @@ fn documented_fields(page: &str, ty: &str) -> BTreeSet<String> {
         "site/reference.html must carry exactly one `{heading}` heading for this pin to anchor on"
     );
     let after = &page[page.find(&heading).expect("counted above") + heading.len()..];
-    let start = after
-        .find("<tbody>")
-        .unwrap_or_else(|| panic!("no <tbody> follows the `{heading}` heading"));
-    let end = after
-        .find("</tbody>")
-        .unwrap_or_else(|| panic!("the table under `{heading}` is unterminated"));
-    let body = &after[start..end];
+    let body = field_index_body(after, &heading);
 
-    let row = regex::Regex::new("<tr><td><code>([A-Za-z][A-Za-z0-9]*)</code></td>")
-        .expect("static pattern");
+    let row =
+        regex::Regex::new("<span class=\"cmd-row__name\"><code>([A-Za-z][A-Za-z0-9]*)</code>")
+            .expect("static pattern");
     let names: BTreeSet<String> = row.captures_iter(body).map(|c| c[1].to_string()).collect();
-    let rows = body.matches("<tr>").count();
+    let rows = body.matches("class=\"cmd-row\"").count();
     assert_eq!(
         names.len(),
         rows,
-        "the `{ty}` table has {rows} rows but only {} of them open with a bare \
-         `<td><code>field</code></td>` cell naming one field. Every row must, or this pin silently \
-         reads a short list and blames the wrong side.",
+        "the `{ty}` index has {rows} rows but only {} of them open with a bare \
+         `<span class=\"cmd-row__name\"><code>field</code>` cell naming one field. Every row must, \
+         or this pin silently reads a short list and blames the wrong side.",
         names.len()
     );
     names

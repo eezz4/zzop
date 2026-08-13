@@ -16,7 +16,7 @@
 //! breaking this, but no field may go unmentioned. Value-level pins against the REAL shipped packs live
 //! in `packages/cli-bin/tests/cli.rs`, where the regexes are the ones users actually read.
 
-use super::explain_over;
+use super::{explain_over, Corpus};
 use zzop_core::parse_dsl_pack;
 
 /// The matcher shapes as TEXT — read at TEST TIME from the filesystem, `def/matcher.rs` first, then
@@ -24,8 +24,11 @@ use zzop_core::parse_dsl_pack;
 /// be a `concat!` of three `include_str!`s whose doc claimed "a struct in an unlisted file makes
 /// [`struct_field_names`] panic … rather than silently vouching" — false for the only way a struct
 /// actually arrives (in a NEW file), which is how `LiteralScan` sat outside this pin for one batch
-/// while its sibling guard (`crate::rule_pack_tests::matcher_source`, same derivation, same incident)
-/// was already fixed. `struct_field_names` panics only for structs someone ASKS about, and
+/// while its sibling guard (`crate::rule_pack_tests::def_source`, same derivation, same incident)
+/// was already fixed. That sibling has since been widened again, to the WHOLE `def/` tree, because
+/// the directory pair below is still an enumeration and the pack ENVELOPE fell outside it; this one
+/// keeps the narrower sweep deliberately, since its subject really is the matcher shapes (`explain`
+/// renders matcher fields, and the envelope structs have no fixture to be missing). `struct_field_names` panics only for structs someone ASKS about, and
 /// [`minimal_fixtures`] is that asker — so the fixture list is itself pinned against the derived
 /// struct set by [`every_matcher_struct_in_the_sources_has_a_minimal_fixture`].
 fn matcher_source() -> &'static str {
@@ -99,7 +102,7 @@ fn struct_field_names(struct_name: &str) -> Vec<String> {
 /// the REQUIRED keys — that is the case where a renderer could most plausibly print nothing.
 fn rendered(pack_json: &str, full_id: &str) -> String {
     let packs = vec![parse_dsl_pack(pack_json).expect("fixture pack must parse")];
-    explain_over(&packs, &[], full_id).expect("fixture rule must resolve")
+    explain_over(&packs, &[], full_id, Corpus::Bundled).expect("fixture rule must resolve")
 }
 
 /// A minimal rule of each matcher kind — only the keys serde requires. Each is paired with the Rust

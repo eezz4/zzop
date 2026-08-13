@@ -766,3 +766,155 @@ fn the_write_site_sightline_is_identical_in_the_finding_and_the_published_docs()
         );
     }
 }
+
+// ── SourceSymbol.id is not unique, and these two builders are where that used to become silence ──
+
+/// `build_name_index` must count DISTINCT ids. Two entries of one id are one candidate, not two, and
+/// treating them as two made `resolve_handler_scoped` refuse to guess — so a route whose handler was
+/// merely overloaded lost its handler and every rule that judges the handler went quiet.
+///
+/// Measured 2026-08-11 end to end: a Spring controller with a single `@PostMapping create(String)` is
+/// flagged by `mutating-route-no-auth`; adding an ordinary UNANNOTATED overload `create(int, String)`
+/// in the same file silenced it, with nothing in `warnings`/`blindSpots`/disclosure classes saying so.
+#[test]
+fn one_id_declared_twice_is_one_candidate_not_an_ambiguity() {
+    let overloaded = vec![sym("C.java", "C.create", 14), sym("C.java", "C.create", 19)];
+    let idx = build_name_index(&overloaded);
+    assert_eq!(
+        idx["create"].len(),
+        1,
+        "same id twice is one candidate: {:?}",
+        idx["create"]
+    );
+    assert_eq!(
+        resolve_handler("create", &idx).as_deref(),
+        Some("C.java#C.create"),
+        "an overload must not cost the route its handler"
+    );
+
+    // The control: two DIFFERENT ids under one tail name stay ambiguous, and the do-not-guess rule
+    // still returns None. Without this the dedup could have been a blanket "always pick one".
+    let two_files = vec![sym("A.java", "A.create", 3), sym("B.java", "B.create", 3)];
+    let idx = build_name_index(&two_files);
+    assert_eq!(idx["create"].len(), 2);
+    assert_eq!(
+        resolve_handler("create", &idx),
+        None,
+        "genuine ambiguity is still refused"
+    );
+}
+
+/// `symbols_by_id` must not let a later same-id declaration with no write sites displace the one that
+/// has them. `HashMap::collect` keeps the LAST entry, which is what both call sites used to do.
+///
+/// The shape is ordinary TypeScript: an `interface helper` declaration-merged onto `function helper()`.
+/// Measured 2026-08-11: `unsafe-read-endpoint` fired when the interface came first and vanished when it
+/// came second — declaration order is not something this rule may depend on.
+#[test]
+fn a_same_id_declaration_without_write_sites_never_displaces_the_one_that_has_them() {
+    let files = files(&[(
+        "h.ts",
+        "export function helper() { db.create({}); }
+",
+    )]);
+    let real = with_write_sites(&files, vec![sym("h.ts", "helper", 1)]);
+    assert!(
+        !real[0].write_sites.is_empty(),
+        "fixture must actually carry a write site"
+    );
+    let empty = sym("h.ts", "helper", 1);
+    assert_eq!(
+        real[0].id, empty.id,
+        "the whole point is that the ids collide"
+    );
+
+    for (order, symbols) in [
+        (
+            "write-site symbol LAST",
+            vec![empty.clone(), real[0].clone()],
+        ),
+        (
+            "write-site symbol FIRST",
+            vec![real[0].clone(), empty.clone()],
+        ),
+    ] {
+        let by_id = symbols_by_id(&symbols);
+        assert!(
+            !by_id["h.ts#helper"].write_sites.is_empty(),
+            "{order}: the entry carrying write sites must win regardless of declaration order"
+        );
+    }
+}
+
+/// `scan_marker_window` must read EVERY same-id declaration's window, not just the first.
+///
+/// The fourth consumer of the non-unique `SourceSymbol.id` (`file#name`): `2c34e6e` fixed
+/// `build_name_index`, `symbols_by_id` and the two inline id maps, and left this one a bare `.find()`.
+///
+/// Measured before the fix, on two `touch` declarations sharing one id where the SECOND carries the
+/// write: no marker -> 1 finding, and a correctly placed `// idempotent-ok:` on that second
+/// declaration -> 1 finding as well. The marker the rule's own message tells the author to write was
+/// read against the FIRST declaration's window and did nothing.
+#[test]
+fn a_marker_under_a_same_id_sibling_declaration_still_suppresses() {
+    let write = "export function touch(c: any) { return prisma.ping.create({ data: {} }); }";
+    // Line 4 (the write-carrying declaration) is the one the marker is placed above.
+    let control =
+        format!("export function touch(c: any) {{ return 1; }}\n\n// plain comment\n{write}\n");
+    let marked = format!(
+        "export function touch(c: any) {{ return 1; }}\n\n// idempotent-ok: audit trail\n{write}\n"
+    );
+
+    let run = |text: &str| {
+        let files = files(&[("api/h.ts", text)]);
+        let symbols = with_write_sites(
+            &files,
+            vec![sym("api/h.ts", "touch", 1), sym("api/h.ts", "touch", 4)],
+        );
+        scan_unsafe_read_endpoint(&ScanUnsafeReadEndpointInput {
+            api_endpoints: &[endpoint("GET", "/touch", "touch")],
+            symbols: &symbols,
+            symbol_graph: &Vec::new(),
+            files: &files,
+        })
+        .len()
+    };
+
+    // The control proves the fixture is live — without it, "0 findings" would pass for the wrong reason.
+    assert_eq!(
+        run(&control),
+        1,
+        "control: the write is found and the rule fires"
+    );
+    assert_eq!(
+        run(&marked),
+        0,
+        "a marker in a same-id declaration's own window must suppress"
+    );
+}
+
+/// The near-miss disclosure reads through the same window scan, so it was blind in the same shape —
+/// the author got neither the suppression they wrote nor the sentence saying it did not work.
+#[test]
+fn a_near_miss_marker_under_a_same_id_sibling_declaration_is_still_disclosed() {
+    let text = "export function touch(c: any) { return 1; }\n\n// idempotent-okay: typo'd stem\nexport function touch(c: any) { return prisma.ping.create({ data: {} }); }\n";
+    let files = files(&[("api/h.ts", text)]);
+    let symbols = with_write_sites(
+        &files,
+        vec![sym("api/h.ts", "touch", 1), sym("api/h.ts", "touch", 4)],
+    );
+    let out = scan_unsafe_read_endpoint(&ScanUnsafeReadEndpointInput {
+        api_endpoints: &[endpoint("GET", "/touch", "touch")],
+        symbols: &symbols,
+        symbol_graph: &Vec::new(),
+        files: &files,
+    });
+    // Still fires (a near-miss never suppresses) — but now it SAYS the comment does not suppress.
+    assert_eq!(out.len(), 1);
+    assert!(
+        out[0].message.contains("idempotent-okay")
+            && out[0].message.contains("does not suppress this rule"),
+        "the near-miss sentence must name the token it found: {}",
+        out[0].message
+    );
+}

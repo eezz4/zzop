@@ -143,9 +143,18 @@ fn emit_type(rel: &str, node: Node, src: &str, path: &[String], out: &mut Vec<So
     let mods = modifiers_of(node);
     let exported = has_modifier(&mods, "public", src);
     let line = line_of(node);
+    // See the twin comment in `parser-java-21`'s `symbols/mod.rs`: `ir.rs`'s span contract makes `None`
+    // the positive claim "this declaration encloses nothing scannable", and an `interface` body is a
+    // SIGNATURE list. C# already answers `None` for `enum` (an `enum_member_declaration_list` is not a
+    // `declaration_list`, so the arm below never matched it) — `interface` was the one leak, measured at
+    // 4 symbols on the reference corpus while TypeScript's 79 were correctly `None`. C# interfaces may
+    // carry default implementations since C# 8; those are members and keep their own leaves, exactly as
+    // Java's `default` methods do.
     let body = node.child_by_field_name("body");
     let (body_start, body_end) = match body {
-        Some(b) if b.kind() == "declaration_list" => (Some(line), Some(end_line_of(b))),
+        Some(b) if b.kind() == "declaration_list" && node.kind() != "interface_declaration" => {
+            (Some(line), Some(end_line_of(b)))
+        }
         _ => (None, None),
     };
 

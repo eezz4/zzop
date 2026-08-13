@@ -291,8 +291,8 @@ fn applies_to_matches_when_a_rule_file_pattern_matches() {
 fn applies_to_is_false_for_a_pack_with_no_rules() {
     let pack = RulePackDef {
         id: "empty".into(),
-        framework: "any".into(),
         schema_version: 1,
+        exported_from: None,
         fragments: Default::default(),
         rules: vec![],
         regex_cache: Default::default(),
@@ -307,6 +307,105 @@ fn a_json_array_root_reports_the_array_diagnosis_not_a_field_type_mismatch() {
     // naming the real problem — the root itself is the wrong shape.
     let err = parse_dsl_pack("[1,2,3]").unwrap_err();
     assert_eq!(err, "expected a JSON object rule pack, got an array");
+}
+
+// --- suppress-marker collisions across the LOADED pack set (see `marker_collisions.rs`) ---
+
+/// A pack carrying exactly the given rule ids, in the given order — the only axis these tests vary.
+/// Built through `parse_dsl_pack` (not a struct literal) so the fixtures face the same deserialization
+/// the real load path applies, including a repeated id inside one pack, which nothing rejects.
+fn pack_with_rule_ids(pack_id: &str, rule_ids: &[&str]) -> RulePackDef {
+    let rules = rule_ids
+        .iter()
+        .map(|rule_id| {
+            format!(
+                r#"{{
+                    "id": "{rule_id}",
+                    "severity": "warning",
+                    "message": "msg",
+                    "matcher": {{
+                        "type": "line-scan",
+                        "file_pattern": "\\.java$",
+                        "line_pattern": "TODO"
+                    }}
+                }}"#
+            )
+        })
+        .collect::<Vec<String>>()
+        .join(",");
+    parse_dsl_pack(&format!(r#"{{"id": "{pack_id}", "rules": [{rules}]}}"#)).unwrap()
+}
+
+#[test]
+fn two_packs_sharing_a_rule_id_collide_on_the_derived_marker() {
+    // The reported defect, verbatim: a third-party pack defines a rule whose bare id equals a bundled
+    // one's. Both derive `zzop-hardcoded-secret-ok`, so the comment a user wrote to vet the bundled
+    // rule's finding also silences the third-party rule — and nothing said so.
+    let packs = [
+        pack_with_rule_ids("security", &["hardcoded-secret", "api-key-in-url"]),
+        pack_with_rule_ids("acme", &["hardcoded-secret"]),
+    ];
+    let issues = suppress_marker_collisions(&packs);
+    assert_eq!(
+        issues.len(),
+        1,
+        "one entry per colliding marker: {issues:?}"
+    );
+    assert!(
+        issues[0].contains("`zzop-hardcoded-secret-ok`"),
+        "the marker text must be named: {issues:?}"
+    );
+    // Both sides named, pack-qualified and SORTED — "acme" before "security" regardless of the input
+    // order above, so the sentence is byte-identical across runs.
+    assert!(
+        issues[0].contains("\"acme/hardcoded-secret\", \"security/hardcoded-secret\""),
+        "both colliding ids must be named in sorted order: {issues:?}"
+    );
+    // The non-colliding sibling rule must not be dragged in.
+    assert!(
+        !issues[0].contains("api-key-in-url"),
+        "only the colliding rules belong in the entry: {issues:?}"
+    );
+}
+
+#[test]
+fn the_collision_report_does_not_depend_on_pack_order() {
+    // Determinism across the axis a real run actually varies: which source contributed which pack
+    // first (directory-iteration order, `packDefs` array order).
+    let a = pack_with_rule_ids("security", &["hardcoded-secret"]);
+    let b = pack_with_rule_ids("acme", &["hardcoded-secret"]);
+    assert_eq!(
+        suppress_marker_collisions(&[a.clone(), b.clone()]),
+        suppress_marker_collisions(&[b, a])
+    );
+}
+
+#[test]
+fn distinct_rule_ids_across_packs_produce_no_collision_warning() {
+    // CONTROL: the ordinary multi-pack load. Every bare id distinct — nothing to report, and a report
+    // here would be pure noise on every run that loads more than one pack.
+    let packs = [
+        pack_with_rule_ids("security", &["hardcoded-secret", "api-key-in-url"]),
+        pack_with_rule_ids("acme", &["acme-token-in-source"]),
+    ];
+    assert!(
+        suppress_marker_collisions(&packs).is_empty(),
+        "distinct rule ids must never trip the collision warning"
+    );
+}
+
+#[test]
+fn a_repeated_rule_id_inside_one_pack_collides_too() {
+    // "ids are unique per pack" is a property of the SHIPPED packs (pinned by `rule_contracts`'
+    // `dsl_rule_ids_are_unique_within_each_pack`), not a loader guarantee — this fixture loads fine.
+    // So the within-pack case is covered by the same census, and shows as the one id listed twice.
+    let packs = [pack_with_rule_ids("acme", &["dup", "dup"])];
+    let issues = suppress_marker_collisions(&packs);
+    assert_eq!(issues.len(), 1, "{issues:?}");
+    assert!(
+        issues[0].contains("`zzop-dup-ok`") && issues[0].contains("\"acme/dup\", \"acme/dup\""),
+        "a within-pack duplicate must name the marker and list the id twice: {issues:?}"
+    );
 }
 
 #[test]

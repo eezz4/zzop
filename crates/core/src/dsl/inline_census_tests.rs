@@ -142,10 +142,12 @@ const AXES: &[(&str, &str)] = &[
     ),
 ];
 
-/// Floor on the number of extracted triples (§5.5). Today's count is 644 across 12 packs and 140 rules;
-/// this sits well below it so it never churns, and far enough above zero that a broken walk, an empty
+/// Floor on the number of extracted triples (§5.5). Far enough above zero that a broken walk, an empty
 /// `rules/dsl`, or a `raw_packs` that stopped finding packs fails LOUDLY instead of leaving this census
-/// vacuously green over an empty subject set.
+/// vacuously green over an empty subject set. Today's count is deliberately not written here: this
+/// prose said "644 across 12 packs and 140 rules" until v0.30.0 exported 17 rules to `examples/packs/`,
+/// which took it to 538 across 11 packs and 116 rules without a single triple being reviewed away. The
+/// test prints the live figures on every run, and the assertion below prints them on failure.
 ///
 /// The drift comparison cannot be its own floor: it is self-referential the moment someone regenerates
 /// against a broken extraction, after which an empty snapshot equals an empty scan forever. This is the
@@ -194,7 +196,18 @@ const UNREVIEWED_CEILING: usize = 0;
 /// two more convention rows could have entered with no bump, hence no author and no written case, which
 /// is the decision moment this ratchet exists to force. Recount before changing it:
 /// `cargo test -p zzop-core dsl_inline_value_census -- --nocapture` prints `convention=<n>`.
-const CONVENTION_CEILING: usize = 65;
+///
+/// A convention row leaves for TWO different reasons and only ONE of them is the one the paragraph
+/// above imagines. (1) Its vocabulary moved into config — the debt was PAID, which is what this ratchet
+/// is for. (2) The rule carrying it LEFT THE BUNDLE: v0.30.0 exported 17 rules to `examples/packs/`
+/// (`5d2050f`, `2de0399`, `9a49080`, `105c52f`; one returned in `c0cc8ed`), this census scans
+/// `rules/dsl/**` only, and the convention axis fell to 57 with nothing paid off — the same rows are
+/// still inline, one directory over. An export therefore leaves this ceiling slack by exactly the count
+/// it carried out, and that slack appears in NO line of the diff that caused it. **Lower it in the same
+/// change as the export**, for the 2026-08-09 reason one paragraph up: the audit that found this at 65
+/// against 57 found 8 rows of room, four times the gap that was judged a defect then. 57 measured
+/// 2026-08-12 (v0.30.0 release audit).
+const CONVENTION_CEILING: usize = 57;
 
 /// [`CENSUS_FILE`] as an absolute path — one owner, so the reader and the writer cannot disagree about
 /// which file this census is. `real_dsl_dir()` is `<manifest>/../../rules/dsl`, so two levels up from it
@@ -323,9 +336,15 @@ fn dsl_inline_value_census_matches_the_committed_snapshot() {
     assert!(
         rows.len() >= SUBJECT_FLOOR,
         "the inline-value census extracted only {} triple(s) from rules/dsl/**, below the floor of \
-         {SUBJECT_FLOOR}. A number this low means the walk, the pack enumeration, or the pack tree \
-         itself is broken and this census is vouching for NOTHING. Fix the extraction; do not lower \
-         the floor to make this pass.",
+         {SUBJECT_FLOOR}. Two readings, and they take OPPOSITE actions, so read the diff that caused \
+         this before choosing:\n\
+         (1) the walk, the pack enumeration, or the pack tree itself is broken and this census is \
+         vouching for NOTHING — fix the extraction; do NOT lower the floor to make this pass;\n\
+         (2) rules legitimately LEFT `rules/dsl/**`, the way v0.30.0 exported 17 of them to \
+         `examples/packs/` (644 triples -> 538) — the rows did not disappear, they moved one directory \
+         over, out of this census's scan root. Nothing is broken, and lowering the floor in the same \
+         commit as the export IS the correct action. Lower CONVENTION_CEILING in that same commit too: \
+         an export leaves it slack by exactly what it carried out.",
         rows.len(),
     );
 

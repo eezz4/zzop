@@ -77,8 +77,8 @@ pub(crate) struct AnalyzeOutputView<'a> {
     nodes: &'a [FileNode],
     scores: &'a Option<Scores>,
     /// What each `scores` key MEANS, one sentence apiece — the same self-describing-reply device
-    /// `verdictMeaning` uses, for the same reason and after the same measurement. Four of the seventeen
-    /// score keys are bare acronyms (`sdp`, `file_size_compliance`, `lod`, `feature_sliced_design`) whose expansion existed only in Rust
+    /// `verdictMeaning` uses, for the same reason and after the same measurement. Several score keys
+    /// are bare acronyms (`sdp`, `file_size_compliance`, `feature_sliced_design`) whose expansion existed only in Rust
     /// doc-comments: a 2026-08-04 name survey found `docs/` and `site/` carried zero occurrences of
     /// "Stable Dependencies Principle", and the MCP tool descriptions name no score field at all. A
     /// consumer holding `scores.sdp = 41.2` had no vocabulary on any surface.
