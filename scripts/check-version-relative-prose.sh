@@ -26,6 +26,23 @@
 #    those sentences were last vetted at; a workspace version that differs reds every entry. The
 #    per-file line COUNT is registered too, so a new claim added to a vetted file also reds.
 #
+#    A SECOND family of sentence belongs to this axis and was invisible to it until 2026-08-14: a claim
+#    about the TAG COORDINATE rather than about a boundary. VERSIONING.md argued a rename table's
+#    contents from "no tag was cut in between — `git tag --list` still tops out at `v0.29.0`", which
+#    names no boundary phrase at all, so all four registered claims were green while that sentence was
+#    false. It was false the day it was WRITTEN, not by rot: releases are cut by CI on the REMOTE, and
+#    the clone it was measured in had never fetched tags, so its local list was two releases stale
+#    (`v0.29.1` and `v0.30.0` both existed). THE LOCAL TAG LIST IS NOT AUTHORITATIVE — the witness for
+#    any tag coordinate in this repo's prose is `git ls-remote --tags origin`, and `git describe` taken
+#    in an unfetched clone is anchored to the wrong release for the same reason. `git tag --list`,
+#    `git ls-remote`, `tops out at`, `no tag was cut`, `newest tag` and `latest tag` are in the needle
+#    so that a sentence of this family is registered and re-read like any other.
+#
+#    What this axis still does NOT hold: it makes a claim be RE-READ, never checks whether it is true.
+#    Both halves of the needle are shape rules. A `VETTED` bump is one act covering every claim line,
+#    so the guard cannot tell a careful re-read from a careless one — see the note at the foot of
+#    scripts/version-relative-prose.txt for why splitting it per claim was considered and declined.
+#
 # 2. UNANCHORED DEICTICS ARE BANNED OUTRIGHT. "the next release", "installable today", "the current
 #    release" name no reference frame at all, so no machine can decide whether they are true and no
 #    human notices when they stop being. This axis converts an undecidable question ("is this number
@@ -77,7 +94,10 @@ if [ "${#PAGES[@]}" -eq 0 ]; then
   exit 1
 fi
 
-ANCHORED='(v[0-9]+\.[0-9]+\.[0-9]+ onward|up to and including v[0-9]+\.[0-9]+\.[0-9]+|as of v[0-9]+\.[0-9]+\.[0-9]+|since v[0-9]+\.[0-9]+\.[0-9]+|from v[0-9]+\.[0-9]+\.[0-9]+)'
+# Two families, one count (see the axis-1 note in the header for why the second one exists).
+ANCHORED_BOUNDARY='(v[0-9]+\.[0-9]+\.[0-9]+ onward|up to and including v[0-9]+\.[0-9]+\.[0-9]+|as of v[0-9]+\.[0-9]+\.[0-9]+|since v[0-9]+\.[0-9]+\.[0-9]+|from v[0-9]+\.[0-9]+\.[0-9]+)'
+ANCHORED_TAGCOORD='(git tag --list|git ls-remote|tops out at|no tag was cut|newest tag|latest tag)'
+ANCHORED="($ANCHORED_BOUNDARY|$ANCHORED_TAGCOORD)"
 DEICTIC='(the next release|installable today|the current release|todays release|as of the latest release)'
 STABILITY='(pre-1\.0|`0\.x`)'
 

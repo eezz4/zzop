@@ -78,7 +78,7 @@ fn warnings_for(
     excludes: Vec<GlobalExclude>,
 ) -> Vec<String> {
     let config = config_with(packs, excludes);
-    let scope = compute_dsl_scope(&config.packs, rels);
+    let scope = compute_dsl_scope(&config.packs, rels, &config.dispatch);
     pack_scope_warnings(&config, &scope)
 }
 
@@ -88,7 +88,11 @@ fn warnings_for(
 #[test]
 fn a_file_every_targeting_rule_vetoes_is_reported() {
     let rels = ["src/a.test.ts", "src/b.ts"];
-    let scope = compute_dsl_scope(&[ts_pack_vetoing_tests()], &rels);
+    let scope = compute_dsl_scope(
+        &[ts_pack_vetoing_tests()],
+        &rels,
+        &crate::DispatchConfig::default(),
+    );
     // The premise, asserted rather than assumed: the vetoed file IS counted as in scope.
     assert_eq!(
         scope.files_in_scope_by_pack,

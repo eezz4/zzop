@@ -45,7 +45,7 @@
           "type": "object",
           "default": {},
           "additionalProperties": { "$ref": "#/definitions/importBinding" },
-          "description": "localName -> ImportBinding."
+          "description": "importKey -> ImportBinding. The key is the local name the file binds for most front ends, but that is NOT universal and an overlay must not assume it: a plain C# 'using A.B;' is keyed by the full specifier (two usings can end in the same simple name and would collide), and imports that bind no name at all (from x import *, use a::b::*, a bare require('y')) get synthetic '__...__' keys. The per-language key table is owned by core/src/ir/imports.rs and is machine-held against the parsers; the key is also what overrides.imports must match, so a wrong one adds a sibling entry instead of displacing."
         },
         "re_exports": { "type": "array", "default": [], "items": { "$ref": "#/definitions/reExport" } },
         "dynamic_imports": {
@@ -141,7 +141,7 @@
               "type": "array",
               "default": [],
               "items": { "type": "string" },
-              "description": "Local names (keys of this projection's imports map) whose NATIVE binding this overlay displaces. Requires the envelope to declare version >= 0.27.0 (the release that introduced the field — an older engine drops it silently, so the same bytes would displace nothing there). Each listed name MUST also appear in imports: the replacement is mandatory, because a declaration without one is a deletion, and deletion is not offered (it has no honest output form and would let an adapter blind the engine silently). Listing a name twice is rejected. A displaced native binding is reported in the run warnings with both the old and the new specifier."
+              "description": "Keys of this projection's imports map (the local name for most front ends — see the imports field description and the per-language key table in core/src/ir/imports.rs) whose NATIVE binding this overlay displaces. Requires the envelope to declare version >= 0.27.0 (the release that introduced the field — an older engine drops it silently, so the same bytes would displace nothing there). Each listed name MUST also appear in imports: the replacement is mandatory, because a declaration without one is a deletion, and deletion is not offered (it has no honest output form and would let an adapter blind the engine silently). Listing a name twice is rejected. A displaced native binding is reported in the run warnings with both the old and the new specifier."
             }
           },
           "description": "Native facts this projection DISPLACES rather than adds to. Absent/empty is the whole contract for an adapter that only fills gaps, and such an envelope stays valid below the 0.27.0 floor. An override exists as an explicit DECLARATION rather than as priority-on-key-collision because a correcting adapter often does not collide at all: measured on examples/adapters/override-required, the two sides spelled the local-name key differently, so the correction arrived as a sibling entry and both the right and the wrong edge survived."

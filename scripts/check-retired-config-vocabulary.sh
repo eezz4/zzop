@@ -67,7 +67,16 @@ done < <(grep -rni -E "$pattern" "${scan_paths[@]}" 2>/dev/null || true)
 
 # Non-emptiness floor: if the scan roots move or the extraction breaks, an empty result is
 # indistinguishable from a clean tree and this guard would pass forever by reading nothing.
-scanned="$(grep -rl -E 'zzop\.config\.jsonc' "${scan_paths[@]}" 2>/dev/null | wc -l | tr -d ' ')"
+#
+# `|| true` is load-bearing, not hygiene. `grep -rl` exits 1 when NOTHING matches — which is precisely
+# the total-collapse case this floor exists for — and under `set -e -o pipefail` that status propagates
+# out of the command substitution and kills the script on THIS line, so the diagnosis below never
+# speaks. `wc`/`tr` exiting 0 does not rescue it: under pipefail reachability is decided by the last
+# FAILING stage, not the last stage. Measured 2026-08-14 by misspelling the needle: exit 1, ZERO bytes
+# of output — failed closed but mute, i.e. indistinguishable on screen from a real finding. Note the
+# floor was only ever reachable for PARTIAL collapse (some files still match, count < 20); the total
+# collapse it names by name was the one case it could not report.
+scanned="$(grep -rl -E 'zzop\.config\.jsonc' "${scan_paths[@]}" 2>/dev/null | wc -l | tr -d ' ' || true)"
 if [ "$scanned" -lt 20 ]; then
   echo "check-retired-config-vocabulary: only $scanned file(s) mention zzop.config.jsonc — the scan" >&2
   echo "  roots are wrong and this guard would be vacuously green. Fix the roots, not this number." >&2

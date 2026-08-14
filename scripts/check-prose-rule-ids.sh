@@ -25,16 +25,23 @@
 #      `docs/rules/catalog.md`'s own Native-analyses table; or
 #   2. it lives in an `examples/packs/` pack AND THE SAME FILE NAMES THAT PACK'S FILE. An exported rule
 #      is real but not loaded by default, so naming it is honest only alongside the way to load it.
-#      This is the rule that fails `site/usage.html` and passes `examples/packs/README.md`, and it is
-#      deliberately a property of the FILE rather than a list of blessed files: the fix for a violation
-#      is to add the retrieval pointer, which is exactly what the reader was missing; or
+#      This is the rule that failed `site/usage.html` in the incident above and that passes
+#      `examples/packs/README.md`, and it is deliberately a property of the FILE rather than a list of
+#      blessed files: the fix for a violation is to add the retrieval pointer, which is exactly what the
+#      reader was missing; or
 #   3. `VERSIONING.md`'s rename tables record it — that file IS this repo's register of ids that once
 #      existed, so "is this a historical id?" has a derived answer instead of a marker-word heuristic.
 #      A sentence explaining a rename must be able to name the old id (`docs/rules/catalog.md` and
 #      `site/rules.html` both do, for `cross-layer/sdk-import-no-visible-consume`).
 #
-# Measured on the clean tree (2026-08-12): 257 qualified ids judged, 0 offenders. Restoring the
-# historical `typescript/no-explicit-any` into `site/usage.html` reports it with rule 2's reason.
+# Measured on the clean tree (2026-08-12): 257 qualified ids judged, 0 offenders. (Re-derive rather than
+# trust that figure — the subject set is every tracked .md/.html and grows with the tree; the script
+# prints its own count on every run.) Planting the historical `typescript/no-explicit-any` into
+# `docs/getting-started.md` reports it with rule 2's reason — re-measured 2026-08-14. The recipe named
+# `site/usage.html` until that day, when the page became a redirect stub: still technically in the subject
+# set, but a stub nobody reads is a poor place to demonstrate a guard, and `docs/getting-started.md` is
+# hand-written (a plant into the GENERATED site/index.html would be undone by the next regeneration) and
+# does not name `examples/packs/typescript-lint.json`, which is what makes rule 2 the reason reported.
 #
 # ## CHECK 2 — the "new id" column of `VERSIONING.md`'s rename tables
 #

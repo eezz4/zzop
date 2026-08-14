@@ -83,6 +83,17 @@ if [ "$spawn_count" -ne 1 ] || [ "$record_count" -ne 1 ]; then
   echo "census call cannot cover them all."
   violations=1
 else
+  # These two assignments have no `|| true` ON PURPOSE, and ORDER IS LOAD-BEARING: they are inside the
+  # `else` of the count test above, so both greps are already known to match exactly once. A grep that
+  # matches nothing exits 1, and under `set -e -o pipefail` that would kill the script on the
+  # assignment with zero output (`cut` exiting 0 does not help — pipefail takes the last FAILING
+  # stage). Reordering these out from under the count test, or relaxing that test to `-lt 1`,
+  # reintroduces exactly that mute death.
+  #
+  # Adding `|| true` for symmetry would be worse than leaving it: an empty spawn_line reaches
+  # `[ "$record_line" -ge "$spawn_line" ]`, which is not a comparison at all but a syntax error on an
+  # empty operand -- a failure that names neither the census nor the spawn. The count test above is the
+  # real protection; this note exists so the next edit knows it is protection and not decoration.
   spawn_line=$(grep -nP "$SPAWN_PATTERN" "$OWNER" | cut -d: -f1)
   record_line=$(grep -nP '^\s*record_spawn\(repo\);' "$OWNER" | cut -d: -f1)
   if [ "$record_line" -ge "$spawn_line" ]; then

@@ -230,6 +230,41 @@ fn unknown_key_warning_fires_inside_vocabulary_and_its_nested_scope() {
     );
 }
 
+/// `parsers` was the SECOND declared scope the unknown-key walk never descended into (wired
+/// 2026-08-14, `vocabulary` being the first). What makes it worse than an unbuilt feature: `VERSIONING.md`
+/// publishes "Unknown keys are ignored with a warning, never a hard error" as a compatibility promise, so
+/// the silence was a published promise that was already false for every key under this scope.
+///
+/// The typo used here is the singular `globOverride` on purpose — it is both the likeliest slip and the
+/// spelling `config-surface.json` declares as a SCOPE name, which is not a config key and must warn.
+#[test]
+fn unknown_key_warning_fires_inside_parsers() {
+    let mapped = config_to_request(
+        &json!({
+            "roots": ["."],
+            "parsers": {"globOverride": [], "globOverrides": []},
+        }),
+        Path::new("/base"),
+    )
+    .unwrap();
+    assert!(
+        mapped.warnings.iter().any(
+            |w| w.contains("unknown config key \"parsers.globOverride\"")
+                && w.contains("under \"parsers\"")
+        ),
+        "a typo under `parsers` must be named, not swallowed: {:?}",
+        mapped.warnings
+    );
+    assert!(
+        mapped
+            .warnings
+            .iter()
+            .all(|w| !w.contains("\"parsers.globOverrides\"")),
+        "the VALID sibling must stay silent: {:?}",
+        mapped.warnings
+    );
+}
+
 #[test]
 fn unknown_key_warning_fires_inside_a_mounts_entry() {
     let mapped = config_to_request(

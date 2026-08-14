@@ -92,8 +92,11 @@ even though nothing cross-checks it against the file.
 
 ## Step 3 — Additive, or displacing?
 
-An overlay **adds**: for `imports` the merge is native-first per local name, so a name the native pass
-already bound keeps its native binding and only names it never bound are added. That is what lets an
+An overlay **adds**: for `imports` the merge is native-first per key, so a key the native pass already
+bound keeps its native binding and only keys it never bound are added. (The key is the local name the
+file binds for most front ends, and something else for C# and for every import that binds no name —
+`crates/core/src/ir/imports.rs` owns the per-language table, and picking the wrong key is how a
+correction arrives as a sibling instead of a replacement.) That is what lets an
 adapter fill exactly the gaps without owning the whole channel. It is also, on its own, not enough
 whenever the native parser bound the same name to something **wrong** — which is the usual case when
 resolution is what failed, because both sides are reading the same `import` statement.

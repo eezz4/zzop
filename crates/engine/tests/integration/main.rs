@@ -49,6 +49,7 @@ mod analyze_exclude_score_channels;
 mod analyze_git;
 mod analyze_git_tree_coordinates;
 mod analyze_gitignore;
+mod analyze_glob_override_disclosure;
 mod analyze_go_cross_layer;
 mod analyze_go_module;
 mod analyze_http_pack_io_scan;

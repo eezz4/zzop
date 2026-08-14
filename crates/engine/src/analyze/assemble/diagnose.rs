@@ -60,7 +60,7 @@ pub(super) fn sweep(
 ) -> DslScope {
     let config = input.config;
     // One census, three consumers: both pack warnings below and `packs_loaded`'s `files_in_scope` count.
-    let dsl_scope = compute_dsl_scope(&config.packs, input.rels);
+    let dsl_scope = compute_dsl_scope(&config.packs, input.rels, &config.dispatch);
     if let Some(w) = minified_files_warning(input.minified, &dsl_scope.in_scope_rels) {
         warnings.push(w);
     }

@@ -1,0 +1,277 @@
+/* ============================================================================
+   zzop site — next-generation rework · shared design system
+   The theme comes from the original assets/site.css: three colours (paper, ink,
+   accent), zero radius, and a 2px rule as the structural element.
+   Everything else (information architecture, typesetting, rhythm) was rewritten
+   from scratch with Korean text as the reference case.
+   Page fragments use only the classes below — inventing a new class per page is
+   how pages start looking different from one another.
+   ========================================================================= */
+
+:root{
+  --paper:#f3f2f2; --ground:#d7d3d3; --tint:#eae7e7;
+  --ink:#201e1d; --accent:#ec3013; --accent-deep:#ae1800;
+  --n500:#9b9797; --n700:#605d5d; --n800:#444141;
+  --rule:2px solid color-mix(in srgb, #201e1d 40%, transparent);
+  --hair:1px solid color-mix(in srgb, #201e1d 16%, transparent);
+
+  /* The original's Archivo has no Hangul coverage, and an artifact cannot load a
+     web font at all (CSP). So the stack falls back to system Hangul faces, while
+     Latin and digits are still claimed by the faces listed ahead of them.
+     The Korean-language alias of "Malgun Gothic" is NOT written here: this file
+     has to stay free of non-Latin characters (CI's check-english-source.sh).
+     scripts/gen-site.mjs appends it, for the Korean edition only, from the one
+     path where Korean is allowed to live (site-src/content/shell.mjs). */
+  --kr:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Pretendard Variable",
+       Pretendard,"Noto Sans KR","Malgun Gothic",system-ui,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,"Cascadia Code",Menlo,Consolas,monospace;
+
+  --measure:34rem;   /* 38-42 Hangul characters. The Latin 65-character measure reads too long here. */
+  --frame:70rem;
+}
+
+*{box-sizing:border-box}
+html{background:var(--ground);color-scheme:light}
+
+/* ---- language switch ----
+   The editions are separate pages, so there is no hiding rule here — this is a
+   link to the page in the other language.
+   It is `.nav .langbtn` and not `.langbtn`, because the `.nav a` rule in the same
+   nav is more specific and would otherwise win. */
+.nav .langbtn{
+  margin-left:auto;font-family:var(--mono);font-size:.75rem;letter-spacing:.06em;
+  background:transparent;color:var(--n700);border:var(--rule);cursor:pointer;
+  padding:.28rem .6rem;line-height:1.4;text-decoration:none;white-space:nowrap;
+}
+.nav .langbtn:hover{color:var(--ink);border-color:var(--ink)}
+.nav .langbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.nav .langbtn b{color:var(--ink);font-weight:700}
+
+body{
+  margin:0 auto;max-width:var(--frame);min-height:100vh;
+  background:var(--paper);color:var(--ink);
+  border-left:var(--rule);border-right:var(--rule);
+  font-family:var(--kr);font-size:17px;line-height:1.8;letter-spacing:-0.003em;
+  word-break:keep-all;              /* without this, Hangul breaks in the middle of a word */
+  overflow-wrap:break-word;-webkit-font-smoothing:antialiased;
+}
+
+/* ---- top nav ---- */
+.nav{
+  position:sticky;top:0;z-index:40;background:var(--paper);
+  border-bottom:var(--rule);
+  display:flex;flex-wrap:wrap;align-items:baseline;gap:.2rem .1rem;
+  padding:.55rem clamp(1rem,4vw,2rem);
+}
+.nav__brand{font-weight:800;letter-spacing:-.03em;margin-right:.9rem;font-size:1.05rem}
+.nav a{
+  font-size:.87rem;text-decoration:none;color:var(--n700);
+  padding:.3rem .6rem;border:1px solid transparent;
+}
+.nav a:hover{color:var(--ink);border-color:var(--rule)}
+.nav a.is-here{color:var(--ink);font-weight:700;box-shadow:inset 0 -2px 0 var(--accent)}
+.nav a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* ---- rhythm: sections are separated by a 2px rule. They are not wrapped in cards. ---- */
+.band{padding:clamp(2.6rem,6vw,4.6rem) clamp(1.25rem,5vw,3rem)}
+.band + .band{border-top:var(--rule)}
+.band--tint{background:var(--tint)}
+.inner{max-width:var(--measure);margin:0 auto}
+.inner--wide{max-width:58rem}
+
+/* ---- type ---- */
+h1,h2,h3{font-weight:800;line-height:1.3;letter-spacing:-.02em;text-wrap:balance;margin:0}
+h1{font-size:clamp(2rem,5.5vw,3.1rem);line-height:1.22}
+h2{font-size:clamp(1.4rem,3.2vw,1.9rem)}
+h3{font-size:1.05rem;letter-spacing:-.01em}
+p{margin:0}
+.stack{display:flex;flex-direction:column;gap:1.15rem}
+.stack--tight{gap:.7rem}
+.stack--loose{gap:2rem}
+
+.eyebrow{font-family:var(--mono);font-size:.72rem;font-weight:600;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--accent-deep)}
+.lede{font-size:1.12rem;color:var(--n800)}
+.muted{color:var(--n700);font-size:.94rem}
+
+strong{font-weight:700}
+em{font-style:normal;background:linear-gradient(transparent 62%,#ffc4b8 62%)}
+a{color:var(--accent-deep);text-underline-offset:.2em}
+a:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+code{font-family:var(--mono);font-size:.88em;background:var(--tint);padding:1px 5px;border:var(--hair)}
+
+/* ---- code panel: ink background ---- */
+.panel{border:var(--rule);background:var(--ink);color:#f3f2f2;overflow:hidden}
+.panel__tab{font-family:var(--mono);font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;
+  padding:.55rem .9rem;border-bottom:1px solid #444141;color:#bab6b6}
+.panel pre{margin:0;padding:1rem .9rem;overflow-x:auto;font-family:var(--mono);
+  font-size:.82rem;line-height:1.75;word-break:normal}
+.panel .c{color:#9b9797}
+.panel .add{color:#ff9783}
+.panel .del{color:#bab6b6;text-decoration:line-through}
+.panel .hit{color:#ff563c;font-weight:600}
+
+/* ---- numbered rows (commands, steps) ---- */
+.run{border:var(--rule);background:var(--paper)}
+.run__row{display:flex;gap:.9rem;padding:.8rem .95rem;align-items:baseline;flex-wrap:wrap}
+.run__row + .run__row{border-top:var(--hair)}
+.run__n{font-family:var(--mono);font-size:.72rem;color:var(--accent-deep);min-width:1.2rem}
+.run__cmd{font-family:var(--mono);font-size:.85rem;word-break:normal}
+.run__what{color:var(--n700);font-size:.88rem;margin-left:auto;text-align:right}
+
+/* ---- three-up ---- */
+.lenses{display:grid;gap:0;border:var(--rule)}
+.lens{padding:1.4rem 1.25rem}
+.lens + .lens{border-top:var(--rule)}
+.lens h3{margin-bottom:.45rem}
+.lens p{color:var(--n800);font-size:.95rem}
+@media (min-width:52rem){
+  .lenses{grid-template-columns:repeat(3,1fr)}
+  .lens + .lens{border-top:0;border-left:var(--rule)}
+}
+
+/* ---- key/value table ---- */
+.vs{display:grid;gap:0;border:var(--rule)}
+.vs__row{display:grid;grid-template-columns:1fr;gap:0}
+.vs__row + .vs__row{border-top:var(--hair)}
+.vs__k,.vs__v{padding:.85rem 1rem}
+.vs__k{font-weight:700;background:var(--tint);font-size:.92rem}
+.vs__v{color:var(--n800);font-size:.95rem}
+@media (min-width:44rem){
+  .vs__row{grid-template-columns:11rem 1fr}
+  .vs__k{border-right:var(--hair)}
+}
+.vs--wide .vs__row{grid-template-columns:1fr}
+@media (min-width:44rem){.vs--wide .vs__row{grid-template-columns:16rem 1fr}}
+
+/* ============================================================================
+   dependency graph stage
+   Neither the drawing code nor the coordinate data lives here — the generator
+   slices both out of site/graph.html at build time. This block only re-skins the
+   chrome the viewer sits in, in the v2 idiom: zero radius, 2px rules as
+   structure, panels flush against the stage edges rather than floating as cards.
+   The background is --ink, because the viewer draws its text in #f3f2f2 — on a
+   light background nothing would be visible.
+   ========================================================================= */
+.graph-stage{
+  position:relative;height:min(68vh,600px);min-height:400px;
+  background:var(--ink);border:var(--rule);overflow:hidden;
+}
+/* The canvas width/height are not optional. <canvas> is a REPLACED element, so if
+   both are auto it uses its intrinsic size (300x150) even when absolutely
+   positioned, and right/bottom are discarded — inset:0 alone will not stretch it.
+   This actually bit the original page (stage 1272x720, canvas 300x150).
+   The viewer sizes itself from cv.clientWidth/clientHeight, so if that is 0 here,
+   it draws nothing. */
+.graph-stage canvas{
+  display:block;position:absolute;inset:0;width:100%;height:100%;
+  cursor:grab;touch-action:none;
+}
+.graph-stage canvas.is-dragging{cursor:grabbing}   /* the viewer toggles this while dragging */
+
+.graph-controls,.graph-legend{
+  position:absolute;background:rgba(32,30,29,.92);
+  -webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);
+  border:0;
+}
+.graph-controls{
+  top:0;left:0;bottom:0;width:14.5rem;overflow-y:auto;
+  border-right:1px solid var(--n700);
+}
+.graph-controls fieldset{border:0;margin:0;padding:.75rem .85rem}
+.graph-controls fieldset + fieldset,.graph-controls .graph-find,.graph-controls .graph-detail{
+  border-top:1px solid var(--n800);
+}
+.graph-controls legend,.graph-find > span{
+  padding:0;font-family:var(--mono);font-size:.64rem;letter-spacing:.12em;color:var(--n500);
+}
+.graph-controls legend{display:block;margin-bottom:.5rem}
+
+.seg{display:flex;border:1px solid var(--n700)}
+.seg label{flex:1;position:relative}
+.seg input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer}
+.seg span{display:block;text-align:center;padding:.34rem .2rem;font-size:.76rem;color:#bab6b6}
+.seg label + label span{border-left:1px solid var(--n700)}
+.seg input:checked + span{background:var(--accent);color:#f8f7f7;font-weight:700}
+.seg input:focus-visible + span{outline:2px solid var(--accent);outline-offset:-2px}
+
+.graph-find{display:grid;padding:.75rem .85rem}
+.graph-find input{
+  margin-top:.5rem;padding:.4rem .5rem;border-radius:0;
+  font-family:var(--mono);font-size:.76rem;color:#f3f2f2;
+  background:#2c2928;border:1px solid var(--n700);
+}
+.graph-find input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+
+/* The viewer fills this. Empty is not the initial state — the viewer puts a hint here. */
+.graph-detail{padding:.75rem .85rem;min-height:5.5rem;font-family:var(--mono)}
+.graph-detail .empty{margin:0;color:var(--n500);font-size:.7rem;line-height:1.65}
+.graph-detail .name{font-size:.82rem;font-weight:700;word-break:break-all;color:#f3f2f2}
+.graph-detail .dir{margin-top:2px;font-size:.66rem;color:var(--n500);word-break:break-all}
+.graph-detail ul{list-style:none;margin:.6rem 0 0;padding:0;display:grid;gap:3px}
+.graph-detail li{display:flex;justify-content:space-between;gap:.6rem;font-size:.72rem;color:#d7d3d3}
+.graph-detail li b{color:#f3f2f2}
+.graph-detail .cyc{
+  display:inline-block;margin-top:.55rem;padding:2px 7px;border-radius:0;
+  background:#f2994a;color:#2a1705;font-size:.64rem;font-weight:700;letter-spacing:.06em;
+}
+
+.graph-legend{
+  bottom:0;right:0;list-style:none;margin:0;padding:.6rem .8rem;
+  display:grid;gap:4px;font-family:var(--mono);
+  border-top:1px solid var(--n700);border-left:1px solid var(--n700);
+}
+.graph-legend li{display:flex;align-items:center;gap:.5rem;font-size:.68rem;color:#d7d3d3}
+/* The one thing exempt from the zero-radius rule. It is not chrome — it is a SWATCH
+   of the glyph the canvas draws with arc(), so squaring it would make the legend
+   contradict the picture it explains. */
+.graph-legend i{width:9px;height:9px;border-radius:50%;flex:none}
+.graph-legend em{margin-left:auto;font-style:normal;color:var(--n500);font-variant-numeric:tabular-nums}
+
+/* Pinching is awkward one-handed and impossible from a keyboard — so the gesture is
+   not the only way in. */
+.graph-zoom{position:absolute;right:0;top:0;display:grid}
+.graph-zoom button{
+  width:2.1rem;height:2.1rem;display:grid;place-items:center;
+  font-family:var(--mono);font-size:1rem;line-height:1;border-radius:0;cursor:pointer;
+  color:#bab6b6;background:rgba(32,30,29,.92);
+  -webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);
+  border:1px solid var(--n700);border-top:0;border-right:0;
+}
+.graph-zoom button:first-child{border-top:1px solid var(--n700)}
+.graph-zoom button:hover{color:#f3f2f2;border-color:var(--n500)}
+.graph-zoom button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+
+.graph-cap{font-family:var(--mono);font-size:.72rem;line-height:1.7;color:var(--n700)}
+.graph-cap .graph-src{display:block;margin-top:.35rem;color:var(--n500)}
+
+@media (max-width:52rem){
+  /* The controls drop below the canvas in normal flow instead of covering a small
+     canvas — so the picture gets the full width. They STAY INK once they drop:
+     every text colour inside is a light one, so on a light background none of it
+     would be readable. The canvas height is capped so it cannot eat the whole
+     viewport — you have to be able to scroll past it. */
+  .graph-stage{height:auto;min-height:0}
+  .graph-stage canvas{position:static;width:100%;height:52vh;min-height:15rem;max-height:24rem}
+  .graph-controls{
+    position:static;width:auto;overflow:visible;
+    border-right:0;border-top:1px solid var(--n700);
+    display:grid;grid-template-columns:1fr 1fr;
+  }
+  .graph-controls fieldset + fieldset{border-top:0;border-left:1px solid var(--n800)}
+  .graph-controls .graph-find,.graph-controls .graph-detail{grid-column:1 / -1}
+  .graph-legend{
+    position:static;border-left:0;
+    grid-template-columns:repeat(auto-fill,minmax(7rem,1fr));
+  }
+  .graph-zoom button{width:2.5rem;height:2.5rem}
+}
+
+/* ---- footnote ---- */
+.note{border-left:var(--rule);padding:.15rem 0 .15rem 1rem;color:var(--n700);font-size:.9rem}
+
+.foot{padding:2.5rem clamp(1.25rem,5vw,3rem);border-top:var(--rule);
+  display:flex;flex-wrap:wrap;gap:.9rem 1.5rem;align-items:baseline;font-size:.88rem;color:var(--n700)}
+.foot__brand{font-weight:800;color:var(--ink);letter-spacing:-.02em}
+
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}

@@ -171,7 +171,8 @@ pub const BLINDNESS_REGISTRY: &[BlindnessClass] = &[
                   only on a name collision); and a resolver that returns \"no module\" for every path \
                   outside a declared vocabulary, which empties the denominator before counting starts. \
                   Asserted: every score ships the POPULATION it scored over in the same object \
-                  (`featureSlicedDesign.totalImports`, `busFactor.total`, `mainSequence.classifiedFiles`, \
+                  (`featureSlicedDesign.layerClassifiedImports`, `busFactor.total`, \
+                  `mainSequence.classifiedFiles`, \
                   ...), so a 0 there IS the never-measured signal — a denominator cannot be dropped in \
                   transit the way a caveat sentence can, and a derived test refuses any score field that \
                   ships without one. `health.pain` renormalizes over the measured metrics only and \

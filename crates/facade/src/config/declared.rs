@@ -5,9 +5,20 @@
 //! same question — "the author declared X; which engine-side owner does X land on, and what does an
 //! undeclared or malformed X mean?" — while the rest of `config.rs` assembles packs and rules.
 //!
-//! The shared rule these all follow: a declared value is applied WHOLE, the empty declaration included.
-//! Letting an owner type's `Default` come back for an empty declaration is the built-in-behind-the-
-//! author's-back that the 2026-07-27 vocabulary arc removed everywhere else.
+//! The rule these follow splits in two, and reading it as one unconditional rule is wrong (corrected
+//! 2026-08-14 — it was written as "a declared value is applied WHOLE, the empty declaration included"
+//! with no qualifier, which is a true sentence about one of the two kinds below and a false one about
+//! the other):
+//!
+//! - REPLACEMENT knobs — everything sourced from `req.vocabulary` — ARE applied whole, the empty
+//!   declaration included. Letting an owner type's `Default` come back for an empty declaration is the
+//!   built-in-behind-the-author's-back that the 2026-07-27 vocabulary arc removed everywhere else.
+//! - `parsers.globOverrides` is NOT one of them: it PUSHES onto `DispatchConfig::glob_overrides`, an
+//!   ADDITIVE tier consulted ahead of the extension map, which every unmatched path still falls through
+//!   to (`dispatch::dispatch` -> `dispatch_by_extension`). So an empty declaration here replaces nothing
+//!   and the extension map keeps answering — correct for a routing override, and the exact opposite of
+//!   what the whole-replacement rule predicts. Read unconditionally, that rule says declaring
+//!   `parsers: {}` blanks the extension map. It does not.
 
 use zzop_engine::EngineConfig;
 

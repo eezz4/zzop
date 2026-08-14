@@ -38,8 +38,10 @@ node --test test/adapter.test.mjs
 ## Contract points
 
 - Channel: dep-graph `imports` ONLY — no `io`, no symbols, no fragments. The merge
-  (`crates/engine/src/envelope/merge.rs`) is additive but NATIVE-FIRST per local name: a name the
-  native pass already bound keeps its native binding, names it never bound are added. Parsed facts are
+  (`crates/engine/src/envelope/merge.rs`) is additive but NATIVE-FIRST per binding key: a key the
+  native pass already bound keeps its native binding, keys it never bound are added. The key is not
+  always the local name — it is per-language, and the table in `crates/core/src/ir/imports.rs` owns
+  it (for Java it is the rightmost dotted segment, which is what this adapter emits). Parsed facts are
   never overridden. Every local name this adapter offers on a `.java` tree is already bound by the
   native parser, so it adds nothing there — pinned end-to-end by
   `crates/engine/tests/analyze_java_imports_overlay.rs`.
@@ -63,7 +65,7 @@ node --test test/adapter.test.mjs
 Pinned from both sides: the node snapshot test pins the adapter's output bytes, the engine test
 pins what the engine does with them. On the committed 3-file fixture the engine test proves the
 native Java parser now yields the full dep graph on its own, and that attaching this overlay
-changes nothing (native-first per local name, and this adapter offers no name the native pass left
+changes nothing (native-first per binding key, and this adapter offers no key the native pass left
 unbound). In the v0.16 era the same fixture went from zero `.java` dep edges to a real, deduped
 `App.java -> TextUtil.java` edge via this overlay — that is the effect to expect on an extension
 that still lacks native import extraction.

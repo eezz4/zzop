@@ -25,7 +25,11 @@ use super::super::helpers::{
 /// same "no native parser exists for this extension" fact, so it belongs in this count too (that file's
 /// size is a SEPARATE, already-disclosed fact via `degraded`/`silent-truncation`, not a reason to hide
 /// the extension gap). Extensionless files (README, Dockerfile) are deliberately excluded from v1:
-/// ambiguous by construction — often config/docs, no reliable language signal to name. The per-extension
+/// ambiguous by construction — often config/docs, no reliable language signal to name. That is a
+/// statement about what this engine will GUESS, and only about the files it is still guessing at: a
+/// `parsers.globOverrides` entry naming such a path routes it to a real frontend like any other, which
+/// makes `dispatch_lang` `Some` and returns above before the extension is ever read (pinned by
+/// `tests/integration/analyze_glob_override_disclosure.rs`). The per-extension
 /// entry caps its sample `rel`s at 3 (during collection, not at emission, so a huge tree never holds more
 /// than 3 rels per extension).
 pub(super) fn record_unparsed_extension(

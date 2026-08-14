@@ -35,7 +35,13 @@
 # some of these very ordinary words:
 #   - docs/demo/break-a-route.md — "19 HTTP routes + 30 shared DB tables" (measured demo counts)
 #   - site/rules.html            — "the cross-layer IO (HTTP routes, DB tables, ...)" (explicit elision)
-#   - site/usage.html            — "backend routes, shared DB tables, route drift" (prose on `zzop cross`)
+#   - site/usage.html            — "backend routes, shared DB tables, route drift" (prose on `zzop cross`).
+#                                  That page became a redirect stub on 2026-08-14 and the sentence did not
+#                                  move onto the new tab, so this third site no longer exists; the entry
+#                                  stays because it is EVIDENCE FOR THE DESIGN CALL below (three sites, an
+#                                  allowlist declined), not a roster of today's tree. Anyone re-measuring
+#                                  the "4 sites" figure should expect fewer and re-derive it, not read it
+#                                  off this line.
 # The offer on the table was an allowlist holding those three, and an allowlist that grows is how a
 # guard stops guarding — the reason check-vendor-token-literals.sh never got an escape hatch, and the
 # same call check-docs-rule-ids.sh made hours earlier when its own widening produced 28 false

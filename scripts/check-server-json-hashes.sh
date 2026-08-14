@@ -199,6 +199,20 @@ pkg_platforms="$(sed -n 's/.*"identifier"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/
   "extracted 0 package identifiers from $SERVER_JSON -- the file layout changed and every check below
   would vacuously pass. Fix the extraction rather than trusting a green run."
 
+# The asymmetry in the next two lines is DELIBERATE, and the abort above is what licenses it.
+#
+# `grep -c` exits 1 on a count of 0, and under `set -e -o pipefail` that kills the script on the
+# assignment with no output at all. This line survives without `|| true` only because the `[ -n
+# "$pkg_platforms" ]` abort directly above has already refused the empty case — i.e. ORDER IS
+# LOAD-BEARING here. Moving, weakening or deleting that abort silently converts this line into a mute
+# exit 1. The line below legitimately CAN count zero (no malformed identifiers is the healthy state),
+# so it carries `|| true`; this one cannot reach zero without the guard being broken already.
+#
+# Do NOT "fix" this by adding `|| true` for symmetry — it would make things worse, not merely
+# redundant. With the abort gone and `|| true` here, pkg_count becomes 0 and flows on: the three-way
+# equality below compares three empty strings and passes, and `[ "$sha_count" -ne "$pkg_count" ]`
+# compares 0 against 0 and passes. That is a vacuous green, which is the exact defect this file's
+# floors exist to prevent. A loud death is worse than a diagnosis but far better than a false clean.
 pkg_count="$(printf '%s\n' "$pkg_platforms" | grep -c .)"
 bad="$(printf '%s\n' "$pkg_platforms" | grep -c '^?$' || true)"
 [ "$bad" -eq 0 ] || abort \

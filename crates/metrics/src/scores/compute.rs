@@ -1,7 +1,8 @@
 //! Score orchestrator — fans out to all 15 score functions and assembles the aggregate `Scores` struct.
 //! All scores are 0-100; higher is better, and every one of them ships the POPULATION it scored over —
-//! see [`super::types::Scores`] for the per-metric population field and why a score without one is not a
-//! measurement.
+//! see [`super::types::Scores`] for the per-metric SUBJECT counted and why a score without one is not a
+//! measurement. Which FIELD carries each count is held by machines only (`crate::health::population_of`
+//! and `scores::meanings::tests`' `POPULATION_FIELD`) — a prose copy of that mapping drifted once.
 //!
 //! Two metrics left this fan-out on 2026-08-08 (`type_safety`, `lod`): their input channels had no
 //! producer anywhere in the workspace, so both published a perfect score on every run ever made. The

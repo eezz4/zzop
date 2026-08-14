@@ -169,10 +169,22 @@ list_guards() {
 # Both POSIX sourcing spellings, `.` and `source`. Matching only one would leave a lib sourced the
 # other way outside the subject set while this header claimed completeness — the same shape as the
 # `git ls-files` attempt that preceded it, which silently dropped every uncommitted lib.
+#
+# BOTH `|| true`s below are load-bearing, and they mute the floor INDEPENDENTLY — measured 2026-08-14
+# by pointing the needle at a directory that does not exist:
+#   neither present -> exit 1, ZERO bytes of output
+#   only the first  -> exit 1, ZERO bytes of output (grep -c exits 1 on a count of 0)
+#   both present    -> the diagnosis below actually prints
+# Under `set -e -o pipefail` a grep that matches nothing exits 1 and that status propagates out of the
+# command substitution, killing the script ON THE ASSIGNMENT — before the abort written to refuse a
+# vacuously green run can speak. The guard still failed closed, but silently, which on screen is
+# indistinguishable from a real finding. `sort -u` and `printf` exiting 0 does not save it: with
+# pipefail the reachability of this floor is decided by the LAST FAILING stage, not the last stage.
+# scripts/lib/tracked-grep.sh:219-226 carries the same pair for the same reason.
 guard_libs=$(grep -hoE '(^|[;&[:space:]])(\.|source)[[:space:]]+\./scripts/lib/[A-Za-z0-9_-]+\.sh' \
   scripts/*.sh scripts/lib/*.sh .githooks/* 2>/dev/null |
-  grep -oE 'scripts/lib/[A-Za-z0-9_-]+\.sh' | sort -u)
-lib_count=$(printf '%s\n' "$guard_libs" | grep -c '.')
+  grep -oE 'scripts/lib/[A-Za-z0-9_-]+\.sh' | sort -u || true)
+lib_count=$(printf '%s\n' "$guard_libs" | grep -c '.' || true)
 if [ "$lib_count" -lt 1 ]; then
   echo "check-guards-wired: no guard sources a scripts/lib/*.sh at all -- either every shared library" >&2
   echo "  was inlined, or this extraction stopped matching. An empty set would pass vacuously." >&2
@@ -443,7 +455,14 @@ defense_invoked_anywhere() { # <path>
   # `import { withPlanted } from "./plant-revert.mjs"`. A module consumed by an invoked defense IS
   # invoked; requiring an interpreter would have pushed the repo shared plant/revert helper onto the
   # hand-run list, which is the opposite of true.
-  git grep -nE -- "(bash|sh|node)[[:space:]][^\"']*$esc|=[\"']?(\./)?scripts/([^[:space:]\"']*/)?$esc|from[[:space:]]+[\"'][^\"']*$esc" ':!site/*' 2>/dev/null |
+  #
+  # The leading `(^|[^[:alnum:]_])` is the same word boundary `invoked_in` above carries, and it is here
+  # for a measured reason (2026-08-14): without it ANY word ending in `sh` supplied the interpreter, so
+  # one ordinary prose sentence -- `... an English page ... scripts/gen-site.mjs ...`, written inside
+  # scripts/check-english-source.sh -- reported TWO uncalled generators as invoked. A false GREEN, and
+  # the witness was a comment. The sibling function had the boundary and documented it; this one was
+  # written later and did not, which is the drift these two functions exist to catch in other files.
+  git grep -nE -- "(^|[^[:alnum:]_])(bash|sh|node)[[:space:]][^\"']*$esc|=[\"']?(\./)?scripts/([^[:space:]\"']*/)?$esc|from[[:space:]]+[\"'][^\"']*$esc" ':!site/*' 2>/dev/null |
     awk -v esc="$esc" '
       {
         line = $0

@@ -66,6 +66,14 @@ jobs:
         run: bash scripts/check-guards-wired.sh
       - name: rules catalog ↔ site sync guard
         run: bash scripts/check-rules-catalog-sync.sh
+      - name: generated site pages ↔ site-src freshness guard
+        # site/index.html and site/ko/index.html are written by scripts/gen-site.mjs and COMMITTED,
+        # because Pages serves site/ as files. A site-src/ edit without a regeneration leaves the repo
+        # carrying a page that will never be deployed, and nothing else notices: the stale page is still
+        # valid HTML, still links correctly, still passes every prose guard. Same defect the site-graph
+        # step in `cli-shim-test` closed for the dep-graph data; this one needs no Rust build, so it runs
+        # here — and in pre-commit — instead of one push later.
+        run: bash scripts/check-site-generated.sh
       - name: rule description ↔ matcher token guard
         run: bash scripts/check-rule-desc-tokens.sh
       - name: pack message ↔ engine-appended suppress sentence guard
@@ -113,6 +121,11 @@ jobs:
         run: bash scripts/check-committed-config-vocabulary.sh
       - name: shell pipe-to-grep-q SIGPIPE seal
         run: bash scripts/check-shell-pipe-sigpipe.sh
+        # A different needle from the seal above, on the same hazard family: that one bans `| grep -q`,
+        # this one bans an empty-set floor its own assignment can never reach. Neither says anything
+        # about the other's shape.
+      - name: unreachable empty-set floor seal
+        run: bash scripts/check-shell-mute-floor.sh
       - name: version-string parser-completeness guard
         run: bash scripts/check-version-lists-parsers.sh
       - name: framework recognizer ↔ parser prose guard
@@ -234,9 +247,11 @@ jobs:
         # packages/cli, no debug fallback), so this needs --release, not a debug build.
         run: cargo build -p zzop-cli-bin --release
       - name: site graph is regenerated from the tree it claims to draw
-        # `site/graph.html` carries a COMMITTED data block — every node of this repo, plus two prose
-        # totals — and `site/architecture.html` carries a third copy of those totals. All four are
-        # written by scripts/site-graph-data.mjs, and until 2026-07-29 NOTHING ran that script: measured,
+        # `site/graph.html` carries a COMMITTED data block — every node of this repo — plus three prose
+        # totals that describe it. All four are written by scripts/site-graph-data.mjs. (A fourth prose
+        # copy sat in `site/architecture.html` until 2026-08-14, when that page became a redirect stub;
+        # the anchor was dropped rather than re-pointed, and that script's header says why.) Until
+        # 2026-07-29 NOTHING ran the generator: measured,
         # it had zero callers anywhere in the tree outside itself. A generator nobody runs and an output
         # everybody commits drift by default, and the drift is invisible — the page keeps rendering, just
         # of a tree that no longer exists. That is the exact defect the generator was written to close

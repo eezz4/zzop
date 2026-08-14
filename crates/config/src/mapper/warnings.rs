@@ -68,6 +68,18 @@ pub(super) fn collect_config_warnings(config: &serde_json::Value) -> Vec<String>
         &mut warnings,
     );
     warn_unknown_keys(config.get("git"), &known("git"), "git.", &mut warnings);
+    // `parsers`, wired 2026-08-14 — the SECOND declared scope this walk never descended into, and the
+    // post-mortem of the FIRST is the comment directly below. `VERSIONING.md` publishes "Unknown keys
+    // are ignored with a warning, never a hard error" as a compatibility promise, so a typo here was
+    // not an unbuilt feature: it was that published promise, already broken. The walk stops HERE and
+    // does not descend into `globOverrides[]` entries — `GlobOverrideRequest` makes `glob`/`language`
+    // required, so a misspelled entry key fails the LOAD with serde naming the missing field.
+    warn_unknown_keys(
+        config.get("parsers"),
+        &known("parsers"),
+        "parsers.",
+        &mut warnings,
+    );
     // `vocabulary` and its one nested scope. Wired 2026-08-07, when `vocabulary.fsd` was renamed to
     // `vocabulary.featureSlicedDesign` and it turned out the old spelling would have been accepted in
     // TOTAL SILENCE — this scope was the only declared one the walk never descended into, though

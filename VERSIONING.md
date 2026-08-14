@@ -3,9 +3,17 @@
 ## Current status: pre-1.0 (`0.x`) — unstable
 
 zzop is pre-1.0. Every `0.x` release — **minor or patch** — may change analysis behavior,
-output shape, the rule set, CLI flags, config keys, or defaults, without prior notice or a
-migration path. There are no backward-compatibility guarantees yet, and there is
-deliberately **no `CHANGELOG.md`** during the `0.x` series (see below).
+output shape, the rule set, CLI flags, config keys, or defaults. Semantic Versioning is not in
+effect yet, so the version number alone does not tell you whether an upgrade breaks you, and there
+are no backward-compatibility guarantees yet.
+
+What the `0.x` license does **not** include is silence. A break to one of the surfaces in
+[The compatibility surface](#the-compatibility-surface) is written down — old and new spelling both,
+in [`CHANGELOG.md`](CHANGELOG.md) — instead of being left for you to discover. That is a promise
+about the RECORD, not about the rate: it narrows the paragraph above by exactly nothing. It is
+scoped that narrowly on purpose — the section directly below is the same promise already being kept
+for the one `0.x` break big enough to need it, and a wider promise made here would be a claim rather
+than a description.
 
 If you depend on zzop, **pin an exact version** and re-test before upgrading. Both binaries are versioned
 by the same release tag, so pin by tag: take the assets for the tag you want from [GitHub
@@ -18,10 +26,11 @@ instead of always taking the marketplace's newest.
 ## Breaking in the current 0.x: suppress markers gained a `zzop-` prefix, and rule ids were renamed
 
 The one 0.x break written down here rather than left to the release notes, because it takes away
-something that was already working in *your* files and does it in two places at once. It is not the
-start of a changelog and sets no precedent — the paragraph above still holds for every other 0.x
-change. What is kept below is what a migration needs: what changed, the id tables to map against, and
-how to find a stale id without diffing those tables by hand.
+something that was already working in *your* files and does it in two places at once. It sits here
+rather than in [`CHANGELOG.md`](CHANGELOG.md) because what it carries is a MIGRATION — id tables to
+map against, and how to find a stale id without diffing them by hand — which is a thing you read
+once and to the end, not a row per release. It sets no precedent for the rest of a `0.x` release:
+the top paragraph still holds for every change outside the surfaces the compatibility table names.
 
 **1. Every DSL suppress marker is now spelled `zzop-<rule id>-ok`** (was `<rule id>-ok`):
 
@@ -130,14 +139,22 @@ renamed by construction. The pack is
 
 A SIXTH rule, `sql/destructive-migration`, was exported the same day and returned the same day, and this
 table deliberately carries no row for it. A rename row exists to migrate a user, and no user could have
-been carrying the exported spelling: `sql/destructive-migration` is the id `v0.29.0` shipped, and no tag
-was cut in between — `git tag --list` still tops out at `v0.29.0`, so both the exporting commit and this
-one describe as `v0.29.0-<n>`, differing only in how far past that tag they sit. Listing a
+been carrying the exported spelling: `sql/destructive-migration` is the id `v0.30.0` shipped, and no tag
+was cut between the exporting commit (`9a49080`) and the returning one (`c0cc8ed`) —
+`git ls-remote --tags origin` tops out at `v0.30.0` (`e7b20da`), which is an ANCESTOR of both hops, so
+both describe as `v0.30.0-<n>`, differing only in how far past that tag they sit. Listing a
 round trip nobody could observe would send readers to `disabledRules`/`suppressions` entries that never
 existed. The window this reasoning depends on closes the moment a tag lands — after that, a rename is
 shipped whether or not it is later undone, and BOTH hops belong here as the `¶¶` rows are spelled.
 Bundling it again also makes it the one bundled rule declaring `"axis": "opinion"`, so the
 `grep -c` count below is 0 everywhere except `rules/dsl/sql/sql.json`, where it is 1.
+
+Read that tag coordinate off the REMOTE — `git ls-remote --tags origin` — and never off a local
+`git tag --list`. Releases are cut by CI on the remote, so a clone that has never fetched tags reports a
+top tag some number of releases stale and every `git describe` taken in it is anchored to the wrong
+release. This paragraph said `v0.29.0` until 2026-08-14 for exactly that reason: the local list was two
+tags behind (it had neither `v0.29.1` nor `v0.30.0`). The argument survived the correction — the tag
+that was missing sits BEFORE both hops, not between them — but the numbers and the witness did not.
 
 The eight `code-hygiene` rows (2026-08-12) close the `axis: opinion` export — after them exactly ONE
 bundled rule declares that axis (`grep -c '"axis": "opinion"' rules/dsl/*/*.json` → 0 everywhere except
@@ -207,16 +224,23 @@ below), so this is recorded here rather than versioned.
 
 ## What 1.0.0 will mark
 
-`1.0.0` is the line where zzop starts making promises:
+`1.0.0` is the line where the promise stops being about whether you hear about a break and starts
+being about **when one may land at all**:
 
-- **Semantic Versioning** takes effect (see the surface below).
-- A maintained **`CHANGELOG.md`** begins, documenting every release from `1.0.0` onward.
-  The `0.x` history is intentionally not reconstructed — it was pre-stable.
+- **Semantic Versioning** takes effect (see the surface below). A break to a covered surface stops
+  being something a minor or patch release may do, and becomes a MAJOR bump.
 
-Until then, the git tag list and the GitHub release notes (auto-generated per tag) are the
-record of what shipped.
+[`CHANGELOG.md`](CHANGELOG.md) does not wait for that line — it is here now. It indexes every
+released tag rather than reconstructing the `0.x` series as prose, because the releases themselves
+are the record and a retold one would be a second copy of it. The GitHub release notes
+(auto-generated per tag) stay the detail behind each of its rows.
 
-## The compatibility surface (from 1.0.0)
+## The compatibility surface
+
+This table is the scope of **both** promises: what a break is recorded against today, and what
+Semantic Versioning will cover from `1.0.0`. Nothing outside it is in scope on either side. The
+scope is deliberately narrow — it holds only what has already been held in practice. Widening it
+later adds a promise; narrowing it breaks one.
 
 Under Semantic Versioning, from `1.0.0`:
 
@@ -225,7 +249,7 @@ Under Semantic Versioning, from `1.0.0`:
   config.
 - **PATCH** — bug fixes and precision improvements that do not change the contract.
 
-The surfaces SemVer will cover:
+The surfaces:
 
 | Surface | What's covered |
 |---|---|
@@ -233,6 +257,41 @@ The surfaces SemVer will cover:
 | CLI flags & config keys | Removing or repurposing a flag/key is a major bump; adding one is minor. Unknown keys are ignored with a warning, never a hard error. |
 | Normalized AST envelope input ([`docs/NORMALIZED_AST.md`](docs/NORMALIZED_AST.md)) | The envelope shape external parser adapters emit. Its `version` field is a RELEASE number in these same units, and moves only when the shape moves — so an adapter emitting a given version keeps being accepted through every later release that did not change the shape. A shape change is never silent: a consumer rejects a version above its own, and a field whose absence would change the analysis carries an explicit floor. |
 | Rule ids | The `disabledRules` / `severityOverrides` ids you configure against. A rename is a major bump. |
+
+### Inside those surfaces, three things are still moving
+
+Being in the table means a change to it is **recorded**, not that it will not happen. Three
+properties inside it are known to be unsettled today. Each is named here rather than left for you to
+infer from a run, because a consumer that assumes the settled version of any of them is building on
+something this project has said out loud it is not holding:
+
+- **Rule ids are still being renamed, and one defect concept is often several ids.** The same
+  concept is frequently spelled once per language rather than once, and folding those spellings into
+  a single id was considered and declined — so the plural stays, and individual ids keep moving as
+  their matchers sharpen. Every rename that *reached a release* lands as a row: the pre-`1.0.0` ones
+  are the tables in *Breaking in the current `0.x`* above, and each release's are in
+  [`CHANGELOG.md`](CHANGELOG.md). The qualifier is load-bearing and that section names its one
+  exception — a rename that was applied and undone between tags carries no row, because a row exists
+  to migrate a user and no user could have been carrying the intermediate spelling.
+  Configure against [`docs/rules/catalog.md`](docs/rules/catalog.md),
+  which is always the current set, and let a run's `configWarnings` / `warnings` tell you when an id
+  you named no longer exists.
+- **`SourceSymbol.id` is NOT UNIQUE — that is the declared contract, and it collides today.**
+  Java/C# overloads, TypeScript overload signatures, and TS declaration merging each collapse
+  several declarations onto one id. **Treat it as a label, not a key**: keying a map by it silently
+  drops the colliding siblings, and iteration order then decides which one survived — a security
+  verdict has been flipped exactly that way. The contract, the measured collision count, and the one
+  convention a consumer that must pick a winner is required to use are on the field itself, in
+  [`docs/adapters/envelope.schema.json`](docs/adapters/envelope.schema.json) (`sourceSymbol.id`) and
+  `crates/core/src/ir.rs`. Making it unique was considered and declined; a disambiguating spelling
+  added later would be additive, so nothing here forecloses it.
+- **Native analysis ids use three namespace conventions at once, and are not being normalized.** A
+  native id is bare, `cross-layer/`-prefixed, or `schema/`-prefixed, and the prefix carries meaning
+  rather than history: bare = judged inside a single tree, `cross-layer/` = exists only where a
+  join across trees does, `schema/` = emitted by the schema family gates. One analysis name occurs
+  in both a bare and a `cross-layer/` form as two genuinely different analyses for that reason. Do
+  not infer that a bare id will grow a prefix, do not strip one, and do not treat a bare/prefixed
+  pair as a duplicate.
 
 ## Explicitly NOT part of the compatibility surface
 
@@ -262,18 +321,20 @@ These change freely at any time, by design — do not build on them:
 
 ## Documents that are compiled INTO the binary — changing one requires a release
 
-These files are not read from disk at run time. They are `include_str!`-baked into the binary by
-`crates/summary/src/contracts.rs` and served as the `zzop contract` / `zzop://contract/*` resources,
-so **a reader on a prebuilt binary sees the bytes from the release they installed**, never the ones
-in this repository.
+These files are not read from disk at run time. They are `include_str!`-baked into the binary and served
+as the `zzop contract` / `zzop://contract/*` resources by `crates/summary/src/contracts.rs`, so **a
+reader on a prebuilt binary sees the bytes from the release they installed**, never the ones in this
+repository. The `include_str!` is not always written in `contracts.rs` itself — see the two notes below
+the list — which is why the guard derives this set through three paths rather than one grep.
 
 The consequence is a rule, not a nuance: *"only documentation changed, so no release is needed"* is
 **false for every file in this list**. A pack author on the previous release cannot see a knob, a
 schema field, or a rule row added here until a new binary ships.
 
 <!-- EMBEDDED-CONTRACT-DOCS: this list is machine-checked against the `include_str!` calls in
-     crates/summary/src/contracts.rs by scripts/check-embedded-contract-docs.sh. Adding a baked
-     document without listing it here (or the reverse) fails that guard. -->
+     crates/summary/src/contracts.rs, the generated example-pack rows, and the `include_str!` behind
+     every cross-crate constant contracts.rs serves, by scripts/check-embedded-contract-docs.sh.
+     Adding a baked document without listing it here (or the reverse) fails that guard. -->
 
 - `docs/adapters/envelope.schema.json`
 - `docs/NORMALIZED_AST.md`
@@ -284,6 +345,7 @@ schema field, or a rule row added here until a new binary ships.
 - `docs/contracts/rule-pack.schema.json`
 - `docs/contracts/example-envelope.json`
 - `docs/rules/catalog.md`
+- `crates/config/config-surface.json`
 - `examples/packs/typescript-lint.json`
 - `examples/packs/orm-eager.json`
 - `examples/packs/sql-preferences.json`
@@ -300,6 +362,18 @@ back" an instruction whose first step needed a source checkout. It is baked now,
 `<stem>.json` under `<tree>/zzop/rules/`, done. Unlike the `docs/` entries above, these rows reach the
 table through a build script (`crates/config/build.rs`) rather than an `include_str!` in
 `contracts.rs`, which is why the guard reads `git ls-files 'examples/packs/*.json'` for this half.
+
+`crates/config/config-surface.json` is the THIRD path and was missing from this list until 2026-08-14.
+`contracts.rs` serves it as the `config-surface` resource, but the `include_str!` that bakes it is in
+`crates/config/src/lib.rs` (`CONFIG_SURFACE_JSON`) — the same bytes the unknown-key warner reads, so
+there is one embed and one truth. A grep for `include_str!` inside `contracts.rs` cannot see it, which
+is exactly how it stayed unlisted while being shipped; the guard now follows every `zzop_*::CONST` that
+`contracts.rs` serves back to the crate that defines it. TWO served resources still have no row here
+and never will, because there is no file to edit: `disclosure-classes` is RENDERED at build time from
+Rust, and `config-template` is a raw string literal in `crates/config/src/template.rs`. Both still need
+a release to reach a reader — a source file is not a document — and the guard aborts rather than skips
+if a served constant resolves to neither an `include_str!` nor a definition it could read.
+
 ## How versions are produced
 
 The version SSOT is the workspace `Cargo.toml`'s `[workspace.package] version` (2026-07-22 reform).
