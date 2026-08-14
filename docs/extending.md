@@ -156,8 +156,10 @@ them:
   not be wholly missing: facts merge additively, so an adapter can supply just the imports or io the
   native parser could not resolve on a file it otherwise parsed fine. Where both sides speak about the
   same thing the native fact wins by default — an overlay adds. Displacing a native fact is possible
-  but has to be **declared**, per local name, in the projection's `overrides` field (which puts a
-  `0.27.0` version floor on the envelope), and every displacement is named in the run's warnings.
+  but has to be **declared**, per import key, in the projection's `overrides` field (which puts a
+  `0.27.0` version floor on the envelope), and every displacement is named in the run's warnings. That
+  key is the local name the file binds for most front ends but not for all of them — the per-language
+  table in `crates/core/src/ir/imports.rs` is its owner, and a key that misses displaces nothing.
 
 Recipe: [recipes/write-an-adapter.md](recipes/write-an-adapter.md) — which channel to fill, how small
 an envelope may be, what each channel costs, and the before/after count that proves it worked.

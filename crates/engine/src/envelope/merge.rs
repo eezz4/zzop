@@ -63,9 +63,11 @@ pub(super) struct DroppedOverlayBinding {
 /// and a partially-better adapter had the same fate (native at 60% discarded the adapter's other 40%).
 /// Additive merging is what lets native and injected extraction COMBINE on one file.
 ///
-/// Native-first is enforced per KEY, not per file: `imports` is a `localName -> ImportBinding` map, so a
-/// local name the native pass already bound keeps its native binding (`or_insert_with`, the same rule
-/// `const_map_fragment` uses below) and only names it never bound are added. `re_exports` and
+/// Native-first is enforced per KEY, not per file: `imports` is a `key -> ImportBinding` map — the key
+/// being the local name for most front ends, but not for all of them (`crates/core/src/ir/imports.rs`
+/// owns the per-language table; C# keys a plain `using` by its full specifier) — so a key the native
+/// pass already bound keeps its native binding (`or_insert_with`, the same rule
+/// `const_map_fragment` uses below) and only keys it never bound are added. `re_exports` and
 /// `dynamic_imports` are sequences with no key, so they append minus exact duplicates — `ReExport` is
 /// compared by value, which keeps a type-only re-export distinct from an otherwise identical runtime one
 /// (only the latter is a dep-graph edge).

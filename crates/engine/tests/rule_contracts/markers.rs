@@ -551,8 +551,8 @@ fn native_marker_honoring_ids() -> BTreeSet<String> {
         !ids.is_empty(),
         "NO native rule reads the inline marker window. If the hand-authored `{HAND_AUTHORED_NATIVE_MARKER}` \
          exception was deliberately retired, that is correct — but then docs/rules/catalog.md, \
-         site/rules.html, site/usage.html and docs/getting-started.md must stop promising it in the SAME \
-         commit, and this assertion is where you find out."
+         site/rules.html and docs/getting-started.md must stop promising it in the SAME commit, and this \
+         assertion is where you find out."
     );
     ids
 }
@@ -721,7 +721,7 @@ fn the_hand_authored_native_marker_still_exists_in_the_scanner() {
         !carrying.is_empty(),
         "the hand-authored `{HAND_AUTHORED_NATIVE_MARKER}` marker is gone from every file defining a \
          marker reader ({scanners:?}) — if that exception was retired, update docs/rules/catalog.md, \
-         site/rules.html, site/usage.html and docs/getting-started.md in the same commit"
+         site/rules.html and docs/getting-started.md in the same commit"
     );
 
     let registered = native_ids();

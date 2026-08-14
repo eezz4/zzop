@@ -20,8 +20,16 @@ VETTED 0.31.0
 
 # All three were FALSE on 2026-08-11, one release after v0.30.0 shipped, with the whole guard fleet
 # green. They now name their boundary explicitly; this registry is what makes the next bump re-read them.
+#
+# VERSIONING.md went 2 -> 5 on 2026-08-14 when the needle grew its tag-coordinate half. Nothing was
+# added to the prose surface by that widening except in VERSIONING.md itself: the three new lines are
+# the rewrite of the one sentence that motivated it (it argued a rename table from `git tag --list`,
+# which had never fetched a tag) plus the two-line note saying to read tag coordinates off the remote.
+# All five VERSIONING.md lines, README.md's one and docs/ARCHITECTURE.md's one were read against
+# v0.31.0 on 2026-08-14 and are true; the two tag-coordinate ones were checked against a live
+# `git ls-remote --tags origin` (top tag v0.30.0 = e7b20da) rather than against the local list.
 claim README.md 1
-claim VERSIONING.md 2
+claim VERSIONING.md 5
 claim docs/ARCHITECTURE.md 1
 
 # "the hook installs the current release" describes the auto-update hook's BEHAVIOUR — it fetches
@@ -29,3 +37,17 @@ claim docs/ARCHITECTURE.md 1
 # guard exists to distinguish from a version claim, and `.claude-plugin/hooks/bootstrap.sh` is the
 # code it describes.
 exempt .claude-plugin/commands/update.md the hook installs whatever tag is newest; behaviour, not a version claim
+
+# Considered and DECLINED on 2026-08-14: per-claim evidence (a line number or a quoted needle on each
+# `claim` line), so that one blanket `VETTED` bump would split into N acts each needing the file open.
+#   - Line numbers are not evidence: any insertion above a claim shifts it, so the column would red on
+#     edits that never touched the sentence, and a guard that reds on unrelated work gets muted.
+#   - A quoted needle reds on every rewrap of a hard-wrapped paragraph. Both files carrying multiple
+#     claims are wrapped at ~100 columns and rewrap routinely, so the same muting pressure applies.
+#   - A hash of the matched lines survives both objections but does NOT buy the thing wanted: it still
+#     leaves ONE `VETTED` line to bump, so it detects a changed claim, never a careless re-read.
+# Splitting the re-read into N acts needs per-claim VETTED versions, i.e. a different guard shape, and
+# that is worth doing only when a bump is actually found to have been careless. The one bump on record
+# (`2a3efa9`, VETTED 0.30.0 -> 0.31.0) was not: its diff is one line and touched no claim sentence, and
+# all four claims it vouched for were re-read on 2026-08-14 and were true. The defect that motivated
+# looking here was needle WIDTH, not bump discipline — that half is fixed in the guard.

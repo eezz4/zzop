@@ -2,307 +2,39 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>zzop — Architecture</title>
-<meta name="description" content="zzop architecture — pipeline flow, the Common IR, language support, crate structure, and cross-layer joins.">
+<meta http-equiv="refresh" content="0; url=index.html#p-arch">
+<title>zzop — Architecture (moved)</title>
+<meta name="description" content="The architecture page moved into the overview page, where it is the How it works tab.">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="canonical" href="https://eezz4.github.io/zzop/index.html">
 <link rel="stylesheet" href="assets/site.css">
 </head>
 <body>
 
-<header class="site-header">
-  <div class="site-header__inner">
-    <a href="index.html" class="brand">
-      <span class="brand__mark" aria-hidden="true">z</span>
-      <span class="brand__wordmark">zzop</span>
-    </a>
-    <input type="checkbox" id="menu" class="menu-toggle">
-    <label for="menu" class="burger" aria-label="Menu"><span></span><span></span><span></span></label>
-    <nav class="site-nav">
-      <a href="index.html" class="site-nav__link">Overview</a>
-      <a href="architecture.html" class="site-nav__link is-active">Architecture</a>
-      <a href="graph.html" class="site-nav__link">Graph</a>
-      <a href="usage.html" class="site-nav__link">Usage</a>
-      <a href="reference.html" class="site-nav__link">Reference</a>
-      <a href="rules.html" class="site-nav__link">Rules</a>
-    </nav>
-    <div class="site-header__actions">
-      <a href="https://github.com/eezz4/zzop" target="_blank" rel="noreferrer" aria-label="GitHub" class="icon-btn">
-        <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"></path></svg>
-      </a>
-    </div>
-  </div>
-</header>
+<!-- REDIRECT STUB. This page has no content of its own any more: the architecture material is a tab
+     on index.html, and two pages owning the same facts means one of them is always the stale one.
 
-<div class="docs-layout">
+     The file stays instead of being deleted because links to it do not: other pages in site/ point
+     here, and so do bookmarks and anything already published. Absorbing those links is the entire
+     job of this file — the referring links are deliberately NOT rewritten.
 
-  <button type="button" class="docs-nav-toggle" aria-expanded="false" aria-controls="docs-nav">
-    Docs menu
-  </button>
+     Three ways out, because each one covers a case the others do not:
+       - meta refresh   sends a browser on immediately
+       - rel=canonical  tells a crawler which URL owns the content (a canonical URL carries no
+                        fragment by definition, so it names index.html; the fragment lives in the
+                        refresh and in the link below, which are the two places it is honoured)
+       - the link       works with JavaScript off, with refresh blocked, and in a text browser -->
 
-  <aside class="docs-nav" id="docs-nav">
-    <div class="docs-nav__group">
-      <div class="docs-nav__group-label">Docs</div>
-      <a href="index.html" class="docs-nav__link">Overview</a>
-      <a href="architecture.html" class="docs-nav__link is-active">Architecture</a>
-      <a href="graph.html" class="docs-nav__link">Graph</a>
-      <a href="usage.html" class="docs-nav__link">Usage</a>
-      <a href="reference.html" class="docs-nav__link">Reference</a>
-      <a href="rules.html" class="docs-nav__link">Rules</a>
-    </div>
-  </aside>
+<div class="docs-layout docs-layout--solo">
 
   <main class="docs-content">
     <div class="docs-content-header">
-      <h1>How the engine processes a tree</h1>
-      <p>A short orientation for making sense of an <code>analyze</code>/<code>analyzeTrees</code> report — what each stage does, what languages are understood natively, and how the engine handles what it can't fully parse. For the field-by-field input/output shape, see the <a href="reference.html">Reference</a>.</p>
+      <h1>This page moved</h1>
+      <p>Everything that was here is now the <strong>How it works</strong> tab of the overview page. If you are not redirected automatically, follow <a href="index.html#p-arch">index.html#p-arch</a>.</p>
     </div>
-
-    <section id="pipeline">
-      <span class="eyebrow eyebrow--sm">PIPELINE</span>
-      <h2>From a tree to a report</h2>
-      <div class="cmd-index cmd-index--stages">
-        <div class="cmd-index__head"><span>Stage</span><span>What happens</span><span></span></div>
-        <div class="cmd-row"><span class="cmd-row__name">Walk</span><span class="cmd-row__desc">Collect every file under <code>root</code>, gitignore-aware, in a deterministic order.</span><a class="cmd-row__anchor" href="#s-walk" aria-label="Details for the walk stage">&para;</a></div>
-        <div class="cmd-row"><span class="cmd-row__name">Parse → IR → rules</span><span class="cmd-row__desc">One fused per-file pass: parse, project to <code>CommonIr</code>, evaluate every applicable pack.</span><a class="cmd-row__anchor" href="#s-parse" aria-label="Details for the parse stage">&para;</a></div>
-        <div class="cmd-row"><span class="cmd-row__name">Whole-tree assembly</span><span class="cmd-row__desc">Merge the per-file artifacts into one graph and run the whole-graph analyses.</span><a class="cmd-row__anchor" href="#s-assemble" aria-label="Details for the assembly stage">&para;</a></div>
-        <div class="cmd-row"><span class="cmd-row__name">Envelope</span><span class="cmd-row__desc">Serialize both stages' findings into one deterministic JSON envelope.</span><a class="cmd-row__anchor" href="#s-envelope" aria-label="Details for the envelope stage">&para;</a></div>
-      </div>
-      <span class="eyebrow eyebrow--sm cmd-details__label">Details — stages</span>
-      <h3 id="s-walk" class="cmd-detail">Walk</h3>
-      <p>A single-threaded, gitignore-aware walk collects every file under <code>root</code>, honoring committed <code>.gitignore</code> files, and sorts the list — the input order to everything downstream is deterministic.</p>
-      <h3 id="s-parse" class="cmd-detail">Parse → Common IR → DSL rules (fused, per file)</h3>
-      <p>Each file is parsed, projected into the language-neutral <code>CommonIr</code>, and every applicable DSL rule pack is evaluated against that file's slice — in one fused pass, in parallel across files. A file's raw parser AST never leaves this step; only IR data and findings cross back out.</p>
-      <h3 id="s-assemble" class="cmd-detail">Whole-tree assembly</h3>
-      <p>Per-file artifacts are merged into one tree-wide dependency graph and IR. Native whole-graph analyses run here: circular dependencies, dead code, structural scores, health index, and (when multiple trees are analyzed together) the cross-layer join.</p>
-      <h3 id="s-envelope" class="cmd-detail">Envelope</h3>
-      <p>Findings from both stages are merged and serialized into one deterministic JSON envelope — same input, byte-identical output.</p>
-      <h3>Common IR</h3>
-      <p>Every file — regardless of language — is projected into <code>CommonIr</code> before anything else touches it. This IR, never a raw language AST, is what the output's <code>ir</code> field actually contains:</p>
-      <div class="cmd-index cmd-index--ir">
-        <div class="cmd-index__head"><span>Field</span><span>Holds</span><span></span></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>dep</code></span><span class="cmd-row__desc">The import graph — each path to the paths it imports.</span><a class="cmd-row__anchor" href="#f-dep" aria-label="Details for the dep field">&para;</a></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>symbols</code></span><span class="cmd-row__desc">Function, class, const, type, and interface declarations.</span><span class="cmd-row__anchor"></span></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>loc</code></span><span class="cmd-row__desc">Physical line count, per file.</span><span class="cmd-row__anchor"></span></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>io</code></span><span class="cmd-row__desc">HTTP/DB/tRPC provide and consume facts (<code>IoFacts</code>) — the input to the cross-layer join.</span><span class="cmd-row__anchor"></span></div>
-      </div>
-      <h3 id="f-dep" class="cmd-detail"><code>dep</code></h3>
-      <p><a href="graph.html">Rendered against this repository</a>: 1,470 files and 2,849 imports, nothing dropped. Both numbers are rewritten by <code>scripts/site-graph-data.mjs</code> every time the graph page is regenerated, so they describe the tree that page was last built from; the graph page carries the two commands that recount them.</p>
-      <p>A custom or external parser can feed the exact same shape into the pipeline through the Normalized AST adapter protocol, described in the language support section below — it joins the same fused pass, the same whole-tree assembly, and the same envelope, unchanged.</p>
-    </section>
-
-    <section id="languages">
-      <span class="eyebrow eyebrow--sm">LANGUAGE SUPPORT</span>
-      <h2>Participation doesn't require a native parser</h2>
-      <p>Support is disclosed as a precision tier, not a flat yes/no — each tier names what structural facts that language's parser can actually stand behind.</p>
-      <div class="cmd-index cmd-index--langs">
-        <div class="cmd-index__head"><span>Language · tier</span><span>What it extracts</span><span></span></div>
-        <div class="cmd-band"><span class="cmd-band__label">native tiers</span></div>
-        <div class="cmd-row"><span class="cmd-row__name">TypeScript / JavaScript <span class="tier-badge">Full AST</span><span class="cmd-row__twin"><code>.ts .tsx .js .jsx .mjs .cjs .mts .cts</code> · native, swc</span></span><span class="cmd-row__desc">Symbols, imports, calls, HTTP routes and egress, guards, ORM and raw-SQL tables.</span><a class="cmd-row__anchor" href="#l-ts" aria-label="Details for TypeScript / JavaScript">&para;</a></div>
-        <div class="cmd-row"><span class="cmd-row__name">Python <span class="tier-badge">Full AST</span><span class="cmd-row__twin"><code>.py .pyi</code> · native, ruff</span></span><span class="cmd-row__desc">Symbols, imports, FastAPI/Django routes, egress, call sites, guards, ORM tables.</span><a class="cmd-row__anchor" href="#l-python" aria-label="Details for Python">&para;</a></div>
-        <div class="cmd-row"><span class="cmd-row__name">Rust <span class="tier-badge">Full AST</span><span class="cmd-row__twin"><code>.rs</code> · native, syn 2</span></span><span class="cmd-row__desc">Symbols, imports, axum routes, egress, raw-SQL tables, call sites, extractor guards.</span><a class="cmd-row__anchor" href="#l-rust" aria-label="Details for Rust">&para;</a></div>
-        <div class="cmd-row"><span class="cmd-row__name">Go <span class="tier-badge">Full CST</span><span class="cmd-row__twin"><code>.go</code> · native, tree-sitter-go</span></span><span class="cmd-row__desc">Symbols, imports, gin and <code>net/http</code> routes, literal egress, GORM tables.</span><a class="cmd-row__anchor" href="#l-go" aria-label="Details for Go">&para;</a></div>
-        <div class="cmd-row"><span class="cmd-row__name">Java <span class="tier-badge">Full CST</span><span class="cmd-row__twin"><code>.java</code> · native, tree-sitter-java, Java 21 grammar</span></span><span class="cmd-row__desc">Symbols, imports, Spring MVC routes, call sites, guards, egress, JPA tables.</span><a class="cmd-row__anchor" href="#l-java" aria-label="Details for Java">&para;</a></div>
-        <div class="cmd-row"><span class="cmd-row__name">C# <span class="tier-badge">Full CST</span><span class="cmd-row__twin"><code>.cs</code> · native, tree-sitter-c-sharp</span></span><span class="cmd-row__desc">Symbols, imports, ASP.NET Core routes, <code>HttpClient</code> egress, EF Core tables.</span><a class="cmd-row__anchor" href="#l-csharp" aria-label="Details for C#">&para;</a></div>
-        <div class="cmd-band"><span class="cmd-band__label">schema languages</span></div>
-        <div class="cmd-row"><span class="cmd-row__name">Prisma <span class="tier-badge">Lexical schema</span><span class="cmd-row__twin"><code>.prisma</code> · native</span></span><span class="cmd-row__desc">Schema models and fields, plus a <code>db-table</code> provide per model.</span><a class="cmd-row__anchor" href="#l-prisma" aria-label="Details for Prisma">&para;</a></div>
-        <div class="cmd-row"><span class="cmd-row__name">SQL <span class="tier-badge">Lexical</span><span class="cmd-row__twin"><code>.sql</code> · native</span></span><span class="cmd-row__desc"><code>CREATE TABLE</code> statements, and the consume-side reader the other parsers call.</span><a class="cmd-row__anchor" href="#l-sql" aria-label="Details for SQL">&para;</a></div>
-        <div class="cmd-band"><span class="cmd-band__label">envelope</span></div>
-        <div class="cmd-row"><span class="cmd-row__name">Everything else <span class="tier-badge">External adapter</span><span class="cmd-row__twin"><code>any</code></span></span><span class="cmd-row__desc">First-class through the Normalized AST envelope protocol — Mode A or Mode B.</span><a class="cmd-row__anchor" href="#l-envelope" aria-label="Details for the external adapter tier">&para;</a></div>
-      </div>
-
-      <span class="eyebrow eyebrow--sm cmd-details__label">Details — native tiers</span>
-      <h3 id="l-ts" class="cmd-detail">TypeScript / JavaScript</h3>
-      <p>Symbols, imports/dep graph, calls, HTTP provides/consumes across Express/Hono/NestJS/Next.js/tRPC and more, router-mount fragments, middleware guard attributes, and <code>db-table</code> consumes from ORM accessors (Prisma, TypeORM) and from raw SQL statement strings (<code>env.DB.prepare("SELECT … FROM ledger")</code>).</p>
-      <details class="design-notes">
-        <summary><span class="design-notes__hint">Design notes — why a SQL string has to shout</span></summary>
-        <div class="design-notes__body">
-          <p>The raw-SQL side is read through <code>parser-sql</code>, and recognized only when the string opens a statement head in UPPERCASE keywords, which is what separates a query from prose like "Select a date from the list".</p>
-        </div>
-      </details>
-      <h3 id="l-python" class="cmd-detail">Python</h3>
-      <p><strong>Python 3</strong> syntax — ruff's parser linked as a Rust library, no Python runtime required. Symbols (<code>def</code>/<code>class</code>/methods, <code>__all__</code>-aware exports), imports/dep graph (incl. relative <code>from .x import y</code>), FastAPI route provides, Django URLconf route provides, <code>requests</code>/<code>httpx</code> literal egress consumes, call sites for the whole-repo call graph, auth-guard evidence, and ORM <code>db-table</code> facts.</p>
-      <details class="design-notes">
-        <summary><span class="design-notes__hint">Design notes — what each Python channel stands behind</span></summary>
-        <div class="design-notes__body">
-          <p>Python-2-only syntax degrades to the lexical fallback like any parse failure.</p>
-          <p>FastAPI route provides read decorators, an <code>APIRouter</code> literal prefix, and cross-file <code>include_router</code> composition. Django URLconf route provides come from a top-level <code>urlpatterns</code> list's <code>url()</code>/<code>re_path()</code>/<code>path()</code> entries, with <code>include('&lt;dotted.module&gt;')</code> composed cross-file through the same router-mount pass FastAPI uses; the HTTP method lives in the view class, not the URLconf, so every such route is emitted verb-unknown rather than guessed.</p>
-          <p>Literal egress consumes cover module-level <code>requests</code>/<code>httpx</code> calls plus <code>Session</code>/<code>Client</code>/<code>AsyncClient</code> instances bound by assignment or a <code>with</code>/<code>async with</code> block. The call sites are what let the handler-reachability rules run on Python routes.</p>
-          <p>Auth-guard evidence is FastAPI <code>Depends(...)</code> in a route decorator's <code>dependencies=</code>, a parameter default, an <code>Annotated[..., Depends(...)]</code> parameter, or a tree-resolved <code>Annotated</code> alias; on the Django side, REST Framework <code>permission_classes</code> on a view class, joined to its URLconf route by view name.</p>
-          <p>ORM <code>db-table</code> facts: SQLModel/SQLAlchemy model classes (<code>table=True</code> or a <code>__tablename__</code>) and Django models (field-driven, through any abstract base) project <code>db-table</code> provides, and their query sites (<code>select(X)</code>/<code>session.get(X)</code>; <code>X.objects…</code>) project <code>db-table</code> consumes resolved cross-file against the model class.</p>
-        </div>
-      </details>
-      <h3 id="l-rust" class="cmd-detail">Rust</h3>
-      <p>Symbols (top-level fn/struct/enum/trait/type-alias/const/static/union, plus <code>impl</code> block methods/assoc consts), imports/dep graph (<code>use</code>/<code>mod</code> items, module-path resolution, same-workspace crate resolution via <code>Cargo.toml</code>), axum router provides (builder chains, cross-file <code>.nest</code>/<code>.merge</code> composition), <code>reqwest</code> literal egress consumes, raw-SQL <code>db-table</code> consumes, call sites for the whole-repo call graph, and auth-guard evidence in the shape Rust actually uses.</p>
-      <details class="design-notes">
-        <summary><span class="design-notes__hint">Design notes — extractors are the guard, and the router layer is the gap</span></summary>
-        <div class="design-notes__body">
-          <p>Raw-SQL <code>db-table</code> consumes are the tables named inside a SQL statement string, including inside a <code>sqlx::query!</code>-style macro's token stream — read through <code>parser-sql</code> under the same UPPERCASE-statement-head gate the TypeScript detail describes, and an interpolated table name is dropped rather than guessed. Call sites resolve crate-locally and across same-workspace crates.</p>
-          <p>A request EXTRACTOR in the handler signature (<code>async fn create(user: AuthUser, ..)</code>) becomes a call-graph edge out of the handler, so the ordinary guard-name vocabulary matches it, while an OPTIONAL extractor never counts. Auth applied at the ROUTER level (a tower <code>.route_layer</code>/<code>.wrap</code>) is not visible, and every run whose Rust routes are in range discloses that gap in its own warnings.</p>
-        </div>
-      </details>
-      <h3 id="l-go" class="cmd-detail">Go</h3>
-      <p>Symbols (top-level func/method/type/const/var), imports/dep graph, gin and <code>net/http</code> router provides, <code>net/http</code> literal egress consumes, and GORM ORM <code>db-table</code> facts.</p>
-      <details class="design-notes">
-        <summary><span class="design-notes__hint">Design notes — how each Go channel is resolved</span></summary>
-        <div class="design-notes__body">
-          <p>Imports come from <code>import</code> declarations, resolved through <code>go.mod</code> module resolution. Router provides cover route groups and Go 1.22 mux pattern syntax.</p>
-          <p>Literal egress consumes cover the package free functions plus the same convenience methods on a bound <code>http.Client</code> value.</p>
-        </div>
-      </details>
-      <h3 id="l-java" class="cmd-detail">Java</h3>
-      <p>Symbols (top-level + nested class/interface/enum/record/annotation-type declarations, dot-qualified methods/constructors with body spans), imports/dep graph, Spring MVC HTTP route provides, call sites for the whole-repo call graph, Spring Security method-security auth-guard evidence, <code>RestTemplate</code>/<code>WebClient</code> literal HTTP egress consumes, and JPA <code>@Entity</code>/<code>@Table</code> <code>db-table</code> provides.</p>
-      <details class="design-notes">
-        <summary><span class="design-notes__hint">Design notes — what the Java pass resolves, and what it declines to guess</span></summary>
-        <div class="design-notes__body">
-          <p>Imports resolve plain/glob/static <code>import</code> forms via an in-tree package index. Route provides compose class + method-level <code>@RequestMapping</code>/<code>@GetMapping</code>/etc. with cross-file <code>extends</code>-chain and constant-prefix resolution, and the call sites are what let the handler-reachability rules run on Spring routes.</p>
-          <p>Method-security evidence is <code>@PreAuthorize</code>/<code>@Secured</code>/<code>@RolesAllowed</code>, feeding the same framework-neutral exemption set NestJS <code>@UseGuards</code> does.</p>
-          <p>On egress, a variable or concatenated URL stays honestly unresolved; Feign and <code>java.net.http</code> are not recognized — disclosed. On the table side, a literal <code>@Table(name = "…")</code> is taken verbatim, else Spring Boot's snake-case default; a non-literal name skips the class rather than guessing.</p>
-        </div>
-      </details>
-      <h3 id="l-csharp" class="cmd-detail">C#</h3>
-      <p>Symbols (top-level + nested class/interface/struct/enum/record/delegate as dot-qualified names, methods/constructors/properties with body spans, <code>const</code>/<code>static readonly</code> fields; <code>public</code>-modifier exports), imports/dep graph, ASP.NET Core HTTP route provides, <code>HttpClient</code> literal egress consumes, and EF Core <code>DbSet&lt;T&gt;</code>/<code>[Table]</code> <code>db-table</code> provides.</p>
-      <details class="design-notes">
-        <summary><span class="design-notes__hint">Design notes — attribute composition and the EF naming rule</span></summary>
-        <div class="design-notes__body">
-          <p>Imports come from <code>using</code> directives incl. <code>static</code>/alias/<code>global</code>, resolved by a namespace→files index.</p>
-          <p>Route provides compose <code>[ApiController]</code>/<code>[Controller]</code> with a class <code>[Route("api/[controller]")]</code> and a method <code>[HttpGet]</code>/<code>[HttpPost("{id}")]</code>/…, plus same-file Minimal-API <code>app.MapGet</code>/<code>MapGroup</code>.</p>
-          <p>A table is named by EF's property-name convention, overridden by a literal <code>[Table("…")]</code>; a non-literal <code>[Table]</code> argument skips the class rather than guessing.</p>
-        </div>
-      </details>
-
-      <span class="eyebrow eyebrow--sm cmd-details__label">Details — schema languages</span>
-      <h3 id="l-prisma" class="cmd-detail">Prisma</h3>
-      <p>Schema models and fields — structural, plus usage-aware schema rules; each model also projects a <code>db-table</code> provide that joins the TypeScript client-side <code>db-table</code> consumes.</p>
-      <h3 id="l-sql" class="cmd-detail">SQL</h3>
-      <p><code>CREATE TABLE</code> statements → <code>db-table</code> provides only — migration files (Flyway/Liquibase-style) light up the db-table join channel for MyBatis/JDBC-style stacks.</p>
-      <details class="design-notes">
-        <summary><span class="design-notes__hint">Design notes — why a temp table mints nothing, and who owns the consume side</span></summary>
-        <div class="design-notes__body">
-          <p>Persistent tables only: a session-local <code>CREATE TEMP</code>/<code>TEMPORARY TABLE</code> mints no provide, since no other layer can join a connection-scoped name; <code>UNLOGGED</code> still provides.</p>
-          <p>A <code>.sql</code> file never projects a consume, but this crate owns the channel's consume-side statement reader, which other parsers call on the SQL strings they hold — so both sides of the key come out of one transform.</p>
-        </div>
-      </details>
-
-      <span class="eyebrow eyebrow--sm cmd-details__label">Details — envelope</span>
-      <h3 id="l-envelope" class="cmd-detail">Everything else</h3>
-      <p>First-class via the Normalized AST envelope protocol — Mode A (stands in for a tree) or Mode B (overlays facts onto a natively-parsed tree).</p>
-      <p>Unsupported doesn't mean silently ignored. A lexically-handled file still gets a line count and still runs every <code>line-scan</code> DSL rule against its raw text — it's just missing the symbol/import/IO extraction that a native parser provides, and that gap is a known, self-reported shape (see "Degraded vs. minified" below), not a silent hole. Python's v1 scope is deliberate, not an oversight — Flask routes are roadmap (Django URLconf routes, SQLModel/SQLAlchemy and Django ORM table facts, <code>requests</code>/<code>httpx</code> <code>Session</code>/<code>Client</code>/<code>AsyncClient</code> instances, the call graph, and FastAPI <code>Depends</code> / Django REST Framework <code>permission_classes</code> auth evidence are all recognized natively — see the Python row above). The Mode-B overlay path is the escape hatch for the shapes that stay out — a router-level <code>APIRouter(dependencies=[...])</code> or <code>fastapi.Security(...)</code>, a guard applied by a custom decorator, DRF permissions that arrive from a setting, a base class or a runtime <code>get_permissions()</code>, and a <code>Depends(...)</code> whose callable name is outside the guard vocabulary. The complete not-recognized list lives in <a href="https://github.com/eezz4/zzop/blob/main/docs/ARCHITECTURE.md">ARCHITECTURE.md</a> and is not restated here, so the two cannot drift apart. The reference adapter (<code>crates/engine/examples/fastapi_overlay_adapter/</code>) covers FastAPI specifically, and a Flask adapter would follow the same recipe.</p>
-      <p>For anything outside the native tiers above — JSP, Ruby, or any other language — a hand-written external parser adapter can produce the same Common IR shape directly, via the Normalized AST protocol: a JSON envelope of per-file symbols, imports, and IO facts, validated against the engine's own Rust types and fed through <code>analyzeEnvelope</code>. The engine runs its language-neutral analyses over the projection: the dependency graph, the circular/unreachable/dead-code passes, and the <code>symbol-scan</code>/<code>io-scan</code> DSL rules. Analyses an envelope cannot support are reported honestly rather than stubbed — <code>scores</code>/<code>health</code> need git history and stay <code>null</code> in envelope mode, and the cross-layer join runs only in multi-tree <code>analyzeTrees</code>. A parser is first-class as soon as its projection is accurate, regardless of how crude it is.</p>
-      <p>The same envelope also composes <em>onto</em> a natively-parsed tree (a Mode-B overlay) instead of standing in for it — an adapter supplies only the facts the native pass can't see for a given project, and they merge into the same analysis. That is the shape of zzop's whole extension model: the engine core is environment-neutral, and every environment fact — a route, a base URL, a router-level auth guard — enters as an injected fact. A native recognizer (Nest, Express, Angular, a raw-Worker <code>pathname</code> dispatcher) is just injection zzop pre-pays for a <em>common</em> environment; anything niche or per-project is injected by an adapter instead. What zzop covers natively is decided by how common an environment is, not by what happens to be detectable.</p>
-      <p>Cross-cutting facts that don't belong to a single file — a router-level auth guard applied by middleware, say — ride a generic entity-attribute channel: an adapter attaches <code>{ target, key, value }</code> annotations to a route, symbol, file, or path scope, and a rule consumes them by key. The contract stays vocabulary-free — it never knows what <code>auth-guarded</code> means — exactly as the cross-layer join keys on <code>(kind, key)</code> without knowing any framework. A native rule and the injected evidence then compose: <code>mutating-route-no-auth</code> clears a route its call-graph scan can't see a guard for once an <code>auth-guarded</code> attribute lands on it, whether that attribute comes from an adapter injecting it or — for the common Express <code>.use(guard)</code>/route-level-guard-argument shapes — the native parser recognizing it directly.</p>
-    </section>
-
-    <section id="crates">
-      <span class="eyebrow eyebrow--sm">CRATE STRUCTURE</span>
-      <h2>The kernel owns no rule vocabulary</h2>
-      <p>The workspace splits the engine kernel from every source of rule vocabulary. <code>core</code>/<code>engine</code> know about IR types and a registry — never about what a rule actually checks for. Rules register themselves from their own crates; the kernel only aggregates.</p>
-      <div class="card-grid">
-        <div class="card">
-          <h3><code>crates/core</code>, <code>crates/engine</code></h3>
-          <p>The kernel. IR types and registry only — no rule-vocabulary knowledge. <code>engine</code> orchestrates the pipeline and aggregates registrations from every rule crate.</p>
-        </div>
-        <div class="card">
-          <h3><code>parser/*</code></h3>
-          <p>One crate per natively-parsed language, each projecting its language into the Common IR — the set is exactly the native rows of the <a href="#languages">Language support</a> table above, which also names the parsing technique and the facts each one extracts. Deliberately not re-listed here: a second copy of that list is a thing that rots, and this one did.</p>
-        </div>
-        <div class="card">
-          <h3><code>rules/native/*</code></h3>
-          <p><code>rules-graph</code> (circular dependencies, dead code), <code>rules-http</code> (single-tree HTTP/route rules), <code>rules-cross-layer</code> (the multi-tree cross-layer join rules), and <code>rules-schema</code> (Prisma structure and usage) — whole-graph analyses, statically linked into the engine, registering their own ids.</p>
-        </div>
-        <div class="card">
-          <h3><code>rules/dsl/*</code></h3>
-          <p>One folder per pack, each pairing its JSON rule definitions with co-located tests. Adding a rule means touching a pack folder — never the kernel.</p>
-        </div>
-        <div class="card">
-          <h3><code>crates/facade</code>, <code>crates/summary</code></h3>
-          <p><code>zzop-facade</code> is the JSON-in/JSON-out contract every surface shares, documented in the <a href="reference.html">Reference</a>. <code>crates/summary</code> is the shared answer layer above it — reply shaping, caps and their disclosures, findings filters, and the <code>facts</code>/<code>graph</code>/<code>manifest</code> projections — and it is the one library both Node-free binary products build over: <code>zzop</code> (package <code>packages/cli-bin</code>, the CLI subcommands) and <code>zzop-mcp</code> (package <code>packages/mcp</code>, the MCP stdio server), thin entrances over one shared analysis path.</p>
-        </div>
-      </div>
-    </section>
-
-    <section id="cross-layer">
-      <span class="eyebrow eyebrow--sm">CROSS-LAYER JOIN</span>
-      <h2>Joining a frontend's fetch to a backend's route</h2>
-      <p>When multiple trees are analyzed together (<code>analyzeTrees</code>), each parser's declared <code>IoFacts.provides</code>/<code>consumes</code> entries are joined across trees on an exact <code>(kind, key)</code> match — for example, a frontend's <code>fetch("/users/:id")</code> joins a backend's registered <code>GET /users/:id</code> route. The join is a plain string match on a normalized key, never AST matching, which is why even a crude external parser adapter can participate as long as its key normalization is correct.</p>
-      <p>Rather than overclaiming a match it can't be sure of, the join result splits into these buckets plus a per-edge confidence flag (two further fields — <code>hostRekeyCounts</code> and <code>wildcardRoutePartitions</code> — are disclosure counters rather than join rows; both are described below):</p>
-      <div class="card-grid">
-        <div class="card">
-          <h3><code>edges</code></h3>
-          <p>A consume matched to a provide across sources.</p>
-        </div>
-        <div class="card">
-          <h3><code>unconsumedProvides</code></h3>
-          <p>A provide no analyzed source consumes. A wildcard route is never here — see the partition below.</p>
-        </div>
-        <div class="card">
-          <h3><code>unprovidedConsumes</code></h3>
-          <p>A consume no analyzed source provides — minus the calls a partitioned wildcard route covers, which are dropped from here for the same reason. <strong>Buckets are raw join facts, not findings</strong> — no rule vocabulary filters them, so a key a single-tree rule vetoes (a static asset, a health path) can still sit here. The rules are the filtered view; the buckets are what the join actually saw.</p>
-        </div>
-        <div class="card">
-          <h3><code>unresolvedConsumes</code></h3>
-          <p>A consume whose target could not be statically determined — either no key was resolved at all, or the resolved key names no route because every path segment is a <code>{}</code> placeholder (<code>GET /{}</code>, from an unresolved <code>${BASE}</code> interpolation). The second form lands here only when the join MISSES: if some tree really does provide a catch-all route for it, that is a genuine edge, not blindness. Both forms mean "blind here", never "the route is missing", and both count toward <code>cross-layer/unresolved-consume-ratio</code>.</p>
-        </div>
-        <div class="card">
-          <h3><code>externalConsumes</code></h3>
-          <p>A consume targeting an absolute external host URL — e.g. <code>GET https://vendor.com/api/users</code>. Classified as third-party egress, not joined, and not treated as drift.</p>
-        </div>
-        <div class="card">
-          <h3><code>ambiguousConsumes</code></h3>
-          <p>A consume matching provides in two or more distinct source trees. Not auto-linked — no edge is emitted; every candidate provider is listed so the ambiguity can be resolved by hand.</p>
-        </div>
-        <div class="card">
-          <h3><code>lowConfidenceReason</code></h3>
-          <p>Set on an edge whose key matched a generic path pattern (health checks, <code>/login</code>, and the like) that many unrelated services could share. The edge is still emitted — just flagged as lower confidence than a distinctively-named route.</p>
-        </div>
-      </div>
-      <p><strong>Wildcard routes are partitioned out, not matched loosely.</strong> A route whose path is an ANT <em>pattern</em> rather than a key (<code>@GetMapping("/files/**")</code>) normalizes byte-for-byte, so read as a literal it produced three wrong answers from one cause: the live catch-all was reported as a dead route in <code>unconsumedProvides</code>, and every call beneath it as a missing one in <code>unprovidedConsumes</code>. A prefix or longest-match fallback was rejected — that would make edges out of a guess, and would have to invent a tiebreak between two catch-alls, while this join's contract is that it is exact. So such a route is lifted out of the join entirely: it emits no edge, it is never reported dead, and the calls it serves (same verb, ANT path match — a <code>POST</code> beneath a GET-only catch-all still reports) leave <code>unprovidedConsumes</code>. Edge count is unchanged by construction; the payoff is false findings removed, not links added. Because that correctness is bought with silence, every partitioned route is disclosed with the number of call sites it swallowed — on the declaring tree's own <code>warnings</code>, and in <code>crossLayer.wildcardRoutePartitions</code>.</p>
-      <p>The <code>cross-layer/*</code> native analyses run on top of this join — matched-edge diagnostics (unconsumed endpoints, method mismatches, version skew, path near-misses, shared database tables, duplicate routes), external-egress checks (shadowed internal routes, secrets in URLs, IP literals, host fan-out, base-URL drift, and more), and a tRPC procedure-coverage check (an unconsumed procedure joined from cross-file router fragments) — cataloged in the <a href="rules.html">rule reference</a>.</p>
-      <p>A per-tree deployment-topology declaration (<code>mountedAt</code>/<code>mounts</code>/<code>hosts</code> config) supplies the one class of join information that lives only in infra, not in either repo's source: a gateway/ingress mount prefix, and which hosts a tree owns. Mounts apply as the last provide-key transform, stacking on top of any code-extracted prefix; a declared host re-keys a matching absolute-URL consume to an internal joinable key before the external-egress gate above applies, and <code>crossLayer.hostRekeyCounts</code> reports per declared host how many consumes that actually moved. Both self-disclose via a warning when they turn out to have zero effect. See the <a href="reference.html">Reference</a>.</p>
-    </section>
-
-    <section id="degraded">
-      <span class="eyebrow eyebrow--sm">DEGRADED VS. MINIFIED</span>
-      <h2>Two different kinds of partial analysis</h2>
-      <p>A file the engine can't fully process falls into one of two distinct, self-reported categories — never a silent skip.</p>
-      <div class="card-grid">
-        <div class="card">
-          <h3>degraded</h3>
-          <p>A file that's too large (over the default 1,500,000-byte / ~1.5MB size cap) or fails to parse. It's still analyzed on a best-effort basis: line count and <code>line-scan</code> DSL rules still run against the raw text, but symbol/import/IO extraction is skipped, so <code>method-scan</code>/<code>symbol-scan</code>/<code>io-scan</code> rules silently find nothing for that file rather than erroring. Listed in the output's <code>degraded</code> array.</p>
-        </div>
-        <div class="card">
-          <h3>minified line shape</h3>
-          <p>A file is classified this way when either holds: any single line is 5,000+ bytes long, or it has a 500+ byte line and lines that long make up at least half the file's bytes — the signature of bundler output and other generated code. Every DSL matcher type is skipped entirely for this file, since a giant physical line offers no reliable scoped context for any of them. Native structural extraction — symbols, imports, IO, the dependency graph, circular/dead-code analyses — is unaffected and proceeds exactly as normal.</p>
-        </div>
-      </div>
-      <p>A hand-written file that happens to contain one long string or comment line among otherwise ordinary lines is not classified as minified — that shape is common enough in real source that it has to keep its rule coverage. When one or more files are classified this way, the output's <code>warnings</code> array gets a single aggregate entry naming the count and a sample of affected paths, never one entry per file.</p>
-      <p>A normal-sized file whose extension has no native parser is a third, distinct case — not counted in <code>degraded</code> — that also self-reports: one aggregate <code>warnings</code> entry per extension, naming a file count and a path sample, pointing at the <code>overlays: [...]</code> config knob. An oversized file of that same unparsed extension gets both facts at once (<code>degraded</code> for its size, plus the per-extension warning for its language).</p>
-      <p>Every run also emits a structural <strong>coverage census</strong> per tree (<code>coverage</code> in the output) — vocab-free counts of how much of each channel it actually filled (files, symbols, import edges, and IO), plus the <code>degraded</code> count above — so a consumer can tell "analyzed and found nothing" apart from "this channel was dark". When a tree analyzes files but extracts zero IO, its <code>coverage.joinContributionZero</code> flag asserts the blindness outright: the tree is invisible to the cross-layer join, so any join finding that references it is structurally weak (a client the extractor can't see — a hand-rolled HTTP wrapper, a generated SDK — is a common cause). And a run-global <code>disclosure</code> registry names the classes of silent failure zzop does, and does <em>not</em> yet, actively detect — so the tool never quietly claims to be complete.</p>
-    </section>
-
-    <p>This page is a conceptual orientation. For the exhaustive, per-decision architecture reference — the public source of truth this page indexes rather than restates — see <a href="https://github.com/eezz4/zzop/blob/main/docs/ARCHITECTURE.md">docs/ARCHITECTURE.md</a>, plus the module docs at the top of each crate's <code>lib.rs</code> under <a href="https://github.com/eezz4/zzop/tree/main/crates">crates/</a>.</p>
-
   </main>
-
-  <aside class="docs-toc">
-    <div class="docs-toc__label">On this page</div>
-    <a href="#pipeline" class="docs-toc__link">Pipeline &amp; Common IR</a>
-    <a href="#languages" class="docs-toc__link">Language support</a>
-    <a href="#crates" class="docs-toc__link">Crate structure</a>
-    <a href="#cross-layer" class="docs-toc__link">Cross-layer join</a>
-    <a href="#degraded" class="docs-toc__link">Degraded vs. minified</a>
-  </aside>
 
 </div>
 
-<footer class="site-footer">
-  <div class="site-footer__inner">
-    <span class="site-footer__brand">zzop</span>
-    <span>— Zero Zone Of Pain · MIT License · © 2026</span>
-    <a href="privacy.html" class="site-footer__gh">Privacy</a>
-    <a href="https://github.com/eezz4/zzop" target="_blank" rel="noreferrer" class="site-footer__gh">GitHub</a>
-  </div>
-</footer>
-
-<script src="assets/docs.js"></script>
 </body>
 </html>

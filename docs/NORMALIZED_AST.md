@@ -58,7 +58,7 @@ the linker is an exact join on normalized keys, never AST matching).
   "path": "relative/slash/path.ext",
   "loc": 123,
   "symbols": [ <SourceSymbol> ],
-  "imports": { "<localName>": { "specifier": "...", "original": "...", "deferred": false, "type_only": false } },
+  "imports": { "<key>": { "specifier": "...", "original": "...", "deferred": false, "type_only": false } },
   "re_exports": [ { "specifier": "...", "original": "...", "local_alias": "..." } ],
   "dynamic_imports": ["./lazy-module"],
   "used_names": ["identifiersReferencedLocally", "..."],
@@ -69,7 +69,7 @@ the linker is an exact join on normalized keys, never AST matching).
   "class_shape_fragments": [ <ClassShapeFragment> ],
   "degraded": false,
   "is_entry": false,
-  "overrides": { "imports": ["localNameWhoseNativeBindingThisReplaces"] },
+  "overrides": { "imports": ["importKeyWhoseNativeBindingThisReplaces"] },
   "loop_spans": [[10, 14]],
   "function_spans": [[4, 20], [9, 12]],
   "test_spans": [[30, 48]],
@@ -101,7 +101,14 @@ Field semantics (all mirror the Rust `zzop-core` serde types — those are the n
     its producer emits. If you give a class a span, you owe a leaf for every region a rule could need
     to scan inside it — otherwise that region goes unreachable the instant any sibling projects a leaf.
 - `imports` — internal dependency edges are derived from these by the engine's resolver; a parser may
-  instead pre-resolve and emit repo-relative specifiers.
+  instead pre-resolve and emit repo-relative specifiers. **The key is usually the local name the file
+  binds, but that is not universal, so do not assume it**: a plain C# `using A.B;` is keyed by the FULL
+  specifier (`using A.Models;` and `using B.Models;` are both legal in one file and would collide on
+  the simple name), and every front end that has them mints synthetic `__…__` keys for imports binding
+  no name at all (`from x import *`, `use a::b::*`, a bare `require("y")`). The per-language key table
+  lives in `crates/core/src/ir/imports.rs` and is machine-held against the parsers — read it before you
+  choose a key, because the key is what `overrides` has to match and a mismatched one lands as a
+  sibling instead of a displacement.
 - `dynamic_imports` — OPTIONAL (`#[serde(default)]`; absent = empty), this file's dynamic-`import()`
   specifiers. Mirrors the native `FileArtifact::dynamic_imports` — folded into the envelope dep graph
   as real (circular-excluded) edges, so a code-split-only module still gets fan-in credit on the
@@ -315,7 +322,8 @@ Field semantics (all mirror the Rust `zzop-core` serde types — those are the n
   native fact rather than adding to it. Requires the envelope to declare `version` >= `"0.27.0"`; see
   "The `overrides` version floor" below for why that floor is per-feature. One sub-field today:
 
-  - `overrides.imports` — an array of LOCAL NAMES (keys of this projection's `imports` map) whose
+  - `overrides.imports` — an array of KEYS of this projection's `imports` map (the local name for most
+    front ends; see that field's own bullet and the table in `crates/core/src/ir/imports.rs`) whose
     native binding this overlay replaces. Each listed name MUST also appear in `imports`: the
     replacement is mandatory. A name listed without one is a deletion request, and deletion is not
     offered — it has no honest output form (there is no replacement fact to disclose) and an adapter
@@ -712,8 +720,9 @@ callers can refer to either unambiguously.
     appended, and `const_map_fragment` merges NATIVE-FIRST (a key the native pass already resolved is
     never overwritten by an overlay). The three dep-graph channels
     (`imports`/`re_exports`/`dynamic_imports`) merge under that SAME native-first rule, applied per KEY:
-    `imports` is a `localName -> binding` map, so a local name the native pass already bound keeps its
-    native binding and only names it never bound are added; `re_exports` and `dynamic_imports` have no
+    `imports` is a key -> binding map (the key is usually the local name — `crates/core/src/ir/imports.rs`
+    owns the per-language table and C# deviates), so a key the native pass already bound keeps its
+    native binding and only keys it never bound are added; `re_exports` and `dynamic_imports` have no
     key and so append minus exact duplicates (a type-only re-export stays distinct from an otherwise
     identical runtime one, since only the latter is an edge). A native fact is therefore never
     overridden by a merge — but the COMPOSITION downstream of the merge can still emit LESS than either

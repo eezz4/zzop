@@ -455,7 +455,16 @@ while IFS= read -r t; do
   # that pipeline shape repo-wide, and a herestring has no writer process to kill.
   grep -qE "^($type_alternation)\$" <<< "$t" && continue
   grep -qxF "$t" <<< "$ignored_types" && continue
-  example="$(grep -rnE "const [A-Z_][A-Z0-9_]*:[[:space:]]*$(printf '%s' "$t" | sed -E 's/[][\\.*^$(){}|+?]/\\&/g')[[:space:]]*(=|$)" "${dirs[@]}" 2>/dev/null | head -1 | cut -d: -f1,2)"
+  # `|| true` is load-bearing: this lookup is allowed to find nothing — `${example:-?}` on the very
+  # next line is the fallback written FOR that outcome — but `grep` exits 1 when it matches nothing and
+  # under `set -e -o pipefail` that killed the script on this assignment, so the `?` branch was
+  # unreachable and the whole finding below went unprinted. Worst possible placement: this line only
+  # runs when there IS a violation to report, so the guard died mute exactly when it had something to
+  # say. Measured 2026-08-14 by forcing every type unknown and misspelling the const needle: exit 1,
+  # ZERO bytes; with `|| true` the full "const TYPE(s) the scanner neither reads nor waives" list
+  # prints with `(e.g. ?)` in each row. `head`/`cut` exiting 0 does not rescue it — under pipefail the
+  # status comes from the last FAILING stage, not the last stage.
+  example="$(grep -rnE "const [A-Z_][A-Z0-9_]*:[[:space:]]*$(printf '%s' "$t" | sed -E 's/[][\\.*^$(){}|+?]/\\&/g')[[:space:]]*(=|$)" "${dirs[@]}" 2>/dev/null | head -1 | cut -d: -f1,2 || true)"
   unknown_types="${unknown_types}    ${t}    (e.g. ${example:-?})"$'\n'
 done < <(all_const_types)
 

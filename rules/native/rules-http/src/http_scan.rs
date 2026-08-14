@@ -37,12 +37,14 @@ const OK_MARKER_LOOKBACK_LINES: u32 = 4;
 
 /// How many lines ABOVE the body-start line the window reaches — the number user-facing text quotes.
 ///
-/// POLICY VALUE, T2: this number is ALSO spelled by hand, in English prose, in three files outside this
-/// crate — `docs/getting-started.md`, `site/rules.html`, `site/usage.html` — because a Markdown/HTML page
-/// cannot reference a Rust constant. Do not edit it alone: the phrase
+/// POLICY VALUE, T2: this number is ALSO spelled by hand, in English prose, in two files outside this
+/// crate — `docs/getting-started.md` and `site/rules.html` — because a Markdown/HTML page cannot
+/// reference a Rust constant. (`site/usage.html` was a third until 2026-08-14, when it became a redirect
+/// stub; the list's OWNER is the test below, whose `MARKER_WINDOW_PROSE_PAGES` records why that entry was
+/// dropped rather than re-pointed.) Do not edit it alone: the phrase
 /// [`marker_window_phrase`] builds is the mirrored thing, and
 /// `the_marker_window_phrase_is_identical_in_the_finding_and_the_published_docs` (this module's `tests`)
-/// asserts the finding message and all three pages carry the SAME rendered phrase.
+/// asserts the finding message and both pages carry the SAME rendered phrase.
 const OK_MARKER_LOOKBACK_ABOVE: u32 = OK_MARKER_LOOKBACK_LINES - 1;
 
 /// The one rendering of the marker window that every user-facing surface must use verbatim — the finding

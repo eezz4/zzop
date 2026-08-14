@@ -23,3 +23,25 @@ docs/adapters/*.fixture.json text eol=lf
 # the classic "bad interpreter" failure, on exactly the platform where this hook is already the most
 # fragile — and the hook was verified working as LF, so pin what was tested.
 .claude-plugin/hooks/*.sh text eol=lf
+
+# The two generated site editions, same shape a fourth time and for a guard that runs on EVERY commit:
+# scripts/gen-site.mjs writes them with `\n`, they are committed (Pages serves site/ as files), and
+# scripts/check-site-generated.sh regenerates and compares them byte-for-byte. Without the pin, a
+# Windows checkout (autocrlf on by default) hands that guard a CRLF copy of an LF blob and it reports
+# the whole file as drift on a tree that has none — a pre-commit guard that cries wolf on a fresh clone
+# is a guard that gets commented out. Pinned narrowly rather than `site/*.html`: site/graph.html and
+# site/rules.html are checked out CRLF today, and gen-site.mjs deliberately flattens the former's line
+# endings when it slices the dep-graph block out of it.
+site/index.html text eol=lf
+site/ko/index.html text eol=lf
+
+# The generator's INPUTS need the same pin, and this half is easier to miss than the half above.
+# Sentences in site-src/content/*.mjs are multi-line template literals: a CRLF working copy puts a
+# literal `\r` INSIDE each string, so the generator faithfully writes CRLF into pages whose committed
+# blobs are LF -- and check-site-generated.sh then reports drift that no edit caused. Pinning only the
+# outputs would leave the guard red on a fresh Windows clone for a reason nobody could find by reading
+# the diff. site-v2.css rides in through readFileSync and lands in the same `<style>` block, so it is
+# the same case. (scripts/gen-site.mjs and scripts/site/render.mjs are NOT pinned: their line endings
+# never reach the output.)
+site-src/content/*.mjs text eol=lf
+site-src/site-v2.css text eol=lf

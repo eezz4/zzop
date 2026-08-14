@@ -81,9 +81,11 @@
 #     and has not been reworded since. If an allowlisted sentence becomes false because the CODE
 #     changed underneath it, nothing here notices — that is what the allowlist's per-entry citation of
 #     a machine-backed source (a struct field, a contract test) is for on the next read.
-#   - a `100%` inside an inline `style=` attribute would fire and need an allowlist entry. No page uses
-#     inline styles today (the site ships one external stylesheet); the escape hatch exists if that
-#     changes. An HTML `<style>` BLOCK is a different matter and is skipped outright — see below.
+#   - a claim inside a NON-`style` HTML attribute (`alt=`, `title=`, `aria-label=`, a `<meta
+#     name="description" content="...">`) is IN scope and stays in scope. Those attributes carry
+#     sentences a reader is shown — the meta description is what a search result prints — so a "never
+#     misses" in one is the same promise it would be in a paragraph. Only `style=` is carved out, and
+#     only because its content is CSS; see below.
 #
 # ---------------------------------------------------------------------------------------------------
 # `<style>` blocks are not prose (2026-07-29)
@@ -100,6 +102,29 @@
 # Deliberately NOT extended to `<script>`: a string literal in a script can be user-facing text (a
 # tooltip, an empty-state message), and this page's viewer proves it — `showDetail`'s EMPTY constant is
 # a sentence shown to a reader. Script bodies stay in scope.
+#
+# ---------------------------------------------------------------------------------------------------
+# Neither is an inline `style=` ATTRIBUTE (2026-08-14)
+# ---------------------------------------------------------------------------------------------------
+# The same doctrine, one syntax later. The `<style>`-element carve-out above was written when the note
+# in "known-uncovered" could still say "no page uses inline styles today"; the 2026-08-14 site rewrite
+# ended that, and the very first inline style shipped was `style="flex-basis:100%"` on the footer. It
+# fired as an absolute claim. `100%` of a flex basis is a LENGTH — it is not a claim about detection,
+# and it is the identical declaration that sits unallowlisted in site/assets/site.css four times and in
+# site/graph.html's `<style>` block three times. Allowlisting it would have put a CSS length in a list
+# whose entries are supposed to be sentences someone can go and check, which is the exact reason the
+# `<style>` gap was closed by a carve-out rather than by an entry.
+#
+# The carve-out is DELIBERATELY as narrow as the ruler allows, so it cannot be used to hide a claim:
+#   - only the attribute NAMED `style` — `alt=`, `title=`, `aria-label=` and `<meta content=>` are
+#     prose, are shown to a reader, and stay in scope (see "known-uncovered" above);
+#   - only the attribute's VALUE, between its quotes;
+#   - and only when EVERY occurrence of the matched text on that line is inside one. The line is
+#     re-tested with its `style="…"` values removed, and if the claim still appears it is judged
+#     normally — so `<p style="flex-basis:100%">100% of bugs</p>` fails on the second `100%`.
+# Invalidation-checked in both directions on 2026-08-14: the footer's `flex-basis:100%` stops firing,
+# while a planted `<p>zzop catches 100% of bugs</p>` and a planted `<span style="width:100%">100%
+# detection</span>` on the same page both still fail by file and line.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -135,7 +160,16 @@ ALLOWLIST=(
   # crates/engine/tests/rule_contracts/native_messages.rs. That test documents itself as a file-level
   # co-occurrence proxy rather than a semantic proof — the claim is backed, but by a pragmatic check,
   # which is why it is vetted here rather than treated as self-evident.
-  "site/index.html|every finding names the exact config"
+  #
+  # Reworded 2026-08-14 from "every finding names the exact config" — the SAME claim in new words, not a
+  # new one, so what backs it is unchanged and the entry is re-keyed rather than re-argued. The PATH is
+  # unchanged too, and that is worth stating because the sentence itself moved: it now lives in
+  # site-src/content/usage.mjs as one half of a {ko, en} pair, and site/index.html is generated from it
+  # by scripts/gen-site.mjs. This guard's surface is `*.md`/`*.html`, so it reads the generated page and
+  # never the `.mjs` source — which is the right end to read, because the generated page is what
+  # deploys, and scripts/check-site-generated.sh is what stops the two from disagreeing. Fixing a claim
+  # therefore means editing site-src/ and regenerating; editing site/index.html alone goes red there.
+  "site/index.html|every finding names the switch that"
 )
 
 # ---------------------------------------------------------------------------------------------------
@@ -241,6 +275,21 @@ cached_lines=()
 cached_in_style=()
 negators_re="(^|[^A-Za-z])($negators)([^A-Za-z]|$)"
 
+# Blank out every inline `style="…"` / `style='…'` VALUE on one line, leaving everything else — every
+# other attribute, and all the text — exactly where it was. Result in STRIPPED (a global rather than a
+# return value: this is called once per match on an HTML line and command substitution would fork for
+# it, which is the cost the whole loop above was rewritten to avoid).
+#
+# The value is removed rather than the whole attribute so no two tokens are glued together, and each
+# loop deletes the match it just found, so the pattern cannot rematch its own replacement and spin.
+strip_style_attrs() { # <line>
+  STRIPPED="$1"
+  local re='style[[:space:]]*=[[:space:]]*"[^"]*"'
+  while [[ $STRIPPED =~ $re ]]; do STRIPPED="${STRIPPED/"${BASH_REMATCH[0]}"/style=}"; done
+  re="style[[:space:]]*=[[:space:]]*'[^']*'"
+  while [[ $STRIPPED =~ $re ]]; do STRIPPED="${STRIPPED/"${BASH_REMATCH[0]}"/style=}"; done
+}
+
 fail=0
 while IFS= read -r row; do
   [ -n "$row" ] || continue
@@ -281,6 +330,19 @@ while IFS= read -r row; do
   # simply yielded the empty string. That can only happen if the file changed between the grep above
   # and this read, and the two spellings should not disagree about what to do when it does.
   line="${cached_lines[$((lineno - 1))]:-}"
+
+  # An inline `style=` attribute is CSS too — same reasoning as the `<style>` element just above, one
+  # syntax later; the header records the footer's `flex-basis:100%` that made this necessary. Judged on
+  # the WHOLE LINE with only the style VALUES removed, so the carve-out covers a claim only when EVERY
+  # occurrence of it on that line is inside one: `style="width:100%">100% of bugs` still fails.
+  # Guarded by a `case` so a line with no inline style pays nothing.
+  case "$line" in
+    *style=*)
+      strip_style_attrs "$line"
+      [[ $STRIPPED == *"$text"* ]] || continue
+      ;;
+  esac
+
   prefix="${line%%"$text"*}"
   if [ "$prefix" != "$line" ]; then
     # NOT `${prefix: -32}`: bash yields the EMPTY string when a negative offset exceeds the string's

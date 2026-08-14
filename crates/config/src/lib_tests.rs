@@ -598,6 +598,12 @@ fn config_paths_are_derived_from_config_keys() {
             // replacement granularity stays the LEAF, exactly as `packs.` and `git.` already work.
             "featureSlicedDesign" => Some("vocabulary.featureSlicedDesign."),
             "parsers" => Some("parsers."),
+            // `globOverride` looks like dead vocabulary from the unknown-key walk's side and is not:
+            // that walk deliberately stops at `parsers.` (a misspelled entry key fails the LOAD, see
+            // `mapper/warnings.rs`), so THIS derivation is the scope's only consumer. Deleting the
+            // scope therefore deletes `parsers.globOverrides[].glob`/`.language` from `configPaths` —
+            // real spellings an author writes — which is exactly the `mount`/`route` false negative
+            // this test was written to close. Weighed and rejected 2026-08-14; keep both.
             "globOverride" => Some("parsers.globOverrides[]."),
             "report" => Some("report."),
             "tree" => Some("trees[]."),

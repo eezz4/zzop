@@ -71,6 +71,43 @@ fn a_house_extension_is_analyzed_only_once_a_glob_override_routes_it() {
     );
 }
 
+/// `parsers.globOverrides` is an ADDITIVE tier, not a replacement one: it is consulted AHEAD of the
+/// extension map and every path it does not match falls through to that map unchanged. Pinned because
+/// `crates/facade/src/config/declared.rs`'s module doc stated the opposite until 2026-08-14 — it gave
+/// "a declared value is applied WHOLE, the empty declaration included" as an unconditional rule covering
+/// everything that file lands, and read that way a declared `parsers` object REPLACES parser routing
+/// rather than prepending to it. The witness is a `.ts` file that no declared override matches: under
+/// the whole-replacement reading it stops being parsed, under the real one the extension map still
+/// answers for it.
+#[test]
+fn a_declared_override_that_matches_nothing_leaves_the_extension_map_answering() {
+    let root = tmp("additive-tier");
+    fs::write(
+        root.join("a.ts"),
+        "export const load = () => fetch('/api/users');\n",
+    )
+    .unwrap();
+    let out = analyze_json(&format!(
+        r#"{{"root":{:?},"sourceId":"t","packDefs":[],"git":{{}},"parsers":{{"globOverrides":[{{"glob":"legacy/**/*.houseml","language":"prisma"}}]}}}}"#,
+        root.display().to_string()
+    ))
+    .expect("a declared override must not fail the run");
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let consumes: Vec<String> = v["ir"]["io"]["consumes"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|c| c["key"].as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(
+        consumes.iter().any(|k| k.contains("/api/users")),
+        "the extension map must still route .ts when a declared override does not match it — the tier \
+         prepends, it does not replace: {consumes:?}"
+    );
+}
+
 /// An unknown language name is an authoring mistake: it must be SAID, and it must not take the run
 /// down. A silent skip would be the worst outcome — the file still gets analyzed by extension, so the
 /// author sees plausible output and concludes the override worked.

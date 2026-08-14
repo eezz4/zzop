@@ -65,8 +65,10 @@ carry no HTTP dependency at all ([privacy](https://eezz4.github.io/zzop/privacy.
 Neither binary needs Node.js, npm, or a compiler. Get them one of four ways:
 
 <!-- Canonical install-lane list for repo readers. docs/getting-started.md, docs/modules/mcp.md and
-     VERSIONING.md link here instead of restating it; site/usage.html is the site-side twin (one copy
-     per audience, not one per page). Add a lane here first, then link. -->
+     VERSIONING.md link here instead of restating it; the site's Usage tab is the site-side twin (one
+     copy per audience, not one per page) — its sentences live in site-src/content/usage.mjs and are
+     generated into site/index.html, since site/usage.html became a redirect stub on 2026-08-14. Add a
+     lane here first, then link. -->
 
 - **Download the binaries.** Grab the `zzop-cli-<platform>[.exe]` (CLI) and/or `zzop-mcp-<platform>[.exe]`
   (MCP server) assets for your platform from [GitHub Releases](https://github.com/eezz4/zzop/releases)
@@ -291,9 +293,12 @@ adapter (`overlays: [...]` in `zzop.config.jsonc`) if that language matters for 
 ## Versioning & stability
 
 zzop is **pre-1.0 (`0.x`) and unstable** — any release may change behavior, output, rules, or
-defaults without notice, so pin an exact version (not a `^`/`~` range) and re-test before upgrading.
-Semantic Versioning and a maintained changelog begin at `1.0.0`. Full policy:
-[VERSIONING.md](VERSIONING.md).
+defaults, so pin an exact version (not a `^`/`~` range) and re-test before upgrading. Semantic
+Versioning begins at `1.0.0`. What is promised before then is narrower, and is a promise about the
+record rather than the rate: a break to one of the surfaces [VERSIONING.md](VERSIONING.md) names is
+written down, old and new spelling both, in [CHANGELOG.md](CHANGELOG.md). VERSIONING.md is also
+where the properties *inside* those surfaces that are still moving get named — rule ids,
+`SourceSymbol.id` uniqueness, native id namespaces — rather than left for you to infer from a run.
 
 ## Layout & development
 

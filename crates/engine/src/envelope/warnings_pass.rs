@@ -62,6 +62,7 @@ pub(super) fn collect_envelope_warnings(
     let dsl_scope = crate::analyze::compute_dsl_scope_filtered(
         &config.packs,
         rels,
+        &config.dispatch,
         super::resolve::rule_runs_in_envelope_mode,
     );
     // Both of that census's reports are config-derived, so Mode A gets the identical pair Mode B does.

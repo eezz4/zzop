@@ -75,6 +75,7 @@
 //! deliberate place to declare it — instead of the parity check silently weakening everywhere.
 mod enum_parity;
 mod id_uniqueness_parity;
+mod import_key_table;
 mod key_parity;
 mod probes;
 mod required_nullable;

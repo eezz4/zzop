@@ -34,7 +34,15 @@ count=0
 # git ls-files (TRACKED only) so an untracked/gitignored local corpus checkout under parser/ can't
 # spoof a phantom crate into the requirement -- same tracked-only rationale as the isolation guards.
 while IFS= read -r -d '' toml; do
-  name=$(grep -m1 -E '^name[[:space:]]*=' "$toml" | sed -E 's/.*"([^"]+)".*/\1/')
+  # `|| true` is load-bearing, not hygiene: `grep` exits 1 when a manifest has no `name =` line, and
+  # under `set -e -o pipefail` that status propagates out of the command substitution and kills the
+  # script ON THIS LINE — so the diagnosis below, the one written for exactly that manifest, could
+  # never speak. Measured 2026-08-14 by pointing the needle at a key no manifest carries: without it
+  # the guard exited 1 with ZERO bytes of output (failed closed, but mute, i.e. indistinguishable on
+  # screen from a real finding); with it the "$toml has no [package] name" line actually prints.
+  # `sed` exiting 0 on empty input does not rescue this: under pipefail the floor's reachability is
+  # decided by the last FAILING stage, not the last stage.
+  name=$(grep -m1 -E '^name[[:space:]]*=' "$toml" | sed -E 's/.*"([^"]+)".*/\1/' || true)
   [ -n "$name" ] || { echo "check-version-lists-parsers: $toml has no [package] name -- cannot verify." >&2; exit 1; }
   count=$((count + 1))
 

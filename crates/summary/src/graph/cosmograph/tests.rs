@@ -535,11 +535,21 @@ fn punctuation_in_a_path_cannot_corrupt_a_row() {
 // -------------------------------------------------------------------------------------------------
 //
 // This lane's column list lives in THREE places: the `json!` blocks in `cosmograph.rs` (the truth), the
-// `zzop graph` lane's `emits` prose in `docs/contracts/surface-parity.json`, and `site/usage.html`'s
-// command table. Nothing compared them, and the predictable happened — measured 2026-07-29,
-// `site/usage.html` had drifted to a seven-column node list, silently dropping `source` and `path`,
-// which the emitter has written on every row since this format landed. A reader mapping columns in a
-// viewer would have gone looking for a `path` column the published schema said did not exist.
+// `zzop graph` lane's `emits` prose in `docs/contracts/surface-parity.json`, and the site's own page.
+// Nothing compared them, and the predictable happened — measured 2026-07-29, `site/usage.html` had
+// drifted to a seven-column node list, silently dropping `source` and `path`, which the emitter has
+// written on every row since this format landed. A reader mapping columns in a viewer would have gone
+// looking for a `path` column the published schema said did not exist.
+//
+// The site half MOVED on 2026-08-14: the site became one generated page and `site/usage.html` became a
+// redirect stub, so the pin follows the columns to where they are now published — the Graph tab of
+// `site/index.html`. Two things about that target are worth stating, because both are load-bearing.
+// (1) It is GENERATED (`scripts/gen-site.mjs` over `site-src/content/graph.mjs`), which is why the pin
+// reads the built page rather than the source: what a reader is served is what has to be true, and
+// `scripts/check-site-generated.sh` already fails a commit where the two disagree. (2) The runs are
+// written ONCE, as language-neutral strings, so the Korean edition (`site/ko/index.html`) is emitted
+// from the same bytes this test reads — checking the English edition is not a half-check here, and it
+// stops being one only if someone folds those lists back into per-language prose.
 //
 // The truth side is DERIVED BY RUNNING THE EMITTER, not by reading its source: the three fixtures above
 // already differ in exactly the axis each conditional column depends on, so subtracting their emitted
@@ -738,7 +748,7 @@ fn graph_lane_emits() -> String {
 #[test]
 fn both_published_schemas_name_exactly_the_columns_this_lane_emits() {
     let registry_emits = graph_lane_emits();
-    let usage = read_repo_file("site/usage.html");
+    let page = read_repo_file("site/index.html");
     let sites: [(&str, &str, &str, &str); 2] = [
         (
             "docs/contracts/surface-parity.json (the `zzop graph` lane's `emits`)",
@@ -746,7 +756,12 @@ fn both_published_schemas_name_exactly_the_columns_this_lane_emits() {
             "`",
             "`",
         ),
-        ("site/usage.html", &usage, "<code>", "</code>"),
+        (
+            "site/index.html (the Graph tab)",
+            &page,
+            "<code>",
+            "</code>",
+        ),
     ];
 
     let mut offenders = Vec::new();

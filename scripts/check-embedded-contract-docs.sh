@@ -34,9 +34,15 @@ abort() {
 # --- what the binary actually bakes -------------------------------------------------------------
 # `include_str!("../../../docs/x.md")` -> `docs/x.md`. The `../../../` prefix is the crate-relative
 # hop out to the repo root; stripping it is what makes the two sides comparable.
+#
+# `|| true` is load-bearing: without it a grep that matches nothing exits 1, `set -e -o pipefail` kills
+# the script on the ASSIGNMENT, and the abort below — the one that exists to refuse a vacuously green
+# run — never speaks. The guard still failed closed, but silently and with no diagnosis, which is the
+# same "muted guard" shape the header rejects. Measured 2026-08-14 by planting a $SOURCE with no
+# include_str! in it: exit 1, zero output.
 baked=$(grep -o 'include_str!("[^"]*")' "$SOURCE" \
   | sed 's/include_str!("//; s/")$//; s|^\(\.\./\)*||' \
-  | sort -u)
+  | sort -u || true)
 
 [ -n "$baked" ] || abort "found zero include_str! docs in $SOURCE — the extraction broke, and an empty
 subject set would make this whole check vacuously green (see the repo's guard-coverage rule)"
@@ -57,6 +63,119 @@ example_packs=$(git ls-files 'examples/packs/*.json' | sort -u)
 packs moved (re-point this derivation in the same commit as the move) or the enumeration broke. An
 empty half of the subject set is a silently narrower guard, not a clean tree."
 baked=$(printf '%s\n%s\n' "$baked" "$example_packs" | sort -u)
+
+# --- the THIRD baking path: bytes OWNED BY ANOTHER CRATE (2026-08-14) ------------------------------
+# Some rows in $SOURCE take their content from a `zzop_*::CONST` rather than from an `include_str!` of
+# their own: the bytes are baked by the crate that already embeds them for its own use and are merely
+# RE-served here, deliberately, so there is one embed and one truth. A grep for `include_str!` inside
+# $SOURCE cannot see those, and `crates/config/config-surface.json` was therefore shipped in every
+# binary while absent from $LISTING for the whole life of its row — the third instance of "the needle
+# is narrower than the class the header names" (working-agreements §5.5), one hop further out than the
+# pack lane above.
+#
+# Derived, never listed: the constants are read out of $SOURCE, the crate is found by the package name
+# its manifest declares, and the definition is read inside that crate. A constant that cannot be
+# resolved ABORTS rather than contributing nothing — the defect being defended against is a served
+# document that neither half of the comparison can see, so "could not follow it" has to be loud.
+#
+# A constant whose definition is NOT an `include_str!` (a raw string literal — the `config-template`
+# row) has no file to list and is skipped. That exclusion is DERIVED, not assumed: the definition is
+# found and read before the decision, which is the whole difference between an exclusion and a blind
+# spot. `disclosure-classes` is excluded the same way one shape over — it is rendered from Rust at
+# build time and its `content:` is a function call, not a path.
+
+# "crates/config/src" + "../config-surface.json" -> "crates/config/config-surface.json"
+resolve_relative() {
+  awk -v joined="$1/$2" 'BEGIN {
+    n = split(joined, seg, "/")
+    top = 0
+    for (i = 1; i <= n; i++) {
+      if (seg[i] == "" || seg[i] == ".") continue
+      if (seg[i] == "..") { if (top > 0) top--; continue }
+      st[++top] = seg[i]
+    }
+    out = ""
+    for (i = 1; i <= top; i++) out = out (i > 1 ? "/" : "") st[i]
+    print out
+  }'
+}
+
+# Shape sweep FIRST. Every `content:` value in $SOURCE must fall into a shape this guard knows how to
+# judge; an unrecognised fourth shape is a document being served that no lane below is looking at. This
+# sweep is also what makes an EMPTY cross-crate lane safe to report clean — inlining these rows back to
+# `include_str!` is a legitimate future, and the sweep proves the rows did not merely become invisible.
+content_rows=0
+while IFS= read -r line; do
+  content_rows=$((content_rows + 1))
+  case "$line" in
+    *include_str!\(*) ;;                                   # lane 1, handled above
+    *"content: "*::*) ;;                                   # lane 3, handled below
+    *"content: "*"()"*) ;;                                 # rendered from Rust — no file to list
+    *) abort "unrecognised \`content:\` shape in $SOURCE — this guard can neither follow it to a file
+nor deliberately exclude it, so the document it serves is invisible to BOTH halves of this check:
+  $line" ;;
+  esac
+done < <(grep -E '^[[:space:]]*content: ' "$SOURCE" || true)
+[ "$content_rows" -gt 0 ] || abort "no \`content:\` rows found in $SOURCE — the shape sweep matched
+nothing, so it would vouch for every row while reading none. The row syntax changed; re-point it."
+
+# `|| true` on this and on the definition lookup below is load-bearing under `set -e -o pipefail`, not
+# hygiene: a grep that finds nothing exits 1, which killed the whole script with NO output and exit 1 —
+# a guard that fails closed but silently, i.e. indistinguishable from a real finding. Found by running
+# the invalidation drill for the abort paths below, which is the only reason it is not still here.
+cross_consts=$(grep -oE '^[[:space:]]*content: [a-z][a-z0-9_]*(::[A-Za-z0-9_]+)+' "$SOURCE" \
+  | sed 's/^[[:space:]]*content: //' \
+  | sort -u || true)
+
+for ref in $cross_consts; do
+  crate_ident="${ref%%::*}"
+  const_name="${ref##*::}"
+  pkg="${crate_ident//_/-}"
+
+  manifest=""
+  while IFS= read -r m; do
+    if grep -qE "^name = \"$pkg\"[[:space:]]*$" "$m"; then manifest="$m"; break; fi
+  done < <(git ls-files '*Cargo.toml')
+  [ -n "$manifest" ] || abort "$SOURCE serves \`$ref\`, but no manifest declares the package \`$pkg\`.
+The constant moved crates — re-point this derivation in the same commit as the move."
+
+  crate_dir=$(dirname "$manifest")
+  def=$(grep -rnE --include='*.rs' "const[[:space:]]+$const_name[[:space:]]*:" "$crate_dir/src" \
+    | grep '=' | head -n1 || true)
+  [ -n "$def" ] || abort "$SOURCE serves \`$ref\`, but no definition of \`$const_name\` was found under
+$crate_dir/src. Either it was renamed or it now lives elsewhere; this guard cannot judge what it
+cannot read."
+
+  def_file=${def%%:*}
+  def_rest=${def#*:}
+  def_line=${def_rest%%:*}
+  def_head=$(sed -n "${def_line}p" "$def_file")
+
+  case "$def_head" in
+    *include_str!\(*) ;;
+    *"= r"*|*'= "'*) continue ;;   # a literal in the source — no file exists to list
+    *)
+      # The `=` can sit on a following line; widen once before giving up.
+      def_head=$(sed -n "${def_line},$((def_line + 2))p" "$def_file")
+      case "$def_head" in
+        *include_str!\(*) ;;
+        *) abort "cannot classify the definition of \`$const_name\` at $def_file:$def_line — it is
+neither an include_str! nor a literal this guard recognises. Classify it here rather than letting it
+fall through: an unclassified served constant is a document nothing checks." ;;
+      esac
+      ;;
+  esac
+
+  inc=$(printf '%s' "$def_head" | grep -o 'include_str!("[^"]*")' | head -n1 \
+    | sed 's/include_str!("//; s/")$//' || true)
+  [ -n "$inc" ] || abort "\`$const_name\` at $def_file:$def_line was classified as an include_str! but
+no path could be extracted from it — the extraction broke, and a lane that contributes nothing while
+reporting success is the shape this file exists to prevent."
+  resolved=$(resolve_relative "$(dirname "$def_file")" "$inc")
+  [ -f "$resolved" ] || abort "\`$const_name\` bakes $inc (resolved to $resolved), which does not
+exist. The path resolution here is wrong, or the file moved without its include_str! following."
+  baked=$(printf '%s\n%s\n' "$baked" "$resolved" | sort -u)
+done
 
 # --- what VERSIONING.md claims ------------------------------------------------------------------
 grep -q "$MARKER" "$LISTING" || abort "$LISTING carries no $MARKER block — the list this guard checks

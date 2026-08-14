@@ -21,7 +21,9 @@
 # `"<pack>/<rule>"` id"), so a doc example disabling a whole pack by its bare id is legitimate.
 #
 # Covered example shapes (all matched after decoding `&quot;` -> `"` so an HTML surface that entity-encodes
-# its code blocks stays scanned; site/usage.html currently uses plain quotes inside <pre><code>):
+# its code blocks stays scanned — site/rules.html does; the site's Rules tab in site/index.html writes the
+# same shape with plain quotes, so both spellings have to be reachable. That second example was
+# site/usage.html until it became a redirect stub on 2026-08-14):
 #   A. `"<key>": "<severity-token>"`  — single-line string form. <key> must be an allowlisted
 #      severity-carrying config key or a cataloged id.
 #   B. `"<key>": {`                   — object form (exclude-only, severity-carrying, or empty; the body
@@ -202,7 +204,14 @@ pack_ids="$(awk '
   /^### `/ { p = $0; sub(/^### `/, "", p); sub(/`.*/, "", p); print p }
 ' "$catalog" | sort -u)"
 
-valid_ids="$(printf '%s\n%s\n' "$catalog_ids" "$pack_ids" | grep -v '^$' | sort -u)"
+# `|| true` is load-bearing, and ORDER is why: when BOTH extractions above come back empty this
+# `grep -v '^$'` sees nothing but blank lines, matches none of them, and exits 1 — which under
+# `set -e -o pipefail` kills the script HERE, three lines above the two floors written to diagnose
+# exactly that state. Measured 2026-08-14 by pointing both awk needles at headings the catalog does
+# not carry: without it the guard exited 1 with ZERO bytes of output; with it the "extracted 0 ids
+# from $catalog — extraction is broken" line prints. The two `grep -c ... || true` floors below were
+# already immune, which is what made this line the last unlit fuse rather than an obvious one.
+valid_ids="$(printf '%s\n%s\n' "$catalog_ids" "$pack_ids" | grep -v '^$' | sort -u || true)"
 
 catalog_id_count="$(printf '%s\n' "$catalog_ids" | grep -c . || true)"
 pack_id_count="$(printf '%s\n' "$pack_ids" | grep -c . || true)"

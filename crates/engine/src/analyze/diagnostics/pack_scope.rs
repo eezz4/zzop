@@ -80,14 +80,22 @@ pub(crate) struct DslScope {
     /// is true in native and envelope mode alike; the mode axis stays owned by
     /// `zero_admission_rules_by_pack`, whose own doc records the envelope-mode inversion.
     pub(crate) rule_vetoed_rels: Vec<String>,
-    /// `extension -> (analyzed files with it, of which in scope of >=1 loaded rule)`, over the
-    /// extensions a native frontend claims ([`crate::dispatch::dispatch_by_extension`]) — the LANGUAGE
-    /// axis of the same census, and [`uncovered_extension_warning`]'s only input. Extension-keyed and
-    /// lowercased because the question it answers ("does any loaded rule target this filetype at all")
-    /// is asked per filetype, not per file. The set of extensions considered is DERIVED from the
-    /// dispatch table, never a hand-written language list: a hand-written one is the same
+    /// `extension -> (analyzed files with it, of which in scope of >=1 loaded rule)`, over the files a
+    /// native frontend claimed IN THIS RUN ([`crate::dispatch::dispatch`], overrides included) — the
+    /// LANGUAGE axis of the same census, and [`uncovered_extension_warning`]'s only input.
+    /// Extension-keyed and lowercased because the question it answers ("does any loaded rule target
+    /// this filetype at all") is asked per filetype, not per file. The set of extensions considered is
+    /// DERIVED from dispatch, never a hand-written language list: a hand-written one is the same
     /// covered-set-narrower-than-the-real-set defect this report exists to disclose, one level up.
     /// A `BTreeMap` so the warning's extension order is deterministic with no sort.
+    ///
+    /// The membership test is the WHOLE dispatch (`glob_overrides` first, then the extension map), not
+    /// the extension map alone. Keyed on the map alone it asked "is this extension in the table", which
+    /// is a different question from "did a parser read these files" the moment a `parsers.globOverrides`
+    /// entry routes a path the table does not know: such a file fell between the two reports — the
+    /// "no native parser" disclosure skips it (a parser DID claim it) and this census skipped it too —
+    /// so a tree that is 90% declared-route files, natively parsed and targeted by no DSL rule at all,
+    /// was named by neither (pinned in `tests/integration/analyze_glob_override_disclosure.rs`).
     ext_census: std::collections::BTreeMap<String, (usize, usize)>,
 }
 
@@ -110,8 +118,9 @@ pub(crate) struct DslScope {
 pub(crate) fn compute_dsl_scope(
     packs: &[zzop_core::RulePackDef],
     analyzed_rels: &[&str],
+    dispatch: &crate::DispatchConfig,
 ) -> DslScope {
-    compute_dsl_scope_filtered(packs, analyzed_rels, |_| true)
+    compute_dsl_scope_filtered(packs, analyzed_rels, dispatch, |_| true)
 }
 
 /// [`compute_dsl_scope`] with a mode filter: `rule_runs` says whether THIS analysis mode evaluates a
@@ -128,6 +137,7 @@ pub(crate) fn compute_dsl_scope(
 pub(crate) fn compute_dsl_scope_filtered(
     packs: &[zzop_core::RulePackDef],
     analyzed_rels: &[&str],
+    dispatch: &crate::DispatchConfig,
     rule_runs: impl Fn(&zzop_core::Matcher) -> bool,
 ) -> DslScope {
     // pattern string -> per-file match mask; `None` = pattern failed to compile (counts as matching
@@ -204,11 +214,13 @@ pub(crate) fn compute_dsl_scope_filtered(
     rule_vetoed_rels.sort_unstable();
     // The language axis, folded out of the SAME per-file union above so it can never disagree with the
     // per-pack counts. Files no native frontend claims are skipped here on purpose: `unparsed_extension_
-    // warning` already owns them, and "no rule targets .png" is not a coverage gap.
+    // warning` already owns them, and "no rule targets .png" is not a coverage gap. The claim test is the
+    // WHOLE dispatch, so a path `parsers.globOverrides` routed counts as the parsed source it is — see
+    // `DslScope::ext_census`'s doc for the hole the extension map alone left between the two reports.
     let mut ext_census: std::collections::BTreeMap<String, (usize, usize)> =
         std::collections::BTreeMap::new();
     for (rel, matched) in analyzed_rels.iter().zip(in_scope_mask.iter()) {
-        if crate::dispatch::dispatch_by_extension(rel).is_none() {
+        if crate::dispatch::dispatch(rel, dispatch).is_none() {
             continue;
         }
         let Some(ext) = std::path::Path::new(rel)

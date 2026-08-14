@@ -39,7 +39,17 @@ if [ ! -d "$DIR" ]; then
 fi
 
 # `du -s` in KiB, portable across the Git-Bash/coreutils combinations this repo is built on.
-KB=$(du -sk "$DIR" 2>/dev/null | awk '{print $1}')
+#
+# `|| true` is load-bearing. The trailing `awk` exits 0 even on empty input, so the usual "the floor is
+# reachable because the LAST producer cannot fail" reading says this line is safe — and it is wrong
+# here. Under `set -e -o pipefail` the pipeline takes the status of the last FAILING stage, and the
+# failing stage is `du`, at the FRONT. `du` exits non-zero when it cannot read the tree, which is
+# exactly the case the diagnosis below is written for: without `|| true` the script died on THIS
+# assignment with ZERO output and exit 1, and "could not size" never printed (measured 2026-08-14 by
+# pointing $DIR at a path that does not exist). The realistic version is worse than the drill — a
+# partially unreadable target/ makes `du` print a usable total AND exit non-zero, so the run died
+# holding the answer, with its stderr already sent to /dev/null one stage earlier.
+KB=$(du -sk "$DIR" 2>/dev/null | awk '{print $1}' || true)
 if [ -z "${KB:-}" ]; then
   echo "preflight-build-env: could not size $DIR — treating as unknown, not as clean." >&2
   exit 1

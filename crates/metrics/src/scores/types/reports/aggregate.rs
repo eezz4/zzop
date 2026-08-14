@@ -31,30 +31,38 @@ use super::*;
 ///
 /// The field carrying it differs per metric because the SUBJECT differs, and naming the subject is the
 /// whole point (a bare `total` was measured to be the more misleading spelling — see `fixRatio`'s
-/// 2026-07-31 renames). Ratio-shaped metrics ship the denominator of their own ratio; the two
-/// DISTANCE-shaped metrics (`mainSequence`, `sdp`) are not ratios at all, so they ship the size of the
-/// classified population instead:
+/// 2026-07-31 renames). Most metrics ship the denominator of their own ratio. Two do not, for two
+/// different reasons: `mainSequence` is a DISTANCE, never a ratio, so it ships the size of the
+/// classified population instead; and `featureSlicedDesign` ships a SECOND count beside its ratio
+/// denominator, because `totalImports` counts imports FSD could not classify either end of (see
+/// [`super::FeatureSlicedDesignScore`]'s `layer_classified_imports` for the measurement that forced
+/// the split). This is the subject each metric counts:
 ///
-/// | metric | population field | subject counted |
-/// |---|---|---|
-/// | `featureSlicedDesign` | `totalImports` | classified imports |
-/// | `cohesion` | `sliceCount` | FSD slices found |
-/// | `coupling` | `importerCount` | files with `fanOut > 0` |
-/// | `sdp` | `totalCrossSliceEdges` | cross-slice edges |
-/// | `hierarchy` | `totalIntraModuleEdges` | intra-module edges |
-/// | `publicApi` | `totalCrossModuleImports` | cross-module imports |
-/// | `fileSizeCompliance` | `total` | live source files |
-/// | `mainSequence` | `classifiedFiles` | files with a KNOWN abstract/concrete kind |
-/// | `modularity` | `edgeCount` | in-graph edges |
-/// | `godFile` | `total` | live source files |
-/// | `siblingCross` | `totalIntraModuleEdges` | intra-module edges |
-/// | `diamond` | `rootsExamined` | scored roots walked |
-/// | `renameInstability` | `total` | files in the git window |
-/// | `busFactor` | `total` | live high-churn files |
-/// | `fixRatio` | `taggedFileTouches` | tagged (file, commit) touches |
+/// | metric | subject counted |
+/// |---|---|
+/// | `featureSlicedDesign` | classified imports |
+/// | `cohesion` | FSD slices found |
+/// | `coupling` | files with `fanOut > 0` |
+/// | `sdp` | cross-slice edges |
+/// | `hierarchy` | intra-module edges |
+/// | `publicApi` | cross-module imports |
+/// | `fileSizeCompliance` | live source files |
+/// | `mainSequence` | files with a KNOWN abstract/concrete kind |
+/// | `modularity` | in-graph edges |
+/// | `godFile` | live source files |
+/// | `siblingCross` | intra-module edges |
+/// | `diamond` | scored roots walked |
+/// | `renameInstability` | files in the git window |
+/// | `busFactor` | live high-churn files |
+/// | `fixRatio` | tagged (file, commit) touches |
 ///
-/// `zzop_metrics::health` reads exactly this column to decide which metrics may enter the composite —
-/// see [`crate::health`] for the renormalization that depends on it.
+/// Which FIELD carries each of those counts is deliberately NOT restated here. Two machines already
+/// hold that mapping — `zzop_metrics::health::population_of`, which reads it to decide which metrics
+/// may enter the composite (see [`crate::health`] for the renormalization that depends on it), and
+/// `scores::meanings::tests`' `POPULATION_FIELD`, which pins the same mapping against serde's own
+/// output. A prose third copy is the one that drifts: this table named `totalImports` for
+/// `featureSlicedDesign` — the ratio denominator, explicitly not the population — while both machines
+/// read `layerClassifiedImports`.
 ///
 /// # Two metrics were REMOVED rather than given a population (2026-08-08)
 ///

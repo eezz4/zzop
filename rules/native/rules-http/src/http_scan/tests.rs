@@ -628,22 +628,29 @@ fn idempotent_ok_marker_suppresses_non_idempotent_write_finding() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Policy pin (T2): the marker window is a Rust constant HERE and hand-written English prose in three
+// Policy pin (T2): the marker window is a Rust constant HERE and hand-written English prose in two
 // published pages. Neither side can reference the other, so the relationship is sealed instead.
 // ---------------------------------------------------------------------------------------------
 
 /// Every published surface that spells the `idempotent-ok` window out in prose. Relative to this crate's
 /// manifest dir; a path that stops existing fails this test loudly rather than silently pinning nothing.
-const MARKER_WINDOW_PROSE_PAGES: [&str; 3] = [
+///
+/// `site/usage.html` was a THIRD entry until 2026-08-14, when the site was rebuilt as one generated page
+/// of tabs and that URL became a redirect stub. The entry was dropped rather than re-pointed at the new
+/// usage tab, because that tab does not spell the window out: the reform moved per-rule mechanics onto the
+/// reference pages the tabs link to, and `site/rules.html` — still hand-written, still carrying the
+/// sentence — is where a reader placing a marker now lands. Re-pointing would have meant WRITING the
+/// sentence into the tab first, i.e. minting a copy for the pin to hold rather than pinning a copy that
+/// readers actually depend on. This test failed loudly on the stub, which is the design working.
+const MARKER_WINDOW_PROSE_PAGES: [&str; 2] = [
     "../../../docs/getting-started.md",
     "../../../site/rules.html",
-    "../../../site/usage.html",
 ];
 
 /// Policy pin (T2 — the boundary admits no shared symbol): `OK_MARKER_LOOKBACK_ABOVE` and the window
-/// sentence in `docs/getting-started.md` / `site/rules.html` / `site/usage.html` are ONE policy — "how far
-/// above the handler may an author put the marker" — spelled twice only because a Markdown or HTML page
-/// cannot reference a Rust constant.
+/// sentence in `docs/getting-started.md` / `site/rules.html` are ONE policy — "how far above the handler
+/// may an author put the marker" — spelled twice only because a Markdown or HTML page cannot reference a
+/// Rust constant.
 ///
 /// Why it needs a pin at all: this window was ALREADY wrong once. The near-miss disclosure promised "the 4
 /// lines above this handler" while `scan_marker_window` reads the body-start line plus 3 above, so a marker

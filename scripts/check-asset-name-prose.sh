@@ -35,10 +35,12 @@
 # either be a member of the derived valid set, or fall into one of these allowed non-asset forms:
 #   - literal placeholders `zzop-cli-<platform>` / `zzop-mcp-<platform>` — these need NO special
 #     handling: the rule's own extraction regex requires an alphanumeric right after the second
-#     dash, so `<` breaks the match before it starts. Every scanned file today (README.md,
-#     VERSIONING.md, packages/README.md, docs/getting-started.md, docs/modules/mcp.md,
-#     packages/cli/README.md, packages/mcpb/README.md, site/usage.html via its
-#     `&lt;platform&gt;` entity encoding) uses exactly this placeholder form and is unaffected.
+#     dash, so `<` breaks the match before it starts. Every scanned file that writes a placeholder
+#     (README.md, packages/cli/README.md, packages/mcpb/README.md, and site/index.html plus its Korean
+#     twin site/ko/index.html via their `&lt;platform&gt;` entity encoding — the site half was
+#     site/usage.html until that page became a redirect stub on 2026-08-14) uses exactly this form and is
+#     unaffected. Re-derive the roster rather than trusting it:
+#     `git grep -lE 'zzop-(cli|mcp)-(&lt;|<)platform' -- '*.md' '*.html'`.
 #   - glob forms ending in a literal `*` (e.g. `zzop-mcp-linux-*`) — unlike the placeholder case,
 #     `-` IS in the extraction regex's continuation class, so a trailing glob star does not stop
 #     the match on its own; this script therefore captures one optional trailing `*`
