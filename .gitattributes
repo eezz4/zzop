@@ -45,3 +45,14 @@ site/ko/index.html text eol=lf
 # never reach the output.)
 site-src/content/*.mjs text eol=lf
 site-src/site-v2.css text eol=lf
+
+# Shell scripts, and this one is not a false-red story like the four above -- it is a deploy that
+# already failed (2026-08-14). ONE guard was committed with CRLF and CI died on `$'\r': command not
+# found` before the site or the release could ship. Nothing local could have caught it: Git for
+# Windows' bash tolerates CRLF in a script, so all 39 guards ran green here while the same bytes were
+# unparseable on the Linux runner. That asymmetry is the whole problem -- the platform that authors
+# the file is the one platform that cannot feel the break. A guard would only re-measure what the
+# checkout already decides, so the fix belongs here, where CRLF cannot enter the blob in the first
+# place. `.githooks/*` is listed separately because it holds no extension.
+*.sh text eol=lf
+.githooks/* text eol=lf
