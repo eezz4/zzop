@@ -61,6 +61,8 @@ body{
 .nav a.is-here{color:var(--ink);font-weight:700;box-shadow:inset 0 -2px 0 var(--accent)}
 .nav a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
+.nav__extra{margin-left:.35rem;border-left:var(--hair);padding-left:.7rem}
+
 .band{padding:clamp(2.6rem,6vw,4.6rem) clamp(1.25rem,5vw,3rem)}
 .band + .band{border-top:var(--rule)}
 .band--tint{background:var(--tint)}
@@ -240,16 +242,16 @@ code{font-family:var(--mono);font-size:.88em;background:var(--tint);padding:1px 
 
 <nav class="nav">
   <span class="nav__brand">zzop</span>
-  <div style="display:flex;flex-wrap:wrap;gap:.1rem">
+  <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:.1rem">
     <a href="#p-index" class="nav__link is-here" data-page="p-index">Overview</a>
     <a href="#p-arch" class="nav__link" data-page="p-arch">How it works</a>
     <a href="#p-usage" class="nav__link" data-page="p-usage">Usage</a>
     <a href="#p-contract" class="nav__link" data-page="p-contract">Contract</a>
     <a href="#p-rules" class="nav__link" data-page="p-rules">Rules</a>
     <a href="#p-graph" class="nav__link" data-page="p-graph">Graph</a>
+    <a href="x-showcase.html" class="nav__extra">In the field</a>
   </div>
-  <a class="langbtn" id="langlink" href="ko/" hreflang="ko"
-     aria-label="Read this in Korean"><b>EN</b> · KO</a>
+  <a class="langbtn" id="langlink" href="ko/" hreflang="ko" aria-label="Read this in Korean"><b>EN</b> · KO</a>
 </nav>
 
 <section class="page" id="p-index">
@@ -1600,10 +1602,11 @@ const items = list.map(x =&gt; db.find(x.id)); <span class="hit">// zzop-nplus1-
   <span class="foot__brand">zzop</span>
   <span>Zero Zone Of Pain · MIT</span>
   <span class="muted" style="flex-basis:100%;max-width:38rem">
-    The full rule catalog, the field-by-field JSON reference and the live import graph are
-    reference material and stay on their own pages:
-    <a href="rules.html">rules</a> · <a href="reference.html">reference</a> · <a href="graph.html">graph</a>.
+    The full rule catalog, the field-by-field JSON reference, the live import graph, and zzop run
+    over everything X open-sourced are reference material and stay on their own pages:
+    <a href="rules.html">rules</a> · <a href="reference.html">reference</a> · <a href="graph.html">graph</a> · <a href="x-showcase.html">in the field</a>.
   </span>
+  <a href="privacy.html">Privacy</a>
   <a href="https://github.com/eezz4/zzop" target="_blank" rel="noreferrer">GitHub</a>
 </footer>
 
@@ -1630,8 +1633,20 @@ const items = list.map(x =&gt; db.find(x.id)); <span class="hit">// zzop-nplus1-
   links.forEach(function (a) {
     a.addEventListener("click", function (e) { e.preventDefault(); show(a.dataset.page); });
   });
-  // deep link straight into a page
-  if (location.hash && document.getElementById(location.hash.slice(1))) show(location.hash.slice(1));
+  // A link INTO a section that is NOT a nav tab changes the hash without passing
+  // through the click handler above: an in-content cross-reference like "see the
+  // Contract" (href="#p-contract"), a deep link landing from another page, or the
+  // back/forward button. Without this the target section would stay hidden and the
+  // click would do nothing visible. Route the initial load AND every later hash
+  // change through one guarded show that fires only for a real section id.
+  function showHash() {
+    var id = location.hash.slice(1);
+    for (var i = 0; i < pages.length; i++) {
+      if (pages[i].id === id) { show(id); return; }
+    }
+  }
+  window.addEventListener("hashchange", showHash);
+  if (location.hash) showHash();
 })();
 </script>
 

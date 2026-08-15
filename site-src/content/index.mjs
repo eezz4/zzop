@@ -387,7 +387,7 @@ export default {
       정직하게 말한다</strong>. critical 다섯이 전부 테스트 픽스처인 것이 약점이 아니라, 그걸 <em>취약점이라 우기지 않은 것</em>이
       강점이다. 재현: 저장소 12개를 클론하고 <code>zzop cross --config</code> 한 번 — 트리마다 심각도·룰별 카운트가 나오고,
       each finding 은 rule id·<code>file:line</code>·잠재우는 config 키를 함께 낸다. 이 코퍼스의 그래프 다섯 장 —
-      <code>dep</code> 전량 4,457파일을 한 캔버스에 그린 것 포함 — 은 <a href="x-showcase.html">따로 한 페이지</a>에 있다.`,
+      <code>dep</code> 전량 4,457파일을 한 캔버스에 그린 것 포함 — 은 영어판 쇼케이스 페이지에 모여 있다(상단 EN 토글).`,
             en: `This is the product's thesis: zzop <strong>does not brag about findings — it states honestly what it
       saw and what it could not</strong>. That all five criticals are test fixtures is not the weakness; the
       strength is that it <em>did not dress them as vulnerabilities</em>. Reproduce: clone the twelve

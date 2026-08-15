@@ -37,28 +37,40 @@ export default {
     { id: "p-graph", src: "graph", label: { ko: "그래프", en: "Graph" } },
   ],
 
+  // Nav entries that are NOT in-page tabs but LINKS to a standalone page in site/.
+  // `pages` above are SPA sections toggled by JS (each `#id` matches a `.page`);
+  // these have an `href` instead and the assembler renders them WITHOUT the
+  // `.nav__link` class, so the section-toggle script leaves them alone and the
+  // browser follows the link. This is how the X showcase (site/x-showcase.html),
+  // a separate page rather than a tab, is reachable from the top bar.
+  // Rendered on BOTH editions so the menu LAYOUT is identical in English and
+  // Korean (the user asked for parity: the item was missing from the Korean bar).
+  // The target is an English-only page with no site/ko/ copy, so the label stays
+  // in ENGLISH on purpose even in the Korean nav: an English label makes it plain
+  // the destination is English, rather than a Korean label ("실전") that silently
+  // lands on an English page. The Korean edition resolves the href to
+  // ../x-showcase.html via fixRootLinks (site/ko/ is one directory down).
+  extras: [
+    { href: "x-showcase.html", label: "In the field" },
+  ],
+
   // 언어 전환 링크의 aria-label. 링크에 보이는 글자("EN · KO")는 언어 무관이라 조립기가 낸다.
   langLink: {
     ko: "영어판으로 보기",
     en: "Read this in Korean",
   },
 
-  // 푸터의 판별 문단. 두 판이 서로 다른 말을 한다 —
-  // 영어판은 별도 페이지로 남은 레퍼런스 자료를 가리키고,
-  // 한국어판은 "여기가 정본이 아니다"를 먼저 말한다.
-  foot: {
-    en: `<span class="muted" style="flex-basis:100%;max-width:38rem">
-    The full rule catalog, the field-by-field JSON reference and the live import graph are
-    reference material and stay on their own pages:
-    <a href="rules.html">rules</a> · <a href="reference.html">reference</a> · <a href="graph.html">graph</a>.
+  // 푸터의 레퍼런스 포인터. **영어판 전용이다** — 가리키는 페이지(rules · reference · graph ·
+  // x-showcase)는 전부 영어 전용 단독 페이지이고 site/ko/ 사본이 없다. 한국어판에서 이걸 링크하면
+  // 한국어 메뉴가 영어 페이지로 튕긴다(2026-08-16 사용자가 이 증상을 지적). 한국어 독자가 영어
+  // 레퍼런스로 가고 싶으면 상단 EN·KO 토글로 영어판에 넘어가면 되고, 거기 nav 가 그 페이지들을
+  // 준다 — 그래서 한국어판 푸터는 이 span 을 렌더하지 않는다(scripts/gen-site.mjs).
+  // 한국어판이 자체적으로 갖는 룰·그래프는 영어 단독 페이지가 아니라 SPA 탭(#p-rules · #p-graph)이다.
+  footEnOnly: `<span class="muted" style="flex-basis:100%;max-width:38rem">
+    The full rule catalog, the field-by-field JSON reference, the live import graph, and zzop run
+    over everything X open-sourced are reference material and stay on their own pages:
+    <a href="rules.html">rules</a> · <a href="reference.html">reference</a> · <a href="graph.html">graph</a> · <a href="x-showcase.html">in the field</a>.
   </span>`,
-    ko: `<span class="muted" style="flex-basis:100%;max-width:38rem">
-    한국어판은 원문을 옮긴 것이 아니라 한국어 기준으로 다시 쓴 것이다.
-    커맨드·설정 키·룰 id 는 원문 철자 그대로 써야 한다 —
-    <a href="https://eezz4.github.io/zzop/">원문 사이트</a>가 정본이다.
-    룰 카탈로그 전체와 필드 단위 JSON 레퍼런스, 살아 있는 import 그래프는 그쪽에 있다.
-  </span>`,
-  },
 
   // 그래프 뷰어가 **화면에 내는** 영어 문장. 원본 site/graph.html 안에서는 스크립트 리터럴로
   // 박혀 있어 번역할 자리가 없었다 — 조립기가 뷰어를 잘라 올 때 모드별로 갈아끼운다.

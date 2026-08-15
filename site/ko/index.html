@@ -61,6 +61,8 @@ body{
 .nav a.is-here{color:var(--ink);font-weight:700;box-shadow:inset 0 -2px 0 var(--accent)}
 .nav a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
+.nav__extra{margin-left:.35rem;border-left:var(--hair);padding-left:.7rem}
+
 .band{padding:clamp(2.6rem,6vw,4.6rem) clamp(1.25rem,5vw,3rem)}
 .band + .band{border-top:var(--rule)}
 .band--tint{background:var(--tint)}
@@ -240,16 +242,16 @@ code{font-family:var(--mono);font-size:.88em;background:var(--tint);padding:1px 
 
 <nav class="nav">
   <span class="nav__brand">zzop</span>
-  <div style="display:flex;flex-wrap:wrap;gap:.1rem">
+  <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:.1rem">
     <a href="#p-index" class="nav__link is-here" data-page="p-index">개요</a>
     <a href="#p-arch" class="nav__link" data-page="p-arch">구조</a>
     <a href="#p-usage" class="nav__link" data-page="p-usage">사용법</a>
     <a href="#p-contract" class="nav__link" data-page="p-contract">계약</a>
     <a href="#p-rules" class="nav__link" data-page="p-rules">룰</a>
     <a href="#p-graph" class="nav__link" data-page="p-graph">그래프</a>
+    <a href="../x-showcase.html" class="nav__extra">In the field</a>
   </div>
-  <a class="langbtn" id="langlink" href="../" hreflang="en"
-     aria-label="영어판으로 보기">EN · <b>KO</b></a>
+  <a class="langbtn" id="langlink" href="../" hreflang="en" aria-label="영어판으로 보기">EN · <b>KO</b></a>
 </nav>
 
 <section class="page" id="p-index">
@@ -442,7 +444,7 @@ code{font-family:var(--mono);font-size:.88em;background:var(--tint);padding:1px 
       정직하게 말한다</strong>. critical 다섯이 전부 테스트 픽스처인 것이 약점이 아니라, 그걸 <em>취약점이라 우기지 않은 것</em>이
       강점이다. 재현: 저장소 12개를 클론하고 <code>zzop cross --config</code> 한 번 — 트리마다 심각도·룰별 카운트가 나오고,
       each finding 은 rule id·<code>file:line</code>·잠재우는 config 키를 함께 낸다. 이 코퍼스의 그래프 다섯 장 —
-      <code>dep</code> 전량 4,457파일을 한 캔버스에 그린 것 포함 — 은 <a href="x-showcase.html">따로 한 페이지</a>에 있다.</p>
+      <code>dep</code> 전량 4,457파일을 한 캔버스에 그린 것 포함 — 은 영어판 쇼케이스 페이지에 모여 있다(상단 EN 토글).</p>
   </div>
 </section>
 
@@ -1573,12 +1575,8 @@ const items = list.map(x =&gt; db.find(x.id)); <span class="hit">// zzop-nplus1-
 <footer class="foot">
   <span class="foot__brand">zzop</span>
   <span>Zero Zone Of Pain · MIT</span>
-  <span class="muted" style="flex-basis:100%;max-width:38rem">
-    한국어판은 원문을 옮긴 것이 아니라 한국어 기준으로 다시 쓴 것이다.
-    커맨드·설정 키·룰 id 는 원문 철자 그대로 써야 한다 —
-    <a href="https://eezz4.github.io/zzop/">원문 사이트</a>가 정본이다.
-    룰 카탈로그 전체와 필드 단위 JSON 레퍼런스, 살아 있는 import 그래프는 그쪽에 있다.
-  </span>
+  
+  <a href="../privacy.html">Privacy</a>
   <a href="https://github.com/eezz4/zzop" target="_blank" rel="noreferrer">GitHub</a>
 </footer>
 
@@ -1605,8 +1603,20 @@ const items = list.map(x =&gt; db.find(x.id)); <span class="hit">// zzop-nplus1-
   links.forEach(function (a) {
     a.addEventListener("click", function (e) { e.preventDefault(); show(a.dataset.page); });
   });
-  // deep link straight into a page
-  if (location.hash && document.getElementById(location.hash.slice(1))) show(location.hash.slice(1));
+  // A link INTO a section that is NOT a nav tab changes the hash without passing
+  // through the click handler above: an in-content cross-reference like "see the
+  // Contract" (href="#p-contract"), a deep link landing from another page, or the
+  // back/forward button. Without this the target section would stay hidden and the
+  // click would do nothing visible. Route the initial load AND every later hash
+  // change through one guarded show that fires only for a real section id.
+  function showHash() {
+    var id = location.hash.slice(1);
+    for (var i = 0; i < pages.length; i++) {
+      if (pages[i].id === id) { show(id); return; }
+    }
+  }
+  window.addEventListener("hashchange", showHash);
+  if (location.hash) showHash();
 })();
 </script>
 

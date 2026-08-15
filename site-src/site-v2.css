@@ -71,6 +71,10 @@ body{
 .nav a:hover{color:var(--ink);border-color:var(--rule)}
 .nav a.is-here{color:var(--ink);font-weight:700;box-shadow:inset 0 -2px 0 var(--accent)}
 .nav a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* A link to a standalone page (e.g. the X showcase), set off from the in-page tabs
+   by a hairline. A class, not an inline style, so the one nav markup gen-site emits
+   styles the same whether the page inlines this sheet or links assets/site.css. */
+.nav__extra{margin-left:.35rem;border-left:var(--hair);padding-left:.7rem}
 
 /* ---- rhythm: sections are separated by a 2px rule. They are not wrapped in cards. ---- */
 .band{padding:clamp(2.6rem,6vw,4.6rem) clamp(1.25rem,5vw,3rem)}
