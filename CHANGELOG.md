@@ -32,16 +32,8 @@ done
 Work on `main` past the top row below. None of it is in any released binary, so an id or a file
 named here is not one an installed `zzop` knows yet.
 
-Changing a surface the table above covers:
-
-- **Four rule packs left the default bundle.** They still ship in the repository, under
-  `examples/packs/`, and their rules now fire only in a run whose config points at them:
-  `typescript-lint` (`5d2050f`), `orm-eager` (`2de0399`), `sql-preferences` (`9a49080`),
-  `code-hygiene` (`105c52f`). A rule id is `<pack>/<rule>`, so a rule that changed packs was renamed
-  by the move itself; the old → new tables are in VERSIONING.md under *Breaking in the current
-  `0.x`*, and **every row there whose new id names one of those four packs rides with this entry**.
-  Migrating a config against those rows before the tag lands will name ids your binary rejects as
-  unknown.
+Nothing here yet — no change in this window has touched a surface that
+[VERSIONING.md](VERSIONING.md)'s *The compatibility surface* covers.
 
 Everything else in the window: `git log <the top row's tag>..main --oneline`.
 
@@ -49,6 +41,7 @@ Everything else in the window: `git log <the top row's tag>..main --oneline`.
 
 | Version | Date | Commit | What the release said it was |
 |---|---|---|---|
+| `v0.31.0` | 2026-08-14 | `10adb51` | subtree git history, wildcard routes, and accessor/overload spans |
 | `v0.30.0` | 2026-08-10 | `e7b20da` | zzop was built TS-only; this release is what did not survive the expansion |
 | `v0.29.1` | 2026-08-05 | `890e355` | the release lane can be re-run, which one of its two publish jobs could not |
 | `v0.29.0` | 2026-08-05 | `b9dfa3f` | rules read call structure instead of guessing from text, and the graph answers what sits on top of what |

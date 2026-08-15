@@ -57,6 +57,88 @@ fn the_cap_is_disclosed_with_both_the_scoped_and_total_counts() {
     assert!(out.contains("drawn 2 / in-scope 5 / total 5"), "{out}");
 }
 
+/// The census (`%%`) does not survive into a rendered picture, so a truncated document must ALSO carry
+/// a visible note node — the tier-wide promise `graph --help` makes ("a %% census plus a visible note
+/// node"). Until 2026-08-15 cochange was the one domain of five with no note path: a default run over
+/// this repo drew 30 of 747 pairs and the rendered picture said nothing.
+#[test]
+fn a_truncated_picture_carries_a_visible_note_node_not_just_the_census_comment() {
+    let edges: Vec<Value> = (0..5)
+        .map(|i| edge(&format!("a{i}.rs"), &format!("b{i}.rs"), 5 - i))
+        .collect();
+    let v = json!({"trees": [tree("x", Value::Array(edges))]});
+    let out = project(&v, None, 2, Fold::of(None));
+    assert!(
+        out.contains(
+            "zzopNote[\"PARTIAL VIEW: 2 of 5 co-change pair(s) drawn (3 dropped by --top 2)"
+        ),
+        "{out}"
+    );
+    // The pointer must NEVER name `zzop facts` — that lane emits `commonIr` (= output.ir) and
+    // coChange is ir's sibling, absent from facts since the lane was born. risk.rs:175 records the
+    // harm the last time a note here pointed at a lane without the data.
+    assert!(!out.contains("zzop facts"), "{out}");
+}
+
+/// `graph --help` promises a visible note for every cap/filter — --scope included. The `%%` census
+/// line does not survive rendering, so a scoped picture must carry its own node (the join lane's
+/// dedicated SCOPED node is the sibling precedent).
+#[test]
+fn a_scoped_picture_carries_a_visible_scope_node() {
+    let v = json!({"trees": [tree("x", json!([
+        edge("src/a.rs", "src/b.rs", 4),
+        edge("docs/c.md", "docs/d.md", 3),
+    ]))]});
+    let out = project(&v, Some("src/"), 10, Fold::of(None));
+    assert!(
+        out.contains("zzopScope[\"SCOPED to 'src/': 1 of 2 co-change pair(s)"),
+        "{out}"
+    );
+    // And an UNSCOPED picture carries none — the node means "a filter removed something you cannot see".
+    let full = project(&v, None, 10, Fold::of(None));
+    assert!(!full.contains("zzopScope"), "{full}");
+}
+
+/// Same promise for --fold: the rendered canvas must say its nodes are boxes, not files — the `%%`
+/// fold census is invisible once drawn.
+#[test]
+fn a_folded_picture_carries_a_visible_fold_node() {
+    let v = json!({"trees": [tree("x", json!([edge("fe/a.ts", "be/x.ts", 9)]))]});
+    let out = project(&v, None, 10, Fold::of(Some(1)));
+    assert!(
+        out.contains("zzopFold[\"FOLDED: a node is a path-prefix box"),
+        "{out}"
+    );
+    let unfolded = project(&v, None, 10, Fold::of(None));
+    assert!(!unfolded.contains("zzopFold"), "{unfolded}");
+}
+
+/// The complement that keeps the note meaningful: a full picture stays note-free (posture's pattern —
+/// emit only when something was dropped, unlike dep/risk which also stamp a "complete" note).
+#[test]
+fn a_full_picture_carries_no_partial_view_note() {
+    let v = json!({"trees": [tree("x", json!([edge("a.rs", "b.rs", 3)]))]});
+    let out = project(&v, None, 10, Fold::of(None));
+    assert!(!out.contains("zzopNote"), "{out}");
+}
+
+/// Under a fold the cap applies AFTER folding, so the note must count folded edges — the same
+/// population the census line counts — not raw pairs (quoting raw pairs would contradict the census
+/// two lines above it).
+#[test]
+fn under_a_fold_the_note_counts_folded_edges_like_the_census_does() {
+    // 4 pairs across distinct top-level dirs so a --fold 1 keeps them as 4 distinct folded edges.
+    let edges: Vec<Value> = (0..4)
+        .map(|i| edge(&format!("d{i}/a.rs"), &format!("e{i}/b.rs"), 4 - i))
+        .collect();
+    let v = json!({"trees": [tree("x", Value::Array(edges))]});
+    let out = project(&v, None, 2, Fold::of(Some(1)));
+    assert!(
+        out.contains("zzopNote[\"PARTIAL VIEW: 2 of 4 folded edge(s) drawn (2 dropped by --top 2)"),
+        "{out}"
+    );
+}
+
 #[test]
 fn scope_keeps_a_pair_when_either_endpoint_is_inside_it() {
     // A tie reaching OUT of the scoped area is what a reader scoping to a folder wants to see.

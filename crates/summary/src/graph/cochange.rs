@@ -38,8 +38,10 @@ use serde_json::Value;
 use super::fold::{self, Fold};
 
 mod folded;
+mod render;
 
 use folded::fold_edges;
+use render::{render, Census};
 
 /// Default cap. Lower than `dep`'s: a co-change edge carries a weight a reader has to compare, and forty
 /// weighted edges is already past the point where a flowchart reads as a picture rather than a list.
@@ -159,126 +161,6 @@ pub(super) fn project(v: &Value, scope: Option<&str>, top: usize, fold: Fold) ->
         &fold_note,
         fold,
     )
-}
-
-struct Census {
-    total: usize,
-    scoped: usize,
-    /// Edges remaining after the fold and BEFORE `--top` — the cap's real denominator once a fold is on.
-    /// Equal to `scoped` when it is off.
-    after_fold: usize,
-    /// Distinct in-scope endpoints, and how many of them this run did not analyze.
-    endpoints: usize,
-    gone: usize,
-    /// Trees where git ran. The gap against `trees_total` is the "not measured" population.
-    trees_measured: usize,
-    trees_total: usize,
-}
-
-fn label(multi: bool, source: &str, rest: &str) -> String {
-    let base = if multi {
-        format!("{source}::{rest}")
-    } else {
-        rest.to_string()
-    };
-    base.replace('"', "'")
-}
-
-fn node_id(source: &str, path: &str) -> String {
-    let mut id = String::from("cc_");
-    for ch in format!("{source}::{path}").chars() {
-        if ch.is_ascii_alphanumeric() {
-            id.push(ch);
-        } else {
-            id.push('_');
-        }
-    }
-    id
-}
-
-fn render(
-    edges: &[Edge],
-    c: Census,
-    multi: bool,
-    scope: Option<&str>,
-    top: usize,
-    fold_note: &str,
-    fold: Fold,
-) -> String {
-    let mut out = String::new();
-    out.push_str("%% zzop graph --domain cochange — files that change together in git history\n");
-    out.push_str(&format!(
-        "%% edges: drawn {} / in-scope {} / total {} | cap --top {top}{}\n",
-        edges.len(),
-        c.scoped,
-        c.total,
-        scope.map(|s| format!(" | --scope {s}")).unwrap_or_default()
-    ));
-    if fold.is_on() && c.after_fold != edges.len() {
-        out.push_str(&format!(
-            "%% the cap applies AFTER the fold: {} of {} folded edge(s) drawn.\n",
-            edges.len(),
-            c.after_fold
-        ));
-    }
-    // The two zeroes that mean different things, always named rather than left for a reader to assume.
-    if c.trees_measured < c.trees_total {
-        out.push_str(&format!(
-            "%% NOT MEASURED in {} of {} tree(s): git was inactive or collection failed there, so their \
-             absence from this picture is not evidence that nothing co-changes.\n",
-            c.trees_total - c.trees_measured,
-            c.trees_total
-        ));
-    }
-    if c.trees_measured > 0 && c.total == 0 {
-        out.push_str(
-            "%% MEASURED AND EMPTY: git history was read and no pair cleared the filters. That is a \
-             finding, not a gap.\n",
-        );
-    }
-    out.push_str(
-        "%% A SAMPLE, never a repository total: commits touching fewer than 2 or more than 25 files form \
-         no pair at all, and each file keeps only its strongest partners — the tail is dropped, not \
-         summed. Read an edge as \"among the strongest measured ties\", never as \"they always change \
-         together\".\n",
-    );
-    out.push_str(
-        "%% Edges are UNDIRECTED and are NOT imports. An import edge is read from source; this one is \
-         read from history and says nothing about why. For imports use --domain dep.\n",
-    );
-    if c.gone > 0 {
-        out.push_str(&format!(
-            "%% {} of {} path(s) here are NOT in this run's analyzed file set: history is a different \
-             population from the working tree. Each was deleted, excluded by config, or is not a source \
-             file zzop parses — this picture cannot tell those apart, so it names the count instead of \
-             guessing, and never drops them (a deleted module that used to pull half the repo with it is \
-             exactly the boundary a reader is looking for).\n",
-            c.gone, c.endpoints
-        ));
-    }
-    out.push_str(fold_note);
-    if fold.is_on() {
-        out.push_str(
-            "%% Pairs whose two files fold into the SAME box are dropped, not drawn as self-loops: that \
-             tie is internal cohesion, and drawing it would read as a boundary where there is none.\n",
-        );
-    }
-    out.push_str("flowchart LR\n");
-    if edges.is_empty() {
-        out.push_str("  none[\"no co-change pairs to draw\"]\n");
-        return out;
-    }
-    for e in edges {
-        let ia = node_id(&e.source, &e.a);
-        let ib = node_id(&e.source, &e.b);
-        out.push_str(&format!(
-            "  {ia}[\"{}\"] --- |{}| {ib}[\"{}\"]\n",
-            label(multi, &e.source, &e.a),
-            e.count,
-            label(multi, &e.source, &e.b)
-        ));
-    }
-    out
 }
 
 #[cfg(test)]

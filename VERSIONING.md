@@ -140,9 +140,10 @@ renamed by construction. The pack is
 A SIXTH rule, `sql/destructive-migration`, was exported the same day and returned the same day, and this
 table deliberately carries no row for it. A rename row exists to migrate a user, and no user could have
 been carrying the exported spelling: `sql/destructive-migration` is the id `v0.30.0` shipped, and no tag
-was cut between the exporting commit (`9a49080`) and the returning one (`c0cc8ed`) —
-`git ls-remote --tags origin` tops out at `v0.30.0` (`e7b20da`), which is an ANCESTOR of both hops, so
-both describe as `v0.30.0-<n>`, differing only in how far past that tag they sit. Listing a
+was cut between the exporting commit (`9a49080`) and the returning one (`c0cc8ed`) — at both hops the
+remote tag list topped out at `v0.30.0` (`e7b20da`), an ANCESTOR of both, and the next tag (`v0.31.0`)
+landed only after the round trip had completed — so both hops describe as `v0.30.0-<n>`, differing only
+in how far past that tag they sit. Listing a
 round trip nobody could observe would send readers to `disabledRules`/`suppressions` entries that never
 existed. The window this reasoning depends on closes the moment a tag lands — after that, a rename is
 shipped whether or not it is later undone, and BOTH hops belong here as the `¶¶` rows are spelled.
@@ -253,7 +254,7 @@ The surfaces:
 
 | Surface | What's covered |
 |---|---|
-| SDK / CLI JSON output (`analyze` / `analyzeTrees` / `analyzeEnvelope`) | Field names and types. New fields are added (minor); existing fields are not removed or repurposed without a major bump. |
+| CLI JSON output — the `analyze` / `analyzeTrees` / `analyzeEnvelope` document shapes ([docs/modules/facade.md](docs/modules/facade.md)) | Field names and types. New fields are added (minor); existing fields are not removed or repurposed without a major bump. |
 | CLI flags & config keys | Removing or repurposing a flag/key is a major bump; adding one is minor. Unknown keys are ignored with a warning, never a hard error. |
 | Normalized AST envelope input ([`docs/NORMALIZED_AST.md`](docs/NORMALIZED_AST.md)) | The envelope shape external parser adapters emit. Its `version` field is a RELEASE number in these same units, and moves only when the shape moves — so an adapter emitting a given version keeps being accepted through every later release that did not change the shape. A shape change is never silent: a consumer rejects a version above its own, and a field whose absence would change the analysis carries an explicit floor. |
 | Rule ids | The `disabledRules` / `severityOverrides` ids you configure against. A rename is a major bump. |

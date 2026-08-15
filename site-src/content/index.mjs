@@ -231,6 +231,86 @@ export default {
 
     {
       blocks: [
+        ["eyebrow", { ko: "실전에서", en: "In the field" }],
+        [
+          "h2",
+          {
+            ko: "X 가 공개한 코드 전부를 걸어 봤다.",
+            en: "Run over everything X ever open-sourced.",
+          },
+        ],
+        [
+          "p",
+          {
+            ko: `X(구 트위터)와 xAI 가 공개한 저장소 12개 — For You 피드부터 Grok 의 빌드 시스템까지 —
+      를 한 번에 걸었다. 아래 수는 2026-08-15 에 zzop 0.31.0 으로 잰 것이고,
+      <strong>수마다 무엇을 센 것인지가 다르다</strong>: <em>walked</em> 는 트리에서 걸은 파일,
+      <em>파서 수신</em>은 그중 네이티브 파서 8종이 실제로 받은 것, 심볼은 그 파서들이 추출한 선언이다.`,
+            en: `Twelve repositories X (formerly Twitter) and xAI have open-sourced — from the For You feed
+      to Grok's build system — in one run. The numbers below were measured 2026-08-15 with zzop 0.31.0,
+      and <strong>each counts a different thing</strong>: <em>walked</em> is files visited in the tree,
+      <em>dispatched</em> is the subset the eight native parsers actually received, and symbols are the
+      declarations those parsers extracted.`,
+          },
+        ],
+        [
+          "vs",
+          [
+            {
+              k: "x-algorithm",
+              v: {
+                ko: `X 의 For You 피드(Rust + Python). <strong>215파일 중 207을 파서가 받았다 — 96%</strong>.
+      이 세트에서 가장 높고, 이유도 정직하다: Rust 와 Python 은 정면 커버리지다.
+      한계도 같은 런이 말했다 — 실서비스 경로는 gRPC 인데 zzop 에 gRPC 인식기가 없어서, axum 을 임포트하고도 라우트 0 이 <em>맞는 답</em>이다.`,
+                en: `X's For You feed (Rust + Python). <strong>207 of 215 files dispatched to a parser — 96%</strong>,
+      the highest in the set, for an honest reason: Rust and Python are head-on coverage.
+      The same run stated the limit too — the service speaks gRPC, which zzop has no recognizer for,
+      so a file importing axum with zero routes is the <em>correct</em> answer, and the run says so.`,
+              },
+            },
+            {
+              k: "grok-build",
+              v: {
+                ko: `Grok 의 빌드 시스템. 단일 트리에서 <strong>심볼 71,142</strong> —
+      zzop 자기 저장소(13,259)의 5.4배를 한 트리가 낸다.`,
+                en: `Grok's build system: <strong>71,142 symbols from a single tree</strong> —
+      5.4× what zzop's own repository (13,259) yields.`,
+              },
+            },
+            {
+              k: { ko: "12트리 전체", en: "All twelve trees" },
+              v: {
+                ko: `walked 12,078 파일, 그중 파서 수신 <strong>4,480(37%)</strong> — 나머지는 대부분 지원 밖 언어(Scala 등)이고,
+      그 파일들도 버려지지 않고 줄 수와 텍스트 룰은 받는다. 심볼 합 <strong>94,281</strong>.
+      전량 <code>facts</code> 한 번이 콜드 73초, 캐시 뒤 30초.`,
+                en: `12,078 files walked, <strong>4,480 of them dispatched (37%)</strong> — the rest are mostly
+      languages outside the eight (Scala above all), and even those still get line counts and text rules.
+      <strong>94,281 symbols</strong> in total. One <code>facts</code> run over everything: 73s cold, 30s warm.`,
+              },
+            },
+          ],
+          { wide: true },
+        ],
+        [
+          "note",
+          {
+            ko: `두 비율을 섞지 않는 것이 이 표의 요점이다: 96% 는 <strong>한 트리</strong>(x-algorithm)의 수이고
+      37% 가 <strong>세트 전체</strong>다. 낮은 쪽을 숨기면 높은 쪽도 못 믿게 된다.
+      재는 법: 저장소들을 클론하고 <code>zzop facts --config</code> 한 번 — 트리마다 <code>coverage</code> 블록이
+      자기 파일·수신·심볼 수를 내고, <strong>열두 블록을 더하면</strong> 위 합계가 나온다.
+      초 단위는 그 실행의 벽시계 시간이지 출력 필드가 아니다.`,
+            en: `The point of this table is refusing to blend two ratios: 96% belongs to <strong>one tree</strong>
+      (x-algorithm), 37% to <strong>the whole set</strong>. Hide the low one and the high one stops being credible.
+      To re-measure: clone the repositories and run <code>zzop facts --config</code> once — each tree's
+      <code>coverage</code> block prints its own file / dispatched / symbol counts, and <strong>the twelve
+      blocks sum</strong> to the totals above. The seconds are that run's wall clock, not a printed field.`,
+          },
+        ],
+      ],
+    },
+
+    {
+      blocks: [
         ["eyebrow", { ko: "시작", en: "Start" }],
         ["h2", { ko: "세 줄이면 된다.", en: "Three lines." }],
         [

@@ -18,7 +18,7 @@ install:
 
 Both dispatch to the same shared handlers over the same engine, so a tool call and a CLI run against the
 same path analyze identically and reach the same verdict. What each surface lets you *ask for* differs
-in one way only:
+in two ways:
 
 - **The findings-list filters reach both.** `analyze_repo`/`cross_repo`/`analyze_envelope` accept
   `severity` (minimum severity), `rule` (an exact rule id) and `limit` (list cap, default 50, max 1000);
@@ -26,13 +26,18 @@ in one way only:
   `--severity`/`--rule`/`--limit`, parsed into the same shared filter, so neither surface can filter
   differently. Counts by severity and rule cover everything on both surfaces regardless; the cap only
   truncates the listed findings, and truncation is always disclosed.
+- **The envelope twins differ in what they can discover.** MCP `analyze_envelope` takes the envelope as
+  TEXT and therefore discovers no config — its own description calls that a declared limit of the lane;
+  CLI `zzop analyze-envelope <file>` names a file and applies the `vocabulary` block of a config found
+  beside it. Every vocabulary-dependent verdict (guard names above all) can differ between the two.
 - **Some lanes are CLI-only, with no MCP tool twin:** `manifest`, `diff`, `facts`, `coverage`, `graph`, `explain`
   and `init`. Which lanes those are, and why each one is unpaired, is answered in one place —
   [CLI-only lanes](modules/mcp.md#cli-only-lanes-manifest--diff--explain--facts--coverage--graph--init) — not by
-  this sentence. (The lanes that project an analysis are recorded as a machine-readable contract in
-  [surface-parity.json](contracts/surface-parity.json)'s `_cliOnlyLanes`, whose keys are that list;
-  `explain` and `init` are deliberately outside that registry — neither projects an analysis — so the
-  registry alone would under-report, and the linked section carries their reasons instead.)
+  this sentence. (The lanes are also recorded as a machine-readable contract in
+  [surface-parity.json](contracts/surface-parity.json)'s `_cliOnlyLanes`, whose keys are that list —
+  `explain` included, declared there so the parity guard can subtract its implementation from the MCP
+  haystack. Only `init` sits outside the registry, deliberately — it projects no analysis — and the
+  registry's own `_doc` says so; the linked section carries the reasons.)
 
 **The rest of this page is the CLI workflow.** For an agent-driven session the equivalents are
 `analyze_repo` (for `zzop analyze`), `cross_repo` (for `zzop cross`), `check_endpoint` (for
@@ -71,7 +76,7 @@ leading dot:
 | Directory | Whose | In version control? |
 |---|---|---|
 | `.zzop/` | zzop's — derived, disposable | **No.** Delete it whenever; the next run rebuilds it. Today it holds `.zzop/cache/`. |
-| `zzop/` | yours — hand-authored | **Yes.** Custom DSL rule packs in `zzop/rules/`, adapter overlays in `zzop/adapters/`. |
+| `zzop/` | yours — hand-authored | **Yes.** Custom DSL rule packs in `zzop/rules/`, adapter overlays in `zzop/adapters/` — the latter a naming convention only: overlays load from the paths your config's `overlays` key names, and nothing auto-discovers that directory (unlike `zzop/rules/`, below). |
 
 Because the two names are one character apart, ignore the derived one with an **anchored** pattern —
 `**/.zzop/`, which is what this repo's own `.gitignore` uses — and never with a `zzop*` glob. A glob
@@ -271,7 +276,9 @@ This section is the one place they're all listed together — each links to its 
 **(a) Inline suppress marker (in code, per line).** Every DSL rule whose matcher anchors at a source line
 has an inline marker derived from its id — `zzop-<rule-id>-ok`. That is every matcher except one, so the
 exception is what this page names rather than the roster: a list of honoring matchers goes stale the day
-a matcher is added, and this sentence had already gone stale that way (it named three of the five);
+a matcher is added, and this sentence had already gone stale that way — twice: it once named three of
+what were then five matcher kinds, and that "five" itself rotted next (the roster is the `matcher.type`
+enum in [contracts/rule-pack.schema.json](contracts/rule-pack.schema.json) — count it there, not here);
 `symbol-scan` findings have no line to anchor a comment against and honor no marker (no shipped rule uses
 that matcher today, and `zzop explain <rule-id>` says so per rule). A comment carrying that marker on the
 finding's own line, or the line directly above it, silences that one finding; every finding's rendered
@@ -299,8 +306,11 @@ marker is inert there. It fails toward firing, not toward silence — a matching
 unsuppressed rather than being guessed away. `dev-path-no-guard-hint`'s guard-hint carve-out reads that
 same anchor line and goes inert with it, so under a full envelope a matching route fires even when its
 registration line carries a guard-hint argument. Clear one there by injecting the attribute the rule
-reads (`auth-guarded` for `protected-path-no-auth-evidence`) or by disabling the rule in config
-(mechanism (b) below).
+reads (`auth-guarded` for `protected-path-no-auth-evidence`). Config-level disabling is NOT a lever on
+this lane: `zzop analyze-envelope` applies only the `vocabulary` block of a config found beside the
+envelope file — its own help says so — and `rules` written there is silently inert. To disable a rule on
+an envelope run you must drive the engine through the embedding lane (mechanism (c) below), whose
+`EnvelopeAnalyzeRequest` does take `disabledRules`.
 Mode B adapter overlays are unaffected: they merge onto a natively-parsed tree whose source text is on
 disk, so both channels stay live. A marker this rule doesn't
 honor no longer fails silently: whether it's a typo or a marker borrowed from another rule, a comment
@@ -351,7 +361,7 @@ is used as-is (e.g. `dead-candidates` — and note some native ids contain a sla
 was removed rather than kept as a knob that did nothing.) Full schema in
 [`packages/README.md`](../packages/README.md).
 
-**(c) SDK/embedding-level (per call, when embedding the engine directly).** Callers embedding
+**(c) Embedding-level (per call, when embedding the engine directly).** Callers embedding
 `zzop-facade` directly — or driving the engine JSON contract via `zzop`'s subcommands — pass
 `suppressions` (finding-level accept-list by rule + path/glob), `disabledRules`, or
 `severityOverrides` on the request:

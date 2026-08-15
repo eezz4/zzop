@@ -154,10 +154,9 @@ export default {
           "p",
           {
             ko: `언어 지원을 <em>되냐 안 되냐</em>로 말하지 않는다.
-      각 언어가 실제로 책임질 수 있는 정밀도를 등급으로 밝힌다.
-      등급이 곧 그 파서가 뒤에 설 수 있는 사실의 범위다.`,
-            en: `Support is not a <em>yes or no</em> flag. Each language is disclosed as a precision tier,
-      and the tier names exactly which structural facts that parser can stand behind.`,
+      각 언어를 <em>무엇이 읽는지</em>를 등급으로 밝힌다 — 그리고 거기서 그 파서가 뒤에 설 수 있는 정밀도가 나온다.`,
+            en: `Support is not a <em>yes or no</em> flag. Each language is disclosed as a tier naming <em>what reads it</em>,
+      and the precision that parser can stand behind follows from that.`,
           },
         ],
         [
@@ -193,6 +192,28 @@ export default {
             },
           ],
           { wide: true },
+        ],
+        [
+          "note",
+          {
+            ko: `<strong><code>Full AST</code> 와 <code>Full CST</code> 를 가르는 것은 누가 그 파일을 읽느냐 — 그리고 그래서 실패의 결이 다르다.</strong>
+      <code>Full AST</code> 는 그 언어 자신의 파서를 링크한 것이라 그 언어의 도구체인이 보는 트리를 그대로 보고,
+      파싱이 실패하면 <strong>파일 단위로</strong> 어휘 폴백으로 강등된다.
+      <code>Full CST</code> 는 tree-sitter 문법 — 버전이 핀된 독립 재구현이라 오류에 관대하다:
+      한 멤버가 깨져도 <strong>파일의 나머지는 계속 추출된다</strong>.
+      그 대가로 아주 새로운 문법은 일반 CST 로 파싱은 되지만 <strong>전용 추출이 아직 없을 수 있다</strong>(Java 21 의 sealed-permits 와 패턴 스위치가 그 자리다).
+      <strong>등급은 능력 순위가 아니다</strong> — 어떤 채널이 실제로 나오는지는 등급이 아니라 언어마다 다르고,
+      그 목록의 정본은 레포의 <code>docs/ARCHITECTURE.md</code> 언어별 표다.`,
+            en: `<strong>What separates <code>Full AST</code> from <code>Full CST</code> is who reads the file — and therefore the grain of failure.</strong>
+      <code>Full AST</code> links the language's own parser, so it sees the tree that language's own toolchain sees,
+      and a file that fails to parse degrades to the lexical fallback <strong>whole</strong>.
+      <code>Full CST</code> reads through a tree-sitter grammar — an independent reimplementation, pinned to a version,
+      and error-tolerant: one broken member <strong>does not blank the rest of the file</strong>.
+      The price is that very new syntax may parse as ordinary CST while <strong>carrying no dedicated extraction yet</strong>
+      (Java 21's sealed-permits and pattern switches sit exactly there).
+      <strong>The tier is not a capability ranking</strong> — which channels a language actually produces varies by language,
+      not by tier, and the repo's per-language table in <code>docs/ARCHITECTURE.md</code> owns that list.`,
+          },
         ],
         [
           "muted",

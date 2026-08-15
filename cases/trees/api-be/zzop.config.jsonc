@@ -1,8 +1,13 @@
 {
-  // Declares this tree's env-config module so `code-hygiene/env-outside-config` has something to gate on.
-  // It lives INSIDE the tree on purpose: `analyze_repo` only auto-discovers a config here, and the
-  // benchmark scores the per-tree axis. Without it the rule stays silent (by design) and three planted
-  // defects read as false negatives.
+  // Declares this tree's env-config module. Original purpose: gating `code-hygiene/env-outside-config`
+  // — that pack was EXPORTED out of the bundle at v0.31.0 (`examples/packs/code-hygiene.json`; see
+  // cases/EXPECTED.jsonc's header for the 41 rule ids across 32 keys removed with it), so on a default run the
+  // rule no longer loads and this declaration gates nothing. It stays because it is load-bearing the day
+  // anyone re-loads that pack via `packs.extraDirs` — and the `overlays` line below it stays regardless:
+  // the same file injects `auth-guarded`, the ONLY negative control `http/protected-path-no-auth-evidence`
+  // has (that rule is bundled and scored today; the overlay's own "// why" block is the owner). The config lives INSIDE the tree on purpose:
+  // config auto-discovery happens at the tree root on both hosts (`zzop analyze <path>` and the MCP
+  // `analyze_repo` alike — the discovery lives in crates/config), and the benchmark scores the per-tree axis.
   "overlays": ["../../zzop-attributes.json"],
   "vocabulary": {
     // Names that prove a call is an auth check, matched against every symbol the mutating-route-no-auth

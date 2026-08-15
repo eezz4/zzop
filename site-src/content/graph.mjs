@@ -230,36 +230,36 @@ export default {
             {
               k: "<code>--domain join</code>",
               v: {
-                ko: "기본값. 교차 계층 조인 — 노드가 io 키다.",
-                en: "The default. The cross-layer join — nodes are io keys.",
+                ko: "기본값. 교차 계층 조인 — 노드가 io 키다. 기본 캡 <strong>25 — 버킷별</strong> 그리는 관계 수라, 여섯 버킷을 다 채우면 문서 전체는 25보다 크다. 큰 <code>edges</code> 목록이 다른 버킷을 그림 밖으로 밀어내지 못하게 하려는 것이다.",
+                en: "The default. The cross-layer join — nodes are io keys. Default cap <strong>25 — drawn relations per bucket</strong>, so a document with all six buckets populated carries more than 25 in total: a big <code>edges</code> list must not push a whole other bucket out of the picture.",
               },
             },
             {
               k: "<code>--domain dep</code>",
               v: {
-                ko: "파일 import 그래프. 노드가 파일이고 순환은 다르게 그려진다. 위 두 표가 나오는 곳이 여기다.",
-                en: "The file import graph — nodes are files, cycles drawn distinctly. This is the domain the two tables above come from.",
+                ko: "파일 import 그래프. 노드가 파일이고 순환은 다르게 그려진다. 위 두 표가 나오는 곳이 여기다. 기본 캡 <strong>40 — 노드에</strong> 걸린다(엣지는 살아남은 노드를 따라간다). 다섯 중 가장 크다.",
+                en: "The file import graph — nodes are files, cycles drawn distinctly. This is the domain the two tables above come from. Default cap <strong>40 — on nodes</strong> (edges follow the surviving nodes), the largest of the five.",
               },
             },
             {
               k: "<code>--domain risk</code>",
               v: {
-                ko: "터지면 넓게 번지는 허브와 추출이 끊긴 이음매.",
-                en: "Blast-radius hubs and extraction seams.",
+                ko: "터지면 넓게 번지는 허브와 추출이 끊긴 이음매. 기본 캡 <strong>12</strong>로 다섯 중 가장 작고, <strong>종류별</strong>로 건다 — 허브 목록이 길다고 이음매가 그림 밖으로 밀려나지 않게. 두 목록은 엔진이 이미 순위를 매겨 짧게 낸 것이라, 이 수는 잘라내기 정책이 아니라 가독성 한계다.",
+                en: "Blast-radius hubs and extraction seams. Default cap <strong>12</strong>, the smallest of the five, and applied <strong>per kind</strong> so a long hub list cannot push every seam out of the picture. Both lists arrive engine-ranked and already short: this number is a readability bound, not a truncation policy.",
               },
             },
             {
               k: "<code>--domain posture</code>",
               v: {
-                ko: "상태를 바꾸는 공격면과 그 가드 상태.",
-                en: "The mutating attack surface and its guard status.",
+                ko: "상태를 바꾸는 공격면과 그 가드 상태. 기본 캡은 <strong>트리별 20</strong>개 라우트 — 이 그림은 분류하라고 있는 것이고 라우트 백 개는 벽이다.",
+                en: "The mutating attack surface and its guard status. The default cap is <strong>20 routes per tree</strong>: this picture is for triage, and a hundred routes is a wall.",
               },
             },
             {
               k: "<code>--domain cochange</code>",
               v: {
-                ko: `git 동시 변경. <code>dep</code> 와 같은 노드 위의 <em>다른</em> 관계라 겹치지 않고 따로 선다 — import 는 소스에서 읽고, 동시 변경은 이력의 표본이다.`,
-                en: `Git co-change: a <em>different</em> relation over the same nodes as <code>dep</code>, so it stands apart rather than blending — an import is read from source, a co-change is a sample of history.`,
+                ko: `git 동시 변경. <code>dep</code> 와 같은 노드 위의 <em>다른</em> 관계라 겹치지 않고 따로 선다 — import 는 소스에서 읽고, 동시 변경은 이력의 표본이다. 기본 캡 <strong>30</strong> 으로 <code>dep</code> 보다 낮다: 여기 엣지는 독자가 비교해야 하는 가중치를 달고 있어서, 마흔 개면 이미 그림이 아니라 목록으로 읽힌다.`,
+                en: `Git co-change: a <em>different</em> relation over the same nodes as <code>dep</code>, so it stands apart rather than blending — an import is read from source, a co-change is a sample of history. Default cap <strong>30</strong>, lower than <code>dep</code>'s: a co-change edge carries a weight the reader has to compare, and forty weighted edges is already past the point where a flowchart reads as a picture rather than a list.`,
               },
             },
           ],
@@ -270,10 +270,16 @@ export default {
           {
             ko: `<code>--format</code> 은 <code>mermaid</code>(기본) · <code>cosmograph-nodes</code> · <code>cosmograph-links</code> 셋이다.
       mermaid 는 다섯 도메인 전부를 플로차트 텍스트로 내고, cosmograph 표는 <code>dep</code> 하나에만 있다.
-      이 레인은 CLI 전용이다 — MCP 도구 쌍이 없다.`,
+      이 레인은 CLI 전용이다 — MCP 도구 쌍이 없다.
+      <code>--top</code> 의 기본값이 도메인마다 다른 것은 밀도가 다르기 때문이다 — 조인은 관계가 수십인데 import 그래프는 수천이다.
+      다섯 값은 전부 <code>zzop graph --help</code> 가 직접 찍는다(이 페이지가 아니라 그쪽이 정본이다).
+      그리고 잘린 만큼은 문서 안에 공시된다 — 센서스 한 줄과 눈에 보이는 노트 노드로.`,
             en: `<code>--format</code> takes <code>mermaid</code> (the default), <code>cosmograph-nodes</code> or
       <code>cosmograph-links</code>. Mermaid serializes all five domains as flowchart text; the cosmograph tables
-      exist for <code>dep</code> alone. This lane is CLI-only — it has no MCP tool twin.`,
+      exist for <code>dep</code> alone. This lane is CLI-only — it has no MCP tool twin.
+      <code>--top</code> defaults differ per domain because their densities do: a join has tens of relations where an
+      import graph has thousands. All five are printed by <code>zzop graph --help</code> itself, which owns them —
+      not this page. Whatever a cap removes is disclosed inside the document, as a census line and a visible note node.`,
           },
         ],
       ],
@@ -383,8 +389,12 @@ export default {
             zoomReset: { ko: "처음 배율로", en: "Reset the view" },
             caption: {
               ko: `위 줄은 그 커맨드가 <strong>stderr</strong> 로 찍는 통계다 — stdout 은 파싱 가능한 표로 남는다.
+      노드와 엣지가 몇 개인지는 이 산문 어디에도 박혀 있지 않다 — <strong>뷰어가 실린 표를 그 자리에서 센다</strong>.
+      숫자의 주인이 하나여야 그래프를 다시 재도 이 페이지가 낡지 않는다.
       배치는 미리 계산되어 데이터에 실려 있어, 이 그림은 누가 언제 열어도 같다.`,
               en: `The line above is what the command prints on <strong>stderr</strong> — stdout stays a parseable table.
+      No node or edge count is hardcoded anywhere in this prose: <strong>the viewer counts the loaded table on the spot</strong>,
+      so the numbers have one owner and re-measuring the graph can never leave this page stale.
       The layout is precomputed and rides in the data, so this picture is the same on every visit.`,
             },
           },

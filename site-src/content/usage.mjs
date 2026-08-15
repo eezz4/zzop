@@ -201,9 +201,18 @@ export default {
           {
             ko: `키 전부를 여기 늘어놓지 않는다. <code>zzop contract config-surface</code> 가 기계로 검증된 전체 키 목록을,
       <code>zzop contract config-template</code> 가 그 시작 파일을 그대로 찍는다 — 소스 체크아웃 없이 바이너리 하나로.
+      기본 <em>값</em>들도 마찬가지다 — 예컨대 무엇이 auth 가드로 인정되는지는 <code>authGuardPattern</code> 을 필두로
+      <strong>여러 어휘 키가 함께</strong> 정한다(메서드 이름이 안 맞아도 <code>authGuardQualifierTokens</code> 의
+      클래스 이름이 가드를 증명할 수 있다). 그 전문들은 이 페이지가 아니라 template 출력이 정본이다:
+      잘린 채 복사된 정규식은 조용히 좁게 탐지한다.
       입출력 JSON 계약은 <a href="#p-contract">계약</a> 페이지에 있다.`,
             en: `The full key list doesn't belong on a page: <code>zzop contract config-surface</code> prints the machine-checked
       vocabulary and <code>zzop contract config-template</code> prints that starter file — from the binary alone.
+      The same goes for default <em>values</em>: what counts as an auth guard is decided by
+      <strong>several vocabulary keys together</strong>, <code>authGuardPattern</code> first among them
+      (a class name can prove a guard through <code>authGuardQualifierTokens</code> even when no method name matches),
+      and the template output owns their full text, not this page —
+      a regex copied truncated silently detects less.
       The input/output JSON contract is on the <a href="#p-contract">Contract</a> page.`,
           },
         ],

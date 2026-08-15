@@ -64,7 +64,10 @@ the leaf: declaring `vocabulary.featureSlicedDesign.entry` leaves the other thre
 `packs.disabled` leaves `packs.extraDirs` alone.
 
 **Watch the keys where "not judged" is the permissive direction.** For most of this block, leaving a
-key alone costs you recall: an undeclared `authGuardPattern` means no name proves a guard. But a few
+key alone costs you recall: an undeclared `authGuardPattern` switches off the method-name arm of guard
+proof, so a route guarded by a name like `requireAuth` starts reporting (a guard-shaped *class* name
+still clears one through `authGuardQualifierTokens` — itself an undeclared-means-unjudged key, so this
+holds only while that key is declared; the point is that the keys are independent levers, not one). But a few
 keys are veto or skip lists, where the same rule runs the other way — an undeclared `skipDirs` skips
 nothing (your `target/` and `node_modules/` get walked), and an undeclared `fileReadCallees` makes
 `cache-lane-file-read` silent on a tree that really has the defect. Both of those are what `zzop init`

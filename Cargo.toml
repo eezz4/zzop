@@ -65,7 +65,7 @@ members = [
 # the `0.0.0` placeholder), and a stamp cannot fail the way a verification can. `version_string()`
 # / the binaries report `CARGO_PKG_VERSION` directly (no `ZZOP_RELEASE_VERSION` env). Cache-bust tokens are
 # stamped with this version at their scope's last change — see the cache decision.
-version = "0.31.0"
+version = "0.32.0"
 edition = "2021"
 license = "MIT"
 
