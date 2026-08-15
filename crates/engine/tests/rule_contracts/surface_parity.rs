@@ -12,8 +12,9 @@
 //!     `carry`/`omit` rows only (see that test's own doc for why `carry-conditional` rows are exempt).
 //!
 //! ## Route taken for TEST 1's "actual serialized key set"
-//! `zzop-facade` is **not** a dev-dependency of `zzop-engine` (checked `crates/engine/Cargo.toml` — no
-//! `[dev-dependencies]` section at all today); adding one is out of this task's scope, which owns only this
+//! `zzop-facade` is **not** a dev-dependency of `zzop-engine` (a `[dev-dependencies]` section exists
+//! now — `zzop-test-support`, added later — but `zzop-facade` is still not in it); adding one was out
+//! of the original task's scope, which owned only this
 //! test file, its own `mod` registration, and the registry — not `Cargo.toml`. So instead of running a real
 //! `analyze()`/`analyzeTrees()` through `zzop_facade` in-process the way `crates/facade/src/analyze_tests.rs`
 //! itself does, this file takes the pragmatic route the task brief names explicitly: it parses the pinned
@@ -236,6 +237,146 @@ pub(crate) fn cli_only_lane_sources(registry: &serde_json::Value) -> BTreeSet<Pa
         }
     }
     out
+}
+
+/// The MODULE TREES those lane sources live in — the scan roots of the bidirectional completeness
+/// check below. Derived from the declared sources themselves rather than declared separately (a
+/// second hand-written list would drift exactly the way this check exists to prevent): a declared
+/// `<dir>/mod.rs` roots its directory, and a declared `<parent>/<name>.rs` roots the sibling module
+/// directory `<parent>/<name>/` when that directory exists (Rust's file-module +
+/// directory-submodule layout). A lane whose source is a single file with no module directory
+/// (today only `zzop coverage`) contributes no root — there is no tree for an undeclared sibling to
+/// hide in — and the day such a file grows a module directory, the sibling rule starts scanning it
+/// with no registry change. That day already came for `zzop facts`: `crates/summary/src/facts/`
+/// exists (holding only `tests.rs` today), so `facts.rs` DOES derive a root — over-scanning a
+/// test-only directory is harmless because `is_test_source` strips it, and the root is exactly
+/// where a first shipped sibling would land.
+fn cli_only_lane_roots(registry: &serde_json::Value) -> BTreeSet<PathBuf> {
+    let mut roots = BTreeSet::new();
+    for canonical in cli_only_lane_sources(registry) {
+        if canonical.file_name().and_then(|n| n.to_str()) == Some("mod.rs") {
+            if let Some(dir) = canonical.parent() {
+                roots.insert(dir.to_path_buf());
+            }
+        } else if let Some(stem) = canonical.file_stem().and_then(|s| s.to_str()) {
+            if let Some(sibling) = canonical.parent().map(|p| p.join(stem)) {
+                if sibling.is_dir() {
+                    roots.insert(sibling);
+                }
+            }
+        }
+    }
+    // Prune roots nested under another root: the recursive scan of the outer root already covers
+    // them, and keeping both made every file under the inner one collect (and, on a failure,
+    // print) twice.
+    let pruned: BTreeSet<PathBuf> = roots
+        .iter()
+        .filter(|r| {
+            !roots
+                .iter()
+                .any(|other| *r != other && r.starts_with(other))
+        })
+        .cloned()
+        .collect();
+    pruned
+}
+
+/// Whether `dir` is a Rust MODULE directory — its entry file is `dir/mod.rs` or the file-module
+/// sibling `<dir>.rs` beside it. This is the anchor of the blind-spot check below: a module
+/// directory's files are reachable for scanning ONLY through a root derived from that entry file,
+/// so an entry file missing from `sources` silently un-scans the whole tree.
+fn is_module_dir(dir: &std::path::Path) -> bool {
+    if dir.join("mod.rs").is_file() {
+        return true;
+    }
+    let (Some(parent), Some(name)) = (dir.parent(), dir.file_name().and_then(|n| n.to_str()))
+    else {
+        return false;
+    };
+    parent.join(format!("{name}.rs")).is_file()
+}
+
+/// The OTHER direction of `_cliOnlyLanes`'s resolution guard. [`cli_only_lane_sources`] hard-fails
+/// a declared path that no longer resolves (a moved lane source), but nothing asked the reverse
+/// question — is every shipped `.rs` inside a lane's module tree declared? — so five files drifted
+/// undeclared across releases (`graph/model.rs` since v0.25.0, `graph/dep/window.rs` since v0.28.0,
+/// three more), and the same class produced a real red at `0e4651d` when a module split left
+/// `cochange/render.rs` undeclared and its CLI vocabulary read as an MCP-lane leak.
+///
+/// An undeclared file here has three honest resolutions, and the failure message names all three —
+/// the "move it out" branch applies only to lanes under TEST 3's haystack directories, because only
+/// there does a declaration subtract anything (the `zzop explain` lane lives in `crates/facade`,
+/// which TEST 3 never scans). It deliberately does NOT offer an exclusion list: inside the
+/// haystack, a genuinely shared file belongs OUTSIDE the lane tree, not on an allowlist —
+/// declaring it instead would subtract it from TEST 3's haystack, and widening that subtraction
+/// unverified kills the guard's safe direction.
+#[test]
+fn every_non_test_rs_inside_a_declared_lane_module_tree_is_itself_declared() {
+    let registry = load_registry();
+    let declared = cli_only_lane_sources(&registry);
+    let roots = cli_only_lane_roots(&registry);
+    assert!(
+        !roots.is_empty(),
+        "no lane module tree could be derived from _cliOnlyLanes — the root-derivation rule no \
+         longer matches how lane sources are laid out, so this check is scanning nothing"
+    );
+    let mut files = Vec::new();
+    for root in &roots {
+        crate::collect_rs_files(root, &mut files);
+    }
+    files.retain(|path| !is_test_source(path));
+    assert!(
+        !files.is_empty(),
+        "lane module trees resolved ({} roots) but hold no non-test .rs file — this check is \
+         scanning nothing",
+        roots.len()
+    );
+
+    // Blind-spot guard on the derivation itself: every declared source that sits inside a Rust
+    // MODULE directory must be covered by a derived root. The one file whose absence from
+    // `sources` cannot be caught by the undeclared-file check below is the module ENTRY file
+    // (mod.rs / the file-module parent) — dropping it derives no root for that tree, silently
+    // un-scanning every file under it while the aggregate floors above stay satisfied. Its
+    // still-declared siblings betray it here instead: they sit in a module directory no root
+    // covers.
+    let mut orphaned: Vec<String> = declared
+        .iter()
+        .filter(|canonical| {
+            let Some(parent) = canonical.parent() else {
+                return false;
+            };
+            is_module_dir(parent) && !roots.iter().any(|root| canonical.starts_with(root))
+        })
+        .map(|canonical| canonical.display().to_string())
+        .collect();
+    orphaned.sort();
+    assert!(
+        orphaned.is_empty(),
+        "declared lane source(s) sit inside a Rust module directory that no derived scan root \
+         covers: {orphaned:?}. That module's ENTRY file (its mod.rs, or the <name>.rs beside the \
+         directory) is missing from `sources` — declare it, or every file under that tree is \
+         silently outside this check."
+    );
+
+    let mut undeclared: Vec<String> = files
+        .iter()
+        .filter(|path| {
+            !std::fs::canonicalize(path).is_ok_and(|canonical| declared.contains(&canonical))
+        })
+        .map(|path| path.display().to_string())
+        .collect();
+    undeclared.sort();
+    assert!(
+        undeclared.is_empty(),
+        "non-test .rs file(s) live inside a _cliOnlyLanes module tree without being declared in \
+         any lane's `sources`: {undeclared:?}. Three honest resolutions: (a) verify the file is \
+         lane projection code, then declare it in docs/contracts/surface-parity.json; (b) if it is \
+         genuinely shared with the MCP reply lane AND lives under a TEST 3 haystack directory \
+         (crates/summary/src, packages/mcp/src, packages/cli-bin/src — where a declaration \
+         subtracts it from that guard's haystack), move it OUT of the lane's module tree instead \
+         of declaring it; (c) for a lane outside those directories (e.g. crates/facade), a \
+         declaration subtracts nothing from TEST 3 — classify honestly and declare."
+    );
 }
 
 use crate::is_test_source;

@@ -271,6 +271,22 @@ severity to include in the findings *list* — counts always cover everything), 
 and `limit` (list cap, default 50, min 0 — `0` is a legal "counts only, no findings listed" query —
 max 1000).
 
+**Tool annotations ride `tools/list`, and they are stated honestly rather than flatteringly.** Every
+tool carries MCP's advisory `annotations` object (`title` + behavior hints, with the same string
+doubled as the tool's top-level `title` for newer clients). The four tree-analyzing tools declare
+`readOnlyHint: false`, because an analysis persists its cache to disk — the product front end
+injects a `.zzop/cache` default resolved beside the honored config file, usually the tree root, and
+a config's own `cacheDir` moves or disables it (the precise rule lives in
+[ARCHITECTURE.md](../ARCHITECTURE.md#caching)) — beside `destructiveHint: false` (the writes, and
+the cache's own self-eviction, stay inside zzop's `.zzop/cache/`, never touching a file a user
+authored) and `idempotentHint: true` (the analysis is deterministic). The three
+text-in/judgment-out tools (`analyze_envelope`, `validate_envelope`, `validate_rule_pack`) declare
+`readOnlyHint: true` — their lane touches no disk at all. Every tool declares
+`openWorldHint: false`: zzop makes zero network calls. These hints are consent-bearing (a host may
+skip a confirmation prompt for a tool that claims to be read-only), so the classification is pinned
+by a test (`tool_annotations_never_claim_read_only_for_the_cache_writing_tools`) rather than left to
+prose — a new tool fails the build until it is explicitly classified.
+
 **Argument validation is strict, not advisory.** A boundary-value round found every tool argument
 here silently accepted the wrong JSON type and behaved as "not provided": a `limit` of `-1`, `1001`,
 `999999`, the STRING `"50"`, or the float `3.7` all passed through as "no cap"; a `severity` NUMBER

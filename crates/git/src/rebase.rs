@@ -72,8 +72,9 @@ impl GitCollection {
     /// coordinate mix this function exists to remove, only harder to see.
     ///
     /// A commit left with no in-tree file is DROPPED rather than kept empty: an empty commit is not a
-    /// commit that touched this tree, and every downstream count over `commits` (the 2..=25 co-change
-    /// window, `window.commits`) would otherwise be counting the enclosing repository's activity while
+    /// commit that touched this tree, and every downstream count over `commits` (the co-change
+    /// commit-size window — bounds owned by `zzop_metrics::coupling` — and `window.commits`) would
+    /// otherwise be counting the enclosing repository's activity while
     /// naming this tree. The corollary is intended: the co-change window then measures how many of THIS
     /// TREE's files a commit touched, which is the only version of the question a tree-scoped answer can
     /// pose — judging it on the repository-wide file count would make a tree's answer depend on files it

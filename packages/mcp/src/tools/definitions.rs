@@ -14,6 +14,30 @@ pub fn list() -> serde_json::Value {
         "tools": [
             {
                 "name": "analyze_repo",
+                // Annotation honesty rule for this whole table (they are advisory UI hints, but a
+                // false one lets a host skip a confirmation the user should have seen): the four
+                // tree-analyzing tools WRITE — the product front end injects a `.zzop/cache` default
+                // resolved beside the honored config file (`crates/config/src/mapper/options.rs`;
+                // usually the tree root, and a config's own `cacheDir` moves or disables it), so they
+                // must not claim `readOnlyHint: true`. They are `destructiveHint: false` — the cache
+                // writes stay inside zzop's own `.zzop/cache/` (it also self-evicts and wipes its own
+                // stale entries there, but never a file a user authored) — and `idempotentHint: true`
+                // (deterministic analysis; a repeat call with the same arguments converges to the
+                // same state). The three text-in/judgment-out tools (analyze_envelope,
+                // validate_envelope, validate_rule_pack) touch no disk at all: the envelope lane's
+                // request deliberately carries no `cacheDir` (`crates/facade/src/request.rs`) and the
+                // MCP arm passes no envelope path to discover a config from
+                // (`crates/summary/src/analyze/mod.rs`), so they claim `readOnlyHint: true`.
+                // `openWorldHint: false` everywhere: zzop performs zero network calls (no HTTP client
+                // crate exists in Cargo.lock), so no tool reaches outside the local filesystem.
+                "title": "Analyze a repository",
+                "annotations": {
+                    "title": "Analyze a repository",
+                    "readOnlyHint": false,
+                    "destructiveHint": false,
+                    "idempotentHint": true,
+                    "openWorldHint": false
+                },
                 "description": "Run zzop's deterministic analysis on ONE repository/tree. Pass EITHER `path` (a tree root — auto-discovers <path>/zzop.config.jsonc: rules, packs, overlays, mounts, with the reply's `config` field saying whether one was honored) OR `configPath` (a zzop.config.jsonc at ANY location, for a config that does not sit at the tree root; the CLI twin spells this `zzop analyze --config <path>`). A config is REQUIRED: a tree with no zzop.config.jsonc is refused, and the error names the config-template resource this server serves (write those bytes to <tree>/zzop.config.jsonc and retry). Everything the config does not say still defaults (bundled rule packs + git signals included); the one thing with no default is its `vocabulary` block, the names zzop would otherwise guess about that project, where an undeclared key is a judgment zzop does not make. Returns a summary (full counts by severity/rule, engine warnings) plus a capped findings list — truncation is always disclosed. The reply's `packsLoaded` array is the pack-load confirmation, one `{id, rules, source, filesInScope, zeroAdmissionRules?}` entry per loaded rule pack: `filesInScope` counts the files whose PATHS the pack's rules would scan (eligibility, never a match or usage count), and `zeroAdmissionRules` (present only when non-empty) lists the rules whose own path gates admitted ZERO files of this tree — those rules could not have read a byte here, so their zero findings mean scope, NOT a clean bill. A config declaring multiple trees returns a guided error telling the caller to run the cross-layer join over that config instead (it names no tool: the sentence is built in a shared crate both products speak through). Cross-layer (`cross-layer/*`) findings come from the multi-tree join and surface only in cross_repo/check_endpoint/check_file replies — this tool reports this tree's own per-tree findings only. Any honored config's rule overrides (disabled rules, remapped severities, and the `packs.only` pack allowlist) are positively acknowledged in the reply's `ruleOverridesApplied` field ({disabled, severityRemapped, only} id lists, omitted when none were requested), alongside the honored config file echoed in `config`. Read `only` before concluding a rule family is clean: when it is present, packs outside it did not run at all, and `packsLoaded` will not tell you so (that field is a path-match census, identical whether a pack ran or not). This reply, and the sibling `zzop analyze <path>` CLI form (same handler), are both a shaped summary that deliberately omits the raw `ir` block some engine disclosures point at — the full raw io facts (`ir.io`'s provide/consume lists) are only in the raw `zzop-facade` JSON output you get by embedding the engine directly, never in this Node-free binary's replies. When the underlying analysis ran git signals (the default, or a config's own `git` settings), the reply also carries a compact, capped `architecture` object summarizing the engine's health/recommendations/critical-file computation: {pain: the composite structural-debt score — read `painMeaning` beside it before quoting it, because this number CONTAINS NO RULE FINDINGS (a tree full of SQL injection scores exactly what the same tree scores with none; `findings.bySeverity` is the defect channel) and most of what it does contain is a structural OPINION rather than a defect claim — `painByAxis` splits it into defect (import cycles only), opinion (barrel discipline, FSD layering, SDP/Main Sequence, Newman modularity, LOC ceilings — a project that deliberately does the opposite is not wrong, it scores low) and history (rename churn, bus factor), each on pain's own scale and summing to it, topRecommendation: {id, severity, topItem} or null when no recommendation cleared threshold — its `id` is one of a closed set the `rule-catalog` contract defines, and this channel is convention-derived too: a critical finding on a path no recommendation rule already matched does not reach it, criticalTop: up to 3 paths off the critical list under its SIZE-WEIGHTED BLAST-RADIUS ranking (blast radius x ln(loc+2), blast radius as tie-break — a 400-line core outranks a 5-line re-export barrel of equal blast, so re-sorting `critical` by `blastRadius` alone does NOT reproduce these three), and NOT the churn hotspot ranking (see the `rule-catalog` contract's criticality entry)}. The whole object is absent (not null) when git signals did not run. Full per-file scores/recommendations/critical-file detail is never in this summary — only the raw `zzop-facade` JSON output (direct engine embedding) carries the complete arrays.",
                 "inputSchema": {
                     "type": "object",
@@ -35,6 +59,14 @@ pub fn list() -> serde_json::Value {
             },
             {
                 "name": "cross_repo",
+                "title": "Join repositories across the layer boundary",
+                "annotations": {
+                    "title": "Join repositories across the layer boundary",
+                    "readOnlyHint": false,
+                    "destructiveHint": false,
+                    "idempotentHint": true,
+                    "openWorldHint": false
+                },
                 "description": "Analyze 2+ repos/trees and join them across the layer boundary — the cross-layer (kind,key) join (e.g. a React consume matching a Spring provide, a shared DB table, route drift). Pass EITHER `configPath` (a zzop.config.jsonc — its `trees`, including \"auto\", define the join; the config-first way) OR `paths` (explicit tree roots, each tagged by directory name — every root LOADS its own zzop.config.jsonc and must have one; the reply's `config` field stays null because no single config governs the run, and `configWarnings` names the ones that were honored). Returns per-tree summaries with engine warnings, the join buckets, matched edges, and cross-layer findings (capped lists disclose truncation). Each `sources[]` row carries `packsLoaded`, the same `{id, rules, source, filesInScope, zeroAdmissionRules?}` pack-load confirmation analyze_repo's reply carries for one tree: `filesInScope` is path ELIGIBILITY (never a match count), and `zeroAdmissionRules` (present only when non-empty) lists rules whose own path gates admitted zero files of that tree — their zero findings are scope, not a clean bill. TWO VIEWS OF ONE BUCKET, and they are different numbers on purpose: `buckets` counts RAW ROWS (one per recorded call site) while `distinctBucketKeys` lists the DISTINCT keys those rows collapse into, so `buckets.X` is always >= the length of `distinctBucketKeys.X` — the reply states this relationship itself in `bucketMeaning`, so no reader has to infer it. The parallel `distinctBucketKeyFirstSites` gives ONE site per distinct key, the FIRST recorded `file:line`, so e.g. an unresolvedConsumes key is locatable without a further query. The honored config file, if any, is echoed at the top level (`config`), and each source's rule overrides, if any, are positively acknowledged per-tree (`ruleOverridesApplied`: {disabled, severityRemapped, only} id lists — `only` being the `packs.only` allowlist, outside which a pack did not run at all) rather than left implicit. Like analyze_repo, this reply (and the sibling `zzop cross` CLI form) is a shaped summary per source that omits the raw `ir` block — full raw io facts live only in the raw `zzop-facade` JSON output (direct engine embedding).",
                 "inputSchema": {
                     "type": "object",
@@ -61,6 +93,14 @@ pub fn list() -> serde_json::Value {
             },
             {
                 "name": "check_file",
+                "title": "Everything zzop knows about one file",
+                "annotations": {
+                    "title": "Everything zzop knows about one file",
+                    "readOnlyHint": false,
+                    "destructiveHint": false,
+                    "idempotentHint": true,
+                    "openWorldHint": false
+                },
                 "description": "DEFINITIVE answer to \"what does zzop know about THIS FILE?\" — the targeting twin of check_endpoint, with a file PATH as the target instead of an io key. Use it when you are working IN a file and want everything about that file rather than everything about the tree. Returns: which tree it belongs to (`sourceId`, plus `otherTrees` when the same relative path exists in more than one, never a silent pick), a `verdict`, its `loc`, its `symbols` (count + exported names), its `io` provides/consumes, its `dependencies` in BOTH directions (`imports` and `importedBy` — the second is the half you cannot read off the file itself), and every finding anchored in it, the tree's own and the cross-layer join's merged into one list with counts by severity and rule. NOTHING IS CAPPED: a single file's facts are bounded by the file, so this surface drops nothing and therefore never has to disclose a truncation. THE VERDICT ANSWERS WHETHER THE FILE WAS ANALYZED, NOT WHETHER IT IS HEALTHY, and that distinction is the point of the tool: an empty findings list means \"clean\" for an `analyzed` file and means \"nothing structural ever ran\" for a `lexical-only` or `degraded` one. Sealed four-token vocabulary — \"analyzed\", \"lexical-only\", \"degraded\", \"not-found\" — and the reply SPELLS OUT the returned token's meaning in its own `verdictMeaning` field, so this description is not a second owner of what a token means. `dependencies` carries the same kind of field, `dependenciesMeaning`: an EMPTY `imports` list is ambiguous on its own, so the reply says what it covers rather than leaving this description to define it. Three host-layer channels ride along beside the analysis, and they are named here because a CLOSED \"Returns:\" list reads as a denial of anything it omits: `config` (the config file this answer was computed under, or null), `warnings` (engine-side diagnostics — WHY a parse degraded, which packs did not load), and `configWarnings` (unknown keys, unknown rule ids). A `lexical-only` verdict without reading `warnings` tells you the file was not analyzed but not what stopped it. A `not-found` reply lists the nearest walked paths in `suggestions`. The target may be tree-relative or absolute (an absolute path is matched by its tail), and either separator style. Pass exactly ONE of `path` (one tree), `paths` (2+ tree roots, each loading its own config), or `configPath`.",
                 "inputSchema": {
                     "type": "object",
@@ -88,6 +128,14 @@ pub fn list() -> serde_json::Value {
             },
             {
                 "name": "check_endpoint",
+                "title": "Check one io key across the join",
+                "annotations": {
+                    "title": "Check one io key across the join",
+                    "readOnlyHint": false,
+                    "destructiveHint": false,
+                    "idempotentHint": true,
+                    "openWorldHint": false
+                },
                 "description": "DEFINITIVE answer to \"is io key X provided/consumed/joined?\" — matches `pattern` against ANY cross-layer io key (http routes, env keys, DB tables, topics) as a case-insensitive substring, over a fresh analysis of the given tree(s). Returns one `verdict` from a sealed eight-token vocabulary — \"linked\", \"provided-only\", \"consumed-unprovided\", \"external\", \"unresolved-only\", \"ambiguous\", \"mixed\", \"not-found\" — and the reply SPELLS OUT the returned token's meaning in its own `verdictMeaning` field, so this description is not a second owner of what a token means (the definitions live with the verdict computation, `zzop_facade`'s query core, and ride every reply on every host). An \"ambiguous\" verdict's candidate providers are listed per matched item, inside each `matches.ambiguousConsumes[]` entry's own `candidates` array — there is no top-level `candidates` field. Full per-bucket counts ride along uncapped; matched objects (file/line/source intact) and related findings are capped with disclosed truncation. `relatedFindings` is a TEXT match, never a computed link — a finding is listed when its rendered message contains the pattern or a matched key as a case-insensitive substring, so it both over- and under-matches, and an empty array is not evidence that no finding concerns the key. The reply states that itself in `relatedFindingsBasis`, so this description is not a second owner of it. The same three host-layer channels check_file names ride along here too — `config`, `warnings`, `configWarnings` — for the same reason: a verdict computed over a tree whose packs failed to load is a verdict about less than you asked for, and `warnings` is where that is said. Pass exactly ONE of `path` (one tree — the join still runs, intra-tree edges included), `paths` (2+ tree roots, each loading its own config), or `configPath`.",
                 "inputSchema": {
                     "type": "object",
@@ -116,6 +164,14 @@ pub fn list() -> serde_json::Value {
             },
             {
                 "name": "analyze_envelope",
+                "title": "Analyze a Normalized AST envelope (Mode A)",
+                // Text in, judgment out — no tree, no cache, no disk (see the honesty rule above).
+                "annotations": {
+                    "title": "Analyze a Normalized AST envelope (Mode A)",
+                    "readOnlyHint": true,
+                    "idempotentHint": true,
+                    "openWorldHint": false
+                },
                 "description": "Run Mode A full-envelope analysis: a complete Normalized AST envelope (a custom parser's output, already validated against its contract) REPLACES native parsing entirely for this run — contrast validate_envelope, which only checks the envelope's shape and runs no analysis at all, and Mode B overlay/mount requests, which merge external symbols ON TOP of a natively-parsed tree instead of replacing it. Only symbol-scan/io-scan DSL rules can fire (an envelope carries no source text, so text-scan/regex-body rules never match — the zzop://contract/rule-catalog resource says which rules are which kind); the native call-graph rules (mutating-route-no-auth, unsafe-read-endpoint, non-idempotent-write) additionally run when the envelope supplies its `files[].calls` channel (call edges — see the zzop://contract/envelope-schema resource; an envelope with http routes and no calls keeps them silent and the reply's warnings say so). The one tool that needs no config: bundled rule packs load the same way they do for every other zzop-mcp tool, and an envelope carries no filesystem location, so there is no `config` file to auto-discover (the reply has no `config`/`path` field at all) and none to require either. DECLARED LIMIT OF THIS LANE, needed to read the findings correctly: this tool receives envelope TEXT, so there is nothing adjacent to it on disk and the run judges by zzop's BUILT-IN convention vocabulary — it does not know what THIS project calls its own auth guards, its generated-file banners or its data-access receivers, so any finding whose text points at a `vocabulary` key is naming a declaration this lane had no way to read. The CLI twin `zzop analyze-envelope <file>` names a file, so it reads the zzop.config.jsonc sitting next to that file and applies that project's declared `vocabulary`, disclosing it in `configWarnings`; when a project's own naming conventions decide the verdict, that twin is the lane that can honor them. Returns the SAME shaped summary analyze_repo/cross_repo return otherwise: full findings counts by severity/rule, engine warnings, `packsLoaded` confirmation (whose per-pack `zeroAdmissionRules` is mode-filtered here: rules of a kind this lane never evaluates — anything but symbol-scan/io-scan — are listed even when their path patterns match, because their green is vacuous without source text), and the structural coverage census — capped lists always disclose truncation. Never carries an `architecture` field, and `gitWindow` is always present but always `null`: git signals need a working tree to diff, which an envelope does not have. Pair with the zzop://contract/envelope-guide and example-envelope resources.",
                 "inputSchema": {
                     "type": "object",
@@ -130,6 +186,13 @@ pub fn list() -> serde_json::Value {
             },
             {
                 "name": "validate_envelope",
+                "title": "Validate a Normalized AST envelope",
+                "annotations": {
+                    "title": "Validate a Normalized AST envelope",
+                    "readOnlyHint": true,
+                    "idempotentHint": true,
+                    "openWorldHint": false
+                },
                 "description": "Validate a Normalized AST envelope (a custom parser's output) against its contract WITHOUT running an analysis — the authoring feedback loop. Returns {valid, issues[], hints[]}; never fails on bad input. The two lists are DIFFERENT AXES: `issues` are why the envelope is REJECTED (they alone set `valid`), while `hints` are shapes that are accepted but almost certainly not what you meant. Their consequences are NOT uniform, so read the hint text instead of assuming one: some shapes make the cross-layer join find nothing at all (an `http` key that is not the normalized \"METHOD /path\" form the join keys on; a provide key carrying a host, which is consume-side external egress only), while others still join and instead change what the run produces (an absolute files[].path is added as a synthetic entry as a Mode B overlay rather than merging onto the file it names; a duplicate provide is joined once per copy). Every hint names its own concrete consequence and the fix, and the checks themselves — not this description — are the list: they live in `zzop_core::envelope_hints`. Treat a non-empty `hints` on a valid envelope as the more urgent signal. Hints are reported for an invalid envelope too (both axes in one round-trip), and are empty when the text did not parse at all. Pair with the zzop://contract/* resources (schema, guide, key-normalization fixture).",
                 "inputSchema": {
                     "type": "object",
@@ -141,6 +204,13 @@ pub fn list() -> serde_json::Value {
             },
             {
                 "name": "validate_rule_pack",
+                "title": "Validate a DSL rule pack",
+                "annotations": {
+                    "title": "Validate a DSL rule pack",
+                    "readOnlyHint": true,
+                    "idempotentHint": true,
+                    "openWorldHint": false
+                },
                 "description": "Validate a DSL rule pack's STRUCTURE before loading it — the exact judgments the engine's pack loader makes at load time (bad JSON, missing field, wrong type, too-new schema_version) plus every rule that would load but could silently never fire — a matcher regex that fails to compile, a line-scan declaring neither `line_pattern` nor `any`, and a method-scan whose `trigger` names a label no `patterns` entry declares. This checks shape ONLY — it never judges rule quality or semantics (whether a pattern over-matches, whether a rule is useful). Validation is also PACK-LOCAL: it cannot see any other pack, so a pack `id` colliding with a bundled or another loaded pack (which replaces it WHOLE) is invisible here — that only surfaces at load time via `packsLoaded` (and its shadow warning, when one fires); check `packsLoaded` after loading a pack this tool passed. Returns {valid, issues[]}; never fails on bad input. Pair with the zzop://contract/rule-pack-schema resource (the machine-readable shape) and the dsl-reference/dsl-authoring-guide resources.",
                 "inputSchema": {
                     "type": "object",

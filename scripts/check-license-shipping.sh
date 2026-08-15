@@ -406,10 +406,59 @@ else
   fi
 fi
 
+# 3c. THE .MCPB BUNDLE'S CONTENT LIST ACTUALLY NAMES THE LICENSE TEXTS. The presence checks above
+# police packages/mcpb/'s COPIES, but those copies are a stand-in: nothing ships them. What ships is
+# whatever the release workflow's `zip -r` argument list names (the bundle is assembled in CI from
+# the ROOT copies), so someone slimming that one line would ship five bundles with no license text
+# while every stand-in check above stayed green. Read the line out of the workflow and assert the
+# obligations are on it — with a non-empty floor, so a moved or reworded bundling step aborts loudly
+# instead of passing vacuously. Comment lines are excluded from subject selection: this repo quotes
+# its own recipes in prose, and a first-match grep that can land on a quoted twin of the line it
+# polices is a fail-open guard.
+mcpb_zipline=$(grep -E 'zip -r .*\.mcpb' .github/workflows/prebuild.yml | grep -vE '^[[:space:]]*#' | head -n 1 || true)
+if [ -z "$mcpb_zipline" ]; then
+  echo "$SELF: no 'zip -r ...mcpb' line found in .github/workflows/prebuild.yml -- the mcpb bundling" >&2
+  echo "  step moved or was reworded. Update this extractor in the SAME commit; a check that cannot" >&2
+  echo "  find its subject must fail, not pass." >&2
+  fail=1
+else
+  mcpb_ziptokens=" $(printf '%s' "$mcpb_zipline" | tr -d '()"') "
+  for must in manifest.json bin README.md LICENSE "$NOTICES"; do
+    case "$mcpb_ziptokens" in
+      *" $must "*) : ;;
+      *)
+        echo "$SELF: the release zip line ships no '$must' -- the .mcpb bundles would go out without" >&2
+        echo "  it while packages/mcpb/'s tracked copies keep the presence checks green." >&2
+        echo "  Line: $mcpb_zipline" >&2
+        fail=1
+        ;;
+    esac
+  done
+fi
+
+# 3d. THE BUNDLE README'S STAGING SOURCE EXISTS. The cp names a repo path, and that step runs for
+# the first time DOWNSTREAM of the tag push and `gh release create` -- a renamed or deleted source
+# file would burn a version number before anyone saw the break. Bind the path's existence to commit time instead: extract the
+# cp's source out of the workflow (comment lines excluded, same posture as the zip line above) and
+# require the file to exist, with the same non-empty floor.
+mcpb_readme_src=$(grep -E 'cp packages/mcpb/[^ ]+ out/README\.md' .github/workflows/prebuild.yml \
+  | grep -vE '^[[:space:]]*#' | head -n 1 | sed -E 's/.*cp (packages\/mcpb\/[^ ]+) .*/\1/' || true)
+if [ -z "$mcpb_readme_src" ]; then
+  echo "$SELF: no 'cp packages/mcpb/... out/README.md' line found in .github/workflows/prebuild.yml --" >&2
+  echo "  the bundle-README staging step moved or was reworded. Update this extractor in the SAME" >&2
+  echo "  commit; a check that cannot find its subject must fail, not pass." >&2
+  fail=1
+elif [ ! -f "$mcpb_readme_src" ]; then
+  echo "$SELF: prebuild.yml stages '$mcpb_readme_src' into every .mcpb, but that file does not exist" >&2
+  echo "  in this tree -- the release job would die at that cp, AFTER the tag push. Restore the file" >&2
+  echo "  or update the workflow's cp in the same commit." >&2
+  fail=1
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo >&2
   echo "$SELF: FAILED -- license obligations are not shipped. See the individual sections above." >&2
   exit 1
 fi
 
-echo "$SELF: clean ($root_count distribution roots carry the root LICENSE byte-for-byte, $crate_count Cargo.toml files declare a license, $NOTICES verified offline, harvest logic unit-tested)."
+echo "$SELF: clean ($root_count distribution roots carry the root LICENSE byte-for-byte, $crate_count Cargo.toml files declare a license, $NOTICES verified offline, harvest logic unit-tested, release zip line ships the license texts + bundle README)."

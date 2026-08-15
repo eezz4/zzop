@@ -352,3 +352,139 @@ fn repeated_call_sites_collapse_into_one_relation_and_the_census_publishes_both_
         "a bucket whose sites all collapse into one relation is not truncated at --top 1: {capped}"
     );
 }
+
+/// T2-shape census pin, same discipline as `cochange/tests.rs`'s commit-window census: the five
+/// `--top` domain caps are owned by [`super::GraphDomain::default_top`], but the site's Graph tab
+/// (BOTH languages, generated from `site-src/content/graph.mjs`) and the surface-parity registry's
+/// graph-lane prose restate them as literals. `zzop graph --help` already derives from the owner —
+/// that drift shipped once (help text quoted 25 for every domain, caught by the v0.25.0 release
+/// audit; `vocabulary.rs`'s own doc records it) — and the two committed HTML pages are
+/// regeneration-checked against `site-src/` by `scripts/check-site-generated.sh`. The pinned
+/// restaters are the `.mjs` source, the registry (its "(default N" clause AND its "mermaid draws N
+/// of ..." illustration, whose N is the dep cap even though the ratio's other half moves with the
+/// repo), and `packages/README.md`'s "(default N;" clause — the full sweep the 2026-08-15 review
+/// ran; a NEW restatement is out of this census until someone adds its needle, so prefer deriving
+/// from the owner over restating at all.
+///
+/// Two pinning shapes, deliberately: the ENGLISH sentences are pinned as contextual needles
+/// (counted, not just found), while the Korean copies cannot appear here as text — this crate's
+/// sources are English-only by guard (`check-english-source.sh`) — so both languages together are
+/// pinned as a DIGIT-TOKEN census over the whole `.mjs`: every standalone numeric token equal to a
+/// cap value is counted, en needle occurrences included. A tuned cap derives new needles/tokens
+/// that count 0 against a stale file; an added or removed mention in EITHER language must bump the
+/// census here. (The five caps are distinct values today; if two domains ever share one, their
+/// token rows merge and this census must be re-derived.)
+#[test]
+fn the_top_cap_prose_on_the_site_source_and_registry_matches_default_top() {
+    use super::GraphDomain;
+    let count = |haystack: &str, needle: &str, n: usize, file: &str| {
+        let found = haystack.matches(needle).count();
+        assert_eq!(
+            found, n,
+            "{file} states a --top default as {needle:?} {found} time(s), expected {n} — either \
+             GraphDomain::default_top moved and a sentence went stale, or a mention was \
+             added/removed without updating this census, or a sentence was reworded so this exact \
+             needle no longer matches (re-anchor the needle or restore the phrase)"
+        );
+    };
+    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
+    let mjs = std::fs::read_to_string(format!("{root}/site-src/content/graph.mjs"))
+        .expect("site-src/content/graph.mjs is readable from the workspace");
+    let registry = std::fs::read_to_string(format!("{root}/docs/contracts/surface-parity.json"))
+        .expect("docs/contracts/surface-parity.json is readable from the workspace");
+
+    let join = GraphDomain::Join.default_top();
+    let dep = GraphDomain::Dep.default_top();
+    let risk = GraphDomain::Risk.default_top();
+    let posture = GraphDomain::Posture.default_top();
+    let cochange = GraphDomain::CoChange.default_top();
+
+    // English sentences, pinned by context.
+    count(
+        &mjs,
+        &format!("Default cap <strong>{join} — drawn relations per bucket</strong>"),
+        1,
+        "site-src/content/graph.mjs (en, join)",
+    );
+    count(
+        &mjs,
+        &format!("Default cap <strong>{dep} — on nodes</strong>"),
+        1,
+        "site-src/content/graph.mjs (en, dep)",
+    );
+    count(
+        &mjs,
+        &format!("at {dep} nodes by default"),
+        1,
+        "site-src/content/graph.mjs (en, dep cut-line)",
+    );
+    count(
+        &mjs,
+        &format!("Default cap <strong>{risk}</strong>, the smallest"),
+        1,
+        "site-src/content/graph.mjs (en, risk)",
+    );
+    count(
+        &mjs,
+        &format!("default cap is <strong>{posture} routes per tree</strong>"),
+        1,
+        "site-src/content/graph.mjs (en, posture)",
+    );
+    count(
+        &mjs,
+        &format!("Default cap <strong>{cochange}</strong>, lower than"),
+        1,
+        "site-src/content/graph.mjs (en, cochange)",
+    );
+
+    // Both languages at once: standalone digit-token census (see the doc above for why the ko
+    // copies cannot be text needles here).
+    let tokens: Vec<&str> = mjs
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let token_census = [
+        // en join x2 (the cap + "more than N in total"), ko join x2 (same pair).
+        (join, 4usize, "join"),
+        // en/ko cap sentences + en/ko cosmograph cut-line ("stops dep at N nodes") + en/ko
+        // cochange contrast ("N weighted edges" — the dep cap quoted inside cochange's blurb).
+        (dep, 6, "dep"),
+        (risk, 2, "risk"),
+        (posture, 2, "posture"),
+        (cochange, 2, "cochange"),
+    ];
+    for (value, expected, domain) in token_census {
+        let value_str = value.to_string();
+        let found = tokens.iter().filter(|t| **t == value_str).count();
+        assert_eq!(
+            found, expected,
+            "site-src/content/graph.mjs carries the standalone number {value} (the {domain} \
+             --top default) {found} time(s), expected {expected} across BOTH language copies — a \
+             tuned cap leaves stale mentions counting short; an added/removed mention in either \
+             language must update this census; and a NON-CAP number that merely equals a cap (a \
+             refreshed sample record's field, a date fragment) also lands here — then re-derive \
+             the census by reading each occurrence, never bump the count to make it pass"
+        );
+    }
+
+    count(
+        &registry,
+        &format!("(default {join}, no upper bound"),
+        1,
+        "docs/contracts/surface-parity.json (graph lane)",
+    );
+    count(
+        &registry,
+        &format!("mermaid draws {dep} of "),
+        1,
+        "docs/contracts/surface-parity.json (graph lane, dep-cap illustration)",
+    );
+    let pkg_readme = std::fs::read_to_string(format!("{root}/packages/README.md"))
+        .expect("packages/README.md is readable from the workspace");
+    count(
+        &pkg_readme,
+        &format!("(default {join};"),
+        1,
+        "packages/README.md (graph section)",
+    );
+}

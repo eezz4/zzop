@@ -405,6 +405,49 @@ code{font-family:var(--mono);font-size:.88em;background:var(--tint);padding:1px 
 
 <section class="band">
   <div class="inner stack">
+    <span class="eyebrow">그 런이 무엇을 봤나</span>
+
+    <h2>결함 171건 — 그리고 zzop 이 그걸 어떻게 말하는지.</h2>
+
+    <p>같은 저장소 12개에 룰을 걸었다(2026-08-15, zzop 0.32.0). 결함이 나온 곳은 <strong>4개뿐</strong>이고
+      <strong>8개는 0건</strong>이다 — 0건도 결과라, 숨기지 않고 공시한다. 합 <strong>171건</strong>:
+      심각도로 나누면 <strong>critical 5 · warning 122 · info 44</strong>. 여기서 핵심은
+      <strong>심각도가 취약점 판정이 아니라 렉시컬 판정</strong>이라는 것이다.</p>
+
+    <div class="vs vs--wide">
+      <div class="vs__row">
+        <div class="vs__k">critical 5건 — 전부 테스트 안</div>
+        <div class="vs__v">다섯 건 모두 <code>conn-string-credentials</code>(<code>scheme://user:pass@host</code> 를
+      소스에 박은 URL)이고, 다섯 건 모두 <strong><code>#[test]</code> 함수 안</strong>이다 —
+      자격증명을 <em>지우는</em> 코드의 테스트 입력(<code>strip_url_credentials_removes_token</code>)이다.
+      zzop 은 이걸 취약점이라 부르지 않는다. 렉시컬로 보이는 것을 보고하고, 잠재우는 config 키를 문장에 담고,
+      사람이 5초 만에 픽스처임을 읽게 둔다.</div>
+      </div>
+      <div class="vs__row">
+        <div class="vs__k">진짜 신호는 warning 에</div>
+        <div class="vs__v">가장 많이 뜬 룰: <code>command-and-interpolation</code> 33 · <code>reqwest-no-timeout</code> 24 ·
+      <code>hardcoded-secret</code> 19 · <code>high-entropy-secret</code> 13 · <code>fs-check-then-use</code> 9.
+      크로스-레인은 별도로, 소비되지 않는 엔드포인트·제공자 없는 호출 같은 계약 틈 20건을 냈다 — 파일 하나를 보는 룰이
+      못 보는 층이다.</div>
+      </div>
+      <div class="vs__row">
+        <div class="vs__k">8개는 0건 — 그것도 공시</div>
+        <div class="vs__v">communitynotes·grok-1·xai-proto·xai-sdk-python·x-algorithm 등 8개는 결함 0.
+      단 zzop 은 "0 = 안전"이라고 말하지 않는다: 같은 런이 트리마다 <em>무엇을 못 봤는지</em>(지원 밖 언어, 미해석 핸들러,
+      gRPC 처럼 인식기 없는 경로)를 커버리지 블록에 담아, 0건이 <em>깨끗</em>인지 <em>범위 밖</em>인지 읽게 한다.</div>
+      </div>
+    </div>
+
+    <p class="note">이게 제품의 논지다: zzop 은 <strong>결함을 자랑하지 않는다 — 자기가 무엇을 봤고 무엇을 못 봤는지를
+      정직하게 말한다</strong>. critical 다섯이 전부 테스트 픽스처인 것이 약점이 아니라, 그걸 <em>취약점이라 우기지 않은 것</em>이
+      강점이다. 재현: 저장소 12개를 클론하고 <code>zzop cross --config</code> 한 번 — 트리마다 심각도·룰별 카운트가 나오고,
+      each finding 은 rule id·<code>file:line</code>·잠재우는 config 키를 함께 낸다. 이 코퍼스의 그래프 다섯 장 —
+      <code>dep</code> 전량 4,457파일을 한 캔버스에 그린 것 포함 — 은 <a href="x-showcase.html">따로 한 페이지</a>에 있다.</p>
+  </div>
+</section>
+
+<section class="band">
+  <div class="inner stack">
     <span class="eyebrow">시작</span>
 
     <h2>세 줄이면 된다.</h2>
@@ -1429,7 +1472,7 @@ const items = list.map(x =&gt; db.find(x.id)); <span class="hit">// zzop-nplus1-
       </div>
       <div class="vs__row">
         <div class="vs__k"><code>--domain cochange</code></div>
-        <div class="vs__v">git 동시 변경. <code>dep</code> 와 같은 노드 위의 <em>다른</em> 관계라 겹치지 않고 따로 선다 — import 는 소스에서 읽고, 동시 변경은 이력의 표본이다. 기본 캡 <strong>30</strong> 으로 <code>dep</code> 보다 낮다: 여기 엣지는 독자가 비교해야 하는 가중치를 달고 있어서, 마흔 개면 이미 그림이 아니라 목록으로 읽힌다.</div>
+        <div class="vs__v">git 동시 변경. <code>dep</code> 와 같은 노드 위의 <em>다른</em> 관계라 겹치지 않고 따로 선다 — import 는 소스에서 읽고, 동시 변경은 이력의 표본이다. 기본 캡 <strong>30</strong> 으로 <code>dep</code> 보다 낮다: 여기 엣지는 독자가 비교해야 하는 가중치를 달고 있어서, 40개면 이미 그림이 아니라 목록으로 읽힌다.</div>
       </div>
     </div>
 

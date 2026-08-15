@@ -7,15 +7,18 @@
 //!
 //! ## The counts are over a FILTERED commit set
 //! Every number this module emits — `pairs`, `co_changes`, each example's `count` — is counted over the
-//! commits that survive [`crate::coupling::MIN_FILES_PER_COMMIT`]..=`max_files_per_commit` (2..=25 by
-//! default, the same window [`crate::coupling`] uses so the two co-change substrates cannot disagree
-//! about which commits are real). A 1-file commit couples nothing, and a 200-file mass rename would
+//! commits that survive [`crate::coupling::MIN_FILES_PER_COMMIT`]..=`max_files_per_commit` (by
+//! default the same window [`crate::coupling`] uses, so the two co-change substrates cannot disagree
+//! about which commits are real — the linked constants are the values; this comment does not repeat
+//! them, because a hand-copied number outlives a tuned constant). A 1-file commit couples nothing, and a 200-file mass rename would
 //! couple everything with everything; both are dropped, so what is left is *deliberate* co-change. That
 //! makes these SUBSET totals: the honest reading of `coChanges: 40` is "40 filtered co-changes", never
-//! "these two layers changed together 40 times". Pairs below `min_co_changes` (2) are dropped again at
-//! the end, and only the top `top_pairs` (20) rows are returned. `docs/modules/facade.md`'s
-//! `layerCoChurn` row carries the same sentence for the consumer, since this field reaches no shaped
-//! CLI/MCP reply and the raw facade contract is where its reader looks.
+//! "these two layers changed together 40 times". Pairs below `min_co_changes` ([`MIN_CO_CHANGES`] by
+//! default) are dropped again at the end, and only the top `top_pairs` ([`TOP_PAIRS`] by default) rows
+//! are returned — the linked constants are the values here too. `docs/modules/facade.md`'s
+//! `layerCoChurn` row carries the same sentence for the consumer (with the values spelled out, pinned
+//! to these constants by `crates/summary/src/graph/cochange/tests.rs`'s census), since this field
+//! reaches no shaped CLI/MCP reply and the raw facade contract is where its reader looks.
 //!
 //! ## An empty result and a wrong result have DIFFERENT causes, and both are the caller's
 //!
@@ -83,11 +86,11 @@ pub fn layer_of(path: &str, shared_dirs: &BTreeSet<String>) -> String {
 }
 
 /// Exclude layer pairs with fewer co-changes (removes one-off coincidences).
-const MIN_CO_CHANGES: u32 = 2;
+pub const MIN_CO_CHANGES: u32 = 2;
 /// Max example file-pairs per layer pair.
 const EXAMPLES_PER_PAIR: usize = 5;
 /// Max layer pairs returned.
-const TOP_PAIRS: usize = 20;
+pub const TOP_PAIRS: usize = 20;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

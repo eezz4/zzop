@@ -491,9 +491,18 @@ jobs:
             # A `.mcpb` is installed and then run offline, so the license texts have to travel INSIDE
             # the bundle — a link back to the repo is not a copy of the license, and the third-party
             # notices cover statically-linked crates whose licenses require the notice to accompany
-            # the binary. Both are copied per iteration because `rm -rf out` above wipes the staging dir.
+            # the binary. The bundle README travels for the same reason: it carries the privacy
+            # statement and the macOS unsigned-binary caveat, which must reach whoever unpacks the
+            # bundle, not whoever browses the repo — it is the USER-FACING half
+            # (packages/mcpb/BUNDLE-README.md), staged under the name a reader expects; the
+            # maintainer packaging doc (packages/mcpb/README.md) deliberately does NOT ship.
+            # check-license-shipping.sh pins both halves at commit time — 3c the zip argument list,
+            # 3d this cp's source path — so a rename cannot surface for the first time here,
+            # downstream of the tag push. All copied
+            # per iteration because `rm -rf out` above wipes the staging dir.
             cp LICENSE THIRD-PARTY-NOTICES.md out/
-            (cd out && zip -r "../zzop-mcp-$plat.mcpb" manifest.json bin LICENSE THIRD-PARTY-NOTICES.md)
+            cp packages/mcpb/BUNDLE-README.md out/README.md
+            (cd out && zip -r "../zzop-mcp-$plat.mcpb" manifest.json bin README.md LICENSE THIRD-PARTY-NOTICES.md)
           done
           ls -la ./*.mcpb
       - name: Upload zzop-mcp binaries + MCPB bundles + license texts to the release

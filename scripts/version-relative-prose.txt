@@ -16,7 +16,7 @@
 #     mandatory and is read by the next person, not by the machine. Liveness-checked: if the deictic is
 #     gone, the exemption reds — an exemption cannot outlive what it excuses.
 
-VETTED 0.32.0
+VETTED 0.33.0
 
 # All three were FALSE on 2026-08-11, one release after v0.30.0 shipped, with the whole guard fleet
 # green. They now name their boundary explicitly; this registry is what makes the next bump re-read them.

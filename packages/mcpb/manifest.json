@@ -2,12 +2,14 @@
   "manifest_version": "0.3",
   "name": "zzop",
   "version": "0.0.0",
-  "description": "Deterministic cross-repo contract analysis for AI agents: which frontend calls hit which backend endpoints (and which don't) — exact joins, disclosed blind spots, no guessing. TypeScript/JavaScript, Python, Java, C#, Rust, Go, Prisma, SQL natively; anything else via a documented adapter envelope. UPDATES ARE MANUAL: this bundle is distributed from GitHub, not the official extension directory, so Claude Desktop will not offer you a newer version — check https://github.com/eezz4/zzop/releases and re-install the newest .mcpb.",
+  "description": "Deterministic cross-repo contract analysis for AI agents: which frontend calls hit which backend endpoints (and which don't) — exact joins, disclosed blind spots, no guessing. TypeScript/JavaScript, Python, Java, C#, Rust, Go, Prisma, SQL natively; anything else via a documented adapter envelope. UPDATES ARE MANUAL for any copy of this bundle installed from a downloaded .mcpb file: Claude Desktop will not offer you a newer version — check https://github.com/eezz4/zzop/releases and re-install the newest .mcpb.",
   "author": {
     "name": "eezz4",
     "url": "https://github.com/eezz4/zzop"
   },
   "homepage": "https://eezz4.github.io/zzop/",
+  "documentation": "https://github.com/eezz4/zzop/blob/main/docs/modules/mcp.md",
+  "support": "https://github.com/eezz4/zzop/issues",
   "repository": {
     "type": "git",
     "url": "https://github.com/eezz4/zzop"

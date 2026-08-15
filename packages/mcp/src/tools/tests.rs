@@ -173,6 +173,111 @@ fn tools_list_pins_names_required_arrays_and_source_exclusivity() {
     );
 }
 
+/// Pins the annotation table's HONESTY, not just its presence. Annotations are advisory UI hints a
+/// host may use to skip a confirmation prompt, so a false one quietly bypasses user consent — the
+/// dangerous direction here is a tree-analyzing tool claiming `readOnlyHint: true` while the
+/// analysis persists its `.zzop/` cache to disk (the front end injects the default beside the
+/// honored config — `crates/config/src/mapper/options.rs`; the behavioral half of this claim is
+/// asserted by `analyze_repo_actually_writes_the_cache_the_read_only_hint_denies` below, not just
+/// spelled). The three text-in/judgment-out tools are the only ones allowed to claim read-only:
+/// their lane carries no `cacheDir` in its request (`crates/facade/src/request.rs`) and the MCP arm
+/// passes no path to discover a config from. `openWorldHint: false` is pinned for every tool
+/// because the workspace has no HTTP client crate at all; if a network call ever arrives, this pin
+/// forces the annotation (and the no-network claim it encodes) to be re-judged in the same change.
+/// The top-level `title` (2025-06-18 BaseMetadata) and `annotations.title` (older clients'
+/// fallback) are pinned equal so the two spellings cannot drift.
+#[test]
+fn tool_annotations_never_claim_read_only_for_the_cache_writing_tools() {
+    let list = super::list();
+    let tools = list["tools"].as_array().expect("tools array");
+    const CACHE_WRITERS: [&str; 4] = ["analyze_repo", "cross_repo", "check_file", "check_endpoint"];
+    const PURE_JUDGES: [&str; 3] = [
+        "analyze_envelope",
+        "validate_envelope",
+        "validate_rule_pack",
+    ];
+    for tool in tools {
+        let name = tool["name"].as_str().expect("tool name is a string");
+        let ann = &tool["annotations"];
+        assert!(
+            ann.is_object(),
+            "tool `{name}` has no annotations object — every tool carries title + honest hints"
+        );
+        assert!(
+            ann["title"].as_str().is_some_and(|t| !t.is_empty()),
+            "tool `{name}` annotations lack a non-empty title"
+        );
+        assert_eq!(
+            tool["title"], ann["title"],
+            "tool `{name}`'s top-level title (2025-06-18 BaseMetadata) and annotations.title \
+             (older clients' fallback) must be the same string"
+        );
+        assert_eq!(
+            ann["openWorldHint"],
+            serde_json::json!(false),
+            "tool `{name}` must pin openWorldHint: false — zzop makes zero network calls"
+        );
+        assert_eq!(
+            ann["idempotentHint"],
+            serde_json::json!(true),
+            "tool `{name}` is deterministic; a repeat call with the same args adds nothing"
+        );
+        if CACHE_WRITERS.contains(&name) {
+            assert_eq!(
+                ann["readOnlyHint"],
+                serde_json::json!(false),
+                "tool `{name}` writes the `.zzop/` cache — claiming read-only would let a host \
+                 skip a confirmation the user should have seen"
+            );
+            assert_eq!(
+                ann["destructiveHint"],
+                serde_json::json!(false),
+                "tool `{name}`'s writes (and self-evictions) stay inside zzop's own \
+                 `.zzop/cache/`, never touching a file a user authored"
+            );
+        } else {
+            assert!(
+                PURE_JUDGES.contains(&name),
+                "tool `{name}` is in neither annotation class — classify it here explicitly \
+                 (measure whether its lane touches disk) before shipping it"
+            );
+            assert_eq!(
+                ann["readOnlyHint"],
+                serde_json::json!(true),
+                "tool `{name}` is text-in/judgment-out and must claim read-only"
+            );
+        }
+    }
+}
+
+/// The behavioral half of the annotation pin above: `readOnlyHint: false` on the tree tools is a
+/// claim about disk writes, and this test PERFORMS the write instead of trusting the table — a real
+/// `analyze_repo` call over a scratch tree must leave zzop's cache directory behind. If this fails
+/// because the front end stopped injecting a cache default (or the starter config stopped naming
+/// one), the annotation classification is what must be re-judged in the same change — a green table
+/// pin over a lane that no longer writes would be the exact spelling-without-behavior drift the pin
+/// alone cannot see.
+#[test]
+fn analyze_repo_actually_writes_the_cache_the_read_only_hint_denies() {
+    let dir = TempDir::new("zzop-mcp-cache-write");
+    dir.write("src/a.ts", "export const a = 1;\n");
+    dir.write_starter_config();
+    let reply = call_tool(
+        "analyze_repo",
+        serde_json::json!({"path": dir.path().to_string_lossy()}),
+    );
+    assert_ne!(
+        reply["isError"],
+        serde_json::json!(true),
+        "analyze failed: {reply}"
+    );
+    assert!(
+        dir.path().join(".zzop").is_dir(),
+        "analyze_repo left no .zzop/ cache in the analyzed tree — either the cache default moved \
+         (re-judge readOnlyHint in the same change) or this fixture no longer triggers an analysis"
+    );
+}
+
 /// README-vs-tools-list drift pin: the tools table in `packages/README.md` (the shared reference
 /// doc every host's tool surface is documented against) went stale once (`analyze_envelope` shipped
 /// without a row) with nothing to catch it — closes the same drift class the surface-parity registry

@@ -49,8 +49,8 @@ pub struct SeamCandidate {
     ///
     /// A FILTERED count, twice over, because its substrate is [`crate::coupling::build_coupling`]:
     /// commits outside [`crate::coupling::MIN_FILES_PER_COMMIT`]..=[`crate::coupling::MAX_FILES_PER_COMMIT`]
-    /// (2..=25) never form a pair at all, and each file then keeps only its top
-    /// [`crate::coupling::COUPLING_TOP_PER_FILE`] (10) partners. So a folder whose files each couple
+    /// never form a pair at all, and each file then keeps only its top
+    /// [`crate::coupling::COUPLING_TOP_PER_FILE`] partners (the links are the values — no copies here). So a folder whose files each couple
     /// weakly to dozens of others outside it can score a LOWER temporal boundary than one with a few
     /// strong ties — the tail is not summed, it is dropped. Read this as "the strongest measured
     /// cross-folder co-change", never as the folder's total temporal coupling. Zero here means "none

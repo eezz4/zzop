@@ -311,6 +311,97 @@ export default {
 
     {
       blocks: [
+        ["eyebrow", { ko: "그 런이 무엇을 봤나", en: "What that run saw" }],
+        [
+          "h2",
+          {
+            ko: "결함 171건 — 그리고 zzop 이 그걸 어떻게 말하는지.",
+            en: "171 findings — and how zzop states each one.",
+          },
+        ],
+        [
+          "p",
+          {
+            ko: `같은 저장소 12개에 룰을 걸었다(2026-08-15, zzop 0.32.0). 결함이 나온 곳은 <strong>4개뿐</strong>이고
+      <strong>8개는 0건</strong>이다 — 0건도 결과라, 숨기지 않고 공시한다. 합 <strong>171건</strong>:
+      심각도로 나누면 <strong>critical 5 · warning 122 · info 44</strong>. 여기서 핵심은
+      <strong>심각도가 취약점 판정이 아니라 렉시컬 판정</strong>이라는 것이다.`,
+            en: `The same twelve repositories, run against the rule packs (2026-08-15, zzop 0.32.0). Only
+      <strong>four</strong> produced any finding; <strong>eight came back with zero</strong> — a zero is a
+      result too, disclosed rather than hidden. <strong>171 in total</strong>, split
+      <strong>5 critical · 122 warning · 44 info</strong>. The point that makes the number honest:
+      <strong>severity is a lexical judgment, not a vulnerability verdict</strong>.`,
+          },
+        ],
+        [
+          "vs",
+          [
+            {
+              k: { ko: "critical 5건 — 전부 테스트 안", en: "5 critical — all inside tests" },
+              v: {
+                ko: `다섯 건 모두 <code>conn-string-credentials</code>(<code>scheme://user:pass@host</code> 를
+      소스에 박은 URL)이고, 다섯 건 모두 <strong><code>#[test]</code> 함수 안</strong>이다 —
+      자격증명을 <em>지우는</em> 코드의 테스트 입력(<code>strip_url_credentials_removes_token</code>)이다.
+      zzop 은 이걸 취약점이라 부르지 않는다. 렉시컬로 보이는 것을 보고하고, 잠재우는 config 키를 문장에 담고,
+      사람이 5초 만에 픽스처임을 읽게 둔다.`,
+                en: `All five are <code>conn-string-credentials</code> (a URL embedding
+      <code>scheme://user:pass@host</code> in source), and all five sit <strong>inside a
+      <code>#[test]</code> function</strong> — test inputs for the code that <em>strips</em> credentials
+      (<code>strip_url_credentials_removes_token</code>). zzop never calls them vulnerabilities. It reports
+      what it lexically sees, names the config key that silences it, and lets a human read them as fixtures
+      in five seconds.`,
+              },
+            },
+            {
+              k: { ko: "진짜 신호는 warning 에", en: "The real signal is in the warnings" },
+              v: {
+                ko: `가장 많이 뜬 룰: <code>command-and-interpolation</code> 33 · <code>reqwest-no-timeout</code> 24 ·
+      <code>hardcoded-secret</code> 19 · <code>high-entropy-secret</code> 13 · <code>fs-check-then-use</code> 9.
+      크로스-레인은 별도로, 소비되지 않는 엔드포인트·제공자 없는 호출 같은 계약 틈 20건을 냈다 — 파일 하나를 보는 룰이
+      못 보는 층이다.`,
+                en: `Top rules by count: <code>command-and-interpolation</code> 33 · <code>reqwest-no-timeout</code> 24 ·
+      <code>hardcoded-secret</code> 19 · <code>high-entropy-secret</code> 13 · <code>fs-check-then-use</code> 9.
+      The cross-layer join added 20 more — contract gaps like unconsumed endpoints and unprovided calls, the
+      layer a single-file rule cannot see.`,
+              },
+            },
+            {
+              k: { ko: "8개는 0건 — 그것도 공시", en: "Eight clean — that's disclosed too" },
+              v: {
+                ko: `communitynotes·grok-1·xai-proto·xai-sdk-python·x-algorithm 등 8개는 결함 0.
+      단 zzop 은 "0 = 안전"이라고 말하지 않는다: 같은 런이 트리마다 <em>무엇을 못 봤는지</em>(지원 밖 언어, 미해석 핸들러,
+      gRPC 처럼 인식기 없는 경로)를 커버리지 블록에 담아, 0건이 <em>깨끗</em>인지 <em>범위 밖</em>인지 읽게 한다.`,
+                en: `Eight — communitynotes, grok-1, xai-proto, xai-sdk-python, x-algorithm and more — came back
+      with zero. zzop does not read a zero as "safe": the same run records, per tree, <em>what it could not
+      see</em> (languages outside the eight, unresolved handlers, recognizer-less paths like gRPC) in the
+      coverage block, so a zero reads as <em>clean</em> or <em>out of scope</em>, never a blank claim.`,
+              },
+            },
+          ],
+          { wide: true },
+        ],
+        [
+          "note",
+          {
+            ko: `이게 제품의 논지다: zzop 은 <strong>결함을 자랑하지 않는다 — 자기가 무엇을 봤고 무엇을 못 봤는지를
+      정직하게 말한다</strong>. critical 다섯이 전부 테스트 픽스처인 것이 약점이 아니라, 그걸 <em>취약점이라 우기지 않은 것</em>이
+      강점이다. 재현: 저장소 12개를 클론하고 <code>zzop cross --config</code> 한 번 — 트리마다 심각도·룰별 카운트가 나오고,
+      each finding 은 rule id·<code>file:line</code>·잠재우는 config 키를 함께 낸다. 이 코퍼스의 그래프 다섯 장 —
+      <code>dep</code> 전량 4,457파일을 한 캔버스에 그린 것 포함 — 은 <a href="x-showcase.html">따로 한 페이지</a>에 있다.`,
+            en: `This is the product's thesis: zzop <strong>does not brag about findings — it states honestly what it
+      saw and what it could not</strong>. That all five criticals are test fixtures is not the weakness; the
+      strength is that it <em>did not dress them as vulnerabilities</em>. Reproduce: clone the twelve
+      repositories and run <code>zzop cross --config</code> once — each tree prints counts by severity and rule,
+      and every finding carries a rule id, a <code>file:line</code>, and the config key that silences it. The
+      five graphs of this corpus — including the full <code>dep</code> of all 4,457 files drawn on one canvas —
+      are on <a href="x-showcase.html">a page of their own</a>.`,
+          },
+        ],
+      ],
+    },
+
+    {
+      blocks: [
         ["eyebrow", { ko: "시작", en: "Start" }],
         ["h2", { ko: "세 줄이면 된다.", en: "Three lines." }],
         [

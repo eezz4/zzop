@@ -258,8 +258,8 @@ export default {
             {
               k: "<code>--domain cochange</code>",
               v: {
-                ko: `git 동시 변경. <code>dep</code> 와 같은 노드 위의 <em>다른</em> 관계라 겹치지 않고 따로 선다 — import 는 소스에서 읽고, 동시 변경은 이력의 표본이다. 기본 캡 <strong>30</strong> 으로 <code>dep</code> 보다 낮다: 여기 엣지는 독자가 비교해야 하는 가중치를 달고 있어서, 마흔 개면 이미 그림이 아니라 목록으로 읽힌다.`,
-                en: `Git co-change: a <em>different</em> relation over the same nodes as <code>dep</code>, so it stands apart rather than blending — an import is read from source, a co-change is a sample of history. Default cap <strong>30</strong>, lower than <code>dep</code>'s: a co-change edge carries a weight the reader has to compare, and forty weighted edges is already past the point where a flowchart reads as a picture rather than a list.`,
+                ko: `git 동시 변경. <code>dep</code> 와 같은 노드 위의 <em>다른</em> 관계라 겹치지 않고 따로 선다 — import 는 소스에서 읽고, 동시 변경은 이력의 표본이다. 기본 캡 <strong>30</strong> 으로 <code>dep</code> 보다 낮다: 여기 엣지는 독자가 비교해야 하는 가중치를 달고 있어서, 40개면 이미 그림이 아니라 목록으로 읽힌다.`,
+                en: `Git co-change: a <em>different</em> relation over the same nodes as <code>dep</code>, so it stands apart rather than blending — an import is read from source, a co-change is a sample of history. Default cap <strong>30</strong>, lower than <code>dep</code>'s: a co-change edge carries a weight the reader has to compare, and 40 weighted edges is already past the point where a flowchart reads as a picture rather than a list.`,
               },
             },
           ],

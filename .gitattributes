@@ -56,3 +56,9 @@ site-src/site-v2.css text eol=lf
 # place. `.githooks/*` is listed separately because it holds no extension.
 *.sh text eol=lf
 .githooks/* text eol=lf
+# Workflow YAML is the same file family one step over: its `run: |` blocks are shell executed by
+# bash on a Linux runner, and the release lane's own bundling loop lives in one. The repo already
+# classifies workflows as shell-bearing for check-shell-pipe-sigpipe.sh; this line makes the EOL
+# pin agree with that classification instead of leaving the release lane's shell unpinned.
+.github/workflows/*.yml text eol=lf
+.github/workflows/*.yaml text eol=lf

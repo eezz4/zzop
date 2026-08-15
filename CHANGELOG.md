@@ -41,6 +41,7 @@ Everything else in the window: `git log <the top row's tag>..main --oneline`.
 
 | Version | Date | Commit | What the release said it was |
 |---|---|---|---|
+| `v0.32.0` | 2026-08-15 | `dd52eae` | the co-change picture stops dropping edges silently, and the site now shows zzop run over everything X open-sourced |
 | `v0.31.0` | 2026-08-14 | `10adb51` | subtree git history, wildcard routes, and accessor/overload spans |
 | `v0.30.0` | 2026-08-10 | `e7b20da` | zzop was built TS-only; this release is what did not survive the expansion |
 | `v0.29.1` | 2026-08-05 | `890e355` | the release lane can be re-run, which one of its two publish jobs could not |

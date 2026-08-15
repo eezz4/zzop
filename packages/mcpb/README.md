@@ -3,14 +3,22 @@
 These packaging lanes (MCPB + Claude Code plugin) ship the native `zzop-mcp` server binary specifically
 (no Node runtime, no per-server Node tax) — the same binary, packaged two ways. (zzop also ships a
 second native binary, the `zzop` CLI, distributed separately via GitHub Releases and npm; see the repo
-root [`README.md`](../../README.md).) Neither lane updates itself: Desktop cannot (see below), and the
+root [`README.md`](https://github.com/eezz4/zzop/blob/main/README.md).) Neither lane updates itself: Desktop cannot (see below), and the
 Code plugin deliberately reports a newer release rather than applying it. No npm is involved in either.
 
 Because Desktop has no notifier of its own for a privately distributed bundle, **the binary reports its
 own age**: past 90 days from the source it was built from, `initialize` carries an `instructions` string
 (and the stderr banner one extra line) saying how old this build is and pointing at the releases page.
 It performs no network call and never claims a newer release exists — it cannot know that — and it is
-silent on a current build. Details: [`docs/modules/mcp.md`](../../docs/modules/mcp.md#mcp-surface).
+silent on a current build. Details:
+[`docs/modules/mcp.md`](https://github.com/eezz4/zzop/blob/main/docs/modules/mcp.md#mcp-surface).
+
+**This file is the maintainer's packaging doc and ships nowhere.** The user-facing half — what an
+unpacker needs (manual updates, the macOS unsigned-binary caveat, the privacy statement) — is
+[`BUNDLE-README.md`](BUNDLE-README.md), which CI stages INTO every bundle as its `README.md`; its
+links are absolute URLs because inside a bundle a repo-relative link has nothing to resolve
+against. One fact, one owner: this file does not restate that content, and the signing non-purchase
+rationale lives there too.
 
 ## Claude Desktop — MCPB bundle (`mcpb/manifest.json`)
 
@@ -24,10 +32,15 @@ so the shipped manifests do not rely on it.
 binary at `bin/zzop-mcp`, so the manifest stays arch-unambiguous (no `platform_overrides` needed):
 
 ```
-zzop-mcp-<platform>.mcpb   (zip)
+zzop-mcp-<platform>.mcpb   (zip; this layout ships from the release AFTER v0.32.0 — bundles up to
+│                          and including v0.32.0 hold only manifest.json, bin/ and the two license files)
 ├── manifest.json       (this dir's file, with `version` stamped from the release tag and
 │                        `compatibility.platforms` narrowed to that bundle's OS)
-└── bin/zzop-mcp[.exe]  (the prebuilt binary for that platform)
+├── bin/zzop-mcp[.exe]  (the prebuilt binary for that platform)
+├── README.md           (staged from this dir's BUNDLE-README.md — the user-facing half: manual
+│                        updates, the macOS caveat, the privacy statement. A bundle is installed
+│                        and read offline, so those docs travel inside)
+└── LICENSE, THIRD-PARTY-NOTICES.md  (license obligations ride inside too; see the recipe)
 ```
 
 Build per target (in prebuild CI, after `cargo build -p zzop-mcp --release --target <triple>`).
@@ -46,7 +59,8 @@ jq --arg os "$os" --arg exe "$exe" '.compatibility.platforms=[$os]
   manifest.stamped.json > out/manifest.json
 npx -y @anthropic-ai/mcpb@2 validate out/manifest.json  # build-time only; not a runtime dep
 cp LICENSE THIRD-PARTY-NOTICES.md out/                  # license obligations ride INSIDE the bundle
-(cd out && zip -r ../zzop-mcp-<platform>.mcpb manifest.json bin LICENSE THIRD-PARTY-NOTICES.md)
+cp packages/mcpb/BUNDLE-README.md out/README.md         # the user-facing half ships as the bundle's README
+(cd out && zip -r ../zzop-mcp-<platform>.mcpb manifest.json bin README.md LICENSE THIRD-PARTY-NOTICES.md)
 ```
 
 Four things in that recipe are load-bearing and easy to drop when copying it by hand:
@@ -91,8 +105,8 @@ the Desktop lane there is no bundle: `plugin.json`'s `mcpServers` command is
 `${CLAUDE_PLUGIN_DATA}/zzop-mcp`, and a `SessionStart` hook (`.claude-plugin/hooks/bootstrap.sh`) puts
 that file there by downloading the release asset for the running platform. Nothing goes on `PATH`.
 The user-facing steps and the update policy are not restated here — they live in
-[`packages/README.md`](../README.md#install-as-a-claude-code-plugin). This section
-covers only why the packaging has that shape.
+[`packages/README.md`](https://github.com/eezz4/zzop/blob/main/packages/README.md#install-as-a-claude-code-plugin).
+This section covers only why the packaging has that shape.
 
 **Why a hook rather than a bundle.** Code plugins have no `platform_overrides` equivalent, so one
 `mcpServers` command string cannot select a per-OS binary out of a bundle — the choice is a hook that

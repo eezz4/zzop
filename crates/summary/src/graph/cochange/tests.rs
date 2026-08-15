@@ -254,3 +254,67 @@ fn a_picture_whose_paths_were_all_analyzed_carries_no_history_gap_line() {
         "an always-on caveat teaches nothing: {out}"
     );
 }
+
+/// T2 value pin, same shape as the posture-verbs and cosmograph-schema dev-dep pins: the co-change
+/// commit window and per-file partner cap are OWNED by `zzop_metrics::coupling`
+/// (`MIN_FILES_PER_COMMIT` / `MAX_FILES_PER_COMMIT` / `COUPLING_TOP_PER_FILE`), but the layering
+/// forbids this crate a shipped dependency on `zzop-metrics`, so the shipped sample disclosure and
+/// the two documents that restate the window hold the values as prose literals. Every needle below
+/// is DERIVED from the owning constants and counted, not just found: two of the doc phrases occur
+/// twice, and a `contains` would stay green while one of the pair went stale. Tune a constant and
+/// each un-updated sentence fails here by name — the "typed 17" drift class (`risk.rs:14`) that
+/// otherwise goes quietly false.
+#[test]
+fn the_commit_window_prose_in_the_disclosure_and_both_documents_matches_the_owning_constants() {
+    use zzop_metrics::{COUPLING_TOP_PER_FILE, MAX_FILES_PER_COMMIT, MIN_FILES_PER_COMMIT};
+
+    // The shipped sentence, asserted in ACTUAL rendered output rather than in this crate's source.
+    let v = json!({"trees": [tree("x", json!([edge("a.rs", "b.rs", 3)]))]});
+    let out = project(&v, None, 10, Fold::of(None));
+    let shipped =
+        format!("fewer than {MIN_FILES_PER_COMMIT} or more than {MAX_FILES_PER_COMMIT} files");
+    assert!(
+        out.contains(&shipped),
+        "the shipped sample disclosure no longer states the owning window ({shipped}): {out}"
+    );
+
+    let count = |haystack: &str, needle: &str, n: usize, file: &str| {
+        let found = haystack.matches(needle).count();
+        assert_eq!(
+            found, n,
+            "{file} states the co-change window as {needle:?} {found} time(s), expected {n} — \
+             either the owning constants moved and a sentence went stale, or a mention was \
+             added/removed without updating this census, or a sentence was reworded/reflowed so \
+             this exact needle no longer matches (markup inside the phrase counts as rewording — \
+             re-anchor the needle or restore the phrase)"
+        );
+    };
+    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
+    let facade = std::fs::read_to_string(format!("{root}/docs/modules/facade.md"))
+        .expect("docs/modules/facade.md is readable from the workspace");
+    let site = std::fs::read_to_string(format!("{root}/site/reference.html"))
+        .expect("site/reference.html is readable from the workspace");
+
+    let window_dash = format!("{MIN_FILES_PER_COMMIT}\u{2013}{MAX_FILES_PER_COMMIT} files");
+    let window_range = format!("{MIN_FILES_PER_COMMIT}..={MAX_FILES_PER_COMMIT} files");
+    let top_partners = format!("top {COUPLING_TOP_PER_FILE} co-change partners");
+    let top_short = format!("top {COUPLING_TOP_PER_FILE} partners");
+    count(&facade, &window_dash, 2, "docs/modules/facade.md");
+    count(&facade, &window_range, 1, "docs/modules/facade.md");
+    count(&facade, &shipped, 1, "docs/modules/facade.md");
+    count(&facade, &top_partners, 1, "docs/modules/facade.md");
+    count(&facade, &top_short, 1, "docs/modules/facade.md");
+    let window_entity = format!("{MIN_FILES_PER_COMMIT}&ndash;{MAX_FILES_PER_COMMIT} files");
+    count(&site, &window_entity, 1, "site/reference.html");
+    count(&site, &shipped, 1, "site/reference.html");
+    count(&site, &top_partners, 1, "site/reference.html");
+
+    // The layerCoChurn row's OWN two thresholds ride the same doc sentence and were the
+    // half-de-numbered stragglers the 2026-08-15 review caught: pin them to their owning constants
+    // too (`zzop_metrics::cross_layer_co_churn`), same census discipline.
+    use zzop_metrics::{MIN_CO_CHANGES, TOP_PAIRS};
+    let churn_floor = format!("below {MIN_CO_CHANGES} co-changes");
+    let churn_rows = format!("top {TOP_PAIRS} rows");
+    count(&facade, &churn_floor, 1, "docs/modules/facade.md");
+    count(&facade, &churn_rows, 1, "docs/modules/facade.md");
+}

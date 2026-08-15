@@ -34,6 +34,13 @@ zzop-rules-http = { path = "../../rules/native/rules-http" }
 # joined by slashes) rather than a bare name mention is the whole point — see that test's own doc for
 # the drift a looser matcher let through — and that needs a real regex, not `str::contains`.
 regex = { workspace = true }
+# Same T2 shape once more (layering forbids a SHIPPED dependency, so a test seals the relation):
+# the co-change commit window and per-file partner cap are owned by `zzop_metrics::coupling`, but
+# `graph/cochange/render.rs`'s shipped sample disclosure and two documents (docs/modules/facade.md,
+# site/reference.html) restate the values as prose literals. The pin in `graph/cochange/tests.rs`
+# derives every needle from the constants, so tuning the window fails the build by name instead of
+# leaving six sentences quietly false.
+zzop-metrics = { path = "../metrics" }
 # `skip_notice!` — the one stderr writer `tests/host_dispatch.rs` is allowed. An integration test is
 # its own crate root, so the crate-level `#![allow]` that covers every other stderr writer in the
 # workspace cannot reach `tests/`; a dev-dependency can.

@@ -406,6 +406,54 @@ code{font-family:var(--mono);font-size:.88em;background:var(--tint);padding:1px 
 
 <section class="band">
   <div class="inner stack">
+    <span class="eyebrow">What that run saw</span>
+
+    <h2>171 findings — and how zzop states each one.</h2>
+
+    <p>The same twelve repositories, run against the rule packs (2026-08-15, zzop 0.32.0). Only
+      <strong>four</strong> produced any finding; <strong>eight came back with zero</strong> — a zero is a
+      result too, disclosed rather than hidden. <strong>171 in total</strong>, split
+      <strong>5 critical · 122 warning · 44 info</strong>. The point that makes the number honest:
+      <strong>severity is a lexical judgment, not a vulnerability verdict</strong>.</p>
+
+    <div class="vs vs--wide">
+      <div class="vs__row">
+        <div class="vs__k">5 critical — all inside tests</div>
+        <div class="vs__v">All five are <code>conn-string-credentials</code> (a URL embedding
+      <code>scheme://user:pass@host</code> in source), and all five sit <strong>inside a
+      <code>#[test]</code> function</strong> — test inputs for the code that <em>strips</em> credentials
+      (<code>strip_url_credentials_removes_token</code>). zzop never calls them vulnerabilities. It reports
+      what it lexically sees, names the config key that silences it, and lets a human read them as fixtures
+      in five seconds.</div>
+      </div>
+      <div class="vs__row">
+        <div class="vs__k">The real signal is in the warnings</div>
+        <div class="vs__v">Top rules by count: <code>command-and-interpolation</code> 33 · <code>reqwest-no-timeout</code> 24 ·
+      <code>hardcoded-secret</code> 19 · <code>high-entropy-secret</code> 13 · <code>fs-check-then-use</code> 9.
+      The cross-layer join added 20 more — contract gaps like unconsumed endpoints and unprovided calls, the
+      layer a single-file rule cannot see.</div>
+      </div>
+      <div class="vs__row">
+        <div class="vs__k">Eight clean — that's disclosed too</div>
+        <div class="vs__v">Eight — communitynotes, grok-1, xai-proto, xai-sdk-python, x-algorithm and more — came back
+      with zero. zzop does not read a zero as "safe": the same run records, per tree, <em>what it could not
+      see</em> (languages outside the eight, unresolved handlers, recognizer-less paths like gRPC) in the
+      coverage block, so a zero reads as <em>clean</em> or <em>out of scope</em>, never a blank claim.</div>
+      </div>
+    </div>
+
+    <p class="note">This is the product's thesis: zzop <strong>does not brag about findings — it states honestly what it
+      saw and what it could not</strong>. That all five criticals are test fixtures is not the weakness; the
+      strength is that it <em>did not dress them as vulnerabilities</em>. Reproduce: clone the twelve
+      repositories and run <code>zzop cross --config</code> once — each tree prints counts by severity and rule,
+      and every finding carries a rule id, a <code>file:line</code>, and the config key that silences it. The
+      five graphs of this corpus — including the full <code>dep</code> of all 4,457 files drawn on one canvas —
+      are on <a href="x-showcase.html">a page of their own</a>.</p>
+  </div>
+</section>
+
+<section class="band">
+  <div class="inner stack">
     <span class="eyebrow">Start</span>
 
     <h2>Three lines.</h2>
@@ -1448,7 +1496,7 @@ const items = list.map(x =&gt; db.find(x.id)); <span class="hit">// zzop-nplus1-
       </div>
       <div class="vs__row">
         <div class="vs__k"><code>--domain cochange</code></div>
-        <div class="vs__v">Git co-change: a <em>different</em> relation over the same nodes as <code>dep</code>, so it stands apart rather than blending — an import is read from source, a co-change is a sample of history. Default cap <strong>30</strong>, lower than <code>dep</code>'s: a co-change edge carries a weight the reader has to compare, and forty weighted edges is already past the point where a flowchart reads as a picture rather than a list.</div>
+        <div class="vs__v">Git co-change: a <em>different</em> relation over the same nodes as <code>dep</code>, so it stands apart rather than blending — an import is read from source, a co-change is a sample of history. Default cap <strong>30</strong>, lower than <code>dep</code>'s: a co-change edge carries a weight the reader has to compare, and 40 weighted edges is already past the point where a flowchart reads as a picture rather than a list.</div>
       </div>
     </div>
 

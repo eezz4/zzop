@@ -153,6 +153,13 @@ ALLOWLIST=(
   # "Every finding ... has this shape" table.
   "README.md|every finding carries a rule id"
 
+  # Same claim, same backing, on the X-corpus findings band of the overview (a {ko, en} pair in
+  # site-src/content/index.mjs, generated into site/index.html by scripts/gen-site.mjs — this guard
+  # reads the generated page, which is the end that deploys; check-site-generated.sh keeps the two in
+  # sync). crates/core/src/finding.rs makes `rule_id`/`severity`/`file`/`line` non-Option, so the
+  # claim is the schema, not a promise. Fixing it means editing site-src/ and regenerating.
+  "site/index.html|every finding carries a rule id"
+
   # The disable hint is appended to every DSL finding by crates/engine/src/pipeline/findings.rs's
   # `append_hints` (pinned by crates/engine/src/tests.rs's
   # `dsl_finding_message_carries_the_config_disable_hint_for_its_own_id`), and every native rule file

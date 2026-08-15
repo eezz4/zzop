@@ -10,9 +10,10 @@
 //! — the shape the mcp-distribution decision settled on for exactly this gap.
 //!
 //! ## The two constraints, and the shape that satisfies both
-//! 1. **No network.** "zzop sends your code nowhere" is a property anyone can check (`reqwest` appears
-//!    zero times in this workspace), so this module reads one baked constant and the system clock and
-//!    calls nothing. There is no HTTP here and there must never be — a version check is exactly the
+//! 1. **No network.** "zzop sends your code nowhere" is a property anyone can check (`reqwest` — or
+//!    any other HTTP client crate — appears zero times in `Cargo.lock`; the WORD shows up in rule
+//!    docs and fixtures, which is why the lockfile is the recount surface), so this module reads one
+//!    baked constant and the system clock and calls nothing. There is no HTTP here and there must never be — a version check is exactly the
 //!    HTTPS-into-the-binary that the 2026-07-24 bootstrap decision rejected.
 //! 2. **No over-claiming.** This module NEVER says a newer release exists. Without a network it cannot
 //!    know that, and asserting it would be the failure `docs/`' output philosophy forbids. It states

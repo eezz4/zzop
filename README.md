@@ -85,8 +85,12 @@ Neither binary needs Node.js, npm, or a compiler. Get them one of four ways:
   see [Use in Claude Code](#use-in-claude-code-mcp-plugin) below. (Windows: the install hook needs a
   POSIX shell — Git for Windows is the supported path; details in
   [packages/README.md](packages/README.md#install-as-a-claude-code-plugin).)
-- **Claude Desktop.** One-click `.mcpb` bundle (drag-and-drop install) — see
-  [packages/mcpb/README.md](packages/mcpb/README.md).
+- **Claude Desktop.** One-click `.mcpb` bundle (drag-and-drop install) — what an installer should
+  know BEFORE installing (updates are manual; on macOS the unsigned binary is expected to hit
+  Gatekeeper; the privacy statement) is [packages/mcpb/BUNDLE-README.md](packages/mcpb/BUNDLE-README.md) —
+  bundles from releases after v0.32.0 carry that file as their own README; bundles up to and
+  including v0.32.0 ship without it, which is exactly why the pre-install pointer here matters.
+  Packaging internals: [packages/mcpb/README.md](packages/mcpb/README.md).
 - **npm.** `npm i -g @zzop/cli` installs the exact same `zzop` binary above, fetched for your platform
   as an npm dependency — every subcommand `zzop help` lists, byte-for-byte the
   same output, no Node runtime involved beyond a tiny launcher script and no separate JS implementation

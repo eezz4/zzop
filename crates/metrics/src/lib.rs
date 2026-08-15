@@ -48,6 +48,8 @@ pub use aggregates::{
 
 pub use commit_tags::default_commit_type_patterns;
 
+pub use cross_layer_co_churn::{MIN_CO_CHANGES, TOP_PAIRS};
+
 pub use coupling::{
     build_coupling, co_change_edges, CoChangeEdge, CouplingEntry, CouplingMap,
     COUPLING_TOP_PER_FILE, MAX_FILES_PER_COMMIT, MIN_FILES_PER_COMMIT,
