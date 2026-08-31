@@ -81,6 +81,7 @@ fn match_map_call(rel: &str, call: Node, src: &str) -> Option<IoProvide> {
     });
 
     Some(IoProvide {
+        route_version: None,
         response: None,
         kind: "http".to_string(),
         key: http_interface_key(verb, &full_path),

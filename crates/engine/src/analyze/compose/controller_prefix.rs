@@ -42,6 +42,7 @@ pub(crate) fn compose_controller_prefix_provides(
                 Some(prefix) => {
                     let full_path = format!("{prefix}/{}", frag.path);
                     out.push(IoProvide {
+                        route_version: None,
                         // Carried through so a prefix-ref route's composed `IoProvide` keeps the same
                         // body/response evidence a literal-prefix route gets directly
                         // (`ControllerPrefixRouteFragment` doc) — `resolve_provide_body_refs` /

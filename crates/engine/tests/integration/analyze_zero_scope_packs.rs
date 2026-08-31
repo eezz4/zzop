@@ -138,8 +138,11 @@ fn packs_with_no_files_in_scope_get_one_aggregated_warning_naming_the_lever() {
     assert_eq!(zero_scope, vec!["java", "python"], "{:?}", out.packs_loaded);
 }
 
-/// Suppression 1 — an ALREADY-DISABLED pack is not nagged about. `packsLoaded` still lists it
-/// (`filesInScope: 0`, since loading is not gating), so the warning cannot simply read that field.
+/// Suppression 1 — an ALREADY-DISABLED pack is not nagged about. `packsLoaded` still LISTS it, since
+/// loading is not gating; here that row also reads `files_in_scope: 0` because this pack is scoped to
+/// `.java` on a TypeScript tree, which is a SCOPE zero rather than a gating one — the two coincide in
+/// this fixture and must not be conflated. The gating fact has its own field since 2026-08-26
+/// (`did_not_run`), asserted below beside the scope zero so the pin says which is which.
 #[test]
 fn an_already_disabled_pack_is_not_named() {
     let dir = ts_tree("zzop-engine-zero-scope-disabled");
@@ -162,13 +165,18 @@ fn an_already_disabled_pack_is_not_named() {
         !hit.contains("\"java\""),
         "a pack the user already disabled must not be named: {hit}"
     );
-    // The disabled pack is still in `packsLoaded` with `filesInScope: 0` — the field the warning
-    // deliberately does NOT read on its own.
-    assert!(
-        out.packs_loaded
-            .iter()
-            .any(|p| p.id == "java" && p.files_in_scope == 0),
-        "{:?}",
+    // The disabled pack is still in `packsLoaded`. Two independent facts on that one row: a scope
+    // zero (`.java` patterns over a TS tree) and, separately, that it never ran at all.
+    let java = out
+        .packs_loaded
+        .iter()
+        .find(|p| p.id == "java")
+        .unwrap_or_else(|| panic!("a disabled pack still loads: {:?}", out.packs_loaded));
+    assert_eq!(java.files_in_scope, 0, "{:?}", out.packs_loaded);
+    assert_eq!(
+        java.did_not_run,
+        Some(zzop_engine::PackNotRun::Disabled),
+        "the warning stays silent about this pack, so the ROW has to carry the reason: {:?}",
         out.packs_loaded
     );
 }

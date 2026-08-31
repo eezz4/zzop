@@ -7,6 +7,32 @@ use crate::{hits, scan, TempDir};
 // ones. It also absorbs the closed-literal whole-table DELETE/UPDATE shapes the critical rules exclude
 // from migration paths (see the two `..._is_destructive_migration_turf_not_critical` fixtures above).
 
+/// A migration under a TEST path is a fixture a suite runs, not a history anyone deploys, and the three
+/// critical siblings exclude test paths too — so dropping it here breaks no disclosure they promised.
+/// Measured 2026-08-19 over 9 upstream trees: 20 of 20 findings sat under one, in exactly these two
+/// layouts. The production control runs in the same test so a green fixture proves the exclusion rather
+/// than an inert scan.
+#[test]
+fn a_destructive_migration_under_a_test_path_is_not_flagged() {
+    for path in [
+        "tests/migrations/test_operations.py",
+        "test/functional/schema-builder/migration/1719925118381-create.ts",
+        "src/__tests__/migrations/0003_drop.sql",
+    ] {
+        let dir = TempDir::new("zzop-sql");
+        dir.write(path, "DROP TABLE i_love_ponies;\n");
+        let out = scan(&dir);
+        assert!(
+            hits(&out, "destructive-migration").is_empty(),
+            "expected no finding in {path}: {:?}",
+            out.findings
+        );
+    }
+    let dir = TempDir::new("zzop-sql");
+    dir.write("migrations/0003_drop.sql", "DROP TABLE i_love_ponies;\n");
+    assert_eq!(hits(&scan(&dir), "destructive-migration").len(), 1);
+}
+
 #[test]
 fn drop_table_in_a_migration_file_is_flagged_at_info() {
     let dir = TempDir::new("zzop-sql");

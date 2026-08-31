@@ -95,6 +95,46 @@ fn unescaped_template_syntax_in_a_ts_file_is_not_flagged() {
     );
 }
 
+/// `<%- include('partial') %>` is EJS's ONLY composing form — the escaped `<%= include(...) %>` prints the
+/// partial's markup as visible text — so the raw tag there is required syntax, not a raw-HTML choice. The
+/// same file's bare `<%- message %>` must survive: measured 2026-08-19 over 9 upstream trees, 16 of 17
+/// findings were the include shape and the 17th was exactly this bare interpolation, a real finding.
+#[test]
+fn ejs_literal_include_is_not_flagged_while_a_bare_interpolation_on_the_next_line_still_is() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "views/login.ejs",
+        "<%- include('head', { title: 'Login' }) -%>\n<%- message %>\n<%- include('../foot') -%>\n",
+    );
+    let out = scan(&dir);
+    let found = hits(&out, "template-unescaped-output");
+    assert_eq!(found.len(), 1, "{:?}", out.findings);
+    assert_eq!(found[0].line, 2);
+}
+
+/// The exclusion is keyed on a CLOSED string-literal argument, so a computed include path is untouched by
+/// it. The CONCATENATED form is pinned beside the bare identifier because it is the one the first spelling
+/// of this exclusion got wrong: that pattern only proved the argument STARTED with a quote, so
+/// `include('partials/' + p)` matched it and went silent while the rule message claimed it still fired.
+#[test]
+fn ejs_include_with_a_non_literal_path_still_reports() {
+    for line in [
+        "<%- include(userPath) %>",
+        "<%- include('partials/' + p) %>",
+        "<%- include(`views/${name}`) %>",
+    ] {
+        let dir = TempDir::new("zzop-be-sec");
+        dir.write("views/dyn.ejs", &format!("{line}\n"));
+        let out = scan(&dir);
+        assert_eq!(
+            hits(&out, "template-unescaped-output").len(),
+            1,
+            "expected a finding for {line}: {:?}",
+            out.findings
+        );
+    }
+}
+
 #[test]
 fn template_unescaped_ok_marker_above_the_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-sec");

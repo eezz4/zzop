@@ -6,7 +6,10 @@
 //! - **`[Table("…")]` attribute** on a class (gate: `using System.ComponentModel.DataAnnotations.Schema;`
 //!   — [`TABLE_ATTRIBUTE_SPECIFIERS`]): the string literal IS the physical table name, used verbatim. A
 //!   NON-LITERAL argument (`nameof(...)`, a constant) skips that class entirely — never guessed.
-//! - **`DbSet<T>` property** (gate: `using Microsoft.EntityFrameworkCore;` — [`EF_CORE_SPECIFIERS`]):
+//! - **`DbSet<T>` property** (gate: `using Microsoft.EntityFrameworkCore;` — [`EF_CORE_SPECIFIERS`] —
+//!   OR a class in the file deriving from a `…DbContext` base, since C# 10's `global using` moves the
+//!   import to one collector file and leaves every context declaring none; see
+//!   [`declares_db_context`]):
 //!   EF Core's convention maps the entity to a table named after the DbSet PROPERTY (`DbSet<User>
 //!   Users` -> table `Users`), so the property name keys the provide and `symbol` carries `T`'s simple
 //!   name (the engine's `resolve_orm_entity_consumes` mechanism, identical to GORM/TypeORM/JPA). A
@@ -33,9 +36,7 @@
 use tree_sitter::Node;
 use zzop_core::IoProvide;
 
-use crate::util::{
-    attribute_name, attributes_of, line_of, node_text, string_literal_text, valid_named_children,
-};
+use crate::util::{node_text, valid_named_children};
 
 const EF_CORE_SPECIFIERS: &[&str] = &["Microsoft.EntityFrameworkCore"];
 
@@ -56,12 +57,36 @@ pub fn extract_ef_core_db_table_provides(rel: &str, text: &str) -> Vec<IoProvide
             .values()
             .any(|b| specs.contains(&b.specifier.as_str()))
     };
-    let ef = gate(EF_CORE_SPECIFIERS);
-    let table_attr = gate(TABLE_ATTRIBUTE_SPECIFIERS);
+    let root = tree.root_node();
+    // The `using` gate alone stopped working when C# 10 shipped `global using`: a project collects its
+    // framework imports into one `GlobalUsings.cs` and every other file declares none. Measured on
+    // dotnet/eShop, 28 files reference `Microsoft.EntityFrameworkCore` and the FIRST is that collector,
+    // while `CatalogContext.cs` opens with `namespace …;` and carries no using at all — so all 9
+    // `DbSet<T>` properties across its 3 contexts extracted zero.
+    //
+    // The second gate is the file's OWN declaration and is stronger than the import it replaces: a class
+    // whose base list names a type ending in `DbContext` IS an EF Core context, by the framework's own
+    // required inheritance, and no import can make that untrue or absent.
+    //
+    // It gates BOTH arms, and the first version of this change gated only `DbSet<T>`. The argument for
+    // that narrower version was that `[Table]` keys on an attribute NAME a non-EF library could also
+    // spell, so widening it would be guessing — that argument is recorded here because it is wrong in a
+    // way worth keeping: it prices the risk of an EXTRA provide while the actual cost was a WRONG one.
+    // See the `table_attr` line below for the measurement that settled it.
+    let ef_import = gate(EF_CORE_SPECIFIERS);
+    let structural = declares_db_context(root, text);
+    let ef = ef_import || structural;
+    // `table_attr` takes the SAME structural signal, and leaving it out was a defect rather than a
+    // narrowing: `global using` moves BOTH namespaces into one collector file, so under the very layout
+    // this gate was widened for, pass 1 stopped running while pass 2 kept going — and pass 1 is what
+    // collects the `[Table]` override set pass 2 consults. Measured: a file carrying
+    // `[Table("app_users")] class User` and `class AppDbContext : DbContext` with no using of its own
+    // emitted `table:users`. Not a missing fact — a WRONG one, at a table name the database does not
+    // have, in the one file layout modern .NET writes.
+    let table_attr = gate(TABLE_ATTRIBUTE_SPECIFIERS) || structural;
     if !ef && !table_attr {
         return Vec::new();
     }
-    let root = tree.root_node();
     let mut out = Vec::new();
     // Pass 1 — `[Table]`-attributed classes: emits the attribute-named provides AND collects the
     // suppression set for pass 2 (every class carrying the attribute at all, literal or not).
@@ -71,155 +96,72 @@ pub fn extract_ef_core_db_table_provides(rel: &str, text: &str) -> Vec<IoProvide
     }
     // Pass 2 — `DbSet<T>` properties (convention naming, minus the same-file overrides above).
     if ef {
-        collect_dbset_provides(root, rel, text, &table_attributed, &mut out);
+        collect_dbset_provides(
+            root,
+            rel,
+            text,
+            ef_import,
+            false,
+            &table_attributed,
+            &mut out,
+        );
     }
     out
 }
 
+/// True when some class in this file derives from a `…DbContext` base — the FILE-level half of the EF
+/// gate, which decides whether either pass runs at all. Per-class attribution is
+/// [`class_derives_db_context`]'s job.
+fn declares_db_context(node: Node, src: &str) -> bool {
+    if node.kind() == "class_declaration" && class_derives_db_context(node, src) {
+        return true;
+    }
+    valid_named_children(node)
+        .into_iter()
+        .any(|c| declares_db_context(c, src))
+}
+
+/// True when THIS class's own base list names a type ending in `DbContext` — the structural half of the
+/// EF gate (see the call site for why the import half stopped sufficing).
+///
+/// `ends_with` rather than an exact match, because deriving from a project's own intermediate context is
+/// the norm and each link in that chain still ends in the framework's type name (`IdentityDbContext`,
+/// `ApplicationDbContext`). Generic bases (`IdentityDbContext<AppUser>`) and primary-constructor bases
+/// (`DbContext(options)`) both arrive as one base entry whose leading token is the type name, so the
+/// check reads that token rather than requiring one node kind.
+///
+/// INTERFACE-shaped names are excluded. C# cannot tell a base class from an implemented interface
+/// syntactically, and .NET's own naming guidelines fix the `I` + PascalCase spelling for interfaces — so
+/// a `class UnitOfWork : IDbContext` holding `DbSet<T>` properties is a hand-rolled wrapper delegating
+/// to a real context, and admitting it would emit that context's tables a second time from the wrong
+/// file. That convention is the framework's, not this project's.
+pub(super) fn class_derives_db_context(class_node: Node, src: &str) -> bool {
+    valid_named_children(class_node)
+        .into_iter()
+        .filter(|c| c.kind() == "base_list")
+        .flat_map(|bases| valid_named_children(bases))
+        .filter_map(|b| {
+            node_text(b, src)
+                .split(['<', ',', '(', ' ', '{'])
+                .next()
+                .map(str::trim)
+        })
+        .any(|name| name.ends_with("DbContext") && !is_interface_name(name))
+}
+
+/// .NET's interface spelling: `I` followed by an uppercase letter (`IDbContext`, `IDisposable`).
+fn is_interface_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars.next() == Some('I') && chars.next().is_some_and(|c| c.is_ascii_uppercase())
+}
+
 // --- [Table] attribute side ---------------------------------------------------------------------------
 
-fn collect_table_attribute_provides(
-    node: Node,
-    rel: &str,
-    src: &str,
-    table_attributed: &mut Vec<String>,
-    out: &mut Vec<IoProvide>,
-) {
-    if node.kind() == "class_declaration" {
-        emit_table_attribute(node, rel, src, table_attributed, out);
-    }
-    for child in valid_named_children(node) {
-        collect_table_attribute_provides(child, rel, src, table_attributed, out);
-    }
-}
+mod dbset;
+mod table_attribute;
 
-fn emit_table_attribute(
-    class: Node,
-    rel: &str,
-    src: &str,
-    table_attributed: &mut Vec<String>,
-    out: &mut Vec<IoProvide>,
-) {
-    let Some(attr) = attributes_of(class)
-        .into_iter()
-        .find(|a| attribute_name(*a, src).as_deref() == Some("Table"))
-    else {
-        return;
-    };
-    let Some(name_node) = class.child_by_field_name("name") else {
-        return;
-    };
-    let class_name = node_text(name_node, src);
-    // Any [Table] presence suppresses this class's DbSet-convention name (module doc) — recorded
-    // before the literal check, so a non-literal rename suppresses without emitting.
-    table_attributed.push(class_name.to_string());
-    let Some(table) = first_positional_string_literal(attr, src) else {
-        return; // nameof(...)/constant/absent — never guessed.
-    };
-    out.push(IoProvide {
-        response: None,
-        kind: "db-table".to_string(),
-        key: format!("table:{}", zzop_core::db_table_channel_casing(&table)),
-        file: rel.to_string(),
-        line: line_of(name_node),
-        symbol: Some(class_name.to_string()),
-        body: None,
-    });
-}
-
-/// The FIRST `attribute_argument`'s string literal, when that is what the argument is — `None` for any
-/// other argument shape or an argument-less attribute.
-fn first_positional_string_literal(attr: Node, src: &str) -> Option<String> {
-    let args = valid_named_children(attr)
-        .into_iter()
-        .find(|c| c.kind() == "attribute_argument_list")?;
-    let first = valid_named_children(args)
-        .into_iter()
-        .find(|c| c.kind() == "attribute_argument")?;
-    let value = valid_named_children(first).into_iter().next()?;
-    string_literal_text(value, src)
-}
-
-// --- DbSet<T> property side ---------------------------------------------------------------------------
-
-fn collect_dbset_provides(
-    node: Node,
-    rel: &str,
-    src: &str,
-    table_attributed: &[String],
-    out: &mut Vec<IoProvide>,
-) {
-    if node.kind() == "property_declaration" {
-        emit_dbset(node, rel, src, table_attributed, out);
-    }
-    for child in valid_named_children(node) {
-        collect_dbset_provides(child, rel, src, table_attributed, out);
-    }
-}
-
-fn emit_dbset(
-    prop: Node,
-    rel: &str,
-    src: &str,
-    table_attributed: &[String],
-    out: &mut Vec<IoProvide>,
-) {
-    let Some(ty) = prop.child_by_field_name("type") else {
-        return;
-    };
-    let Some(entity) = dbset_entity_name(ty, src) else {
-        return;
-    };
-    if table_attributed.iter().any(|c| c == &entity) {
-        return; // same-file [Table] override wins (module doc).
-    }
-    let Some(name_node) = prop.child_by_field_name("name") else {
-        return;
-    };
-    let prop_name = node_text(name_node, src);
-    out.push(IoProvide {
-        response: None,
-        kind: "db-table".to_string(),
-        key: format!("table:{}", zzop_core::db_table_channel_casing(prop_name)),
-        file: rel.to_string(),
-        line: line_of(name_node),
-        symbol: Some(entity),
-        body: None,
-    });
-}
-
-/// `DbSet<T>` (optionally `DbSet<T>?`) -> `T`'s simple name; `None` for any other property type.
-fn dbset_entity_name(ty: Node, src: &str) -> Option<String> {
-    let ty = if ty.kind() == "nullable_type" {
-        valid_named_children(ty).into_iter().next()?
-    } else {
-        ty
-    };
-    if ty.kind() != "generic_name" {
-        return None;
-    }
-    let mut children = valid_named_children(ty).into_iter();
-    let head = children.next()?;
-    if node_text(head, src) != "DbSet" {
-        return None;
-    }
-    let args = children.find(|c| c.kind() == "type_argument_list")?;
-    let arg = valid_named_children(args).into_iter().next()?;
-    type_simple_name(arg, src)
-}
-
-/// The simple (rightmost-segment) name of a type-argument node: `User`, `Models.User` -> `User`;
-/// `None` for a shape that names no single entity type (a nested generic, a tuple, ...).
-fn type_simple_name(node: Node, src: &str) -> Option<String> {
-    match node.kind() {
-        "identifier" => Some(node_text(node, src).to_string()),
-        "qualified_name" => {
-            let last = node.child_by_field_name("name")?;
-            type_simple_name(last, src)
-        }
-        _ => None,
-    }
-}
+use dbset::collect_dbset_provides;
+use table_attribute::collect_table_attribute_provides;
 
 #[cfg(test)]
 mod tests;

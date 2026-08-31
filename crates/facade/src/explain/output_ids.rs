@@ -114,11 +114,11 @@ mod tests {
             "{message}"
         );
         // The class's own summary is now IN the answer, so an id from any source resolves to meaning
-        // without a second command.
-        assert!(
-            message.contains("Stale results from an un-bumped fingerprint"),
-            "{message}"
-        );
+        // without a second command. Anchored on a phrase from the middle of the summary rather than its
+        // opening words: this needle used to be the first four words, so rewording the sentence that
+        // introduces a class broke the pin without anything about the CONTRACT (id resolves to its own
+        // prose) having changed.
+        assert!(message.contains("cache fingerprint contract"), "{message}");
     }
 
     #[test]

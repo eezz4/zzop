@@ -26,6 +26,14 @@ zzop-core = { path = "../core" }
 # after a release audit measured the drift live — widening the rule's set left every test in the
 # workspace green while this diagram silently kept covering the old four.
 zzop-rules-http = { path = "../../rules/native/rules-http" }
+# Same T2 shape, and the sharpest instance of it: `graph/dep.rs` reads cycle membership out of the
+# `circular` finding's `data`, and for months it read a key (`members`) that rule has never emitted —
+# invisible because BOTH graph test files hand-wrote a fixture spelling the same invented key. A test
+# that authors its own subject cannot notice that its subject does not exist. So the fixture is now
+# BUILT BY THE RULE (`graph/dep/tests.rs`'s `circular_finding`, which calls
+# `zzop_rules_graph::circular::circular_findings` and serializes it through the same `Finding` serde
+# impl the analyze reply uses) rather than typed out in two places. Added 2026-08-30.
+zzop-rules-graph = { path = "../../rules/native/rules-graph" }
 # Test-only again, same T2 shape: `graph/cosmograph.rs`'s emitted column schema is published as prose in
 # `docs/contracts/surface-parity.json` and on the site's Graph tab (`site/index.html`, generated from
 # `site-src/content/graph.mjs`; it was `site/usage.html` until that page became a redirect stub on

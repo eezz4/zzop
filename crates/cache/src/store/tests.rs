@@ -512,6 +512,10 @@ fn key_mismatch_inside_entry_is_treated_as_miss() {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     let wrong_entry = IrEntry {
         format_version: FORMAT_VERSION,
+        // Irrelevant to this test: the key comparison rejects the entry before the digest is
+        // consulted. Left obviously wrong rather than computed, so a reader does not mistake this for
+        // an integrity fixture — `a_hand_edited_ir_payload_is_refused` is that.
+        payload_digest: String::new(),
         key: IrKey {
             content_hash: "not-the-right-hash".to_string(),
             parser_fingerprint: "parser1".to_string(),
@@ -697,4 +701,222 @@ fn entries_survive_a_reopen_exactly_when_the_schema_version_is_unchanged() {
             );
         }
     }
+}
+
+// --- Entry integrity: a well-formed hand-edit is the one staleness trick that got through ---
+
+/// The measured attack, exactly. Seven other tricks (identical mtime + identical byte length, a
+/// byte-identical file's cross-file invalidation, truncated / zero-byte / garbage entries, a changed
+/// config fingerprint, four concurrent runs) all recomputed correctly. This one did not: rewrite
+/// `findings` to `[]`, leave every fingerprint alone, and the real finding vanished from three
+/// consecutive runs with no warning. The key describes the INPUTS; nothing described the OUTPUT.
+#[test]
+fn a_hand_edited_findings_payload_is_refused_and_counted() {
+    let dir = scratch_dir("integrity-findings");
+    let cache = AnalysisCache::open(&dir, "v1").unwrap();
+    let k = key("source", "p1", "r1");
+    cache.put_findings(&k, &sample_findings()).unwrap();
+    assert_eq!(cache.get_findings(&k).unwrap().len(), 1, "baseline hit");
+
+    // Blank the findings the way a hand-edit would, leaving every key field intact.
+    let path = cache.findings_path(&k);
+    let mut entry: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    entry["findings"] = serde_json::json!([]);
+    fs::write(&path, serde_json::to_vec(&entry).unwrap()).unwrap();
+
+    assert!(
+        cache.get_findings(&k).is_none(),
+        "a payload that does not match its own digest must be a MISS, so the file is re-analyzed \
+         rather than served an emptied findings list"
+    );
+    assert_eq!(cache.rejected_entries(), 1);
+    let w = cache
+        .integrity_warning()
+        .expect("the refusal must be disclosed");
+    assert!(w.contains("1 cache entry"), "{w}");
+    // The claim must not overstate itself: the digest is keyless, so this detects edits that did not
+    // know about it, not a determined forger.
+    assert!(w.contains("detector, not an authenticity check"), "{w}");
+}
+
+/// The IR half of the same axis. An IR payload is not where a finding is deleted, but it is where a
+/// symbol, an import edge or an io fact can be — and every rule downstream reads those.
+#[test]
+fn a_hand_edited_ir_payload_is_refused() {
+    let dir = scratch_dir("integrity-ir");
+    let cache = AnalysisCache::open(&dir, "v1").unwrap();
+    let k = key("source", "p1", "r1");
+    cache.put_ir(&k, &sample_ir(10)).unwrap();
+    assert!(cache.get_ir(&k).is_some(), "baseline hit");
+
+    let path = cache.ir_path(&IrKey::from(&k));
+    let mut entry: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    entry["ir"]["symbols"] = serde_json::json!([]);
+    fs::write(&path, serde_json::to_vec(&entry).unwrap()).unwrap();
+
+    assert!(cache.get_ir(&k).is_none());
+    assert_eq!(cache.rejected_entries(), 1);
+}
+
+/// The invalidation that keeps this from being "reject everything": an untouched entry must still be
+/// served, and must cost no warning. Without it, a digest that never matched would pass the two tests
+/// above while making the cache useless.
+#[test]
+fn an_untouched_entry_still_hits_and_reports_no_integrity_problem() {
+    let dir = scratch_dir("integrity-clean");
+    let cache = AnalysisCache::open(&dir, "v1").unwrap();
+    let k = key("source", "p1", "r1");
+    cache.put_ir(&k, &sample_ir(10)).unwrap();
+    cache.put_findings(&k, &sample_findings()).unwrap();
+
+    assert!(cache.get_ir(&k).is_some());
+    assert_eq!(cache.get_findings(&k).unwrap().len(), 1);
+    assert_eq!(cache.rejected_entries(), 0);
+    assert!(
+        cache.integrity_warning().is_none(),
+        "a healthy run must be silent here, or a reader learns to skip the channel"
+    );
+}
+
+/// A valid entry COPIED onto another key's file must not verify. This is why the digest covers the key
+/// as well as the payload: both entries are internally consistent, and serving the copy would answer
+/// one file's question with another file's findings.
+#[test]
+fn an_entry_copied_onto_another_keys_file_is_refused() {
+    let dir = scratch_dir("integrity-swap");
+    let cache = AnalysisCache::open(&dir, "v1").unwrap();
+    let a = key("source-a", "p1", "r1");
+    let b = key("source-b", "p1", "r1");
+    cache.put_findings(&a, &sample_findings()).unwrap();
+    cache.put_findings(&b, &Vec::new()).unwrap();
+
+    // Take a's entry, retarget its stored key to b's, and drop it on b's path — the key comparison
+    // passes, since the key inside the file now says b.
+    let mut entry: serde_json::Value =
+        serde_json::from_slice(&fs::read(cache.findings_path(&a)).unwrap()).unwrap();
+    entry["content_hash"] = serde_json::json!(b.content_hash);
+    fs::write(cache.findings_path(&b), serde_json::to_vec(&entry).unwrap()).unwrap();
+
+    assert!(
+        cache.get_findings(&b).is_none(),
+        "a's payload under b's key must not be served as b's answer"
+    );
+    assert_eq!(cache.rejected_entries(), 1);
+}
+
+// --- The detector must fire at TAMPERING, never at zzop's own writes ---
+//
+// `FileIrSlice::const_map_fragment` is a `std::collections::HashMap`, whose serde_json object-key order
+// follows a per-INSTANCE randomized seed. The digest is computed from a serialization of the payload on
+// both sides, so unless that serialization is canonicalized, WRITING hashes one key order and READING
+// hashes the order of the map instance deserialization happened to build — a healthy entry accuses
+// itself. Measured on a real getredash/redash checkout (1289 files, 42 entries carrying a 2+-key
+// `const_map_fragment`): seven consecutive runs over a cache zzop had just written reported 33, 33, 32,
+// 38, 38, 34 and 35 refused entries, with findings identical every run.
+//
+// The pair below is one test design, not two tests: the "no warning" half is worth nothing on its own
+// (a detector wired to a constant `true` would pass it), so it is followed by the SAME payload, the SAME
+// read path, and a real hand-edit — which must still be refused.
+
+/// A `const_map_fragment` with enough keys that a fresh map instance essentially never reproduces the
+/// written order. 8 keys, so a coincidental match is ~1/8! per read.
+fn ir_with_multi_key_const_map() -> FileIrSlice {
+    let mut ir = sample_ir(10);
+    ir.const_map_fragment = (0..8)
+        .map(|i| (format!("CONST_{i}"), format!("value-{i}")))
+        .collect();
+    ir
+}
+
+/// The "0" half. Reading the same untouched entry many times must refuse it ZERO times: every read
+/// deserializes a NEW `HashMap` with a new hash seed, so a digest taken over a non-canonical
+/// serialization flags a random subset of the reads — which is exactly the shape of the field measurement
+/// above. One read would be a coin flip; the loop makes the assertion mean what it says.
+#[test]
+fn a_healthy_entry_holding_a_map_is_never_refused_however_often_it_is_read() {
+    let dir = scratch_dir("integrity-map-clean");
+    let cache = AnalysisCache::open(&dir, "v1").unwrap();
+    let k = key("source", "p1", "r1");
+    let ir = ir_with_multi_key_const_map();
+    cache.put_ir(&k, &ir).unwrap();
+
+    const READS: usize = 100;
+    for _ in 0..READS {
+        let got = cache
+            .get_ir(&k)
+            .expect("an entry zzop just wrote must be served");
+        assert!(
+            json_eq(&got, &ir),
+            "the served slice must equal what was put"
+        );
+    }
+    assert_eq!(
+        cache.rejected_entries(),
+        0,
+        "zzop's own write was accused of corruption on some of {READS} reads — the payload never \
+         changed, so the digest is being taken over bytes that are not stable for one value"
+    );
+    assert!(cache.integrity_warning().is_none());
+}
+
+/// The half that gives the half above its meaning: the SAME payload, the SAME read path, one byte of a
+/// `const_map_fragment` VALUE rewritten on disk with the stored digest left alone. If this does not fire,
+/// the test above is proving nothing.
+#[test]
+fn the_same_read_path_still_refuses_a_hand_edited_map_value() {
+    let dir = scratch_dir("integrity-map-tampered");
+    let cache = AnalysisCache::open(&dir, "v1").unwrap();
+    let k = key("source", "p1", "r1");
+    cache.put_ir(&k, &ir_with_multi_key_const_map()).unwrap();
+    assert!(cache.get_ir(&k).is_some(), "baseline hit");
+
+    let path = cache.ir_path(&IrKey::from(&k));
+    let mut entry: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    entry["ir"]["const_map_fragment"]["CONST_3"] = serde_json::json!("tampered");
+    fs::write(&path, serde_json::to_vec(&entry).unwrap()).unwrap();
+
+    assert!(
+        cache.get_ir(&k).is_none(),
+        "a rewritten map VALUE must still be refused — canonicalizing the digest input may drop key \
+         ORDER from what is hashed, never content"
+    );
+    assert_eq!(cache.rejected_entries(), 1);
+    assert!(cache.integrity_warning().is_some());
+}
+
+/// The exact — and only — edit class the canonical digest input gives up, pinned so it is a decision
+/// somebody made rather than a surprise somebody finds. Re-emitting the same object's keys in another
+/// order is not a modification of the entry: it deserializes to the identical value, so serving it is
+/// serving what zzop wrote. Everything that changes a key, a value, an array's order or an element's
+/// presence still moves the digest (the test above, and the four `payload_digest` unit tests).
+#[test]
+fn a_pure_key_reordering_is_not_treated_as_tampering() {
+    let dir = scratch_dir("integrity-map-reordered");
+    let cache = AnalysisCache::open(&dir, "v1").unwrap();
+    let k = key("source", "p1", "r1");
+    let ir = ir_with_multi_key_const_map();
+    cache.put_ir(&k, &ir).unwrap();
+
+    // Re-emit the map object's members in reverse order, value-for-value identical. Done on the raw
+    // TEXT: parsing into `serde_json::Value` would sort the keys (its `Map` is a `BTreeMap` here) and
+    // silently undo the very thing under test.
+    let path = cache.ir_path(&IrKey::from(&k));
+    let text = fs::read_to_string(&path).unwrap();
+    let marker = "\"const_map_fragment\":{";
+    let start = text.find(marker).unwrap() + marker.len();
+    let end = start + text[start..].find('}').unwrap();
+    let mut members: Vec<&str> = text[start..end].split(',').collect();
+    members.reverse();
+    let reordered = format!("{}{}{}", &text[..start], members.join(","), &text[end..]);
+    assert_ne!(
+        reordered, text,
+        "the reordering must actually move the bytes"
+    );
+    fs::write(&path, reordered).unwrap();
+
+    let got = cache
+        .get_ir(&k)
+        .expect("a re-ordered but value-identical map is the same entry, not a modified one");
+    assert!(json_eq(&got, &ir));
+    assert_eq!(cache.rejected_entries(), 0);
 }

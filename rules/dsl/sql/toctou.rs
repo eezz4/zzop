@@ -1,4 +1,4 @@
-use crate::{hits, scan, TempDir};
+use crate::{assert_clauses_precede_imperative, hits, scan, TempDir};
 
 // --- race-condition-toctou (uses `absent` labels) ---
 
@@ -173,5 +173,83 @@ fn a_write_that_precedes_the_only_read_is_not_flagged() {
         hits(&out, "race-condition-toctou").is_empty(),
         "{:?}",
         out.findings
+    );
+}
+
+/// FINDING 1 (2026-08-23): this rule still shipped the unconditional imperative the batch that
+/// rewrote `db/find-then-create-no-unique` existed to remove -- "Add a unique constraint and replace
+/// the check-then-act with an upsert", with no overwrite counter-indication and no pointer to one.
+/// It is reachable on its own (`--rule sql/race-condition-toctou`, `packs.only: ["sql"]`), so the
+/// sibling message does not rescue the reader, and it is harmful: on cal.com the rule reports
+/// `addSecondaryEmail.handler.ts:45`, which reads a secondary email by address and rejects it as
+/// already taken -- following the old remedy literally reassigns another user's verified address to
+/// the caller. Pinned AS DELIVERED, because "the message says it" is the only property that matters.
+#[test]
+fn the_toctou_finding_counter_indicates_the_blind_upsert_swap() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "api/createSubHandlers.ts",
+        "declare const subStore: any;\nexport async function subscribe() {\n  const existing = await subStore.findOne((s: any) => s.id === \"x\");\n  if (!existing) {\n    await subStore.create({ id: \"y\" });\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "race-condition-toctou");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    let m = &h[0].message;
+    for needle in [
+        "KEEP THE WRITE and handle the unique violation",
+        "correct ONLY when OVERWRITING the existing row is what you want",
+        "hands the second caller the first caller's record",
+        "where the answer is a credential or an ownership column, take (1)",
+    ] {
+        assert!(
+            m.contains(needle),
+            "the delivered remedy no longer counter-indicates the overwrite edit -- missing {needle:?} in: {m}"
+        );
+    }
+    assert!(
+        !m.contains("replace the check-then-act with an upsert"),
+        "the unconditional imperative is back: {m}"
+    );
+}
+
+/// The ROOT of this remedy — "add a unique constraint" — is a prescription whose precondition this
+/// rule cannot check, and this message used to assert the precondition away in so many words ("that
+/// part is unconditional"). It is not unconditional: where the looked-up pair is one an owner may
+/// legitimately hold twice (two linked accounts at the same external provider, two installs of one
+/// integration), the constraint takes the project down twice over — the migration is refused by any
+/// table already holding such a duplicate, and forced through it rejects the second legitimate row.
+/// Both of this message's two named ways of "living with it" presuppose the constraint EXISTS, so
+/// neither could ever counter-indicate the root they descend from; the clause attaches to the root.
+///
+/// Asserts POSITION, not presence (§27): a reader who acts on the first instruction never reaches a
+/// caveat printed after it. Named by ROLE only — no vendor, path, schema or corpus tree.
+#[test]
+fn the_toctou_remedy_questions_the_column_pair_before_it_prescribes_the_constraint() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "api/createSubHandlers.ts",
+        "declare const subStore: any;\nexport async function subscribe() {\n  const existing = await subStore.findOne((s: any) => s.id === \"x\");\n  if (!existing) {\n    await subStore.create({ id: \"y\" });\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "race-condition-toctou");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    let m = &h[0].message;
+
+    assert!(
+        !m.contains("that part is unconditional"),
+        "the message asserts away the very precondition it cannot check: {m}"
+    );
+
+    assert_clauses_precede_imperative(
+        "race-condition-toctou",
+        m,
+        "add a unique constraint",
+        &[
+            "NOT MEANT TO BE UNIQUE",
+            "legitimately hold twice",
+            "migration FAILS OUTRIGHT",
+            "second legitimate row is rejected",
+            "distinguishes the two rows",
+        ],
     );
 }

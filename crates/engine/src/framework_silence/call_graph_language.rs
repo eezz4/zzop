@@ -27,7 +27,12 @@ use zzop_core::IoProvide;
 /// The rule this gap silences. Spelled here rather than imported because `rules-http` exposes the id only
 /// as a literal inside `scan_mutating_route_no_auth`'s emitted `Finding`; the pin below asserts the
 /// spelling against the shipped rule registry so a rename cannot leave this warning naming a ghost.
-const SILENCED_RULE_ID: &str = "mutating-route-no-auth";
+///
+/// `pub(super)` for one reader: S17 (`route_language_zero_extraction`), the mirror of this tripwire,
+/// names the same rule and used to spell it a second time. Its doc claimed the pin below covered that
+/// copy; it did not, and could not — the pin reads THIS constant. Sharing the symbol is what makes
+/// that claim true, so the registry assertion below now guards both warnings' spelling.
+pub(super) const SILENCED_RULE_ID: &str = "mutating-route-no-auth";
 
 /// Cap on example route files listed per uncovered extension — the "up to 3 example paths" convention
 /// every sibling tripwire in this module uses.
@@ -95,6 +100,7 @@ mod tests {
             line: 1,
             symbol: None,
             body: None,
+            ..Default::default()
         }
     }
 
@@ -139,6 +145,8 @@ mod tests {
 
     /// Seals that the id this warning publishes is the id the engine actually ships — a rename that
     /// missed this file would otherwise leave the disclosure pointing at a rule nobody can look up.
+    /// Covers S17's disclosure too, since 2026-08-31: that module reads THIS constant rather than
+    /// carrying its own copy, which is what its doc had claimed all along.
     #[test]
     fn silenced_rule_id_is_a_real_shipped_rule() {
         let mut registry = zzop_core::RuleRegistry::new();

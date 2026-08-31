@@ -1,7 +1,7 @@
 //! Exercises `find_dead_exports` against hand-built fixtures — imports, barrel/aliased re-export
 //! chains, entry-file live roots, default-export matching, and the `Unused` vs `InFileOnly` split.
 use super::*;
-use zzop_core::{disable_hint, ImportBinding};
+use zzop_core::{disable_hint, ImportBinding, ImportMap, ReExport};
 
 fn resolve(spec: &str, _from: &str) -> Option<String> {
     Some(spec.strip_prefix("./").unwrap_or(spec).to_string())
@@ -42,6 +42,7 @@ fn file(name: &str, exports: Vec<DeadExportCandidate>) -> DeadExportInputFile {
         exported_signature_names: HashSet::new(),
         export_aliases: Vec::new(),
         is_generated: false,
+        auto_import_referenced_names: HashSet::new(),
     }
 }
 
@@ -158,6 +159,53 @@ fn tool_config_files_default_export_is_excluded_from_dead_candidates() {
         vec![default_export("config", SourceSymbolKind::Const)],
     )];
     assert!(find_dead_exports(&files, resolve).is_empty());
+}
+
+/// THIS rule is a second consumer of `unreachable::tool_config_patterns`, and the one the widening did
+/// not name: it was priced against `dead-candidates` alone, but `is_entry_or_test` reads the same
+/// predicate, so every shape admitted there goes silent here too.
+///
+/// Both newly-admitted shapes ride with a CONTROL carrying a byte-equivalent export, because "these
+/// two are excluded" and "everything is excluded" are the same assertion without one.
+///
+/// ⚠ **The qualifier row is `webpack.config.prod.js`, not `vite.config.sw.js`, and the difference is
+/// load-bearing.** A `vite.`/`vitest.`/`jest.`/`cypress.`/`playwright.` stem is ALREADY matched by
+/// `zzop_core::is_test_file` through the shared `test-paths` fragment, which `is_entry_or_test`
+/// consults on its own — so a `vite.config.sw.js` row stays silent even with the widening reverted and
+/// proves nothing about it. That was this test's first shape, and a refutation pass caught it supplying
+/// half the evidence for a claim it could not support. Verified the repair the same way it was caught:
+/// with `tool_config_patterns` reverted to its single pre-widening row, this assertion FAILS on both
+/// remaining rows rather than one.
+#[test]
+fn the_widened_config_shapes_silence_this_rule_too_and_only_them() {
+    let files = vec![
+        // A SECOND config for the same tool — reached only through that tool's `--config` flag, and a
+        // stem the test-path fragment does not carry, so only the widening can silence it.
+        file(
+            "webpack.config.prod.js",
+            vec![default_export("config", SourceSymbolKind::Const)],
+        ),
+        // `config.<ext>` directly inside a tool-owned DOT-directory (VitePress).
+        file(
+            "docs/.vitepress/config.mts",
+            vec![default_export("config", SourceSymbolKind::Const)],
+        ),
+        // The control is one level DEEPER — ordinary source under a tool directory. It was a sibling
+        // at depth 1 until 2026-08-21, when the dot-directory arm widened from the `config` stem to
+        // depth: `.storybook/main.mjs` is as tool-owned as `.storybook/config.js`, so a depth-1
+        // sibling stopped being outside the exemption and stopped being a control.
+        file(
+            "docs/.vitepress/theme/other.ts",
+            vec![default_export("config", SourceSymbolKind::Const)],
+        ),
+    ];
+    let found = find_dead_exports(&files, resolve);
+    let reported: Vec<&str> = found.iter().map(|f| f.file.as_str()).collect();
+    assert_eq!(
+        reported,
+        vec!["docs/.vitepress/theme/other.ts"],
+        "the two config shapes are silent here and the control is not: {reported:?}"
+    );
 }
 
 #[test]
@@ -564,6 +612,63 @@ fn nextjs_middleware_convention_file_exports_are_not_dead() {
 }
 
 #[test]
+fn nextjs_pages_api_route_config_export_is_not_dead() {
+    // MEASURED (cal.com, 2026-08-26): five payment-webhook routes under `apps/web/pages/api/**`
+    // carry `export const config = { api: { bodyParser: false } }`. Next.js reads that object from
+    // the FILE PATH at build time; no module imports it. Deleting it turns the body parser back on,
+    // the raw body the HMAC signature check needs is consumed, and every payment webhook fails to
+    // verify. Same name+path scoping as `is_middleware_convention_file`, one directory over.
+    let files = vec![
+        file(
+            "apps/web/pages/api/integrations/btcpayserver/webhook.ts",
+            vec![export("config", SourceSymbolKind::Const)],
+        ),
+        file(
+            "src/pages/api/webhook.ts",
+            vec![export("config", SourceSymbolKind::Const)],
+        ),
+    ];
+    assert!(find_dead_exports(&files, resolve).is_empty());
+}
+
+#[test]
+fn other_exports_in_a_pages_api_route_are_still_dead_candidates() {
+    // Name-scoped, not a wholesale directory exclusion: the ten `handler` exports this corpus has
+    // under `pages/api/**` must keep reporting.
+    let files = vec![file(
+        "apps/web/pages/api/stripe/webhook.ts",
+        vec![export("handler", SourceSymbolKind::Function)],
+    )];
+    assert_eq!(
+        find_dead_exports(&files, resolve),
+        vec![DeadExport {
+            file: "apps/web/pages/api/stripe/webhook.ts".to_string(),
+            name: "handler".to_string(),
+            kind: SourceSymbolKind::Function,
+            reason: DeadExportReason::Unused,
+        }]
+    );
+}
+
+#[test]
+fn config_export_outside_a_pages_api_route_is_still_dead() {
+    // The path scoping must not leak into a global `config` exemption — `config` is a plausible
+    // domain symbol. Both rows are MEASURED cal.com shapes that must survive:
+    // `packages/app-store/salesforce/codegen.ts:3`, and a `pages/` file outside `pages/api/`.
+    let files = vec![
+        file(
+            "packages/app-store/salesforce/codegen.ts",
+            vec![export("config", SourceSymbolKind::Const)],
+        ),
+        file(
+            "apps/web/pages/settings/billing.tsx",
+            vec![export("config", SourceSymbolKind::Const)],
+        ),
+    ];
+    assert_eq!(find_dead_exports(&files, resolve).len(), 2);
+}
+
+#[test]
 fn other_exports_in_a_middleware_file_are_still_dead_candidates() {
     // The exemption is name-scoped (`middleware`/`config` only), not a wholesale file exclusion.
     let files = vec![file(
@@ -673,10 +778,30 @@ fn finding_message_is_byte_identical_to_the_pre_sweep_text() {
     // finding.rs`) already pin its rendered form; this test only needs to confirm it lands in the right
     // place in the surrounding sentence.
     let tail = disable_hint("unimported-export");
+    // The convention clause is spelled once and interpolated into both arms: it is the SAME sentence
+    // in both, and a copy per arm is how the two drift. It also keeps this pin honest about what it
+    // is pinning — the surrounding fixed text and the ORDER, not the clause's own wording, which
+    // `framework_convention_clause_precedes_the_imperative_in_both_arms` is the owner of.
+    let convention = "Zero in-repo importers is BY DESIGN for two shapes, and these are examples \
+                      rather than a list to match yourself against: in both, deleting the export \
+                      changes runtime behavior with no import left to break. (1) A framework reads \
+                      this name from the file's own path rather than importing it — `export const \
+                      config` in a Next.js Pages Router route, `export const prerender` in an Astro \
+                      page, `export function load` in a SvelteKit route. (2) A build tool injects \
+                      a whole DIRECTORY's exports as globals, so every consumer writes the bare \
+                      identifier and no import line exists anywhere — Nuxt auto-imports the \
+                      directories its `nuxt.config.*` nominates, and `unplugin-auto-import` does \
+                      the same from a Vite or Webpack setup. Nothing is reserved about the NAME in (2), so \
+                      the question to ask is about the PATH: does a build tool in this tree \
+                      nominate the directory this symbol lives in as an injection source? A \
+                      `nuxt.config.*` that nominates it is already read and resolved here, name by \
+                      name; a table declared anywhere else, or inherited by a Nuxt layer through \
+                      `extends`, is not.";
     assert_eq!(
         out[0].message,
         format!(
-            "exported function 'helper' is never imported anywhere (deletion candidate). Delete it, \
+            "exported function 'helper' is never imported anywhere (deletion candidate). \
+             {convention} Delete it, \
              or export it from somewhere it's actually consumed. A file carrying a machine-generated \
              banner in its first 8 lines is skipped by this rule already \
              (`vocabulary.generatedFileMarkers` picks the banner vocabulary); a generator that \
@@ -690,6 +815,7 @@ fn finding_message_is_byte_identical_to_the_pre_sweep_text() {
         out[1].message,
         format!(
             "exported const 'localOnly' is only referenced within its own file (un-export candidate). \
+             {convention} \
              Drop the `export` keyword to make the un-used-elsewhere status explicit. A file carrying \
              a machine-generated banner in its first 8 lines is skipped by this rule already \
              (`vocabulary.generatedFileMarkers` picks the banner vocabulary); a generator that \
@@ -699,6 +825,61 @@ fn finding_message_is_byte_identical_to_the_pre_sweep_text() {
              are invisible to this in-repo import graph."
         )
     );
+}
+
+/// §27 pin — POSITION, not existence. The framework-convention clause must sit BEFORE the
+/// imperative in BOTH arms: a reader who acts on the first instruction never reaches a caveat
+/// placed after it, and the act here is deleting the `export const config` that keeps a payment
+/// webhook's raw body intact. Moving the clause after the verb leaves every token present and must
+/// still turn this test red.
+///
+/// BOTH shapes are pinned, and the discriminating question with them. A reader who matches none of
+/// shape (1)'s three examples has to be told the list is open and handed a question they can answer
+/// about their own tree — that is the whole repair for the Nuxt reader who read three path-convention
+/// examples, matched none, and deleted a live composable. A pin on shape (1) alone would let shape
+/// (2) or the question drift below the verb with this test still green.
+#[test]
+fn framework_convention_clause_precedes_the_imperative_in_both_arms() {
+    let dead = vec![
+        DeadExport {
+            file: "apps/web/pages/api/x.ts".to_string(),
+            name: "helper".to_string(),
+            kind: SourceSymbolKind::Function,
+            reason: DeadExportReason::Unused,
+        },
+        DeadExport {
+            file: "apps/web/pages/api/x.ts".to_string(),
+            name: "localOnly".to_string(),
+            kind: SourceSymbolKind::Const,
+            reason: DeadExportReason::InFileOnly,
+        },
+    ];
+    let out = dead_export_findings(dead, &HashMap::new());
+    // Every one of these must sit before the verb: the "these are examples" disclaimer that opens the
+    // list, each of the two shapes, and the question a reader answers about their own tree.
+    let needles = [
+        "these are examples rather than a list to match yourself against",
+        "A framework reads this name from the file's own path",
+        "A build tool injects a whole DIRECTORY's exports as globals",
+        "does a build tool in this tree nominate the directory this symbol lives in",
+    ];
+    for (finding, imperative) in out.iter().zip(["Delete it,", "Drop the `export` keyword"]) {
+        let verb = finding
+            .message
+            .find(imperative)
+            .expect("imperative is missing from the message");
+        for needle in needles {
+            let clause = finding
+                .message
+                .find(needle)
+                .unwrap_or_else(|| panic!("missing from the message: {needle}"));
+            assert!(
+                clause < verb,
+                "'{needle}' at {clause} must precede the imperative at {verb}: {}",
+                finding.message
+            );
+        }
+    }
 }
 
 // ---- Public-signature exemption (module doc "Public-signature exemption") --------------------
@@ -969,4 +1150,71 @@ fn rename_to_default_is_alive_via_a_default_import() {
         },
     ];
     assert!(find_dead_exports(&files, resolve).is_empty());
+}
+
+// ---- Auto-import tables (module doc "Auto-import tables") ------------------------------------
+// A build config injecting a whole directory's exports as globals leaves NO import statement for the
+// graph to read. The engine resolves those bare references and hands each file the subset of its own
+// export names that some other file in the same app actually writes. The pair below is the whole
+// design: resolution, not directory exemption.
+
+#[test]
+fn an_auto_import_referenced_export_is_alive_with_no_importer_anywhere() {
+    // nocodb `composables/useRowComments.ts#useProvideRowComments`: two consumers (one `.ts`, one
+    // `.vue`) write it bare, zero `import` statements exist for it in the whole repo, and the rule
+    // told a blind auditor to delete it — which breaks the expanded-form Discussion sidebar.
+    let files = vec![DeadExportInputFile {
+        auto_import_referenced_names: HashSet::from(["useProvideRowComments".to_string()]),
+        ..file(
+            "app/composables/useRowComments.ts",
+            vec![export("useProvideRowComments", SourceSymbolKind::Function)],
+        )
+    }];
+    assert!(find_dead_exports(&files, resolve).is_empty());
+}
+
+#[test]
+fn an_unreferenced_export_in_the_same_auto_import_file_still_reports() {
+    // The direction that makes this a RESOLUTION rather than an exemption, and the reason a
+    // file-level fan-in count cannot stand in for the name set: `snapshotFilter` sits in the same
+    // tree, the same app and the same auto-import directory as the 487 silenced names, and it is the
+    // one symbol a blind auditor's 14-name sample found referenced nowhere. Exempting the directory
+    // — or trusting the file's fan-in — kills exactly the finding this rule exists to make.
+    let files = vec![DeadExportInputFile {
+        auto_import_referenced_names: HashSet::from(["isFilterOp".to_string()]),
+        ..file(
+            "app/utils/filterUtils.ts",
+            vec![
+                export("isFilterOp", SourceSymbolKind::Function),
+                export("snapshotFilter", SourceSymbolKind::Function),
+            ],
+        )
+    }];
+    let dead = find_dead_exports(&files, resolve);
+    assert_eq!(dead.len(), 1, "{dead:?}");
+    assert_eq!(dead[0].name, "snapshotFilter");
+    assert_eq!(dead[0].reason, DeadExportReason::Unused);
+}
+
+#[test]
+fn auto_import_names_do_not_leak_across_files() {
+    // The set is per-FILE, keyed by the file that is reached. A name resolved for one auto-import
+    // file must not vouch for a same-named export in another — the engine's scan pairs every name
+    // with the candidate that publishes it, and this pins that the rule never widens that pairing.
+    let files = vec![
+        DeadExportInputFile {
+            auto_import_referenced_names: HashSet::from(["useThing".to_string()]),
+            ..file(
+                "app/composables/a.ts",
+                vec![export("useThing", SourceSymbolKind::Function)],
+            )
+        },
+        file(
+            "app/composables/b.ts",
+            vec![export("useThing", SourceSymbolKind::Function)],
+        ),
+    ];
+    let dead = find_dead_exports(&files, resolve);
+    assert_eq!(dead.len(), 1, "{dead:?}");
+    assert_eq!(dead[0].file, "app/composables/b.ts");
 }

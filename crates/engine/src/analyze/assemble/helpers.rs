@@ -18,6 +18,31 @@ pub(super) use java::{
 /// Deterministic `(kind, key, file, line)` total order for the tree's final IO provide array — applied
 /// right before `IoFacts` assembly in `super::assemble` so emitted order is stable across runs regardless
 /// of collection order. Its consume-side twin `sort_io_consumes` uses the identical key order.
+/// Extension -> count of files a parser frontend projected at least one fact from, for the
+/// zero-extraction cross S17 reads. Three channels, not one: symbols, dep edges AND io facts — a
+/// frontend can legitimately project only the third (`zzop-parser-sql`, Prisma), and omitting it
+/// understates the denominator and silently narrows every row the cross can produce. Degraded files
+/// are excluded, matching the coverage reply's own `structural` column exactly.
+pub(super) fn structural_exts(
+    rels: &[&str],
+    all_symbols: &[zzop_core::ir::SourceSymbol],
+    dep: &std::collections::HashMap<String, Vec<String>>,
+    io_provides: &[zzop_core::IoProvide],
+    io_consumes: &[zzop_core::IoConsume],
+    degraded: &[super::collect::DegradedFile],
+) -> std::collections::BTreeMap<String, usize> {
+    let structural: std::collections::HashSet<&str> = all_symbols
+        .iter()
+        .map(|s| s.file.as_str())
+        .chain(dep.keys().map(String::as_str))
+        .chain(io_provides.iter().map(|p| p.file.as_str()))
+        .chain(io_consumes.iter().map(|c| c.file.as_str()))
+        .collect();
+    let degraded: std::collections::HashSet<&str> =
+        degraded.iter().map(|d| d.rel.as_str()).collect();
+    crate::zero_extraction::structural_by_ext(rels.iter().copied(), &structural, &degraded)
+}
+
 pub(super) fn sort_io_provides(provides: &mut [zzop_core::IoProvide]) {
     provides.sort_by(|a, b| {
         a.kind
@@ -85,19 +110,33 @@ pub(in crate::analyze) fn is_rust_source_ext(rel: &str) -> bool {
     rel.ends_with(".rs")
 }
 
-/// True for the extensions the SFC `<script>`-block pre-scan targets (`.vue`/`.svelte`, case-insensitive)
-/// — see `super::collect::Collected::sfc_rels`'s doc. Same "duplicated extension check rather than
-/// threading the dispatch config" convention `is_python_source_ext` documents, with the extra twist that
-/// these files dispatch to `None` by construction (`crate::dispatch` has no `.vue`/`.svelte` arm), so
+/// True for the extensions an import PRE-SCAN targets — see
+/// `super::collect::Collected::prescan_rels`'s doc for what the pre-scan does with them.
+///
+/// The roster is NOT spelled here. It belongs to the crate that decides its own reach
+/// (`zzop_parser_typescript::PRESCAN_IMPORT_HOSTS`, beside the readers that can actually answer "where
+/// does this dialect keep its imports"), and this call site asks it through `prescan_mode`. That is a
+/// DEPARTURE from the "duplicated extension check rather than threading the dispatch config"
+/// convention `is_python_source_ext` documents, and it is deliberate: the duplicate is what went
+/// stale. `.md` joined on 2026-08-20 and `.mdx`/`.astro` on 2026-08-21, each through a different
+/// reader, and a literal here would have kept the pre-scan blind to them while the parser crate
+/// already handled them unchanged.
+///
+/// This predicate deliberately collapses the MODE away — it answers "is this file pre-scanned at
+/// all", which is the only question the collection gate has. Which reader runs is
+/// `extract_prescan_imports`'s business, one layer down, and a mode leaking up to here would be a
+/// second table to keep in step.
+///
+/// These files dispatch to `None` by construction (`crate::dispatch` has no arm for any of them), so
 /// there is no `Language` variant to check against.
-pub(super) fn is_sfc_ext(rel: &str) -> bool {
+pub(super) fn is_prescan_ext(rel: &str) -> bool {
     let Some(ext) = std::path::Path::new(rel)
         .extension()
         .and_then(|e| e.to_str())
     else {
         return false;
     };
-    matches!(ext.to_ascii_lowercase().as_str(), "vue" | "svelte")
+    zzop_parser_typescript::prescan_mode(ext).is_some()
 }
 
 mod rust;

@@ -109,6 +109,7 @@ fn emit_entity(class: Node, rel: &str, src: &str, out: &mut Vec<IoProvide>) {
         return;
     };
     out.push(IoProvide {
+        route_version: None,
         response: None,
         kind: "db-table".to_string(),
         key: format!("table:{}", zzop_core::db_table_channel_casing(&table)),

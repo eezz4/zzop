@@ -10,19 +10,19 @@ export default {
         [
           "h1",
           {
-            ko: "176개를 나열하는 대신,<br>어디에 사는지를 그린다.",
-            en: "176 entries, not listed.<br>Mapped.",
+            ko: "178개를 나열하는 대신,<br>어디에 사는지를 그린다.",
+            en: "178 entries, not listed.<br>Mapped.",
           },
         ],
         [
           "lede",
           {
-            ko: `기본으로 로드되는 것은 팩 <strong>11벌 · DSL 룰 116개</strong>와
-      <strong>네이티브 분석 60개</strong>(단일 트리 33 + 저장소 간 27)다. 원문 사이트는 이걸 176행짜리 표로 싣는다 —
+            ko: `기본으로 로드되는 것은 팩 <strong>11벌 · DSL 룰 118개</strong>와
+      <strong>네이티브 분석 60개</strong>(단일 트리 33 + 저장소 간 27)다. 원문 사이트는 이걸 178행짜리 표로 싣는다 —
       찾을 것이 있을 때는 정확하지만, <em>무엇을 잡는 도구인지</em>는 알려주지 않는다.
       이 페이지는 표가 아니라 지도다.`,
-            en: `The default load is <strong>11 packs · 116 DSL rules</strong> plus
-      <strong>60 native analyses</strong> (33 single-tree + 27 cross-repo). The source site prints all 176 as one
+            en: `The default load is <strong>11 packs · 118 DSL rules</strong> plus
+      <strong>60 native analyses</strong> (33 single-tree + 27 cross-repo). The source site prints all 178 as one
       table — exact when you
       already know what you're looking for, and silent about <em>what kind of tool this is</em>.
       This page is the map, not the table.`,
@@ -62,7 +62,7 @@ export default {
           "vs",
           [
             {
-              k: "<code>security</code> · 49",
+              k: "<code>security</code> · 51",
               v: {
                 ko: `커밋된 시크릿, 인젝션, 약한 암호, 토큰과 CORS 설정 —
             <code>hardcoded-secret</code> · <code>sql-string-concat</code> · <code>weak-password-hash</code> ·
@@ -187,7 +187,7 @@ export default {
           "lenses",
           [
             {
-              h: { ko: "DSL 룰 · 116", en: "DSL rules · 116" },
+              h: { ko: "DSL 룰 · 118", en: "DSL rules · 118" },
               p: {
                 ko: `파일 한 장 안에서 끝난다. 룰마다 matcher 모양을 정확히 하나 고르고, 두 번째 파일의 내용은 볼 수 없다.
           그 대신 JSON 이라 당신이 직접 쓸 수 있다.`,
@@ -465,11 +465,11 @@ export default {
         [
           "note",
           {
-            ko: `176행 전부 — 룰마다의 심각도·matcher·정확히 무엇을 잡는지, 그리고 네이티브 60개의 표 — 는
+            ko: `178행 전부 — 룰마다의 심각도·matcher·정확히 무엇을 잡는지, 그리고 네이티브 60개의 표 — 는
       <a href="https://eezz4.github.io/zzop/rules.html" target="_blank" rel="noreferrer">원문 카탈로그</a>에 있다.
       그 페이지는 레포의 <code>docs/rules/catalog.md</code> 에서 생성되고, 거기 적힌 모든 id 가 엔진이 실제로 로드하는 것과
       같은지는 Rust 메타테스트가 기계로 확인한다 — 카탈로그는 코드와 조용히 어긋날 수 없다.`,
-            en: `All 176 rows — every rule's severity, matcher and exact subject, plus the 60-row native table — live in the
+            en: `All 178 rows — every rule's severity, matcher and exact subject, plus the 60-row native table — live in the
       <a href="https://eezz4.github.io/zzop/rules.html" target="_blank" rel="noreferrer">source catalog</a>. That page
       is generated from <code>docs/rules/catalog.md</code> in the repo, and a Rust meta-test machine-checks that every
       id listed there is one the engine actually loads — the catalog cannot silently drift from the code.`,

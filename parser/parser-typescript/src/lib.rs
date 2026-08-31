@@ -1,14 +1,10 @@
 //! zzop-parser-typescript — native swc TS parser -> Common IR projection (0 N-API crossings). swc types
-//! stay inside this crate (an swc upgrade should never leak into the public IR); only zzop-core types are
-//! exposed.
+//! stay inside this crate (an swc upgrade should never leak into the public IR); only zzop-core types are exposed.
 //!
 //! ## 2-layer layout
-//! - `lang` — swc -> Common-IR LANGUAGE projection: call-graph construction (`calls`) and dependency-path
-//!   resolution (`resolve`). Symbol/import extraction lives in sibling crate-root modules since both `lang` and `adapters`
-//!   depend on it.
+//! - `lang` — swc -> Common-IR LANGUAGE projection: call-graph construction (`calls`) and dependency-path resolution (`resolve`). Symbol/import extraction lives in sibling crate-root modules since both `lang` and `adapters` depend on it.
 //! - `adapters` — framework-vocabulary producers emitting `IoConsume`/`IoProvide`/fragment IR. WHICH
-//!   frameworks is not restated here — [`FRAMEWORK_RECOGNIZERS`] below is the machine-verified list
-//!   (engine test `rule_contracts::recognizer_channels`); the prose copy had drifted to 5 against 18.
+//!   frameworks is not restated here — [`FRAMEWORK_RECOGNIZERS`] below is the machine-verified list (engine test `rule_contracts::recognizer_channels`); the prose copy had drifted to 5 against 18.
 
 pub mod adapters;
 mod asset_refs;
@@ -19,13 +15,16 @@ mod cjs_exports;
 mod cjs_require;
 mod dead_export_facts;
 mod export_aliases;
+mod exported_names;
 mod factory;
 mod function_spans;
 mod ident_refs;
 mod imports;
 pub mod lang;
 mod loop_spans;
+mod nuxt_config;
 mod parse;
+mod prescan;
 mod project;
 mod re_exports;
 mod sfc_imports;
@@ -70,13 +69,13 @@ pub use adapters::typeorm_repository::extract_typeorm_repository_consumes;
 pub use adapters::wrapper_calls::extract_wrapper_fragments;
 pub use lang::calls::parse_calls;
 pub use lang::resolve::{
-    build_dep, build_dep_with_workspace, match_workspace_pkg, resolve_file,
-    resolve_file_with_workspace, try_ext, TsconfigPaths, WorkspacePkg, RESOLVE_EXTS,
+    build_dep, build_dep_with_workspace, build_dep_with_workspace_candidates, match_workspace_pkg,
+    resolve_file, resolve_file_with_workspace, try_ext, TsconfigPaths, WorkspacePkg,
+    NUXT_CONFIG_FILES, RESOLVE_EXTS,
 };
-pub use lang::write_site::write_sites_for_symbol_with_vocab;
 pub use lang::write_site::{
-    write_sites_for_symbol, CompiledWriteSiteVocab, WriteSiteVocab, DEFAULT_ORM_RECEIVER_PATTERN,
-    DEFAULT_WRITE_METHODS,
+    write_sites_for_symbol, write_sites_for_symbol_with_vocab, CompiledWriteSiteVocab,
+    WriteSiteVocab, DEFAULT_ORM_RECEIVER_PATTERN, DEFAULT_WRITE_METHODS,
 };
 
 pub use asset_refs::parse_asset_refs;
@@ -86,15 +85,18 @@ pub use asset_refs::parse_asset_refs;
 // same one either way.
 pub use call_sites::{extract_call_sites, CONSOLE_WRITE_METHODS};
 pub use dead_export_facts::{parse_dead_export_facts, DeadExportFacts};
+pub use exported_names::parse_exported_names;
 pub use function_spans::extract_function_spans;
 pub use ident_refs::parse_local_identifier_refs;
 pub use imports::parse_imports;
 pub use loop_spans::extract_loop_spans;
+pub use nuxt_config::parse_nuxt_imports_dirs;
 pub(crate) use parse::{line_of, parse_module, parse_with_cm};
 pub use parse::{parse_count, parse_ok, reset_parse_count};
+pub use prescan::{extract_prescan_imports, prescan_mode, PrescanMode, PRESCAN_IMPORT_HOSTS};
 pub use project::{build_common_ir, count_loc};
 pub use re_exports::{parse_dynamic_imports, parse_re_exports};
-pub use sfc_imports::extract_sfc_script_imports;
+pub use sfc_imports::{extract_sfc_script_imports, is_sfc_script_host, SFC_SCRIPT_HOST_EXTENSIONS};
 pub use signature_refs::parse_exported_signature_names;
 pub use string_literals::extract_string_literals;
 pub use symbols::{parse_symbols, parse_symbols_with_vocab};
@@ -154,146 +156,5 @@ pub const ARRAY_ITERATION_METHODS: &[&str] = &[
     "findIndex",
 ];
 
-use zzop_core::recognizer::{channel, FrameworkRecognizer};
-
-/// Frameworks this parser recognizes — see [`zzop_core::recognizer`] for what a declaration does and
-/// does not claim.
-///
-/// This is the longest list in the workspace, and the reason is worth stating so it is not read as a
-/// coverage target: roughly half of these have NO counterpart in another ecosystem (tRPC, Next.js
-/// route files, Hono, Nest decorators are TypeScript-shaped). "Recognizer parity with TypeScript" is
-/// therefore not a goal for any other parser — the goal is layer-2 population coverage per ecosystem
-/// (`parser-expansion.md` §0), and the populations differ.
-///
-/// Several adapter MODULES are deliberately absent here because they are mechanisms rather than
-/// frameworks — `class_shapes`, `wrapper_calls`, `global_prefix` and the `client_base` pair refine or
-/// resolve what the framework rows above already found, and declaring them would answer "does zzop
-/// know my stack" with our own module names. `pathname_dispatch` used to be listed in that sentence
-/// and was moved OUT of it on 2026-08-01: it recognizes framework-less servers on its own evidence and
-/// emits its own provides, so calling it a mechanism was simply wrong (see its row below).
-pub const FRAMEWORK_RECOGNIZERS: &[FrameworkRecognizer] = &[
-    FrameworkRecognizer {
-        framework: "express",
-        extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
-        emits: &[channel::PROVIDES],
-    },
-    FrameworkRecognizer {
-        framework: "nestjs",
-        extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
-        emits: &[channel::PROVIDES],
-    },
-    // Nest fills the auth-evidence channel twice over: `controller_decorators`' `@UseGuards` lines and
-    // `nest_middleware`'s `forRoutes` patterns both feed the decorator-guard side channel that exempts
-    // routes from `mutating-route-no-auth` — guard evidence, not io. Express/hono deliberately do NOT
-    // carry this row: their guard words ride INSIDE the mount fragments and surface as `auth-guarded`
-    // attributes on their own `io.provides` at compose time, not as a separate side channel.
-    FrameworkRecognizer {
-        framework: "nestjs",
-        extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
-        emits: &[channel::AUTH_EVIDENCE],
-    },
-    FrameworkRecognizer {
-        framework: "next.js",
-        extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
-        emits: &[channel::PROVIDES],
-    },
-    // Framework-LESS servers that route by comparing `url.pathname` against string literals — raw
-    // Cloudflare Workers, Node `http.createServer`, Deno/Bun `serve` (`pathname_dispatch`). The row is
-    // spelled after the SHAPE rather than after a package because there is no package to name: the
-    // honest claim is "a server that dispatches on `url.pathname` is recognized". Until 2026-08-01 this
-    // module was carried as a `NOT_A_FRAMEWORK` exemption reading "route-shape heuristic shared by
-    // several framework rows", which was false in both halves — no other row consumes it, and it mints
-    // its own `io.provides` from its own per-function evidence gates.
-    FrameworkRecognizer {
-        framework: "pathname dispatch",
-        extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
-        emits: &[channel::PROVIDES],
-    },
-    // Hono fills BOTH sides of the join, and until 2026-08-01 this list said it filled one. The
-    // provide side is `router_mounts`' `new Hono()` / `: Hono` receiver vocabulary, whose verb and
-    // mount fragments the engine composes into `http` provides (`compose_router_mount_provides`); the
-    // consume side is `hono_client`'s typed RPC calls. Worth naming what this was: `emits` exists
-    // precisely so a parser cannot look whole while filling half a join, and this was the FIRST wrong
-    // answer the field itself produced — the mechanism that catches an under-claiming PARSER does not
-    // catch an under-claiming ROW, because nothing binds a row's channel set to the modules behind it.
-    FrameworkRecognizer {
-        framework: "hono",
-        extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
-        emits: &[channel::PROVIDES],
-    },
-    FrameworkRecognizer {
-        framework: "hono",
-        extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
-        emits: &[channel::CONSUMES],
-    },
-    FrameworkRecognizer {
-        framework: "trpc",
-        extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
-        emits: &[channel::PROVIDES],
-    },
-    FrameworkRecognizer {
-        framework: "trpc",
-        extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
-        emits: &[channel::CONSUMES],
-    },
-    FrameworkRecognizer {
-        framework: "typeorm",
-        extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
-        emits: &[channel::DB],
-    },
-    FrameworkRecognizer {
-        framework: "prisma client",
-        extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
-        emits: &[channel::DB],
-    },
-    FrameworkRecognizer {
-        framework: "raw sql",
-        extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
-        emits: &[channel::DB],
-    },
-    FrameworkRecognizer {
-        framework: "axios",
-        extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
-        emits: &[channel::CONSUMES],
-    },
-    FrameworkRecognizer {
-        framework: "fetch",
-        extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
-        emits: &[channel::CONSUMES],
-    },
-    // `ky` and `$fetch` were MISSING from this list until 2026-08-01, which made the disclosure
-    // understate what this build knows — the opposite drift direction from the one
-    // `rule_contracts::recognizer_drift` catches, and invisible to it: that guard binds MODULES to
-    // rows, and both of these live inside the already-declared `egress` module. The residual is
-    // therefore known and stated rather than guessed at: a module's row set is guarded, the client
-    // VOCABULARY inside one is not, so widening `egress/matchers.rs` needs a row added here by hand.
-    FrameworkRecognizer {
-        framework: "ky",
-        extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
-        emits: &[channel::CONSUMES],
-    },
-    FrameworkRecognizer {
-        framework: "$fetch",
-        extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
-        emits: &[channel::CONSUMES],
-    },
-    // The rest of that same residual, paid down 2026-08-01: `egress/angular.rs` and
-    // `egress/generated_client.rs` are two more client recognizers living inside the declared `egress`
-    // module, and neither had a row. `angular` is the dependency-injected `HttpClient` idiom, hard-gated
-    // on the file importing `@angular/common/http`; the generated row covers the three openapi codegen
-    // families whose call sites carry the URL as a request-descriptor PROPERTY rather than an argument
-    // (swagger-typescript-api's `.request({ path, method })`, openapi-typescript-codegen's
-    // `__request(OpenAPI, { url, method })`, `@hey-api/openapi-ts`'s `.get({ url })`). Both tag their
-    // consumes with their own `IoConsume::client` value (`"angular"`, `"generated"`), which is the same
-    // vocabulary a reader of this list is asking about.
-    FrameworkRecognizer {
-        framework: "angular",
-        extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
-        emits: &[channel::CONSUMES],
-    },
-    FrameworkRecognizer {
-        framework: "openapi generated client",
-        extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
-        emits: &[channel::CONSUMES],
-    },
-];
+mod framework_recognizers;
+pub use framework_recognizers::FRAMEWORK_RECOGNIZERS;

@@ -13,6 +13,7 @@ import * as dbUnawaitedWrite from './lib/db.unawaited-write.decoy';
 import * as dbUpdateDeleteNoWhere from './lib/db.update-delete-no-where.decoy';
 import * as deadDynamicLoader from './lib/dead.dynamic-loader';
 import * as egressMixedContent from './lib/egress.http-url-literal.decoy';
+import * as redisFlushallInCode from './lib/redis.flushall-in-code.decoy';
 import * as reexports from './lib/reexports';
 import * as reliabilityBodyLimitMissing from './lib/reliability.body-limit-missing.decoy';
 import * as reliabilityConsoleInLoop from './lib/reliability.console-in-loop.decoy';
@@ -20,6 +21,7 @@ import * as reliabilityIntervalNoClear from './lib/reliability.interval-no-clear
 import * as securityApiKeyInUrl from './lib/security.api-key-in-url.decoy';
 import * as securityConnStringCredentials from './lib/security.conn-string-credentials.decoy';
 import * as securityCorsWildcard from './lib/security.cors-wildcard.decoy';
+import * as securityDangerousHtmlConcat from './lib/security.dangerous-html-concat.decoy';
 import * as securityEvalDynamicCode from './lib/security.eval-dynamic-code.decoy';
 import * as securityHardcodedSecret from './lib/security.hardcoded-secret.decoy';
 import * as securityHighEntropySecret from './lib/security.high-entropy-secret.decoy';
@@ -51,6 +53,7 @@ export const registry = {
   dbUpdateDeleteNoWhere,
   deadDynamicLoader,
   egressMixedContent,
+  redisFlushallInCode,
   reexports,
   reliabilityBodyLimitMissing,
   reliabilityConsoleInLoop,
@@ -58,6 +61,7 @@ export const registry = {
   securityApiKeyInUrl,
   securityConnStringCredentials,
   securityCorsWildcard,
+  securityDangerousHtmlConcat,
   securityEvalDynamicCode,
   securityHardcodedSecret,
   securityHighEntropySecret,

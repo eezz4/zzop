@@ -38,45 +38,11 @@
 use serde_json::{json, Map, Value};
 
 mod blind_spots;
+mod dispatch_meaning;
+mod io_channels;
 mod join_visibility;
 mod recognizers;
-
-/// One sentence per dispatch class (plus the per-row `inDepGraph` derived count), shipped in the
-/// reply so the vocabulary is self-describing — the same discipline as `query_file`'s
-/// `verdictMeaning`, sharing its semantics: `structural` here is `analyzed` there, per file.
-fn legend() -> Value {
-    json!({
-        "structural": "a structural projection exists (symbols and/or dep-graph membership) — the \
-                       dispatch class that rules needing structure run on. NOT a per-rule claim: \
-                       which declared rules still lack their evidence channel on this tree is \
-                       `blindSpots`' axis, so read an empty findings list against that list, not as \
-                       clean outright",
-        "lexicalOnly": "walked and line-scanned only — no parser in this build claims the extension, \
-                        so everything needing symbols, imports or io facts was never evaluated; an \
-                        empty findings list does NOT mean clean",
-        "degraded": "a parser tried and bailed (syntax error or over sizeCap) — text rules ran, \
-                     structural ones did not",
-        "inDepGraph": "files of this extension contributing at least one RESOLVED outgoing import \
-                       edge (a non-empty source entry in the dep graph). A LOW count against `files` \
-                       on a structural extension is the import-resolution blindness signal: the \
-                       files were parsed, but their imports did not resolve to in-tree files. NOT a \
-                       declared-imports count — the dep graph carries only resolved edges; the \
-                       declared side is `declaredImports`' axis, so read the two together",
-        "declaredImports": "sum over this extension's parsed files of each file's DISTINCT declared \
-                            import specifiers (import/use/using bindings, re-exports, dynamic \
-                            import()), counted BEFORE resolution — package imports and specifiers \
-                            no resolver could map are still in it, so `declaredImports` high with \
-                            `inDepGraph` low is the import-resolution blindness signal read directly. \
-                            NOT 1:1 with the census's `resolvedImportEdges`: a declaration is a \
-                            specifier and an edge is a resolved (importer, file) pair — several \
-                            specifiers can land on one file, and one glob import can fan out to \
-                            several edges. `null` means NEVER MEASURED for this extension (its \
-                            parser projects no import channel — e.g. prisma/sql — or the tree was \
-                            ingested as a Mode A envelope, which measures nothing here): absence of \
-                            data, not 0. A degraded file counts 0 declared — read the row's \
-                            `degraded` column beside it"
-    })
-}
+mod unread;
 
 /// Answers over an `analyzeTrees` output. No query parameters: the whole point is the aggregate view,
 /// and a caller wanting one file has `queryFile`.
@@ -100,8 +66,9 @@ pub fn query_coverage_json(analysis_json: &str) -> Result<String, String> {
         "trees".to_string(),
         Value::Array(trees.iter().map(|t| tree_view(t, &sightlines)).collect()),
     );
-    out.insert("dispatchMeaning".to_string(), legend());
+    out.insert("dispatchMeaning".to_string(), dispatch_meaning::legend());
     out.insert("blindSpotMeaning".to_string(), blind_spots::legend());
+    out.insert("unreadExtensionMeaning".to_string(), unread::legend());
     // The other CAPABILITY table this build carries, and until now the one with no user surface at
     // all: which frameworks the compiled-in parsers recognize, channel by channel. Top-level and
     // UNCROSSED with any tree, deliberately — it is a fact of the code (true before any tree is
@@ -155,6 +122,18 @@ fn tree_view(tree: &Value, sightlines: &[zzop_core::RuleSightline]) -> Value {
     if let Some(dep) = dep {
         structural.extend(dep.keys().map(String::as_str));
     }
+    // The THIRD projection channel, and the one this set omitted until 2026-08-20: io facts. A parser
+    // frontend that projects neither symbols nor dep edges is not hypothetical — `zzop-parser-sql` is
+    // exactly that by design (`dispatch.rs`: "`db-table` io PROVIDEs only ... no symbols/imports
+    // project for `.sql`"), and `Prisma` shares the shape. The cost was measured on macrozheng/mall:
+    // `{"ext":"sql","files":1,"structural":0,"lexicalOnly":1}` next to a census reading
+    // `parserDispatched: 525` (524 java + that file) and all 76 of the run's `db-table` provides
+    // coming out of it, while `zzop version --verbose` advertised the frontend that read it. A reader
+    // auditing coverage concluded the file was never parsed; it was parsed, and every fact it yielded
+    // is in this same reply. `lexicalOnly`'s own legend promises "no parser in this build claims the
+    // extension", which was false for that row — the honest fix is to count the channel, not to
+    // reword the promise.
+    extend_with_io_files(&mut structural, tree.pointer("/output/ir/io"));
 
     // Fetched before the extension table below, which reads its `declaredImportsByExt` half (F4);
     // forwarded verbatim as the `census` field further down, exactly as before.
@@ -209,12 +188,18 @@ fn tree_view(tree: &Value, sightlines: &[zzop_core::RuleSightline]) -> Value {
                                                .unwrap_or(Value::Null) })
         })
         .collect();
-    // The extensions with 1+ structural file — the measured half of the `blindSpots` cross.
-    let structural_exts: std::collections::BTreeSet<String> = by_ext
+    // The extensions with 1+ structural file — the measured half of the `blindSpots` cross, and
+    // (with their file counts) of `ioChannels`' `zeroExtraction` cross.
+    let structural_by_ext: std::collections::BTreeMap<String, usize> = by_ext
         .iter()
         .filter(|(_, counts)| counts.1 > 0)
-        .map(|(ext, _)| ext.clone())
+        .map(|(ext, counts)| (ext.clone(), counts.1))
         .collect();
+    let structural_exts: std::collections::BTreeSet<String> =
+        structural_by_ext.keys().cloned().collect();
+
+    // Bound before the view so `blindSpotBasis` names the exclusion off the very list it emits.
+    let unread = unread::extensions(by_ext.iter().map(|(e, c)| (e.as_str(), c.0, c.1)));
 
     let join_zero = census
         .get("joinContributionZero")
@@ -224,9 +209,10 @@ fn tree_view(tree: &Value, sightlines: &[zzop_core::RuleSightline]) -> Value {
         "sourceId": tree.get("sourceId").cloned().unwrap_or(Value::Null),
         "extensions": extensions,
         "blindSpots": blind_spots::blind_spots(sightlines, &structural_exts),
-        // What the cross above was computed FROM (derived at emit time) — without it an empty
-        // `blindSpots` reads the same for "crossed, nothing blind" and "no structural input at all".
-        "blindSpotBasis": blind_spots::basis(sightlines.len(), structural_exts.len()),
+        // What the cross was computed from AND what it excluded — see `blind_spots::basis`.
+        "blindSpotBasis": blind_spots::basis(sightlines.len(), structural_exts.len(), &unread),
+        // The excluded population itself: principal filetypes no structural parser read.
+        "unreadExtensions": unread,
         // The tree's own engine self-reports, forwarded verbatim — the same field `zzop facts`
         // carries. The framework-silence warnings (e.g. the call-graph coverage gap naming
         // mutating-route-no-auth) live HERE, not in any sightline declaration: that gap is
@@ -246,6 +232,12 @@ fn tree_view(tree: &Value, sightlines: &[zzop_core::RuleSightline]) -> Value {
         // join-blind. The reword makes the sentence true in both worlds: it names WHAT the overlay
         // must contribute, so it can never read as "add any overlay".
         "joinVisibility": join_visibility::join_visibility(&census, join_zero),
+        // The per-CHANNEL view `joinVisibility` above and the census's `joinContributionZero` both
+        // structurally cannot give: those two ask ONE question of the whole io contribution, so a
+        // full channel vouches for an empty one (measured on gogs — 12 db-table provides, 0 http
+        // routes, "contributed joinable io"). It also carries the zero-extraction cross that names
+        // an empty channel by LANGUAGE instead of by recognized framework name. See `io_channels`.
+        "ioChannels": io_channels::io_channels(tree, &structural_by_ext),
     });
     // CONDITIONAL by the same convention as `query_file`'s `otherTrees`: this surface's always-present
     // norm exists for fields whose ABSENCE would be ambiguous, and an absent `walkNote` is not — it can
@@ -264,6 +256,28 @@ fn tree_view(tree: &Value, sightlines: &[zzop_core::RuleSightline]) -> Value {
     view
 }
 
+/// Adds every file named by an `ir.io` provide or consume to `set`. Split out because BOTH extension
+/// bucketings — this module's and `zzop_summary`'s `coverageGaps`, which its own doc pins as this one's
+/// arm-for-arm mirror — must fold the same three channels in, and a channel added to one and not the
+/// other is how the two surfaces come to disagree about the same file.
+///
+/// A `null`/absent `io` block (an older shape, or an envelope run that measured none) contributes
+/// nothing rather than erroring: absence of the channel is not evidence about any file.
+fn extend_with_io_files<'a>(set: &mut std::collections::HashSet<&'a str>, io: Option<&'a Value>) {
+    let Some(io) = io.and_then(Value::as_object) else {
+        return;
+    };
+    for side in ["provides", "consumes"] {
+        let Some(rows) = io.get(side).and_then(Value::as_array) else {
+            continue;
+        };
+        set.extend(
+            rows.iter()
+                .filter_map(|r| r.get("file").and_then(Value::as_str)),
+        );
+    }
+}
+
 /// Lowercased tail after the last `.` of the last path segment; whole name (lowercased) when there is
 /// no dot, so `Makefile` groups as `makefile` rather than vanishing into an empty key. MIRROR of the
 /// engine census's `ext_of` (`crates/engine/src/analyze/assemble/declared.rs`) — the two must agree
@@ -271,11 +285,10 @@ fn tree_view(tree: &Value, sightlines: &[zzop_core::RuleSightline]) -> Value {
 /// `null` ("never measured") cell. The end-to-end pin in `tests.rs` is what crosses the two halves;
 /// every other F4 test authors one side's fixture by hand.
 fn ext_of(rel: &str) -> String {
-    let base = rel.rsplit('/').next().unwrap_or(rel);
-    match base.rsplit_once('.') {
-        Some((_, ext)) if !ext.is_empty() => ext.to_ascii_lowercase(),
-        _ => base.to_ascii_lowercase(),
-    }
+    // Delegated rather than copied: this lane and the engine's zero-extraction cross key the SAME rows
+    // by extension, and the cross moved into the engine while this key stayed here — which is exactly
+    // the drift the cross's own module doc was written to prevent, reintroduced one function below it.
+    zzop_engine::zero_extraction::ext_of(rel)
 }
 
 #[cfg(test)]

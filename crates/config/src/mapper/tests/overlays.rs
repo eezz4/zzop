@@ -326,7 +326,7 @@ fn retired_presentation_keys_warn_as_removed_and_stay_unforwarded() {
     .unwrap();
 
     for (key, remedy) in [
-        ("failOn", "gate a build by reading the severities"),
+        ("failOn", "A host option does gate now"),
         ("format", "emits JSON and only JSON"),
         ("report", "no zzop binary writes report files"),
     ] {

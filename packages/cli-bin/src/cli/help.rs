@@ -21,7 +21,7 @@ fn elaborations() -> Vec<(&'static str, String)> {
         ),
         (
             "analyze-envelope",
-            "analyze-envelope <envelope.json> — Mode A: a Normalized-AST envelope file REPLACES native parsing, print the same JSON findings summary. The envelope FILE's own directory is searched for a zzop.config.jsonc, the same discovery `analyze <path>` makes at a tree root, and that config's `vocabulary` block is applied — the only key an envelope run can use, since every other one configures a tree walk this lane never performs. Applying it is reported in the reply's `configWarnings`; with no such file beside the envelope the run judges by zzop's built-in convention vocabulary, which cannot know what THIS project calls its own guards".to_string(),
+            "analyze-envelope <envelope.json> — Mode A: a Normalized-AST envelope file REPLACES native parsing, print the same JSON findings summary. The envelope FILE's own directory is searched for a zzop.config.jsonc, the same discovery `analyze <path>` makes at a tree root, and that config's `vocabulary` block and rule-pack selection (`packs.extraDirs`, `packs.disabled`, `packs.only`) are applied — the keys an envelope run can use, since every other one configures a tree walk this lane never performs. The pack axis matters most here: every bundled rule targets zzop's own native filetypes, so an envelope for a language zzop has no parser for gets DSL findings only from a pack that targets ITS extension — declare the directory, or drop the pack in `zzop/rules/` beside the config and it is discovered with no declaration. Applying the config is reported in the reply's `configWarnings`; with no such file beside the envelope the run judges by zzop's built-in convention vocabulary, which cannot know what THIS project calls its own guards".to_string(),
         ),
         (
             "validate-envelope",
@@ -33,7 +33,7 @@ fn elaborations() -> Vec<(&'static str, String)> {
         ),
         (
             "cross",
-            "cross <path>... | cross --config <path> — analyze 2+ trees, print the cross-layer join".to_string(),
+            "cross <path> <path>... (2+ paths) | cross --config <path> — analyze 2+ trees, print the cross-layer join".to_string(),
         ),
         (
             "file",
@@ -45,7 +45,7 @@ fn elaborations() -> Vec<(&'static str, String)> {
         ),
         (
             "manifest",
-            "manifest <path>... | manifest --config <path> — print the run's STRUCTURAL CONTRACT MANIFEST (identity only: provides/edges/bucket membership, no file or line). Commit it, then compare a later run with `diff`".to_string(),
+            "manifest <path> <path>... (2+ paths) | manifest --config <path> — print the run's STRUCTURAL CONTRACT MANIFEST (identity only: provides/edges/bucket membership, no file or line). Commit it, then compare a later run with `zzop diff`. Like `zzop cross`, it is a CROSS-TREE contract: a single-tree config is refused too, so there is no one-tree manifest to name — use `zzop facts`/`zzop coverage` for a single tree".to_string(),
         ),
         (
             "diff",
@@ -57,7 +57,7 @@ fn elaborations() -> Vec<(&'static str, String)> {
         ),
         (
             "coverage",
-            "coverage <path>... | coverage --config <path> — the AGGREGATE-VISIBILITY view: \"how much of this tree does zzop actually see?\" Per tree, an extension-by-dispatch table (structural / lexical-only / degraded, plus inDepGraph — files of the extension with at least one RESOLVED outgoing import edge — and declaredImports, the pre-resolution declared-specifier denominator (null = never measured, e.g. a prisma/sql row), so declared-but-unresolved import blindness reads off one row; each field's meaning shipped in the reply as dispatchMeaning), blindSpots — the CAPABILITY axis: per-rule evidence blind spots derived from the compiled-in sightline declarations crossed with the tree's structural extensions, with blindSpotBasis saying what was crossed — the tree's own engine warnings forwarded verbatim (the framework-silence self-reports ride there), the coverage census, and joinVisibility — the tree's own io contribution as COUNTS (provides, consumesKeyed, consumesUnresolved) plus a meaning saying what a key does and does not prove; no rate is derived for you, because 1-of-1 and 400-of-440 are not the same evidence and a quotient hides which one you hold. DELIBERATELY NO SINGLE SCORE: axes zzop never measured on your tree (recall) ride in an unmeasured FIELD instead of being folded into a number that would get quoted without them".to_string(),
+            "coverage <path>... | coverage --config <path> — the AGGREGATE-VISIBILITY view: \"how much of this tree does zzop actually see?\" Per tree, an extension-by-dispatch table (structural / lexical-only / degraded, plus inDepGraph — files of the extension with at least one RESOLVED outgoing import edge — and declaredImports, the pre-resolution declared-specifier denominator (null = never measured, e.g. a prisma/sql row), so declared-but-unresolved import blindness reads off one row; each field's meaning shipped in the reply as dispatchMeaning), blindSpots — the CAPABILITY axis: per-rule evidence blind spots derived from the compiled-in sightline declarations crossed with the tree's structural extensions, with blindSpotBasis saying what was crossed AND what it excluded — unreadExtensions, the principal filetypes no structural parser read, which is the population that cross cannot contain by construction (a language with no parser never becomes a structural extension, so the largest blind spot is the one that vanishes from the list) — ioChannels, whose extracted rows carry one entry per read io kind PRESENT EVEN AT ZERO, so a filled channel cannot vouch for an empty one, and whose zeroExtraction rows name each (channel, extension) this build declares a route/table recognizer for and got zero from, restricted to extensions that are a principal share of what this run read structurally so a rounding-error filetype is ABSENT from the list rather than cleared by it, and keyed on the tree's own extension mix rather than on recognizing a framework by name — the tree's own engine warnings forwarded verbatim (the framework-silence self-reports ride there), the coverage census, and joinVisibility — the tree's own io contribution as COUNTS (provides, consumesKeyed, consumesUnresolved) plus a meaning saying what a key does and does not prove; no rate is derived for you, because 1-of-1 and 400-of-440 are not the same evidence and a quotient hides which one you hold. DELIBERATELY NO SINGLE SCORE: axes zzop never measured on your tree (recall) ride in an unmeasured FIELD instead of being folded into a number that would get quoted without them".to_string(),
         ),
         (
             "graph",
@@ -97,13 +97,53 @@ fn elaborations() -> Vec<(&'static str, String)> {
 
 /// The three findings-view knobs, appended to the elaboration of every subcommand that takes them.
 /// One string, referenced from the table rather than repeated into it, so the three lanes cannot drift.
-const FILTER_KNOBS: &str = "  Findings-view knobs (the argv spelling of the same arguments the MCP tool twin takes): --severity <critical|warning|info> (minimum severity in the LIST; counts always cover everything), --rule <id>, --limit <n> (list cap; 0 = counts only).
-  Run knob: --profile-rules adds a `ruleTimings` report (per-rule wall-clock, cost-descending) to the reply. CLI-only — it has no MCP tool twin, because a timing report is a question about a local run rather than an answer about the code, and no zzop.config.jsonc key, because a config declares what is true about the PROJECT while this asks about ONE INVOCATION. On analyze-envelope the report times the envelope lane's own rule classes (symbol-scan/io-scan DSL rules plus the whole-graph analyses that run in Mode A). Cache hits contribute no timing, so profile against a cold cache; the report says so itself and carries the cache counts that prove it.";
+const FILTER_KNOBS: &str = "  Findings-view knobs (the argv spelling of the same arguments the MCP tool twin takes): --severity <critical|warning|info> (minimum severity in the LIST; counts always cover everything), --rule <id> (a full <pack>/<rule> id, or a bare rule id when it is unambiguous — the same forms `explain` takes, through the same lookup; an id that can be proven to match no rule this run could report is a usage error, exit 2, never a silent empty result), --limit <n> (list cap; 0 = counts only).
+  Run knob: --profile-rules adds a `ruleTimings` report (per-rule wall-clock, cost-descending) to the reply. CLI-only — it has no MCP tool twin, because a timing report is a question about a local run rather than an answer about the code, and no zzop.config.jsonc key, because a config declares what is true about the PROJECT while this asks about ONE INVOCATION. On analyze-envelope the report times the envelope lane's own rule classes (symbol-scan/io-scan DSL rules plus the whole-graph analyses that run in Mode A). Cache hits contribute no timing, so profile against a cold cache; the report says so itself and carries the cache counts that prove it.
+  CI gate: --fail-on <critical|warning|info> moves the EXIT CODE with the findings — exit 3 when any finding sits at or above that severity, 0 when none does; the reply still goes to stdout in full and one line naming the counts goes to stderr. 3 rather than 1 on purpose: 1 already means \"zzop could not answer\", and a CI log has to tell a broken config apart from a real critical. It reads the COUNTS, so --severity/--rule/--limit narrow the view you print without narrowing the gate — all three, which is why `--rule <one id> --fail-on critical` still fails on a critical from some OTHER rule. A --rule id proven to match nothing outranks this gate: that refusal exits 2, because a threshold applied to a view that cannot be what it claims proves nothing. CLI-only (an MCP tool call has no exit code to move), and no zzop.config.jsonc key (a config declares what is true about the PROJECT; which findings should break THIS pipeline is the pipeline's decision). Refused on cross rather than ignored — that reply has no per-tree severity census, so gate each tree with analyze --fail-on.";
 
 /// Which subcommands take [`FILTER_KNOBS`] — exactly the analysis lanes whose MCP twin tool declares
 /// `severity`/`rule`/`limit` in its input schema (`analyze_repo`, `analyze_envelope`, `cross_repo`).
 /// Kept as a list rather than a per-row flag so the parity statement above is readable in one place.
 const FILTERED_SUBCOMMANDS: [&str; 3] = ["analyze", "analyze-envelope", "cross"];
+
+/// The one-line stand-in [`print_help`] prints under each filtered subcommand, in place of the whole
+/// [`FILTER_KNOBS`] block that lane now prints ONCE at the end.
+///
+/// # Why a pointer rather than the block
+/// The whole-list lane used to print [`FILTER_KNOBS`] three times, byte for byte: 3 × 2,239 characters
+/// of a 17,750-character document, so a quarter of `zzop help` was spent saying the same thing twice
+/// more. The single-subcommand lane ([`subcommand_help`]) is untouched and still prints the block in
+/// full — one subcommand answering alone has no repetition to remove.
+///
+/// # Why it still spells every knob out
+/// Folding the block away must not cost REACHABILITY: a reader who stops at the `cross` entry has to
+/// leave knowing `--fail-on` exists. So this line NAMES all five flags; only their behaviour moved.
+/// It deliberately does not claim which of them a given subcommand accepts — `cross --fail-on` is
+/// refused rather than ignored, and [`crate::cli::fail_on`] owns that refusal. A second owner here is
+/// how a help line starts contradicting the binary it describes.
+///
+/// Interpolating `sub` is load-bearing rather than decorative: it is what keeps the three pointers from
+/// being byte-identical lines, i.e. from reintroducing in miniature the duplication this removes.
+fn knobs_pointer(sub: &str) -> String {
+    format!(
+        "  ^ zzop {sub} also reads the SHARED KNOBS block printed once at the end of this help: \
+         --severity, --rule, --limit (findings view), --profile-rules (run), --fail-on (CI gate). \
+         That block says what each one does, and where one of them is refused rather than ignored."
+    )
+}
+
+/// The heading that introduces the single [`FILTER_KNOBS`] printing, naming its subjects so the block
+/// does not sit at the end of the document with nothing saying who it is about.
+///
+/// Derived from [`FILTERED_SUBCOMMANDS`] rather than hand-spelled: that list is already the one owner
+/// of "who takes these knobs", and a hand-copied sentence here is the drift this file keeps refusing.
+fn shared_knobs_heading() -> String {
+    format!(
+        "  SHARED KNOBS — the block below applies to: {}. It is printed once for all of them; each \
+         subcommand's own --help prints it inline instead.",
+        FILTERED_SUBCOMMANDS.join(", ")
+    )
+}
 
 /// The polite lane: an explicit help REQUEST prints the usage line + one elaboration per subcommand to
 /// stdout, exit 0. The exit-2 stderr lane stays a bare usage line + `BARE_INVOCATION_HINT` — an error
@@ -119,9 +159,12 @@ pub fn print_help() {
     for (name, text) in elaborations() {
         println!("  {text}");
         if FILTERED_SUBCOMMANDS.contains(&name) {
-            println!("{FILTER_KNOBS}");
+            println!("{}", knobs_pointer(name));
         }
     }
+    // ONCE, after the list, rather than once per filtered subcommand. See `knobs_pointer`.
+    println!("{}", shared_knobs_heading());
+    println!("{FILTER_KNOBS}");
     println!(
         "  (every subcommand also takes --help/-h for just its own line; the MCP server is the sibling 'zzop-mcp' binary — it speaks JSON-RPC over stdio, not a 'zzop' subcommand)"
     );

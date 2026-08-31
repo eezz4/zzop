@@ -1,3 +1,4 @@
+use super::types::{ANALYSIS_DARK, EXTRACTION_BLIND, INPUT_CONFIG, TRUST_CALIBRATION};
 use super::*;
 use std::collections::BTreeSet;
 
@@ -7,19 +8,53 @@ use std::collections::BTreeSet;
 /// `notYetDetected` promoted to `asserted` before the detection actually ships) MUST fail the gate
 /// rather than pass silently. Adding/renaming/removing a class, or changing any status, fails here —
 /// update this table deliberately, in lock-step with the real shipped detection.
+///
+/// WHAT THIS PIN IS DESIGNED TO MISS, written here so its green is never cited as coverage: both sides
+/// of every row are authored by hand, so it proves a status did not CHANGE unnoticed and nothing
+/// whatever about whether the status is TRUE. A row can name a mechanism that was since narrowed, or
+/// omit one that since shipped, and this table stays green. Measured 2026-08-29, when an outside audit
+/// put a counter-example to each of the six `asserted` rows and three did not survive — every one of
+/// the three sat under this green pin. Exactly one row in the registry has a prose-to-mechanism pin of
+/// its own (`score-population-empty`, whose prose tokens are crossed against the real score population
+/// fields in `crates/metrics/src/scores/meanings/tests.rs`), and that pin's subject set is score keys
+/// by construction, so it can see no other row. The two checks added below are the sliver of the gap
+/// this file can close from inside the registry — a mirrored pair may not disagree about its own
+/// status, and an `asserted` claim may not stand without a written reason. Neither measures FIRING;
+/// that needs a fixture tree shaped like the class, one per class, and is not built.
 const EXPECTED: &[(&str, &str)] = &[
     ("capability-absent-vs-empty", "asserted"),
     ("channel-empty-family-dark", "partial"),
     ("classified-skip", "partial"),
     ("coincidental-match", "asserted"),
     ("config-error", "asserted"),
-    ("consume-side-unextracted", "asserted"),
+    // Demoted asserted -> partial 2026-08-29, the reverse of every other movement in this table, and
+    // the reason is that the row was reading its ASSERTED FACT as if it covered its CLASS.
+    // `coverage.joinContributionZero` really is emitted every run — but its predicate is conjunctive
+    // (files > 0 AND zero provides AND zero keyed consumes), so a tree that publishes routes can never
+    // satisfy it no matter how dark its consume channel goes. Measured on a 717-file Java tree: 322
+    // provides, 0 keyed consumes, `joinContributionZero` false, no warning about the consume side at
+    // all, and two files in the tree driving an http client directly. What remains beside the fact is
+    // three near-zero tree-wide heuristics, which is the definition of `partial`. The mirror row
+    // `provide-side-unextracted` describes the same loss on the other channel, has strictly MORE
+    // machinery for it (a per-FILE gate this side has no twin of) and has said `partial` since it
+    // shipped — so the pair was labelled backwards from its own mechanisms, which is what
+    // `mirrored_channel_rows_carry_the_same_status` below now refuses.
+    ("consume-side-unextracted", "partial"),
     ("generated-client-unrecognized", "partial"),
     ("input-scope-error", "partial"),
     ("join-bucket-unfiltered", "notYetDetected"),
     ("key-mismatch-drift", "partial"),
     ("language-unparsed", "partial"),
-    ("overlay-facts-unverified", "notYetDetected"),
+    // Promoted notYetDetected -> partial 2026-08-17. Not because the engine can verify an overlay's
+    // facts — it still cannot — but because the reader could not previously tell which facts were an
+    // overlay's AT ALL. Two measured consequences of that: a successful run named the adapter's
+    // `parser` id nowhere, and the framework-silence tripwire went quiet once the overlay supplied
+    // routes, so writing the adapter deleted the warning that asked for one. Every run an overlay
+    // contributed to now names each parser, its counts, and the share of http routes that were declared
+    // rather than extracted, and the tripwires judge on the extracted half. Still `partial`, never
+    // `asserted`: the disclosure is per-RUN, not per-fact — an individual provide still carries no
+    // origin, so a wrong key inside a well-formed overlay is as invisible as before.
+    ("overlay-facts-unverified", "partial"),
     ("provide-side-unextracted", "partial"),
     ("resolution-gap", "asserted"),
     // Promoted notYetDetected -> partial when the call-graph LANGUAGE gap became a real per-run
@@ -51,7 +86,7 @@ const EXPECTED: &[(&str, &str)] = &[
 
 #[test]
 fn registry_matches_the_pinned_id_and_status_map() {
-    let actual: BTreeSet<(&str, &str)> = BLINDNESS_REGISTRY
+    let actual: BTreeSet<(&str, &str)> = blindness_registry()
         .iter()
         .map(|c| (c.id, c.status.as_str()))
         .collect();
@@ -64,7 +99,7 @@ fn registry_matches_the_pinned_id_and_status_map() {
     );
     // No duplicate ids (the BTreeSet would swallow a dup on `id` only if statuses also matched, so
     // check the raw count too).
-    assert_eq!(BLINDNESS_REGISTRY.len(), EXPECTED.len());
+    assert_eq!(blindness_registry().len(), EXPECTED.len());
 }
 
 #[test]
@@ -76,7 +111,7 @@ fn every_group_is_valid_and_all_four_are_represented() {
         TRUST_CALIBRATION,
     ];
     let mut seen: BTreeSet<&str> = BTreeSet::new();
-    for class in BLINDNESS_REGISTRY {
+    for class in blindness_registry() {
         assert!(
             valid.contains(&class.group),
             "unknown group {:?} on {:?}",
@@ -99,7 +134,7 @@ fn every_group_is_valid_and_all_four_are_represented() {
 
 #[test]
 fn status_tokens_are_the_three_known_camel_case_values() {
-    for class in BLINDNESS_REGISTRY {
+    for class in blindness_registry() {
         assert!(
             matches!(
                 class.status.as_str(),
@@ -109,4 +144,126 @@ fn status_tokens_are_the_three_known_camel_case_values() {
             class.status.as_str()
         );
     }
+}
+
+/// RED at `dd4db4d`: **a mirrored pair may not disagree about its own status.**
+///
+/// `consume-side-unextracted` and `provide-side-unextracted` are one question asked on the two sides of
+/// the same join, and they are the only rows in this registry whose ids differ by nothing but that
+/// word. They had drifted to `asserted` / `partial` — and the side carrying the STRONGER label was the
+/// side with the WEAKER mechanism: the provide row had gained a per-FILE gate (a framework-importing
+/// file that contributed no route) while the consume row still rested on a tree-wide conjunction that a
+/// route-serving tree can never satisfy. Nothing noticed, because the pin above compares each row only
+/// with a copy of itself.
+///
+/// The pairing is DERIVED from the ids rather than listed, so a future `consume-side-*`/`provide-side-*`
+/// pair is judged the day it lands. If the two channels genuinely diverge one day — one side really
+/// does gain a mechanism the other lacks — that is a deliberate claim, and it belongs in this test as a
+/// named exception carrying which side is stronger and why, never as a quiet edit to `EXPECTED`.
+#[test]
+fn mirrored_channel_rows_carry_the_same_status() {
+    let by_id: std::collections::BTreeMap<&str, &str> = blindness_registry()
+        .iter()
+        .map(|c| (c.id, c.status.as_str()))
+        .collect();
+
+    let mut pairs = 0usize;
+    for (id, status) in &by_id {
+        if !id.contains("consume") {
+            continue;
+        }
+        let mirror = id.replace("consume", "provide");
+        let Some(mirror_status) = by_id.get(mirror.as_str()) else {
+            continue;
+        };
+        pairs += 1;
+        assert_eq!(
+            status, mirror_status,
+            "`{id}` says {status} while its mirror `{mirror}` says {mirror_status}. These are the same \
+             question on the two sides of one join; a difference here is a claim that one channel is \
+             detected better than the other, which has to be true of the MECHANISMS and stated out \
+             loud, not left as a status drift."
+        );
+    }
+
+    assert!(
+        pairs >= 1,
+        "no mirrored consume/provide row pair was found — the id spelling this derivation keys on \
+         changed, so this test is now measuring nothing (a green that means the guard broke, not that \
+         the registry is sound)."
+    );
+}
+
+/// **An `asserted` row must say, in the source beside it, why it cannot be silently missed.**
+///
+/// `asserted` is the one status that promises something unconditional, and it is the status an author
+/// reaches for when a mechanism looks solid from the inside. The 2026-08-29 audit is the measurement
+/// behind this test: of the six rows carrying it, the ONE that survived a counter-example attempt
+/// (`score-population-empty`) was also the only one whose author had written down what made the label
+/// hold — "the population is a field on every score object, produced by the same computation as the
+/// number beside it". The three that did not survive had no such sentence anywhere.
+///
+/// This does NOT verify the label; prose proves nothing on its own. What it does is make the label's
+/// evidence a thing that exists in a fixed place — the next promoter has to produce it, and the next
+/// auditor has one paragraph to attack instead of a mechanism to go find. The residual is named rather
+/// than papered over: a wrong reason passes this test exactly as a right one does.
+///
+/// The subject set is scanned out of the registry source, and the scan's own count is cross-checked
+/// against the live registry so a broken scan cannot pass by finding nothing.
+#[test]
+fn every_asserted_row_states_why_it_cannot_be_silently_missed() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/disclosure/registry");
+    let entries =
+        std::fs::read_dir(&dir).unwrap_or_else(|e| panic!("failed to read {}: {e}", dir.display()));
+
+    let mut scanned = 0usize;
+    let mut unjustified: Vec<String> = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().is_none_or(|x| x != "rs") {
+            continue;
+        }
+        let label = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+        let lines: Vec<&str> = text.lines().collect();
+        for (i, line) in lines.iter().enumerate() {
+            if line.trim() != "status: DisclosureStatus::Asserted," {
+                continue;
+            }
+            scanned += 1;
+            let reason_lines = lines[..i]
+                .iter()
+                .rev()
+                .take_while(|l| l.trim_start().starts_with("//"))
+                .count();
+            if reason_lines < 2 {
+                unjustified.push(format!("{label}:{}", i + 1));
+            }
+        }
+    }
+
+    let asserted = blindness_registry()
+        .iter()
+        .filter(|c| c.status == DisclosureStatus::Asserted)
+        .count();
+    assert_eq!(
+        scanned, asserted,
+        "the source scan found {scanned} `asserted` row(s) while the registry holds {asserted} — the \
+         scan is reading a different set than it is judging (a moved file, a reformatted `status:` \
+         line), so its verdict below is about nothing. Working-agreements: a guard that passes while \
+         scanning nothing is the failure this repo has now measured several times."
+    );
+    assert!(
+        unjustified.is_empty(),
+        "`asserted` row(s) with no reason written beside them: {unjustified:?}. `asserted` promises a \
+         signal that cannot be absent on any run — write, immediately above the `status:` line, WHAT \
+         carries it unconditionally and what the class deliberately does not claim. Every other status \
+         in this registry that was argued for carries such a block; the rows that did not are the ones \
+         an outside audit broke."
+    );
 }

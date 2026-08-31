@@ -45,19 +45,30 @@ export default {
   // a separate page rather than a tab, is reachable from the top bar.
   // Rendered on BOTH editions so the menu LAYOUT is identical in English and
   // Korean (the user asked for parity: the item was missing from the Korean bar).
-  // The target is an English-only page with no site/ko/ copy, so the label stays
-  // in ENGLISH on purpose even in the Korean nav: an English label makes it plain
-  // the destination is English, rather than a Korean label ("실전") that silently
-  // lands on an English page. The Korean edition resolves the href to
-  // ../x-showcase.html via fixRootLinks (site/ko/ is one directory down).
+  //
+  // 라벨이 두 판 모두 영어였던 것은 취향이 아니었다(2026-08-16). 목적지에 site/ko/ 사본이
+  // 없었으므로, 영어 라벨이 **이 링크를 누르면 언어를 벗어난다**는 정직한 경고였다.
+  // 2026-08-18 에 그 페이지가 한국어 판을 갖게 되면서 경고가 만료됐다 — 그리고 참이 아니게 된
+  // 경고는 없느니만 못하다(영어를 예상하게 만들어 놓고 한국어를 준다). 그래서 라벨은 여기 다른
+  // 문장들과 같은 짝이 되고, 한국어 판에서 fixRootLinks 가 이 href 를 더는 고쳐 쓰지 않는다
+  // (ROOT_PAGES 가 손 목록이 아니라 **한국어 판이 있는 문서 집합에서 파생**되기 때문이다).
   extras: [
-    { href: "x-showcase.html", label: "In the field" },
+    { href: "x-showcase.html", label: { ko: "실전", en: "In the field" } },
   ],
 
   // 언어 전환 링크의 aria-label. 링크에 보이는 글자("EN · KO")는 언어 무관이라 조립기가 낸다.
   langLink: {
     ko: "영어판으로 보기",
     en: "Read this in Korean",
+  },
+
+  // 푸터의 개인정보 방침 링크 라벨. 조립기에 영어 리터럴로 박혀 있었고, 그 자리의 주석이
+  // *"영어 전용이라 한국어 판은 ../privacy.html 로 올라간다"* 를 사유로 들고 있었다.
+  // 2026-08-18 에 그 페이지가 한국어 판을 갖게 되면서 사유가 만료됐다 — 한국어 독자가
+  // 한국어 방침으로 가는 링크를 영어 라벨로 누를 이유가 없다. `extras` 라벨과 같은 판정이다.
+  footPrivacy: {
+    ko: "개인정보",
+    en: "Privacy",
   },
 
   // 푸터의 레퍼런스 포인터. **영어판 전용이다** — 가리키는 페이지(rules · reference · graph ·

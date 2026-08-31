@@ -1,4 +1,32 @@
-use crate::{hits, scan, TempDir};
+use crate::{
+    assert_disqualifier_clause_precedes_imperative, assert_landing_precedes_imperative, hits, scan,
+    TempDir,
+};
+
+/// The ARGV landing, spliced ahead of the `execFile`/`spawn` imperative.
+///
+/// WHY THIS RULE NEEDED ONE (`1.architecture/rules/rule-quality.md` §27 leg 3, §33, §37). The
+/// disqualifying clause this rule already carried answers "might this finding be wrong" — it says the
+/// rule cannot prove the dynamic part is request-derived. It says nothing about the OTHER question,
+/// which is what the reader's own CORRECT edit costs, and for this remedy the answer is large: `exec`
+/// and `execSync` hand their whole string to a shell, so the argv form silently unmakes every command
+/// that was relying on the shell to do something. Two different axes, and until this landing the
+/// message was exhaustive on one and silent on the other.
+///
+/// NOT A DISQUALIFIER, which is why it is pinned with the landing helper rather than the clause one.
+/// A reader whose command contains a pipe still has a real finding: the interpolation is still going
+/// to a shell, and that is still injection. What changes is that the one-line swap is not available to
+/// them, and the message now says so before it hands them the swap.
+///
+/// WHY THE EXIT NAMES `shell: true` AS A TRAP RATHER THAN AS AN OPTION. It is the move a reader makes
+/// when the argv rewrite breaks their pipeline, it makes the finding go quiet (this rule matches on
+/// `exec`/`execSync` spellings, not on `spawn`), and it restores the exact substrate the finding is
+/// about. An exit that reads as an option here would be an exit back into the defect.
+///
+/// POSITION, not presence. The invalidation probe for the test below is to move this constant to the
+/// tail of the message: every token stays present and spelled exactly once, and the pin must go red on
+/// ORDER alone.
+const ARGV_REWRITE_LANDING: &str = "THE ARGV REWRITE IS NOT A DROP-IN, AND WHAT IT BREAKS FAILS QUIETLY: `exec`/`execSync` hand the whole string to a shell, so every command that RELIES on the shell — a `|` pipe, a `>` redirect, `&&`/`;` sequencing, a `*` glob, `$VAR` expansion, a `~` home reference — stops meaning what it meant the moment its parts become inert argv elements.";
 
 // --- shell-exec-interpolation ---
 
@@ -124,6 +152,66 @@ fn spawn_with_argv_array_and_interpolated_arg_is_not_flagged() {
         hits(&out, "shell-exec-interpolation").is_empty(),
         "{:?}",
         out.findings
+    );
+}
+
+/// POSITION pin on a DELIVERED finding, carrying BOTH claims this rule now makes ahead of its remedy:
+/// the disqualifier (this finding may be wrong) and the landing (the remedy costs something even when
+/// the finding is right). Both must be reached before the imperative, because a reader who acts on the
+/// first instruction never reaches anything placed behind it.
+///
+/// Two helpers rather than one because the two make different claims and the panic prose says which:
+/// a landing that failed the disqualifier helper's message would tell the next author the finding is
+/// unreliable, which is not what went wrong.
+#[test]
+fn the_argv_landing_and_the_disqualifier_both_precede_the_imperative() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/tools.ts",
+        "import { exec } from \"child_process\";\nexport function run(name: string) {\n  exec(`ls ${name}`);\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "shell-exec-interpolation");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    let imperative = "Use `execFile`/`spawn` with an argv array instead";
+    assert_disqualifier_clause_precedes_imperative(
+        "shell-exec-interpolation",
+        &h[0].message,
+        "whether or not this rule can prove it's request-derived",
+        imperative,
+    );
+    assert_landing_precedes_imperative(
+        "shell-exec-interpolation",
+        &h[0].message,
+        ARGV_REWRITE_LANDING,
+        imperative,
+    );
+    // The facts the landing exists to carry. Presence, unlike order, is what a rewrite loses — and the
+    // worked example is the load-bearing half: a reader who is told only that "shell features break"
+    // still has to be shown that the failure is a wrong RESULT, not an error at the call.
+    for needle in [
+        "`exec('ls *.log | wc -l > out')`",
+        "counts no lines and writes no file",
+        "Read the command string before you rewrite it",
+        "`spawn`'s stdio",
+        "expand the glob with a directory read",
+    ] {
+        assert!(
+            h[0].message.contains(needle),
+            "security/shell-exec-interpolation: the landing lost {needle:?}: {}",
+            h[0].message
+        );
+    }
+    // The trap exit, pinned separately: `shell: true` is the move this landing exists to head off, and
+    // it must stay named as the thing that RESTORES the defect rather than as a third way out.
+    let trap = h[0]
+        .message
+        .find("reaching for `shell: true`")
+        .expect("the shell: true trap left the message");
+    assert!(
+        h[0].message[trap..].contains("restores the exact injection this finding is about"),
+        "security/shell-exec-interpolation: `shell: true` is named but no longer as a trap: {}",
+        h[0].message
     );
 }
 

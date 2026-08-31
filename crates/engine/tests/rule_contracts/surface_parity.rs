@@ -775,6 +775,76 @@ fn every_omit_or_conditional_row_carries_a_non_empty_note() {
 )]
 const WHY_THE_NOTE_SHAPE_IS_CHECKED: () = ();
 
+/// A note may not assert a status its own column does not carry.
+///
+/// # The incident
+/// The `nativeAnalyses` and `nativeAnalysesMeaning` rows landed on 2026-08-28 declaring
+/// `carry-conditional`, each opening with a paragraph explaining why `carry` is not the honest label
+/// here — and each asserting `carry` again further down in the SAME note. A status edit applied to
+/// the column and to the first paragraph, and not to the last. Both rows shipped, and every check on
+/// a note (non-emptiness, and the `omit`-row citation shape) stayed green, because none of them ever
+/// compared the prose to the row it sits in. A reader who scrolled met two opposite claims about one
+/// field and no way to tell which had been edited.
+///
+/// # What is decidable here
+/// Not truth — the sibling assertion's doc explains why a test cannot know whether a sentence about a
+/// consumer is accurate. But a note that spells `<X>, not <Y>` or `<X> rather than <Y>` with both
+/// tokens drawn from [`STATUSES`] is making a claim ABOUT THIS ROW'S COLUMN in a form a machine can
+/// read, and the column is right there. So the check is exact and its failure mode is one edit.
+///
+/// # What it deliberately does not do
+/// It does not forbid a note from naming a status: `packsLoadedMeaning`'s note says
+/// `carry-conditional` on BOTH ends` and must keep saying it. Only the CONTRASTIVE form is matched,
+/// because that form is how a status is asserted rather than described. And it cannot tell a note
+/// discussing a NEIGHBOUR's status apart from one discussing its own — the registry has no such note
+/// today, and if one is ever written the fix is to name the neighbour outside the contrastive phrase,
+/// not to loosen this. Measured against the pre-repair registry: two AGREES (correctly untouched) and
+/// exactly the two CONTRADICTS above, no third.
+#[test]
+fn no_row_note_asserts_a_status_its_own_column_does_not_carry() {
+    let registry = load_registry();
+    let surfaces = registry_surfaces(&registry);
+    let mut wrong: Vec<String> = Vec::new();
+    for root in registry_roots(&registry) {
+        for (field, row) in registry_rows(&registry, &root) {
+            let note = row.get("note").and_then(|v| v.as_str()).unwrap_or("");
+            for surface in &surfaces {
+                let status = row_status(row, surface).unwrap_or_else(|| {
+                    panic!("{root}.{field} is missing the required string field `{surface}`")
+                });
+                for claimed in STATUSES {
+                    if claimed == status {
+                        continue;
+                    }
+                    for rejected in STATUSES {
+                        if rejected == claimed {
+                            continue;
+                        }
+                        for phrase in [
+                            format!("`{claimed}`, not `{rejected}`"),
+                            format!("`{claimed}` rather than `{rejected}`"),
+                        ] {
+                            if note.contains(&phrase) {
+                                wrong.push(format!(
+                                    "{root}.{field}.{surface} declares `{status}` but its note \
+                                     asserts {phrase:?}"
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "a registry note contradicts its own status column — a half-finished status edit, which is \
+         how both native-analysis rows shipped saying two opposite things at once:\n{}\n\
+         State the status ONCE, in the column, and let the prose explain it.",
+        wrong.join("\n")
+    );
+}
+
 /// The note-shape rule is enforced HERE but has to be learned THERE — in the registry's own `_doc`,
 /// which is what someone writing a note actually reads. Until 2026-08-11 that `_doc` said, accurately,
 /// "THIS PROSE IS GUARDED BY NOTHING"; the assertion above made that sentence half false the moment it

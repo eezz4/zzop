@@ -50,7 +50,7 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
         mut io_provides,
         mut io_consumes,
         dep,
-        noncycle_edges,
+        noncycle_candidates,
         per_file_findings,
         trpc_fragment_pairs,
         router_mount_pairs,
@@ -78,7 +78,11 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
     // `mutating-route-no-auth` as `route_attr_store`, so an injected `auth-guarded` attribute clears
     // a route here exactly as it does natively (it is also `AnalyzeOutput` plumbing — the cross-layer
     // idempotency veto reads it for filesystem trees).
-    let mut warnings: Vec<String> = Vec::new();
+    // Mode A's copy of the native lane's check (`analyze_tree`) — an uncompilable declared pattern is
+    // read as an undeclared one by every consumer, so it must not be silent here either. Both lanes
+    // call the SAME function; a check that lived on one lane would answer the same config two ways.
+    let mut warnings: Vec<String> =
+        crate::vocabulary::uncompilable_vocabulary_warnings(&config.vocabulary);
     let mut native_attrs: Vec<zzop_core::Attribute> = Vec::new();
     // Merged BEFORE `const_fragment_pairs` moves into `late_resolve_cross_file_consumes` below —
     // `MountRef` prefixes resolve against the same map an envelope's consumes do, so a Mode A producer
@@ -144,6 +148,12 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
     let packs: Vec<&zzop_core::RulePackDef> = enabled_packs.iter().collect();
     crate::pipeline::findings::append_hints(&packs, &mut io_scan_findings);
 
+    // The ONE fold, run after every file's symbols are in — the shared decision both lanes call, so
+    // the envelope lane cannot drift from the native one on what "erased at compile time" means. The
+    // export-side arm stays ON here: an envelope carries no tsconfig, so there is nothing to read the
+    // `verbatimModuleSyntax` family out of, and the native lane likewise defaults to on when a tree
+    // declares none.
+    let noncycle_edges = noncycle_candidates.refine(&all_symbols, true);
     let cycles = circular_from_dep_excluding(&dep, &noncycle_edges);
     let dep_stats = dep_stats_from_dep(&dep);
     // Every `FileProjection` is, by construction, a parsed-source file (an external parser only ever
@@ -252,6 +262,12 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
         ir,
         findings,
         degraded,
+        // Mode A replaces native parsing with a document: there is no tree to walk and therefore no
+        // `package.json` to read, so no build-surface declaration can exist. Empty for a DIFFERENT reason
+        // than a Java tree's empty vec (that tree was walked and declared nothing), and the honest
+        // consequence is the same either way — the summary layer's build tier stays empty and the
+        // ordering degrades to the two tiers it had before.
+        build_script_paths: Vec::new(),
         file_count,
         coverage,
         package_imports,
@@ -266,6 +282,7 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
         layer_co_churn: None,
         co_change: None,
         packs_loaded: crate::PackLoaded::from_config(config, &dsl_scope),
+        native_analyses: crate::NativeAnalyses::of(&config.rule_config),
         warnings,
         config_warnings,
         cache: None,

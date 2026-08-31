@@ -1,5 +1,7 @@
-//! `Matcher::MethodScan`'s shape — the multi-pattern, same-span co-occurrence matcher and its four
-//! structural gates (`trigger_in_loop` / `after` / `after_in_same_function`, plus the `absent` veto).
+//! `Matcher::MethodScan`'s shape — the multi-pattern, same-span co-occurrence matcher and its
+//! structural gates (`trigger_in_loop` / `after` / `after_in_same_function` / `require_call_kind`) plus
+//! its two vetoes: `absent`, scoped to the whole body, and `trigger_call_exclude_pattern`, scoped to
+//! the trigger call's own parentheses.
 //! Split out of the parent `def/matcher.rs` for the same reason that file was split out of `def/mod.rs`:
 //! the repo's per-file line cap. This one struct's field docs carry the measured evidence behind every
 //! gate (why co-occurrence was not enough, what each gate deletes, what it degrades to on a parser that
@@ -61,7 +63,7 @@ pub struct MethodScan {
     /// SAME line (so a one-liner like `p.then(r => setX(r))` counts, with `.then(` preceding `setX(`).
     ///
     /// SAME-LINE NESTING RESIDUAL — the negative direction of that same offset comparison, and the one a
-    /// new rule author has to price in before setting this field. `order_ok` (`dsl/method_scan.rs`)
+    /// new rule author has to price in before setting this field. `order_ok` (`dsl/method_scan/gates.rs`)
     /// compares the two patterns' FIRST-MATCH start offsets and nothing else, so it cannot tell a callee
     /// that merely follows the trigger from one nested INSIDE the trigger's own argument list — which
     /// evaluates FIRST. `p.then(r => setX(r))` counts because the boundary token happens to start first;
@@ -149,6 +151,46 @@ pub struct MethodScan {
     /// line in the SAME span — e.g. a try/catch guarding a TOCTOU race, or a `$transaction(...)` wrapper.
     #[serde(default)]
     pub absent: Vec<LabeledPattern>,
+    /// The NARROW veto [`Self::absent`] is the wide one: a trigger match does not count when this
+    /// pattern matches inside the TRIGGER CALL'S OWN PARENTHESES — the match's line plus the
+    /// continuation lines its unclosed parens hold open, capped, matched in multi-line mode
+    /// (`crate::dsl::veto_window::trigger_call_excluded`). Like `trigger_in_loop` and `after`, a
+    /// vetoed trigger match neither satisfies the trigger nor anchors the finding, so a SECOND,
+    /// unmitigated trigger call elsewhere in the same span still fires.
+    ///
+    /// Why a second veto field rather than another `absent` entry: `absent` reads the whole symbol
+    /// BODY, which is the wrong scope for "this call's argument was checked". Measured on cal.com, where
+    /// 17 `res.redirect(` sites have their argument opened by the project's own origin-allowlist
+    /// helper (`security/open-redirect`: 28 findings before this field, 15 after): a body-scoped `absent` on the same
+    /// vocabulary also waives a redirect whose neighbour statement merely LOGS a sanitized copy of the
+    /// URL (`sanitizeUrlForLog`, measured), and it cannot tell a mitigator that wraps the target from
+    /// one that wraps something else entirely. This field can, because the text it reads is bounded by
+    /// the call.
+    ///
+    /// The WINDOW is why this is not `LineScan::exclude_pattern` in method-scan clothing: 16 of those
+    /// 17 have the mitigator on a CONTINUATION line, inside the still-open `redirect(`, where a
+    /// formatter put it. A line-local veto would have cleared 1 of the rule's 34 corpus findings.
+    ///
+    /// WHAT THE FIELD PROVES IS NOT THE FIELD'S BUSINESS, and getting that backwards is how the first
+    /// version of `security/open-redirect`'s pattern shipped a false NEGATIVE. All this field supplies
+    /// is the TEXT the call's own parentheses hold; the pattern decides what a match in it means. A
+    /// pattern that stops at a guard call's opening `(` has proved only that the guard OPENS the
+    /// argument, and a raw request value concatenated or interpolated after it is then waived by a
+    /// veto that never looked. A rule claiming the guard produces the WHOLE value must spell the
+    /// value's closure too — `redirect(safe(x) + req.query.q)`, and its template-literal twin where a
+    /// second interpolation follows the guard's, are the shapes that separate the two claims. The
+    /// repo's older spelling of the same closure is `browser.json`'s `${html-sink-sanitized}`
+    /// fragment, which requires the sanitizer's balanced argument list to be followed by `[;,)}]|$`.
+    ///
+    /// What a rule setting this may CLAIM is bounded by what the window can see, and the residuals are
+    /// the same ones `CallScan::line_exclude_pattern` carries plus one of its own: the cap
+    /// (`veto_window::MAX_CALL_WINDOW_LINES`), a comment anywhere in the argument list ending the
+    /// window there, a mitigator applied on a PRECEDING statement or by a wrapper being out of reach by
+    /// construction, and — new here — a line carrying TWO trigger matches declining the window
+    /// entirely. Every one of those leaves the site FIRING; this field only ever SUPPRESSES, so absence
+    /// of evidence must never become evidence of a waiver.
+    #[serde(default)]
+    pub trigger_call_exclude_pattern: Option<String>,
     /// Structural PRESENCE gate over the projected call-site channel: when set, the symbol span must
     /// additionally contain at least one `SourceFile::call_sites` entry of exactly this `kind` (the
     /// site's own line within `body_start..=body_end`). It is the CO-OCCURRENCE axis a lexical

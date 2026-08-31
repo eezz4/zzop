@@ -8,10 +8,10 @@
 //!   zzop analyze-envelope <file>     — Mode A: analyze a Normalized-AST envelope file in place of native parsing.
 //!   zzop validate-envelope <file>    — offline "is this envelope well-formed?" report (exit 0 valid / 1 invalid).
 //!   zzop validate-rule-pack <file>   — offline "does this DSL pack load, and can every rule fire?" report (exit 0 / 1).
-//!   zzop cross <path>...             — analyze 2+ trees and print the cross-layer join (zzop's headline).
+//!   zzop cross <path> <path>...      — analyze 2+ trees and print the cross-layer join (zzop's headline).
 //!   zzop endpoint <pattern> <path>... — definitive "is io key X provided/consumed/joined?" query.
 //!   zzop endpoint <pattern> --config <path> — same query, trees defined by a zzop.config.jsonc.
-//!   zzop manifest <path>...          — the run's structural contract manifest (identity only) — commit it, diff a later run against it.
+//!   zzop manifest <path> <path>...   — the run's structural contract manifest over 2+ trees (identity only) — commit it, diff a later run against it.
 //!   zzop diff <a.json> <b.json>      — the delta between two manifests: bucket transitions first.
 //!   zzop facts <path>...             — the run's post-assembly facts (per-tree CommonIr + the whole cross-layer join, uncapped) for your own rule program.
 //!   zzop file <path> <tree>...       — what does zzop know about THIS FILE: its tree, its verdict (analyzed / lexical-only / degraded / not-found), symbols, io, both edge directions, findings.
@@ -50,8 +50,13 @@ mod cli;
 /// DERIVED where a set has an owner: the graph domain list comes from `GraphDomain::WIRE_NAMES`, which
 /// documents itself as that set's one owner precisely so a new domain cannot ship with a usage line that
 /// omits it. This line spelled it by hand until 2026-08-06 and did omit one.
+/// The per-subcommand paths ARITY is the same kind of promise and is held the same way: it is spelled by
+/// hand here but machine-checked against the `parse_trees_args` call sites by
+/// `cli::help::tests::every_tree_path_subcommand_spells_its_arity_floor_in_the_help_and_usage_lines`.
+/// It said `cross <path>...` / `manifest <path>...` until 2026-08-20 while both parsers demanded two —
+/// `<path>...` is "one or more" in every CLI grammar, so this line offered a form the binary refuses.
 pub(crate) fn usage() -> String {
-    format!("usage: zzop <analyze <path> | analyze --config <path> | analyze-envelope <envelope.json> | validate-envelope <envelope.json> | validate-rule-pack <pack.json> | cross <path>... | cross --config <path> | file <path> [--source-id <id>] <tree>... | file <path> [--source-id <id>] --config <path> | endpoint <pattern> <path>... | endpoint <pattern> --config <path> | manifest <path>... | manifest --config <path> | diff <a.json> <b.json> [--allow-tool-drift] | facts <path>... | facts --config <path> | coverage <path>... | coverage --config <path> | graph <path>... | graph --config <path> [--domain <{}>] [--format <mermaid|cosmograph-nodes|cosmograph-links>] [--scope <prefix>] [--top <n>] [--fold <n>] | init [<dir>] [--force] | contract [<name>] | explain <rule-id> [--config <path>] | version [--verbose]> (analyze, analyze-envelope and cross also take [--severity <critical|warning|info>] [--rule <id>] [--limit <n>] [--profile-rules]; every subcommand takes --help)",
+    format!("usage: zzop <analyze <path> | analyze --config <path> | analyze-envelope <envelope.json> | validate-envelope <envelope.json> | validate-rule-pack <pack.json> | cross <path> <path>... (2+ paths) | cross --config <path> | file <path> [--source-id <id>] <tree>... | file <path> [--source-id <id>] --config <path> | endpoint <pattern> <path>... | endpoint <pattern> --config <path> | manifest <path> <path>... (2+ paths) | manifest --config <path> | diff <a.json> <b.json> [--allow-tool-drift] | facts <path>... | facts --config <path> | coverage <path>... | coverage --config <path> | graph <path>... | graph --config <path> [--domain <{}>] [--format <mermaid|cosmograph-nodes|cosmograph-links>] [--scope <prefix>] [--top <n>] [--fold <n>] | init [<dir>] [--force] | contract [<name>] | explain <rule-id> [--config <path>] | version [--verbose]> (analyze, analyze-envelope and cross also take [--severity <critical|warning|info>] [--rule <id>] [--limit <n>] [--profile-rules]; every subcommand takes --help)",
         zzop_summary::GraphDomain::WIRE_NAMES.join("|")
     )
 }

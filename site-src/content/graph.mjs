@@ -55,11 +55,11 @@ export default {
           "run",
           [
             {
-              cmd: "zzop graph --domain dep --format cosmograph-links &gt; links.ndjson",
+              cmd: "zzop graph . --domain dep --format cosmograph-links &gt; links.ndjson",
               what: { ko: "엣지 표 · 필수", en: "the edges · required" },
             },
             {
-              cmd: "zzop graph --domain dep --format cosmograph-nodes &gt; nodes.ndjson",
+              cmd: "zzop graph . --domain dep --format cosmograph-nodes &gt; nodes.ndjson",
               what: { ko: "점 표 · 스타일 축", en: "the points · styling axes" },
             },
           ],

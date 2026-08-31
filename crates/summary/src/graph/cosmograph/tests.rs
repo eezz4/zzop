@@ -1,8 +1,12 @@
 use super::*;
 use serde_json::Value;
 
+use crate::graph::dep::tests::circular_finding;
+
 /// The same shape `dep/tests.rs` uses — a 3-file cycle plus an unrelated leaf — so a reader comparing
 /// the two formats is comparing them over identical input rather than two fixtures that might differ.
+/// The `circular` finding comes from the RULE ([`circular_finding`]) for both, which is also what stops
+/// the two files from agreeing with each other about a key no producer emits.
 fn one_tree() -> Value {
     serde_json::json!({
         "trees": [{
@@ -14,10 +18,7 @@ fn one_tree() -> Value {
                     "src/c.ts": ["src/a.ts"],
                     "src/leaf.ts": []
                 }},
-                "findings": [{
-                    "ruleId": "circular", "severity": "warning", "file": "src/a.ts", "line": 1,
-                    "message": "m", "data": { "members": ["src/a.ts", "src/b.ts", "src/c.ts"] }
-                }]
+                "findings": [circular_finding(&["src/a.ts", "src/b.ts", "src/c.ts"])]
             }
         }]
     })
@@ -147,6 +148,63 @@ fn the_census_discloses_that_the_graph_is_resolved_in_tree_only() {
         line.contains(zzop_facade::DEP_GRAPH_RESOLVED_ONLY),
         "the shared sentence must ride the census verbatim: {line}"
     );
+}
+
+/// 🔴 The pair of tables that shows the two axes disagreeing, and the census sentence that reconciles
+/// them. Measured on `corpus/oss/fe-axios` (2026-08-31): the links table carried BOTH directions of
+/// `src/components/App/App.slice.ts <-> src/types/user.ts`, every link row said
+/// `endpointsInCycle: false`, both node rows said `inCycle: false`, and the census said
+/// `0 circular finding(s)` — five statements, each correct about the edge set it was computed over,
+/// and nothing naming the fact that they were two different edge sets.
+///
+/// Asserted on BOTH tables because they have different readers: the links table is where the two-way
+/// pair is visible and the points table is where `inCycle: false` is read about it.
+#[test]
+fn both_tables_disclose_a_two_way_pair_the_cycle_verdict_does_not_cover() {
+    let v = serde_json::json!({
+        "trees": [{ "sourceId": "web", "output": {
+            "ir": { "dep": {
+                "src/app.slice.ts": ["src/types/user.ts"],
+                "src/types/user.ts": ["src/app.slice.ts"],
+                "src/leaf.ts": ["src/types/user.ts"]
+            }},
+            "findings": []
+        }}]
+    });
+    let u = super::super::dep::collect(&v);
+    let (links, link_census) = links_ndjson(&u, None);
+    let (nodes, node_census) = nodes_ndjson(&u, None);
+
+    // The premise, from the emitted bytes rather than asserted: both directions are on the wire and
+    // every cycle column on both tables says "no".
+    let link_rows = rows(&links);
+    assert_eq!(link_rows.len(), 3, "{links}");
+    assert!(
+        link_rows.iter().all(|r| r["endpointsInCycle"] == false)
+            && rows(&nodes).iter().all(|r| r["inCycle"] == false),
+        "the case under test is a graph whose every cycle column reads false:\n{links}\n{nodes}"
+    );
+
+    for line in [link_census.render(), node_census.render()] {
+        assert!(
+            line.contains("1 file pair(s) in this graph import EACH OTHER"),
+            "the census must COUNT the disagreement, not merely warn that one is possible: {line}"
+        );
+        assert!(
+            line.contains(zzop_facade::CYCLE_GRAPH_EXCLUDES_ERASED_IMPORTS),
+            "and it must carry the shared sentence verbatim from its one owner, never a paraphrase: \
+             {line}"
+        );
+    }
+}
+
+/// The other direction: a graph with no such pair must not carry the sentence. `one_tree`'s cycle IS
+/// reported, so its members are explained and there is nothing to reconcile.
+#[test]
+fn a_census_with_no_disagreement_to_report_stays_quiet_about_erased_imports() {
+    let u = super::super::dep::collect(&one_tree());
+    let line = nodes_ndjson(&u, None).1.render();
+    assert!(!line.contains("import EACH OTHER"), "{line}");
 }
 
 #[test]
@@ -428,16 +486,8 @@ fn a_chord_and_a_bridge_are_endpoint_true_though_neither_lies_on_a_reported_cycl
                     "src/y.ts": ["src/x.ts"]
                 }},
                 "findings": [
-                    {
-                        "ruleId": "circular", "severity": "warning", "file": "src/a.ts", "line": 1,
-                        "message": "m",
-                        "data": { "members": ["src/a.ts", "src/b.ts", "src/c.ts"] }
-                    },
-                    {
-                        "ruleId": "circular", "severity": "warning", "file": "src/x.ts", "line": 1,
-                        "message": "m",
-                        "data": { "members": ["src/x.ts", "src/y.ts"] }
-                    }
+                    circular_finding(&["src/a.ts", "src/b.ts", "src/c.ts"]),
+                    circular_finding(&["src/x.ts", "src/y.ts"])
                 ]
             }
         }]

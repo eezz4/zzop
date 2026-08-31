@@ -15,7 +15,11 @@
 //! - **Call shapes**: `.GetAsync`, `.PostAsync`, `.PutAsync`, `.DeleteAsync`, `.PatchAsync`,
 //!   `.GetStringAsync`, `.GetByteArrayAsync`, `.GetStreamAsync`, `.GetFromJsonAsync`,
 //!   `.PostAsJsonAsync`, `.PutAsJsonAsync`, `.DeleteFromJsonAsync` on ANY receiver — `url` is always
-//!   the FIRST positional argument. `.SendAsync` is deliberately NOT recognized (needs a separately
+//!   the FIRST positional argument. The GENERIC spelling of each (`.GetFromJsonAsync<Catalog>(...)`)
+//!   keys identically: a generic invocation's name node carries the type arguments in its text, which
+//!   until 2026-08-21 meant one `<T>` removed the call from this channel entirely — measured on
+//!   dotnet/eShop, 16 generic call sites extracted 0 while the non-generic overload beside them keyed
+//!   normally. `.SendAsync` is deliberately NOT recognized (needs a separately
 //!   constructed `HttpRequestMessage` — roadmap, same "not visible at the call site" note Go's own doc
 //!   carries for its `*http.Client`/`client.Do(req)` skip).
 //! - **URL resolution**: a plain string literal verbatim, or an interpolated string
@@ -95,7 +99,20 @@ fn match_client_call<'t>(call: Node<'t>, src: &str) -> Option<(&'static str, Nod
         return None;
     }
     let name_node = func.child_by_field_name("name")?;
-    let method_name = node_text(name_node, src);
+    // A GENERIC invocation's `name` is a `generic_name` node whose text is `GetFromJsonAsync<Catalog>`,
+    // type arguments included — so comparing that text against the vocabulary below matched nothing and
+    // one type argument made the whole call disappear. That is not an edge case in .NET: it is the
+    // canonical spelling of the `System.Net.Http.Json` helpers, and on dotnet/eShop it cost both Blazor
+    // apps every one of their egress rows (16 generic call sites tree-wide, 0 extracted) while the
+    // non-generic overload on the next line keyed normally. Take the identifier out of the generic name.
+    let ident = if name_node.kind() == "generic_name" {
+        valid_named_children(name_node)
+            .into_iter()
+            .find(|c| c.kind() == "identifier")?
+    } else {
+        name_node
+    };
+    let method_name = node_text(ident, src);
     let (_, verb) = VERB_METHODS.iter().find(|(m, _)| *m == method_name)?;
     let args = call.child_by_field_name("arguments")?;
     let first = valid_named_children(args)

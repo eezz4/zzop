@@ -1,4 +1,4 @@
-use super::{hits, scan, TempDir};
+use super::{assert_disqualifier_clause_precedes_imperative, hits, scan, TempDir};
 
 // --- dev-path-no-guard-hint ---
 
@@ -329,5 +329,38 @@ fn dev_route_registered_in_a_routes_test_fixture_path_is_not_flagged() {
         hits(&out, "dev-path-no-guard-hint").is_empty(),
         "{:?}",
         out.findings
+    );
+}
+/// §27 pin (2026-08-29). The disqualifier is this rule's Mode-A disclosure: under a whole-tree
+/// `analyzeEnvelope` run there is no filesystem root, so all three channels that read the registration
+/// line go inert — the route fires EVEN WHEN a guard-hint argument is present on its line, the
+/// suppression marker does nothing, and there is no rule-level `off` either. That is the strongest form
+/// of §27's third leg: the finding is wrong AND the remedy cannot clear it. At HEAD it sat at byte 1017
+/// and the imperative at byte 468, so a reader under Mode A would go add an env guard that was already
+/// there and watch the finding survive.
+///
+/// The IMPERATIVE moved to the end rather than the block moving forward, and the two are the same edit
+/// here: the disclosure opens "THREE channels here read that registration line — the guard-hint
+/// carve-out above, THIS MARKER, ..." and "this marker" points at the suppression sentence directly
+/// above it. Lifting the disclosure alone would strand that antecedent; lifting disclosure and marker
+/// together is exactly "move the imperative past both". The imperative is self-contained, so no bridging
+/// sentence was needed. 1546 chars before and after, character multiset identical.
+#[test]
+fn dev_path_message_puts_the_mode_a_inert_channels_disclosure_before_the_gate_it_imperative() {
+    let dir = TempDir::new("zzop-http");
+    dir.write(
+        "src/routes/apiRoutes.ts",
+        "declare const apiRoutes: any;\ndeclare const api: any;\napiRoutes.get(\"/api/dev/config\", api.configHandler);\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "dev-path-no-guard-hint");
+    // Sentence repair only — the finding itself is unchanged.
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+
+    assert_disqualifier_clause_precedes_imperative(
+        "dev-path-no-guard-hint",
+        &h[0].message,
+        "so under it all three are inert: a matching route fires even when a guard-hint argument IS present on its line",
+        "If no guard exists, gate it behind an env check",
     );
 }

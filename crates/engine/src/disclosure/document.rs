@@ -3,25 +3,25 @@
 //! that file past the 300-line cap — and the split line is the honest one: above is what zzop is blind
 //! to, here is how that is delivered.
 //!
-//! Both views read `BLINDNESS_REGISTRY` and nothing else. That is the load-bearing property of the
+//! Both views read `blindness_registry()` and nothing else. That is the load-bearing property of the
 //! 2026-07-29 fold, not a nicety: a run reply carries the TALLIES (so "gaps exist, and there are this
 //! many" is still unmissable without asking) while the PROSE ships once, through the contract lane. If
 //! the two could come from different places, a registry that grew while the counts sat still would turn
 //! the fold into a lie.
 
-use super::{DisclosureStatus, BLINDNESS_REGISTRY};
+use super::{blindness_registry, DisclosureStatus};
 
 /// How many classes carry each status, in wire order — `(total, asserted, partial, notYetDetected)`.
 /// The registry's SHAPE: what an analyze reply carries instead of the paragraphs.
 pub fn disclosure_counts() -> (usize, usize, usize, usize) {
     let with = |status: DisclosureStatus| {
-        BLINDNESS_REGISTRY
+        blindness_registry()
             .iter()
             .filter(|c| c.status == status)
             .count()
     };
     (
-        BLINDNESS_REGISTRY.len(),
+        blindness_registry().len(),
         with(DisclosureStatus::Asserted),
         with(DisclosureStatus::Partial),
         with(DisclosureStatus::NotYetDetected),
@@ -34,7 +34,7 @@ pub fn disclosure_counts() -> (usize, usize, usize, usize) {
 /// [`disclosure_counts`] plus a pointer to this document, which `zzop contract disclosure-classes` and
 /// MCP `resources/read zzop://contract/disclosure-classes` both serve.
 ///
-/// Rendered from `BLINDNESS_REGISTRY` on every call, never a committed copy of the same prose —
+/// Rendered from `blindness_registry()` on every call, never a committed copy of the same prose —
 /// `document_carries_every_class_verbatim` below is the seal, and the fold's own end-to-end pin lives
 /// in `crates/summary/tests/disclosure_fold.rs`.
 ///
@@ -77,7 +77,7 @@ pub fn disclosure_contract_text() -> String {
          do not assume coverage that does not exist.\n\n",
     );
     let mut group = "";
-    for class in BLINDNESS_REGISTRY {
+    for class in blindness_registry() {
         if class.group != group {
             group = class.group;
             out.push_str(&format!("## Group: {group}\n\n"));
@@ -110,7 +110,7 @@ mod tests {
     #[test]
     fn document_carries_every_class_verbatim() {
         let text = disclosure_contract_text();
-        for class in BLINDNESS_REGISTRY {
+        for class in blindness_registry() {
             assert!(text.contains(class.id), "document omits id {:?}", class.id);
             assert!(
                 text.contains(class.group),
@@ -146,7 +146,7 @@ mod tests {
             "a status outside {{asserted, partial, notYetDetected}} would be uncounted by every folded \
              reply while `classes` kept growing"
         );
-        assert_eq!(classes, BLINDNESS_REGISTRY.len());
+        assert_eq!(classes, blindness_registry().len());
     }
 
     /// Every group gets exactly one heading, in registry order — the document is grouped, not one flat
@@ -155,7 +155,7 @@ mod tests {
     fn every_group_heads_exactly_one_section() {
         let text = disclosure_contract_text();
         let groups: std::collections::BTreeSet<&str> =
-            BLINDNESS_REGISTRY.iter().map(|c| c.group).collect();
+            blindness_registry().iter().map(|c| c.group).collect();
         for group in groups {
             let heading = format!("## Group: {group}\n");
             assert_eq!(

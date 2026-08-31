@@ -46,14 +46,19 @@ proptest! {
     #![proptest_config(input_strategy::config(CASES))]
 
     #[test]
-    fn no_public_entry_point_panics(text in input_strategy::source_text()) {
-        hammer("Api/Controllers/OrdersController.cs", &text);
+    fn no_public_entry_point_panics(
+        rel in input_strategy::rel_path(),
+        text in input_strategy::source_text(),
+    ) {
+        hammer(&rel, &text);
     }
 }
 
 #[test]
 fn no_public_entry_point_panics_on_fixed_edge_cases() {
     for text in input_strategy::FIXED_EDGE_CASES {
-        hammer("Api/Controllers/OrdersController.cs", text);
+        for rel in input_strategy::FIXED_RELS {
+            hammer(rel, text);
+        }
     }
 }

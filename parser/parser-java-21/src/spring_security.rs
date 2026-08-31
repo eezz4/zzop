@@ -1,6 +1,6 @@
-//! Spring Security **global authorization posture** extraction — the `http.authorizeRequests()...
-//! .anyRequest().authenticated()` builder chain in a `WebSecurityConfigurerAdapter.configure(HttpSecurity)`
-//! (or a `SecurityFilterChain` bean) — for the `mutating-route-no-auth` rule's route-auth exemption. This
+//! Spring Security **global authorization posture** extraction — the `authorizeRequests()`/
+//! `authorizeHttpRequests(..)` builder chain in a `WebSecurityConfigurerAdapter.configure(HttpSecurity)`
+//! or a `SecurityFilterChain` bean — for the `mutating-route-no-auth` rule's route-auth exemption. This
 //! is the application-GLOBAL auth mechanism (the residual the rule's own doc names): every route is
 //! authenticated-by-default, with an enumerable list of `.permitAll()` exceptions, so — unlike an opaque
 //! global guard — it IS route-mappable (a route is authenticated iff it matches no `.permitAll()` matcher).
@@ -8,22 +8,31 @@
 //! ## Safety: parse-all-or-nothing (a security rule must not false-clear)
 //! Exempting a route wrongly (clearing a genuinely-open mutating route) would HIDE a real finding — the
 //! dangerous direction. So this extractor is deliberately all-or-nothing: it returns a posture ONLY when
-//! BOTH (a) the chain terminates in `.anyRequest().authenticated()`/`.fullyAuthenticated()`
-//! (secure-by-default — any other `anyRequest` terminal, or none, means the default is not "authenticated"
-//! and we cannot safely infer any route is guarded), AND (b) EVERY clause after `authorizeRequests`/
-//! `authorizeHttpRequests` is recognized — a matcher (`antMatchers`/`requestMatchers`/`mvcMatchers`)
-//! followed by a known terminal (`permitAll`/`authenticated`/`fullyAuthenticated`/`denyAll`), with LITERAL
-//! path arguments only.
-//! It also bails on anything that makes the posture NON-global or opens routes it can't see: a chain-level
-//! request scoper before the entrypoint (`http.antMatcher(...)`/`securityMatcher`/`regexMatcher`/
-//! `requestMatchers()` — detected as ANY object-side method whose name contains `Matcher`, so the guard is
-//! robust to the full deprecated-and-current family, not a fragile name list), and a `WebSecurity.ignoring(`
-//! call anywhere in the file (it bypasses the filter chain entirely, opening paths the `authorizeRequests`
-//! chain never lists). Any unrecognized clause (a `.hasRole(...)`/`.access(...)` restriction, a non-literal
-//! path, the lambda-DSL form), or more than one authorization chain in the file, likewise returns `None` —
-//! no posture, no exemption, every finding kept. A missed exemption is a false-positive we already ship; a
-//! wrong exemption is a hidden vulnerability. Only the classic fluent `WebSecurityConfigurerAdapter` form is
-//! parsed; the Spring-6 lambda DSL is future work (bails safely).
+//! BOTH (a) the chain terminates in a PROVABLY authenticated `anyRequest` default, AND (b) EVERY clause
+//! configuring the authorization registry is recognized — a matcher (`antMatchers`/`requestMatchers`/
+//! `mvcMatchers`) followed by a known terminal (`permitAll`/`authenticated`/`fullyAuthenticated`/
+//! `denyAll`), with LITERAL path arguments only. Anything else returns a NAMED bail
+//! ([`SpringPostureBail`]) — no posture, no exemption, every finding kept. A missed exemption is a
+//! false-positive we already ship; a wrong exemption is a hidden vulnerability.
+//!
+//! Both registry spellings are read — the classic fluent chain and the Spring-6 lambda DSL — and two
+//! `authorizeHttpRequests(..)` customizers on ONE chain are folded, because Spring applies both to the
+//! same registry. See [`clauses`] for that half. What still bails, and why:
+//! - **`WebSecurity.ignoring(`** anywhere in the file: it bypasses the filter chain ENTIRELY, opening
+//!   paths the `authorizeHttpRequests` chain never lists, so a config carrying one could hide an open
+//!   mutating route from `permit_all`.
+//! - **a chain-level request scoper** (`http.securityMatcher(..)`/`antMatcher(..)`/`requestMatchers()`,
+//!   detected as ANY chain-spine method whose name contains `Matcher`, so the guard is robust to the full
+//!   deprecated-and-current family rather than a fragile name list): its posture is path-LOCAL, and
+//!   applying it tree-wide would false-clear open routes outside the scope.
+//! - **a configurer that opens paths of its own** (`formLogin(f -> f.loginPage(..).permitAll())`,
+//!   `logout().permitAll()`): those paths never reach `permit_all`. Both this hazard and the scoper above
+//!   are checked on the entrypoint's chain AND on every SIBLING statement configuring the same builder —
+//!   Spring reads `http.a(); http.b();` exactly as `http.a().b()`, so one spine is not the config. See
+//!   [`siblings`].
+//! - **more than one independent authorization chain** in the file: config-vs-config scoping is ambiguous.
+//! - **a non-literal matcher argument**, an unrecognized clause, or an `anyRequest` default that is not
+//!   provably "authenticated" (notably `.access(mgr == null ? … : mgr)`, whose live arm could GRANT).
 //!
 //! The `.permitAll()` matcher list is intentionally the ONLY thing acted on: an explicit
 //! `.antMatchers(...).authenticated()` is redundant with the authenticated default (its routes are exempt
@@ -32,7 +41,13 @@
 
 use tree_sitter::Node;
 
-use crate::util::{node_text, valid_named_children};
+use crate::util::node_text;
+
+mod clauses;
+mod fold;
+mod siblings;
+#[cfg(test)]
+mod tests;
 
 /// The parsed global authorization posture: a secure-by-default (`anyRequest().authenticated()`) chain
 /// plus its enumerated `.permitAll()` exceptions. A route is authenticated (and thus exempt from
@@ -49,6 +64,69 @@ pub struct SpringSecurityPosture {
 pub struct SpringAntMatcher {
     pub method: Option<String>,
     pub patterns: Vec<String>,
+}
+
+/// WHY an extraction produced no posture. Every bail is named rather than a silent `None`, so a later
+/// pass can hook the one it knows how to resolve (a property-backed whitelist reaches
+/// [`Self::NonLiteralMatcher`], carrying both the unreadable argument and the expression that binds it)
+/// and so a "this config exists but we could not read it" self-report can say which shape stopped it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SpringPostureBail {
+    /// No authorization entrypoint in the file (or it did not parse) — not a security config at all.
+    /// This is the overwhelmingly common case: every non-config Java file lands here.
+    NotAConfig,
+    /// A `WebSecurity.ignoring(` call anywhere in the file.
+    WebSecurityIgnoring,
+    /// A chain-level request scoper before/after the entrypoint — the posture is path-local, not global.
+    ChainScoper,
+    /// More than one independent authorization builder chain in the file.
+    MultipleChains,
+    /// One chain mixes the classic-fluent and lambda-DSL spellings.
+    MixedDsl,
+    /// A customizer-lambda shape that cannot be enumerated exhaustively; carries the node kind or the
+    /// structural reason (`"if_statement"`, `"chain-not-on-parameter"`, …).
+    LambdaBody(String),
+    /// A matcher argument that is not a literal path. `arg` is its source text; `bound_by` is the
+    /// enhanced-for iterable that binds it when the argument is such a loop variable
+    /// (`requestMatchers(url)` under `for (String url : ignoreUrlsConfig.getUrls())`).
+    NonLiteralMatcher {
+        arg: String,
+        bound_by: Option<String>,
+    },
+    /// An `HttpSecurity` configurer on the chain spine that opens paths of its own
+    /// (`logout().permitAll()`, `formLogin(f -> f.loginPage(..).permitAll())`); carries its name.
+    ConfigurerPermitAll(String),
+    /// The builder's use across the enclosing method cannot be enumerated, so a sibling statement could
+    /// carry a hazard unseen: the entrypoint chain has no nameable receiver (`"chain-base"`), or a second
+    /// name is bound to the same object (`"alias"`). See [`siblings`].
+    SiblingScope(String),
+    /// A registry clause that is neither a known matcher nor a known terminal; carries its name.
+    UnrecognizedClause(String),
+    /// The chain never proves an authenticated `anyRequest` default.
+    NotSecureByDefault,
+    /// `.anyRequest().access(..)` whose argument is not provably `AuthenticatedAuthorizationManager
+    /// .authenticated()`; carries the argument source text.
+    AnyRequestAccessNotProvable(String),
+}
+
+impl SpringPostureBail {
+    /// A stable kebab-case id for this bail — the name a consumer matches on and a report prints.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::NotAConfig => "not-a-config",
+            Self::WebSecurityIgnoring => "web-security-ignoring",
+            Self::ChainScoper => "chain-scoper",
+            Self::MultipleChains => "multiple-chains",
+            Self::MixedDsl => "mixed-dsl",
+            Self::LambdaBody(_) => "lambda-body",
+            Self::NonLiteralMatcher { .. } => "non-literal-matcher",
+            Self::ConfigurerPermitAll(_) => "configurer-permit-all",
+            Self::SiblingScope(_) => "sibling-scope",
+            Self::UnrecognizedClause(_) => "unrecognized-clause",
+            Self::NotSecureByDefault => "not-secure-by-default",
+            Self::AnyRequestAccessNotProvable(_) => "any-request-access-not-provable",
+        }
+    }
 }
 
 impl SpringSecurityPosture {
@@ -78,48 +156,44 @@ impl SpringAntMatcher {
     }
 }
 
-const MATCHER_METHODS: &[&str] = &["antMatchers", "requestMatchers", "mvcMatchers"];
-const AUTHZ_ENTRYPOINTS: &[&str] = &["authorizeRequests", "authorizeHttpRequests"];
-/// Chain terminals that mean "not an open route" (recognized so they don't force a bail; only `permitAll`
-/// is acted on). `denyAll` blocks entirely; `authenticated`/`fullyAuthenticated` require auth.
-const CLOSED_TERMINALS: &[&str] = &["authenticated", "fullyAuthenticated", "denyAll"];
-
-/// Extract the Spring Security global posture from one Java file, or `None` if the file has no single
-/// fully-recognized secure-by-default authorization chain (see the module doc's safety contract).
-pub fn extract_spring_security_posture(_rel: &str, text: &str) -> Option<SpringSecurityPosture> {
+/// Extract the Spring Security global posture from one Java file, or a NAMED bail if the file has no
+/// single fully-recognized secure-by-default authorization chain (see the module doc's safety contract).
+pub fn extract_spring_security_posture(
+    _rel: &str,
+    text: &str,
+) -> Result<SpringSecurityPosture, SpringPostureBail> {
     // `WebSecurity.ignoring().antMatchers(...)` (in a `configure(WebSecurity)` method, often the same
     // class) opens paths by bypassing the filter chain ENTIRELY — stronger than `permitAll`, and invisible
-    // to the `authorizeRequests` chain this parses. A mutating route on an ignored path is genuinely open,
-    // so any config that uses `ignoring` could hide such a route from `permit_all`: bail conservatively
+    // to the authorization chain this parses. A mutating route on an ignored path is genuinely open, so
+    // any config that uses `ignoring` could hide such a route from `permit_all`: bail conservatively
     // rather than risk exempting it. (`ignoring` paths are almost always static GET resources, but the
     // safe posture is to not reason about a config we can't fully see.)
     if text.contains(".ignoring(") {
-        return None;
+        return Err(SpringPostureBail::WebSecurityIgnoring);
     }
-    let tree = crate::parse_tree(text)?;
-    let root = tree.root_node();
-
-    // Find every `authorizeRequests`/`authorizeHttpRequests` call. Exactly one → parse it; else bail
-    // (zero = not a config; more than one = multiple/ambiguous chains, unsafe to reason about).
+    let tree = crate::parse_tree(text).ok_or(SpringPostureBail::NotAConfig)?;
     let mut entrypoints = Vec::new();
-    collect_authz_entrypoints(root, text, &mut entrypoints);
-    let [entry] = entrypoints.as_slice() else {
-        return None;
+    collect_authz_entrypoints(tree.root_node(), text, &mut entrypoints);
+    let Some(first) = entrypoints.first() else {
+        return Err(SpringPostureBail::NotAConfig);
     };
 
-    // A chain-level request scoper BEFORE the entrypoint — `http.antMatcher("/api/**").authorizeRequests()`
-    // / `securityMatcher`/`mvcMatcher`/`requestMatcher` (SINGULAR) — narrows the whole chain to a path
-    // subset, so its posture is NOT global and must never be applied tree/module-wide (it would false-clear
-    // open routes OUTSIDE the scope). Such a scoper sits on the entrypoint's `object` side, invisible to the
-    // upward `ascend_chain` walk, so descend the object chain and bail if one is present.
-    if chain_has_scoper(*entry, text) {
-        return None;
+    // Every entrypoint must sit on ONE builder chain. Two `authorizeHttpRequests(..)` calls on the SAME
+    // chain configure the same registry and are folded; two on DIFFERENT chains are two postures whose
+    // relative scoping we cannot resolve, so they bail.
+    let chain = chain_root(*first);
+    if entrypoints
+        .iter()
+        .any(|e| chain_root(*e).id() != chain.id())
+    {
+        return Err(SpringPostureBail::MultipleChains);
     }
-
-    // Ascend the method chain from the entrypoint, collecting each following `.clause(args)` in source
-    // order (the parents whose `object` is the node below).
-    let clauses = ascend_chain(*entry, text);
-    parse_clauses(&clauses, text)
+    let groups = clauses::walk_chain(chain, text)?;
+    // …and the chain's own spine is not the whole configuration: a SIBLING statement can reconfigure the
+    // same `http` object, and Spring treats `http.a(); http.b();` exactly as `http.a().b()`. The two
+    // chain-level hazards are re-checked over those statements before any posture is returned.
+    siblings::scan(chain, text)?;
+    fold::into_posture(&groups, text)
 }
 
 /// Collect every `method_invocation` node whose method name is an authorization entrypoint.
@@ -127,7 +201,7 @@ fn collect_authz_entrypoints<'a>(node: Node<'a>, src: &str, out: &mut Vec<Node<'
     if node.kind() == "method_invocation"
         && node
             .child_by_field_name("name")
-            .is_some_and(|n| AUTHZ_ENTRYPOINTS.contains(&node_text(n, src)))
+            .is_some_and(|n| clauses::AUTHZ_ENTRYPOINTS.contains(&node_text(n, src)))
     {
         out.push(node);
     }
@@ -137,111 +211,16 @@ fn collect_authz_entrypoints<'a>(node: Node<'a>, src: &str, out: &mut Vec<Node<'
     }
 }
 
-/// True when the entrypoint's `object` chain (everything BEFORE `authorizeRequests`) contains a
-/// chain-level request SCOPER. Rather than enumerate the scoping method names (fragile: `securityMatcher`/
-/// `antMatcher`/`mvcMatcher`/`regexMatcher`/`requestMatcher` singular AND the `requestMatchers()`/
-/// `securityMatchers()` plural chain-level entrypoints, plus whatever future Spring adds), this matches ANY
-/// object-side method whose name contains `Matcher` — every `HttpSecurity` scoping method is spelled that
-/// way and NO non-scoping builder method on the pre-`authorizeRequests` spine (`csrf`/`cors`/`and`/
-/// `sessionManagement`/`exceptionHandling`/…) contains it, so the broad match is both robust and free of
-/// false bails. A scoped chain's posture is path-local, not global, and applying it would false-clear open
-/// routes outside the scope — so its presence forces the whole extraction to bail.
-fn chain_has_scoper(entry: Node, src: &str) -> bool {
-    let mut cur = entry.child_by_field_name("object");
-    while let Some(node) = cur {
-        if node.kind() != "method_invocation" {
-            break;
-        }
-        if node
-            .child_by_field_name("name")
-            .is_some_and(|n| node_text(n, src).contains("Matcher"))
-        {
-            return true;
-        }
-        cur = node.child_by_field_name("object");
-    }
-    false
-}
-
-/// The clauses chained after `entry`, in source order: ascend parent `method_invocation`s where the
-/// current node is the `object`. Each yields `(method_name_node, arguments_node_opt)`.
-fn ascend_chain<'a>(entry: Node<'a>, src: &str) -> Vec<(String, Option<Node<'a>>)> {
-    let mut out = Vec::new();
-    let mut cur = entry;
+/// The outermost `method_invocation` of the builder chain `node` belongs to — ascend while the current
+/// node is the parent's `object`. Two entrypoints share a chain iff they share this root.
+fn chain_root(node: Node) -> Node {
+    let mut cur = node;
     while let Some(parent) = cur.parent() {
         if parent.kind() != "method_invocation" || parent.child_by_field_name("object") != Some(cur)
         {
             break;
         }
-        if let Some(name) = parent.child_by_field_name("name") {
-            out.push((
-                node_text(name, src).to_string(),
-                parent.child_by_field_name("arguments"),
-            ));
-        }
         cur = parent;
     }
-    out
+    cur
 }
-
-/// Fold the clause sequence into a posture, or `None` on ANY unrecognized shape (safety bail).
-fn parse_clauses(clauses: &[(String, Option<Node>)], src: &str) -> Option<SpringSecurityPosture> {
-    let mut permit_all = Vec::new();
-    let mut default_authenticated = false;
-    let mut i = 0;
-    while i < clauses.len() {
-        let (name, args) = &clauses[i];
-        let (term, _) = clauses.get(i + 1)?; // every matcher/anyRequest needs a following terminal
-        if MATCHER_METHODS.contains(&name.as_str()) {
-            let matcher = parse_matcher(*args, src)?; // non-literal args -> bail
-            if term == "permitAll" {
-                permit_all.push(matcher);
-            } else if !CLOSED_TERMINALS.contains(&term.as_str()) {
-                return None; // unrecognized terminal after a matcher
-            }
-        } else if name == "anyRequest" {
-            if term == "authenticated" || term == "fullyAuthenticated" {
-                default_authenticated = true;
-            } else {
-                return None; // anyRequest not authenticated -> not secure-by-default -> bail
-            }
-        } else {
-            return None; // unrecognized clause
-        }
-        i += 2;
-    }
-    default_authenticated.then_some(SpringSecurityPosture { permit_all })
-}
-
-/// Parse one matcher's argument list into `SpringAntMatcher`, or `None` if any argument is neither a
-/// `HttpMethod.X` (first position only) nor a string literal (a non-literal path can't be reasoned about).
-fn parse_matcher(args: Option<Node>, src: &str) -> Option<SpringAntMatcher> {
-    let args = args?;
-    // A malformed argument subtree (an ERROR/MISSING node) is dropped by `valid_named_children`, which
-    // would let a non-literal/unparsed arg pass unseen — bail on any parse error in the args (safe).
-    if args.has_error() {
-        return None;
-    }
-    let mut method = None;
-    let mut patterns = Vec::new();
-    for (idx, arg) in valid_named_children(args).into_iter().enumerate() {
-        match arg.kind() {
-            "string_literal" => patterns.push(strip_string(node_text(arg, src))),
-            // `HttpMethod.GET` — only valid as the FIRST argument.
-            "field_access" if idx == 0 => {
-                let field = arg.child_by_field_name("field")?;
-                method = Some(node_text(field, src).to_string());
-            }
-            _ => return None, // a variable, concatenation, or other non-literal -> bail
-        }
-    }
-    Some(SpringAntMatcher { method, patterns })
-}
-
-/// Strip the surrounding quotes from a Java string-literal node's text (`"/x"` -> `/x`).
-fn strip_string(raw: &str) -> String {
-    raw.trim_matches('"').to_string()
-}
-
-#[cfg(test)]
-mod tests;

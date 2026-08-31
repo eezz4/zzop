@@ -201,7 +201,16 @@ census_file="scripts/policy-census.txt"
 # the empty-channel disclosure. Same rule-ID vocabulary as the `NATIVE_ANALYSES` rows above wearing a
 # third struct type — and its rows are QUOTED to users by name, so a row silently dropped removes a
 # rule from a published sentence about what this run could not see.
-type_alternation='&str|&\[&str\]|&\[u8\]|&\[\(&str,[[:space:]]*&str\)\]|\[&str;[[:space:]]*[0-9]+\]|\[\(&str,[[:space:]]*&str\);[[:space:]]*[0-9]+\]|&\[\(&str,[[:space:]]*&\[&str\]\)\]|&\[\(&str,[[:space:]]*&\[&str\],[[:space:]]*&str\)\]|&\[\(&str,[[:space:]]*SeverityValue\)\]|&\[\(&str,[[:space:]]*&\[RuleIoChannel\]\)\]|&\[BlindnessClass\]|&\[FrameworkRecognizer\]|&\[RuleChannelDirection\]|&\[NormalizedKey\]|&\[RuleIoChannel\]|RuleIoChannel|RiskWeights|usize|u32|u64|i32|i64|f64|f32'
+# u8 joined 2026-08-24: `ROLE_SHIPPED`/`ROLE_TEST_PATH`/`ROLE_BUILD_SURFACE`, the deployment-role RANKS the
+# summary layer sorts findings by. It is the last missing member of the numeric family this alternation
+# already reads (usize/u32/u64/i32/i64/f32/f64) and it was never argued out — only never met, which is the
+# "waived by silence" state the blind-spot assertion below exists to refuse. Waiving it in $ignored_types
+# would have been the wrong door and provably so: a `u8` can hold a min-length, a max-depth or a rank just
+# as a `u32` can, so "structurally cannot carry policy" is false for this type. Adding it widened the
+# census by exactly the three names above and nothing else (measured: every `u8` const across all scan
+# dirs is one of those three), so the "if it balloons, narrow back down" caution three notes up did not
+# apply.
+type_alternation='&str|&\[&str\]|&\[u8\]|&\[\(&str,[[:space:]]*&str\)\]|\[&str;[[:space:]]*[0-9]+\]|\[\(&str,[[:space:]]*&str\);[[:space:]]*[0-9]+\]|&\[\(&str,[[:space:]]*&\[&str\]\)\]|&\[\(&str,[[:space:]]*&\[&str\],[[:space:]]*&str\)\]|&\[\(&str,[[:space:]]*SeverityValue\)\]|&\[\(&str,[[:space:]]*NonSourceKind\)\]|&\[\(&str,[[:space:]]*PrescanMode\)\]|&\[\(&str,[[:space:]]*&\[RuleIoChannel\]\)\]|&\[BlindnessClass\]|&\[FrameworkRecognizer\]|&\[RuleChannelDirection\]|&\[NormalizedKey\]|&\[RuleIoChannel\]|RuleIoChannel|RiskWeights|usize|u32|u64|i32|i64|f64|f32|u8'
 pattern="^[[:space:]]*(pub(\\((crate|super|in [^)]+)\\))? )?const [A-Z_][A-Z0-9_]*: ($type_alternation)"
 
 # Const types the census DELIBERATELY does not read, one line per type with its reason. Nothing is

@@ -46,13 +46,13 @@ the block below is a reading aid, not a second source of truth.
 zzop analyze <path>                  # analyze ONE repo/tree, print a JSON findings summary
 zzop analyze --config <zzop.config.jsonc>  # same analysis, the ONE tree the config names (a config outside the tree root)
 zzop analyze-envelope <envelope.json>  # Mode A: a Normalized-AST envelope file replaces native parsing, same summary shape
-zzop cross <path>...                 # analyze 2+ trees, print the cross-layer join (paths mode)
+zzop cross <path> <path>... (2+)      # analyze 2+ trees, print the cross-layer join (paths mode)
 zzop cross --config <zzop.config.jsonc>  # same, but the config's `trees` define the join
 zzop file <path> <tree>...           # definitive "what does zzop know about THIS FILE?" query (uncapped)
 zzop file <path> --config <zzop.config.jsonc>  # same query, the config's trees define the run
 zzop endpoint <pattern> <path>...    # definitive "is io key X provided/consumed/joined?" query
 zzop endpoint <pattern> --config <zzop.config.jsonc>  # same query, the config's `trees` define the join
-zzop manifest <path>...              # the run's structural contract manifest (identity only) — commit it
+zzop manifest <path> <path>... (2+)  # the run's structural contract manifest (identity only) — commit it
 zzop manifest --config <zzop.config.jsonc>  # same, but the config's `trees` define the join
 zzop diff <a.json> <b.json> [--allow-tool-drift]  # the delta between two manifests: bucket transitions first
 zzop facts <path>...                 # the run's POST-ASSEMBLY FACTS (per-tree CommonIr + the whole join, uncapped) for YOUR OWN rule program
@@ -320,7 +320,7 @@ both products speak through (machine-pinned by
 When the underlying analysis ran git signals (the default, or a config's own `git`
 settings, provided a real git history is actually present), `analyze_repo`'s reply also carries a
 compact, capped `architecture` object — `{pain, painByAxis, painMeasuredWeight, painTotalWeight, painMeaning,
-topRecommendation, criticalTop}` — summarizing the
+topRecommendation, topRecommendationMeaning, criticalTop, criticalTopMeaning}` — summarizing the
 facade's `health`/`recommendations`/`critical` computation (see
 [Output contract](#output-contract) below for the exact shape); it is present only then, absent
 (never `null`) otherwise. `cross_repo`'s `sources[].path` was audited for the same raw-path-echo gap
@@ -424,7 +424,7 @@ rendered `disclosure-classes` have no `include_str!` in that file to grep:
 | `example-envelope` | Minimal valid Mode-A envelope example (a crude JSP parser's output). |
 | `config-surface` | Machine-verified config vocabulary — every config key, dotted path, CLI flag, and embedder field zzop accepts (`crates/config/config-surface.json`, the same file `zzop-config` embeds for unknown-key warnings; its `_docs` sections self-describe). |
 | `config-template` | Annotated starter `zzop.config.jsonc` (`crates/config/src/template.rs`, whose own tests check every key it names against the `config-surface` vocabulary): each optional key with a comment saying what it MEANS, set to zzop's own value — so the file documents the defaults instead of changing them. Writing it is REQUIRED once per tree: every analysis lane refuses a tree with no config, and this document is what both hosts point at when they do. `zzop init [<dir>] [--force]` (see [CLI surface](#cli-surface)) writes these exact bytes to disk; this resource is the same document without the write. |
-| `rule-catalog` | Every rule id the engine ships today — the 11 DSL packs + all native analysis ids, with severity/matcher/detection prose per rule (the suppress marker is derived, `zzop-<rule id>-ok`) (`docs/rules/catalog.md`) — the discoverability gap closed: `packsLoaded` gives counts only, and the `dsl-reference` resource pointed at this file without it ever being served over MCP. Pair with the `rule` tool argument, which the three full-analysis tools take — `analyze_repo`, `cross_repo`, `analyze_envelope` (an id absent from this catalog never fires). `check_file` and `check_endpoint` declare no `rule` property and no handler reads one, so a `rule` key sent to either is an unknown argument, silently ignored rather than a narrower answer. The CLI-only `zzop explain <rule-id>` (see [CLI surface](#cli-surface)) answers "what exactly is this ONE rule" straight from the same compiled-in DSL pack data, no catalog prose parsing required — and `--config <path>` widens it to a run's loaded packs, which is the only surface that reaches a rule this catalog cannot list (a recovered pack's). No MCP twin either way, since this resource already covers the bundled ground over the wire. |
+| `rule-catalog` | Every rule id the engine ships today — the 11 DSL packs + all native analysis ids, with severity/matcher/detection prose per rule (the suppress marker is derived, `zzop-<rule id>-ok`) (`docs/rules/catalog.md`) — the discoverability gap closed: `packsLoaded` gave counts only then (it carries `ruleIds` since 2026-08-20, but only for the packs one RUN loaded, while this resource answers with no run at all), and the `dsl-reference` resource pointed at this file without it ever being served over MCP. Pair with the `rule` tool argument, which the three full-analysis tools take — `analyze_repo`, `cross_repo`, `analyze_envelope` (an id absent from this catalog never fires). `check_file` and `check_endpoint` declare no `rule` property and no handler reads one, so a `rule` key sent to either is an unknown argument, silently ignored rather than a narrower answer. The CLI-only `zzop explain <rule-id>` (see [CLI surface](#cli-surface)) answers "what exactly is this ONE rule" straight from the same compiled-in DSL pack data, no catalog prose parsing required — and `--config <path>` widens it to a run's loaded packs, which is the only surface that reaches a rule this catalog cannot list (a recovered pack's). No MCP twin either way, since this resource already covers the bundled ground over the wire. |
 | `disclosure-classes` | Every silent-failure class zzop knows about, each with the status of how completely zzop detects it today (`asserted` / `partial` / `notYetDetected`) — the full text behind the counts every analyze reply carries (`zzop://contract/disclosure-classes`, also `zzop contract disclosure-classes`). The one row that is **rendered** from the engine's live blindness registry rather than `include_str!`'d from a committed file, so it cannot drift from the counts the replies tally off that same registry. Listed after the `include_str!`'d rows above, and ahead of the derived `example-pack-*` block below. |
 | `example-pack-code-hygiene` | `examples/packs/code-hygiene.json` verbatim — an EXPORTED pack: shipped in the binary but NOT loaded, so its rules run only when a config points at them. |
 | `example-pack-orm-eager` | `examples/packs/orm-eager.json` verbatim — same shape. |
@@ -512,23 +512,52 @@ Every tool reply is summary-first: full counts ride along unconditionally, and a
 says so explicitly — this is the token-bomb guard for MCP responses (`crates/summary/src/output/mod.rs`),
 built to never lie by omission.
 
-- **Findings** shape to `{total, bySeverity, byRule, shown, truncated?, testPaths?}`. `total`/`bySeverity`/`byRule`
+- **Findings** shape to `{total, bySeverity, byRule, shown, truncated?, testPaths?, buildPaths?}`. `total`/`bySeverity`/`byRule`
   are always computed over the FULL set — a `severity`/`rule` filter narrows only `shown`, never the
-  counts. `shown` is the filtered list, sorted severity-descending with original engine order as the
+  counts. `shown` is the filtered list, sorted by deployment role descending (see below), then
+  severity-descending, with original engine order as the
   stable tiebreak (deterministic — same analysis, byte-identical tool output), capped at `limit`
-  (default 50, max 1000). `truncated` (`{shown, totalMatching, hint}`) appears **only** when `shown` is
-  incomplete — its absence is itself the "you have everything" signal, so a cap is never silent. A
+  (default 50, max 1000). `truncated` (`{shown, totalMatching, severitiesNotShown, hint}`) appears
+  **only** when `shown` is
+  incomplete — its absence is itself the "you have everything" signal, so a cap is never silent.
+  `severitiesNotShown` (`{counts, meaning}`, always present inside `truncated`, `counts: {}` when it
+  has nothing to name) says which severity bands the cut removed **outright**. It exists because
+  role-first ordering can push an entire `critical` band past the cap while `bySeverity` still counts
+  it — measured on cal.com at `--limit 1000`: `bySeverity: {critical: 6}` beside 1000 rows with no
+  `critical` among them. Its population is the set the cap was applied to (post-`severity`/`rule`
+  filter), so a caller who filtered `info` out themselves is never told `info` is "not shown", and a
+  severity merely thinned rather than removed is not listed. The `hint` names only remedies that
+  work on THIS reply: at `limit == 1000` "raise the limit" is dropped, because a larger `limit` is a
+  usage error, and narrowing by `severity` is what actually reaches a removed band. A
   `rule` filter that matches ZERO findings AND names a rule id absent from `byRule` (i.e. it never
   fired at ALL this run, not merely filtered down to nothing) gets an additive `note` field pointing
   the caller at the `rule-catalog` contract resource (`zzop://contract/rule-catalog` /
   `zzop contract rule-catalog`) to check the id — this fires through the real `analyze_repo`/
   `cross_repo`/`check_endpoint` tool-call path end to end, not just the underlying shaping helper.
 
-  Within a severity tier, findings whose file matches the DSL's shared test-path pattern sort
-  after production findings, and `testPaths` (`{count, meaning}`, additive-only like `truncated`)
-  announces the demotion with the full-set count — the credential rules deliberately keep scanning
-  test paths (a committed secret is a leak wherever it sits; the catalog rows say so), but a first
-  screen leads with production code. Nothing is dropped and no count moves.
+  Findings sort by **deployment role** first, descending — shipped code, then test paths, then build
+  surface — and severity orders WITHIN a role. So a shipped `critical` is still row one, but a `critical`
+  in a fixture or a build script sorts below every shipped finding, including shipped `info`. Reach and
+  ranking are separate: the rules still SCAN those paths and every count includes what they find; only
+  the reading order changed. Each demoted tier publishes its own `{count, meaning}` key, additive-only
+  like `truncated` (present exactly when it has something to say, **absent** rather than `{"count": 0}`
+  otherwise):
+
+  - `testPaths` — the file matches the DSL's shared test-path pattern. The credential rules deliberately
+    keep scanning test paths (a committed secret is a leak wherever it sits; the catalog rows say so), but
+    a first screen should not be a wall of fixtures.
+  - `buildPaths` — the file is build/release surface: the analyzed tree's own `package.json` `scripts`
+    names it, or it sits under `.github/` (CI workflow, composite action, repo template) or is a `*.example` template. A build script's
+    problems are the toolchain's, not the product's.
+
+  Both are ORDERING facts. Nothing is dropped, no count moves, and `--fail-on` is unaffected — that flag
+  reads `findings.bySeverity`, the full census, never `shown`. The two counts are computed independently
+  over the full set and may overlap (a manifest-declared script that also sits under `fixtures/` is in
+  both); each is a true statement about the run, and neither is a partition. The build tier is a JS/npm
+  ecosystem fact plus two file-name shapes: on a tree that declares none — no `package.json` `scripts`
+  target, nothing under `.github/`, no `*.example` — the order is exactly what it was before the tier
+  existed and no `buildPaths` key appears. To find out for a given tree, run it with `--limit 0` and see
+  whether `findings.buildPaths` is there at all; an absent key IS the answer.
 - **Cross-layer edges** (`cross_repo`) get the same treatment via a plain list cap (`edgesTruncated`,
   default cap 200 — edges are small rows, so most joins fit uncapped).
 - **`degraded`** (`analyze_repo` only) — the size-capped/parse-failure file-path list gets the same
@@ -581,8 +610,8 @@ built to never lie by omission.
   e.g. unknown-rule-id overrides) are never capped** — the honest
   self-report channels outrank brevity, on the theory that a truncated warning list is worse than a long
   one.
-- **`packsLoaded`** — the engine's positive pack-load confirmation (`{id, rules, source, filesInScope,
-  zeroAdmissionRules?}[]`,
+- **`packsLoaded`** — the engine's positive pack-load confirmation (`{id, rules, ruleIds, source, filesInScope?,
+  filesInScopeIfEnabled?, zeroAdmissionRules?, didNotRun?}[]`,
   id-sorted; see the [`AnalyzeOutputView` table](facade.md#the-zzop-facade-json-contract)) rides through whole on every
   `analyze_repo` reply and per-source on `cross_repo` — one entry per loaded pack, bounded by the pack
   count, so it needs no cap. `filesInScope` counts the files this tree has that the pack's rules WOULD
@@ -604,13 +633,33 @@ built to never lie by omission.
   omitted on a `filesInScope: 0` pack (the pack-level zero already covers every rule of it) — see the
   facade table for the full definition. In this host the bundled packs are
   injected as inline `packDefs`, so they report `source: "inline"` (the removed JS wrapper's bundled
-  packs arrived as `"dir"` instead — a packaging difference, not a behavior one).
+  packs arrived as `"dir"` instead — a packaging difference, not a behavior one). `ruleIds` is the
+  LIST behind the `rules` COUNT — every id the pack loaded with, always present, and the field a
+  consumer validating a `rule` filter must read: without it the only answerable question was the pack
+  PREFIX, which is why a typo INSIDE a loaded pack came back as a silent empty result on the CLI twin
+  until 2026-08-20.
+- **`packsLoadedMeaning`** — the legend for the array above, and the reason `packsLoaded` stopped
+  being the one numeric channel in this reply with no statement of what it measures (2026-08-26).
+  Build-constant sentences keyed `row`, `filesInScope` and `zeroAdmissionRules`, plus `didNotRun` only
+  when a pack really was gated off. The `zeroAdmissionRules` sentence is the one an audit asked for by
+  name: “admission 0” has two readings whose implications are opposite — “no analyzed file ever
+  reached this rule” (its zero is scope) versus “files reached it and nothing fired” (a clean bill) —
+  and it has always meant the first. OMITTED, never null and never an empty object, when no pack
+  loaded. `cross_repo` carries ONE merged copy at the reply root rather than repeating it in each
+  `sources[]` row; the merge is order-independent because every value is the same build constant, and
+  its `didNotRun` entry appears when ANY tree gated a pack. A sibling key rather than a `meaning`
+  inside the object because `packsLoaded` is an array whose only “inside” is a row — same shape as
+  `scoreMeanings`, opposite of `ruleTimings`/`cache`, which can host their own.
 - **`ruleOverridesApplied`** — rides through whole on every `analyze_repo` reply and per-source on
   `cross_repo`'s `sources[]` entries, same as `packsLoaded`, but omitted (not `null`) whenever the
   engine itself omits it (no `disabledRules`/`severityOverrides`/`packsOnly` requested) — see the
   [`AnalyzeOutputView` table](facade.md#the-zzop-facade-json-contract) for the field shape. Its `only`
-  member is the one a reader must not skip: `packsLoaded` reports the same rows whether a pack ran or
-  not, so an allowlist is invisible everywhere else in the reply.
+  member reports which entries of the CALLER-SUPPLIED request took effect, a different question from
+  what happened to each loaded pack — `packsLoaded[].didNotRun` answers that one, and has since
+  2026-08-26. Read together they cover the case neither can alone: an allowlist whose every entry is a
+  typo admits no pack at all, so `only` is `[]` (nothing matched a loaded pack) while every
+  `packsLoaded` row reads `didNotRun: "notAllowlisted"`. Before that field existed this sentence said
+  `packsLoaded` reports the same rows whether a pack ran or not — true then, and the defect.
 - **`coverage`** — the engine's per-tree structural coverage census (`files`, `parserDispatched` — renamed from `sourceFiles`, `symbols`,
   `resolvedImportEdges` — renamed from `importEdges` and counting RESOLVED in-tree edges only,
   `declaredImportsByExt` — the per-extension DECLARED-specifier denominator for that edge count,
@@ -643,7 +692,8 @@ built to never lie by omission.
   promises "git signals included". Present **only** when `health` rode this tree's output
   (i.e. git signals actually ran — a real `.git` history, not merely the default `git: {}`
   request) — **absent**, never `null`, when they did not (e.g. no `.git` directory at all). Shape:
-  `{pain, painByAxis, painMeasuredWeight, painTotalWeight, painMeaning, topRecommendation, criticalTop}`.
+  `{pain, painByAxis, painMeasuredWeight, painTotalWeight, painMeaning, topRecommendation,
+  topRecommendationMeaning, criticalTop, criticalTopMeaning}`.
   `pain` is `health.pain` — the composite structural-debt scalar, and **the only score number any
   shipped CLI or MCP surface publishes** (the full `scores` object rides the raw `zzop-facade`
   embedding lane alone, so nothing else here carries a per-metric denominator). It therefore ships
@@ -662,7 +712,14 @@ built to never lie by omission.
   measure scores 100 and so contributed no pain. `pain` is `null`, never `0`, when nothing was
   measurable at all; `topRecommendation` is `null`-safe `{id, severity, topItem}` built from
   `recommendations[0]` (`topItem` is that recommendation's top-ROI item's `path`, `null` when there is
-  none); `criticalTop` is up to 3 file paths off the front of the engine's own **size-weighted
+  none). Its `severity` is a RECOMMENDATION PRIORITY BAND, not a finding severity — the same three
+  tokens, computed from structure (import cycles, fan-out, churn) and from no rule finding at all, so a
+  `critical` here beside a `findings.bySeverity` holding none is normal rather than a contradiction
+  (measured on dotnet/eShop: `{"info":8,"warning":16}` beside `severity: "critical"` naming a test file
+  with zero findings of its own; two independent auditors read it as the reply contradicting itself).
+  `topRecommendationMeaning` ships that vocabulary in the reply, the same self-describing device as
+  `painMeaning` and `criticalTopMeaning`; the field could not simply be renamed, because CLI JSON field
+  names are the compatibility surface `VERSIONING.md` covers and a rename is a major bump; `criticalTop` is up to 3 file paths off the front of the engine's own **size-weighted
   blast-radius** ranking of `critical` (`blastRadius * ln(loc + 2)`, with `blastRadius` as the
   tie-break — `crates/metrics/src/criticality.rs`). The weighting is why a 400-line core outranks a
   5-line re-export barrel of equal blast, and it is also why re-sorting the raw `critical` array by

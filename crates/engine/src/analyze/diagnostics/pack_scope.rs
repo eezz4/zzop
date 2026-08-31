@@ -15,7 +15,10 @@ mod vetoed_files;
 mod vetoed_files_tests;
 
 use scope_warnings::{no_applicable_dsl_rule_warning, zero_scope_packs_warning};
-use uncovered_extension::uncovered_extension_warning;
+/// Re-export only — the principal-filetype floor's one declaration lives on the constant itself; this
+/// link is what lets the facade's `unreadExtensions` cell read THAT number instead of copying it.
+pub use uncovered_extension::MIN_UNCOVERED_EXTENSION_SHARE_PCT;
+use uncovered_extension::{thin_rule_reach_warning, uncovered_extension_warning};
 use vetoed_files::rule_vetoed_files_warning;
 
 use crate::EngineConfig;
@@ -97,11 +100,23 @@ pub(crate) struct DslScope {
     /// so a tree that is 90% declared-route files, natively parsed and targeted by no DSL rule at all,
     /// was named by neither (pinned in `tests/integration/analyze_glob_override_disclosure.rs`).
     ext_census: std::collections::BTreeMap<String, (usize, usize)>,
+    /// `extension -> how many LOADED rules admitted at least one file carrying it` — the RULE axis of the
+    /// same language question [`Self::ext_census`] asks on the file axis, over the same dispatch-claimed
+    /// file set. [`rule_admission::ExtReach`] owns the definition; `uncovered_extension`'s
+    /// `thin_rule_reach_warning` is its only consumer.
+    ///
+    /// It exists because a filetype's coverage is not the binary `ext_census` reports. A single rule
+    /// matching one `.py` file makes that extension "covered" there, while the measured reach is 10 of
+    /// 116 rules — so the extension passed the only gate the language axis had, and a Python tree's near-
+    /// empty findings list still read as a clean bill.
+    ext_rule_reach: std::collections::BTreeMap<String, usize>,
 }
 
 /// Builds the [`DslScope`] census. `packs` is `config.packs` (the LOADED set, before `disabled_rules`
-/// gating — same convention `AnalyzeOutput::packs_loaded`'s own doc documents: reflects load, not
-/// enablement, since applicability is about scope, not disablement) and `analyzed_rels` is every file
+/// gating — the census is deliberately enablement-BLIND, because applicability is a property of
+/// patterns and paths that stays true whatever the caller switched off; `PackLoaded::did_not_run` is
+/// where the run's gating is reported, and the wire view is what decides which of the two scope keys a
+/// gated pack's row may honestly publish) and `analyzed_rels` is every file
 /// this tree's walk actually visited (`analyze::assemble`'s `loc_by_path` keys / envelope's own file
 /// list). Inspects every matcher kind's OWN `file_pattern` (`LineScan`/`MethodScan`/`SymbolScan`/
 /// `IoScan`/`CallScan` all carry one) — more precise than `pack_loader::applies_to`'s pack-level pre-filter,
@@ -153,6 +168,8 @@ pub(crate) fn compute_dsl_scope_filtered(
     // by the same `fold_admitted` call that produces the per-rule admission counts, so the file-axis
     // and rule-axis halves of this census cannot disagree.
     let mut admitted_mask = vec![false; analyzed_rels.len()];
+    // The rule axis of the language question, folded in the same traversal as the two masks above.
+    let mut ext_reach = rule_admission::ExtReach::new(analyzed_rels, dispatch);
     for pack in packs {
         let mut pack_mask = vec![false; analyzed_rels.len()];
         let mut zero_admitted: Vec<String> = Vec::new();
@@ -172,11 +189,24 @@ pub(crate) fn compute_dsl_scope_filtered(
             // The path-gate fold runs unconditionally: `admitted_mask` is a statement about PATTERNS
             // (`DslScope::rule_vetoed_rels`' doc owns why it ignores the mode), while the zero-
             // admission list below is a statement about this run and applies the mode filter on top.
-            let admitted =
-                rule_admission::fold_admitted(&masks, pattern, exclude, &mut admitted_mask);
+            let admitted = rule_admission::fold_admitted(
+                &masks,
+                pattern,
+                exclude,
+                &mut admitted_mask,
+                &mut ext_reach,
+            );
             // Path-gate admission AND the mode filter: a rule this mode never evaluates admits
-            // nothing whatever its patterns match (see `compute_dsl_scope_filtered`'s doc).
-            if !rule_runs(&rule.matcher) || admitted == 0 {
+            // nothing whatever its patterns match (see `compute_dsl_scope_filtered`'s doc). The
+            // filetype marks follow the same verdict — reach counts scrutiny, and a rule that never
+            // runs scrutinises no language.
+            let runs = rule_runs(&rule.matcher);
+            if runs {
+                ext_reach.commit();
+            } else {
+                ext_reach.discard();
+            }
+            if !runs || admitted == 0 {
                 zero_admitted.push(rule.id.clone());
             }
         }
@@ -212,29 +242,9 @@ pub(crate) fn compute_dsl_scope_filtered(
         .map(|((rel, _), _)| (*rel).to_string())
         .collect();
     rule_vetoed_rels.sort_unstable();
-    // The language axis, folded out of the SAME per-file union above so it can never disagree with the
-    // per-pack counts. Files no native frontend claims are skipped here on purpose: `unparsed_extension_
-    // warning` already owns them, and "no rule targets .png" is not a coverage gap. The claim test is the
-    // WHOLE dispatch, so a path `parsers.globOverrides` routed counts as the parsed source it is — see
-    // `DslScope::ext_census`'s doc for the hole the extension map alone left between the two reports.
-    let mut ext_census: std::collections::BTreeMap<String, (usize, usize)> =
-        std::collections::BTreeMap::new();
-    for (rel, matched) in analyzed_rels.iter().zip(in_scope_mask.iter()) {
-        if crate::dispatch::dispatch(rel, dispatch).is_none() {
-            continue;
-        }
-        let Some(ext) = std::path::Path::new(rel)
-            .extension()
-            .and_then(|e| e.to_str())
-        else {
-            continue;
-        };
-        let entry = ext_census.entry(ext.to_ascii_lowercase()).or_insert((0, 0));
-        entry.0 += 1;
-        if *matched {
-            entry.1 += 1;
-        }
-    }
+    // Both halves of the language axis, folded out of the SAME per-file union above so they can never
+    // disagree with the per-pack counts or with each other (`ExtReach::into_census` owns the definition).
+    let (ext_census, ext_rule_reach) = ext_reach.into_census(&in_scope_mask);
     DslScope {
         files_in_scope_by_pack,
         zero_admission_rules_by_pack,
@@ -243,6 +253,7 @@ pub(crate) fn compute_dsl_scope_filtered(
         in_scope_rels,
         rule_vetoed_rels,
         ext_census,
+        ext_rule_reach,
     }
 }
 
@@ -263,6 +274,7 @@ pub(crate) fn pack_scope_warnings(config: &EngineConfig, scope: &DslScope) -> Ve
             &config.rule_config,
         ))
         .chain(uncovered_extension_warning(&config.packs, scope))
+        .chain(thin_rule_reach_warning(&config.packs, scope))
         .chain(rule_vetoed_files_warning(
             &config.packs,
             scope,

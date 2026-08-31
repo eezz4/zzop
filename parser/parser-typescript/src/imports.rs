@@ -16,20 +16,54 @@ pub(crate) fn export_name(n: &ModuleExportName) -> String {
     }
 }
 
+/// The collision-free key of the `n`-th specifier-less `import "y"` in a file — the shared
+/// binds-no-name convention documented in `zzop_core::ImportBinding`'s per-language key table. The one
+/// place this spelling is written: `crates/core/tests/envelope_schema_parity/import_key_table.rs` reads
+/// the literal out of THIS file and holds it against the table, and it cannot tell a test's copy of the
+/// string from an emitted one — so tests ask for the key here rather than respelling it.
+pub(crate) fn side_effect_key(n: u32) -> String {
+    format!("__side_effect_import_{n}__")
+}
+
 /// import declarations -> `{ localName -> ImportBinding }`. Specifiers are verbatim; path resolution is
 /// the caller's responsibility. Also collects CommonJS `require("literal")` bindings (top-level +
 /// function-body-nested) via a tree walk, so dep-graph / circular / call resolution work on CJS trees too.
+///
+/// A SIDE-EFFECT import (`import "./x";`, no specifier clause at all) binds no name, so it gets a
+/// synthetic `__side_effect_import_{N}__` key — the same convention `zzop_core::ImportBinding`'s
+/// per-language key table states for every import that binds nothing, so that the EDGE enters the map
+/// instead of being dropped. It is a real synchronous module load (the target's top-level effects run),
+/// which is how registry-style trees wire their pages; without the binding those targets had no importer
+/// at all and false-fired `dead-candidates`/`unreachable`.
 pub fn parse_imports(file: &str, source: &str) -> ImportMap {
     let mut map = ImportMap::new();
     let Some(module) = parse_module(file, source) else {
         return map;
     };
+    let mut side_effect_seq: u32 = 0;
     for item in &module.body {
         let ModuleItem::ModuleDecl(ModuleDecl::Import(import)) = item else {
             continue;
         };
         let specifier = import.src.value.as_str().unwrap_or_default().to_string();
         let clause_type_only = import.type_only;
+        if import.specifiers.is_empty() {
+            map.insert(
+                side_effect_key(side_effect_seq),
+                ImportBinding {
+                    specifier,
+                    // `"_"` (the Go blank-import spelling), deliberately NOT `"*"`: a side-effect import
+                    // consumes no named export, and `find_dead_exports` reads a `"*"` original as "every
+                    // export of the target is used" — which would silently blank `unimported-export` out
+                    // for the whole target file.
+                    original: "_".into(),
+                    deferred: false,
+                    type_only: clause_type_only,
+                },
+            );
+            side_effect_seq += 1;
+            continue;
+        }
         for spec in &import.specifiers {
             match spec {
                 ImportSpecifier::Named(n) => {
@@ -120,10 +154,54 @@ mod tests {
         assert_eq!(m["useState"].original, "useState");
     }
 
+    // --- Side-effect (specifier-less) `import "x"` ---
+    //
+    // These replace `side_effect_import_has_no_bindings`, which pinned the DEFECT: `import "./x";` is a
+    // real module load (the target's top-level effects run), so dropping it left the target with no
+    // importer at all and false-fired `dead-candidates`/`unreachable` on every registry-style tree. The
+    // synthetic-key convention is the one `zzop_core::ImportBinding`'s per-language key table already
+    // states for every import that binds no name — the edge enters the map, keyed collision-free.
+
     #[test]
-    fn side_effect_import_has_no_bindings() {
-        let m = parse_imports("x.ts", "import \"side\";\n");
-        assert!(m.is_empty());
+    fn side_effect_import_records_edge_under_synthetic_key() {
+        let m = parse_imports("x.ts", "import \"./side\";\n");
+        assert_eq!(m.len(), 1);
+        let (key, binding) = m.iter().next().unwrap();
+        assert_eq!(*key, side_effect_key(0));
+        assert_eq!(binding.specifier, "./side");
+        // NOT "*": a side-effect import consumes no named export, and `find_dead_exports` reads a "*"
+        // binding as "every export of the target is used" — which would silently suppress
+        // `unimported-export` on the whole target file.
+        assert_eq!(binding.original, "_");
+        assert!(!binding.deferred);
+        assert!(!binding.type_only);
+    }
+
+    #[test]
+    fn multiple_side_effect_imports_get_distinct_keys() {
+        let m = parse_imports("x.ts", "import \"./a\";\nimport \"./b\";\n");
+        assert_eq!(m.len(), 2, "both edges must survive the BTreeMap: {m:?}");
+        let specs: Vec<&str> = m.values().map(|b| b.specifier.as_str()).collect();
+        assert_eq!(specs, vec!["./a", "./b"]);
+    }
+
+    #[test]
+    fn side_effect_import_and_bare_require_keys_do_not_collide() {
+        let m = parse_imports("x.js", "import \"./a\";\nrequire(\"./b\");\n");
+        assert_eq!(m.len(), 2, "two independent synthetic namespaces: {m:?}");
+        let mut specs: Vec<&str> = m.values().map(|b| b.specifier.as_str()).collect();
+        specs.sort_unstable();
+        assert_eq!(specs, vec!["./a", "./b"]);
+    }
+
+    #[test]
+    fn side_effect_import_does_not_displace_a_named_binding() {
+        let m = parse_imports(
+            "x.ts",
+            "import \"./css.css\";\nimport { named } from \"./named\";\n",
+        );
+        assert_eq!(m["named"], binding("./named", "named", false));
+        assert_eq!(m[&side_effect_key(0)].specifier, "./css.css");
     }
 
     #[test]

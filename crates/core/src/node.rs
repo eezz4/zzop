@@ -50,7 +50,13 @@ pub struct FileNode {
     /// Change count over the same period.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recent_change_count: Option<u32>,
-    /// author email -> commit count for this file. Used for precise knowledge-silo / bus-factor calculation.
+    /// author email -> commit count for this file, feeding the knowledge-silo / bus-factor calculations.
+    /// The key is `git log`'s `%aE`, so it is the address AFTER the repo's own `.mailmap` is applied — an
+    /// identity the repo DECLARED, not a raw address string. A repo with no `.mailmap` gets raw addresses
+    /// verbatim, and there one person committing from a work address, a personal address and a machine
+    /// default still counts as three; the failure direction is a false all-clear on bus-factor, so read a
+    /// healthy `author_count` on a mailmap-less repo as unresolved rather than as measured. Bot commits
+    /// (`dependabot[bot]` and friends) are not filtered and each count as an author.
     /// See `tag_counts`'s doc — same determinism fix, `Option`-wrapped variant.
     #[serde(
         default,

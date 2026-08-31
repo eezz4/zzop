@@ -37,5 +37,5 @@ use zzop_core::recognizer::{channel, FrameworkRecognizer};
 pub const FRAMEWORK_RECOGNIZERS: &[FrameworkRecognizer] = &[FrameworkRecognizer {
     framework: "prisma schema",
     extensions: &["prisma"],
-    emits: &[channel::DB],
+    emits: &[channel::DB_PROVIDES],
 }];

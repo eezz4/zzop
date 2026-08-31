@@ -172,3 +172,74 @@ pub fn marker_leaders_for_path(rel: &str) -> Leaders {
     }
     Leaders::Slash
 }
+
+/// One suppression marker found in a file: the 1-based line it sits on, and the marker token itself.
+///
+/// The census this feeds is a statement about the SOURCE, not about a run — see [`suppress_marker_sites`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SuppressMarkerSite {
+    /// The analyzed rel path this marker sits in — carried on the site so a consumer folding many files
+    /// together never has to re-pair a site with its file.
+    pub file: String,
+    pub line: u32,
+    pub marker: String,
+}
+
+/// Every `zzop-<rule>-ok` suppression marker in `text`, under the marker leaders `rel`'s extension
+/// admits ([`marker_leaders_for_path`]).
+///
+/// # Why this exists, and what it may claim
+/// A marker silences its rule, and a silenced finding is by definition not in the findings list — so a
+/// reviewer reading a report cannot see that a hardcoded production credential was quieted by one
+/// comment, short of grepping the tree themselves. Every other silence in this product self-reports;
+/// this one did not.
+///
+/// It reports MARKERS PRESENT, never "findings suppressed", and the difference is not pedantry: a
+/// marker whose rule would not have fired anyway (a stale one left behind after the code was fixed) is
+/// counted here and suppressed nothing. Counting actual suppressions instead would mean threading a
+/// counter through every matcher AND through the per-file cache, where a warm run replays findings
+/// without re-running the rules that would have done the counting — the count would silently go to zero
+/// on the second run, which is the failure mode of the thing it is disclosing. A marker census is a
+/// pure function of the file's text, so it is identical warm and cold by construction.
+///
+/// The token shape is [`NEAR_MISS_MARKER_TOKEN_PATTERN`] narrowed to the `zzop-` prefix that
+/// `RuleDef::suppress_marker_for_id` actually mints, so this census and the suppression it describes
+/// cannot disagree about what a marker looks like. A non-zzop `-ok` comment (`idempotent-ok` and the
+/// like) is deliberately not counted: it is not this mechanism.
+pub fn suppress_marker_sites(rel: &str, text: &str) -> Vec<SuppressMarkerSite> {
+    let re = census_re(marker_leaders_for_path(rel));
+    text.lines()
+        .enumerate()
+        .filter_map(|(idx, line)| {
+            let token = re.captures(line)?.get(1)?.as_str();
+            Some(SuppressMarkerSite {
+                file: rel.to_string(),
+                line: u32::try_from(idx + 1).unwrap_or(u32::MAX),
+                marker: format!("zzop-{token}"),
+            })
+        })
+        .collect()
+}
+
+/// The census regex per leader set, memoized exactly like `near_miss_re` beside it — same derivation
+/// from `Leaders::line_leaders()`, so a leader this crate starts honoring is censused without a second
+/// edit. The `zzop-` prefix sits OUTSIDE the shared token pattern's capture group, which is why the
+/// caller re-attaches it rather than reading it back out.
+fn census_re(leaders: Leaders) -> &'static regex::Regex {
+    static SLASH: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    static SQL: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    static HASH: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let cell = match leaders {
+        Leaders::Slash => &SLASH,
+        Leaders::SlashOrSql => &SQL,
+        Leaders::SlashOrHash => &HASH,
+    };
+    cell.get_or_init(|| {
+        let alt = leaders.line_leaders().join("|");
+        regex::Regex::new(&format!(
+            r"(?:{alt})\s*zzop-{}",
+            super::NEAR_MISS_MARKER_TOKEN_PATTERN
+        ))
+        .expect("the suppress-marker census shape is a compile-time constant regex")
+    })
+}

@@ -121,6 +121,23 @@ fn java_file_is_out_of_scope_for_flushall_and_keys_glob() {
     assert!(out.findings.is_empty(), "{:?}", out.findings);
 }
 
+/// POSITION pins for this pack's rule messages — the shared module every pack root includes.
+/// One home, four named claims; see `rules/dsl/message_order_pins.rs` for which claim is which and
+/// why the summary form and the clause form are not interchangeable.
+#[path = "../message_order_pins.rs"]
+mod message_order_pins;
+
+/// The §27 COVERAGE guard — every DSL rule carries a position pin or a declared verdict about its own
+/// message, and a rule carrying neither turns this red. Included by every pack root that includes the
+/// pins above, deliberately: the guard reads the whole pack set off disk, so one copy would do the
+/// work, and being wired eight times is what keeps it from being dropped by a single edit.
+#[path = "../message_order_verdicts.rs"]
+mod message_order_verdicts;
+use message_order_pins::{
+    assert_disqualifier_clause_precedes_imperative,
+    assert_disqualifier_summary_precedes_imperative, assert_landing_precedes_imperative,
+};
+
 mod client_no_error_listener;
 mod flushall_in_code;
 mod keys_command_in_code;

@@ -4,6 +4,7 @@
 //! `examples/packs/tests/console_in_be.rs`. It shared no fixture with any rule here, so nothing had to
 //! be duplicated.
 
+use crate::assert_disqualifier_clause_precedes_imperative;
 use crate::{hits, scan, TempDir};
 
 // --- body-limit-missing ---
@@ -18,6 +19,36 @@ fn express_json_without_limit_is_flagged() {
     assert_eq!(h[0].line, 1);
 }
 
+/// §27 pin (2026-08-29). The disqualifier here is the RESIDUAL the rule declares about itself: the
+/// `limit:` veto reads exactly one line in each direction, so a limit written two or more lines below
+/// the call — after another option, say — still reports. A reader who acts on "Set an explicit `limit`
+/// ..." having already written one two lines down edits nothing and learns nothing; the sentence that
+/// tells him the answer here is the suppression marker sat three sentences further on.
+///
+/// The whole disclosure block moved ahead of the imperative rather than only its last sentence, because
+/// "exactly one line in each direction" is a SUMMARY of the WHERE-the-limit-may-sit sentence and "that
+/// second spelling" points back into it — lifting the residual alone would have stranded both
+/// antecedents. Equivalently: the imperative moved to the end, where it is self-contained (no pronoun,
+/// its own example), so the move needed no bridging sentence. 1353 chars before and after, multiset
+/// identical.
+#[test]
+fn body_limit_missing_message_puts_the_two_line_residual_before_the_set_a_limit_imperative() {
+    let dir = TempDir::new("zzop-be-rel");
+    dir.write("src/app.ts", "app.use(express.json());\n");
+    let out = scan(&dir);
+    let h = hits(&out, "body-limit-missing");
+    // Sentence repair only — the finding itself is unchanged.
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 1);
+
+    assert_disqualifier_clause_precedes_imperative(
+        "body-limit-missing",
+        &h[0].message,
+        "A limit written two or more lines below the call",
+        "Set an explicit `limit`",
+    );
+}
+
 #[test]
 fn express_json_with_explicit_limit_is_not_flagged() {
     let dir = TempDir::new("zzop-be-rel");
@@ -30,6 +61,43 @@ fn express_json_with_explicit_limit_is_not_flagged() {
     );
 }
 
+/// The spelling a formatter actually produces, and the one this rule could not see until 2026-08-21:
+/// the trigger matches the line that OPENS the options object and the limit sits one line down. Measured
+/// on directus `06027c83` (`api/src/app.ts:247-248`) — the single place across directus and 38 corpus
+/// trees where the advice had genuinely been taken was the one place the rule fired.
+#[test]
+fn express_json_with_the_limit_on_the_next_line_is_not_flagged() {
+    let dir = TempDir::new("zzop-be-rel");
+    dir.write(
+        "src/app.ts",
+        "app.use(express.json({\n  limit: process.env.MAX_PAYLOAD_SIZE as string,\n}));\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "body-limit-missing").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+/// The contract is EXACTLY one line in each direction, so a limit two lines down is still reported. Pinned
+/// because it is a residual the rule message states, not an oversight — a span knob is what this field
+/// deliberately is not.
+#[test]
+fn a_limit_two_lines_below_the_trigger_is_still_flagged() {
+    let dir = TempDir::new("zzop-be-rel");
+    dir.write(
+        "src/app.ts",
+        "app.use(express.json({\n  strict: true,\n  limit: '1mb',\n}));\n",
+    );
+    let out = scan(&dir);
+    assert_eq!(
+        hits(&out, "body-limit-missing").len(),
+        1,
+        "{:?}",
+        out.findings
+    );
+}
 #[test]
 fn body_limit_ok_marker_above_the_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-rel");
@@ -340,6 +408,40 @@ fn fs_in_loop_serial_require_file_gate_skips_a_file_with_no_fs_signal() {
     assert!(
         hits(&out, "fs-in-loop-serial").is_empty(),
         "{:?}",
+        out.findings
+    );
+}
+
+/// **An `.unref()`'d interval cannot cause the harm this rule names.** The finding is about a timer that
+/// keeps running with nobody able to stop it; `.unref()` removes the handle from Node's event-loop
+/// refcount, so the process exits on schedule whether or not anyone ever calls `clearInterval`. Measured
+/// on nocodb `3a5cbd5`, where `packages/nocodb/src/helpers/tele.ts:33` ends in `.unref()` on the flagged
+/// line itself and was reported anyway.
+///
+/// The veto is per-LINE, not per-file, and that is the load-bearing part: a file holding one unref'd
+/// timer and one genuinely leaked timer must still report the leaked one. Both ride here in one call.
+///
+/// Stated miss: `.unref()` chained on the NEXT line is not seen. A line-scan sees one line, and widening
+/// to a window would need evidence this shape occurs — it did not in the tree that produced the finding.
+#[test]
+fn an_unrefd_interval_is_vetoed_on_its_own_line_and_a_leaked_sibling_still_fires() {
+    let dir = TempDir::new("zzop-be-rel");
+    dir.write(
+        "src/telemetry.ts",
+        "export function start() {\n\
+        \x20 setInterval(() => send(), 60_000).unref();\n\
+        \x20 setInterval(() => leak(), 1000);\n\
+        }\n\
+        declare function send(): void;\n\
+        declare function leak(): void;\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "interval-no-clear");
+    let lines: Vec<u32> = h.iter().map(|f| f.line).collect();
+    assert_eq!(
+        lines,
+        vec![3],
+        "only the un-unref'd timer on line 3 may fire: {:?}",
         out.findings
     );
 }

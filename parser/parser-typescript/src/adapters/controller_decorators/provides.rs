@@ -36,10 +36,14 @@ struct ControllerCollector<'a> {
 
 impl Visit for ControllerCollector<'_> {
     fn visit_class_decl(&mut self, n: &ClassDecl) {
-        if let Some(ControllerCtx::Literal { prefix }) = controller_context(&n.class.decorators) {
+        if let Some(ControllerCtx::Literal {
+            prefix,
+            route_version,
+        }) = controller_context(&n.class.decorators)
+        {
             for member in &n.class.body {
                 if let ClassMember::Method(m) = member {
-                    self.emit_method(&prefix, m);
+                    self.emit_method(&prefix, route_version.as_deref(), m);
                 }
             }
         }
@@ -50,13 +54,21 @@ impl Visit for ControllerCollector<'_> {
 }
 
 impl ControllerCollector<'_> {
-    fn emit_method(&mut self, prefix: &str, m: &ClassMethod) {
+    /// `route_version` is the class-level `route-version-v1` discriminator (see `context`): it rides
+    /// beside the key rather than inside it, because under header/media-type versioning the version
+    /// never reaches the URL. Every route of one controller carries the same one — method-level
+    /// `@Version()` is not read, so a method that overrides its class is stamped with the CLASS scope.
+    /// That is a real hazard rather than a conservative default (a `VERSION_NEUTRAL` method answers at
+    /// every version, so the class text UNDER-reports its reach and can be the difference that demotes
+    /// a genuine shadow); the module doc's "Known limits" owns the measurement that leaves it in v1.
+    fn emit_method(&mut self, prefix: &str, route_version: Option<&str>, m: &ClassMethod) {
         let Some((verb, name, line, paths, body, response)) = method_route_facts(self.cm, m) else {
             return;
         };
         for path in paths {
             let full_path = format!("{prefix}/{path}");
             self.out.push(IoProvide {
+                route_version: route_version.map(str::to_string),
                 body: body.clone(),
                 response: response.clone(),
                 kind: "http".to_string(),

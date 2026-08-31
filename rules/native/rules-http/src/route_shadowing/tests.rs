@@ -12,6 +12,7 @@ fn provide(key: &str, file: &str, line: u32) -> zzop_core::IoProvide {
         file: file.to_string(),
         line,
         symbol: None,
+        ..Default::default()
     }
 }
 
@@ -48,7 +49,15 @@ fn message_is_byte_identical_to_the_pre_sweep_text() {
          NestJS-style), the param route's pattern also matches every request this literal route was \
          meant to catch, so the earlier registration intercepts first and this handler is effectively \
          unreachable. Fix: register the literal route BEFORE the param route (or merge them into one \
-         handler that branches on the concrete value). Precision limit: \"first registered pattern \
+         handler that branches on the concrete value). That reading holds IF both registrations reach \
+         the SAME router, which is a condition this rule checks only as far as mounting makes it \
+         checkable: when the file's routers are mounted inside the analyzed tree, the mount prefix is \
+         already part of each key, so two Router instances mounted at different prefixes never group \
+         together here. What is left is the router this tree never mounts — a package that exports a \
+         Router for some other repo to mount, where two instances in one file can carry the same bare \
+         path and be separate routers at runtime. Same limit its sibling `duplicate-route` states, for \
+         the same reason: registration order is only an ordering between handlers that share a router. \
+         Precision limit: \"first registered pattern \
          wins\" is framework-dependent — a router that picks the most-specific match regardless of \
          registration order is unaffected by this shape; disable via config `rules: { \
          \"route-shadowing\": \"off\" }` (embedders: `disabledRules`) if that's your framework or the \
@@ -165,6 +174,7 @@ fn non_http_provides_are_ignored() {
             file: "r.ts".to_string(),
             line: 2,
             symbol: None,
+            ..Default::default()
         },
         zzop_core::IoProvide {
             response: None,
@@ -174,7 +184,52 @@ fn non_http_provides_are_ignored() {
             file: "r.ts".to_string(),
             line: 5,
             symbol: None,
+            ..Default::default()
         },
     ];
     assert!(route_shadowing_findings(&provides).is_empty());
+}
+
+/// The exact pair that fires in `r.ts` is silent once the same two lines sit in a test file: a test file's
+/// provides share a FILE without sharing a ROUTER, the one condition this rule cannot check. Measured
+/// 2026-08-19: 56 of 58 upstream findings were this, mostly one param route paired against dozens of
+/// literals declared in later, independent cases of the same suite.
+#[test]
+fn a_shadow_pair_inside_a_test_file_is_not_flagged() {
+    let pair = |file: &str| {
+        vec![
+            provide("GET /items/{}", file, 2),
+            provide("GET /items/active", file, 5),
+        ]
+    };
+    // Control first: the same two lines in production code DO fire, so a green test file below is the
+    // exclusion working rather than the fixture having gone inert.
+    assert_eq!(route_shadowing_findings(&pair("src/routes.ts")).len(), 1);
+    for file in [
+        "test/app.router.js",
+        "src/__tests__/routes.ts",
+        "src/routes.spec.ts",
+    ] {
+        assert!(
+            route_shadowing_findings(&pair(file)).is_empty(),
+            "expected no finding in {file}"
+        );
+    }
+}
+
+/// The skip is per PROVIDE, not per pair: a production shadow keeps firing when a test file happens to
+/// contribute a route of the same shape. Mirrors `duplicate_route`'s
+/// `duplicate_across_two_prod_files_still_fires_alongside_a_coincidental_test_file_provide`.
+#[test]
+fn a_prod_shadow_still_fires_alongside_a_coincidental_test_file_provide() {
+    let provides = vec![
+        provide("GET /items/{}", "test/app.router.js", 1),
+        provide("GET /items/{}", "src/routes.ts", 2),
+        provide("GET /items/active", "src/routes.ts", 5),
+        provide("GET /items/archived", "test/app.router.js", 9),
+    ];
+    let found = route_shadowing_findings(&provides);
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].file, "src/routes.ts");
+    assert_eq!(found[0].line, 5);
 }

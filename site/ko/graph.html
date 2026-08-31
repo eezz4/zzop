@@ -1,0 +1,822 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>zzop — 의존 그래프</title>
+<meta name="description" content="zzop 을 zzop 자신에게 돌렸다: 이 레포지토리의 모든 파일과 그 사이의 모든 import 를 상한 없이. 엔진은 NDJSON 표 두 개를 낼 뿐 아무것도 그리지 않고, 그림은 뷰어가 그것을 읽어 그린다.">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="alternate" hreflang="en" href="https://eezz4.github.io/zzop/graph.html">
+<link rel="alternate" hreflang="ko" href="https://eezz4.github.io/zzop/ko/graph.html">
+<link rel="alternate" hreflang="x-default" href="https://eezz4.github.io/zzop/graph.html">
+<link rel="stylesheet" href="assets/site.css">
+<style>
+/* ── dependency-graph page ──────────────────────────────────────────────
+   Scoped to this page. Everything colour/type comes from assets/site.css
+   tokens; the only new values are the categorical area hues, which live in
+   the script so the legend and the canvas cannot disagree about them.
+
+   THE PAGE FRAME IS NOT HERE ANY MORE. `.graph-page` used to declare its own
+   `max-width`, centring margin and a 24px gutter, which made this the only
+   page on the site whose gutter was not `--pad-x` and the only one without the
+   left docs nav. It is now a grid item of `.docs-layout--wide` (see
+   assets/site.css); what stays below is only what is specific to a canvas
+   stage and its overlay chrome. The breakpoint is the site's 860px for the
+   same reason — a second breakpoint at 780px meant the controls and the docs
+   shell rearranged at different widths on one page. */
+
+.graph-intro { max-width: 68ch; }
+/* The eyebrow is the site's `.eyebrow`, not a local one. The override that used
+   to sit here set the mono face and the raw accent; the guide reserves the
+   undiluted accent for CTAs and active markers and asks body-adjacent text to
+   take the deep step, which is exactly what `.eyebrow` already does. */
+.graph-intro h1 { margin: 0 0 14px; font-size: clamp(30px, 4vw, 38px); line-height: 1.15;
+  letter-spacing: -.03em; text-wrap: balance; }
+.graph-intro .lede { margin: 0 0 20px; color: var(--text-secondary); font-size: 16px; line-height: 1.65; }
+/* 2px, like every other structural box on the site (`.code-panel`, the frame,
+   the section rules). The 1px it used to carry was exactly the hairline the
+   design brief rules out: structure is drawn with 2px solid dividers instead of
+   shadows, and never weakened to a hairline. The 1px separators that remain
+   below are INSIDE a panel, the same role `.cmd-row`'s 1px bottom rule plays
+   inside an index. */
+.graph-cmd {
+  margin: 0; padding: 12px 14px; overflow-x: auto;
+  background: var(--bg-deep); border: 2px solid var(--border); border-radius: var(--radius-sm);
+  font-family: var(--font-mono); font-size: 12.5px; line-height: 1.7; color: var(--text-secondary);
+}
+.graph-cmd code { color: inherit; background: none; padding: 0; }
+.graph-cmd-note { margin: 10px 0 0; color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
+
+.graph-figure { margin: 28px 0 0; }
+/* The stage's edge is an OUTLINE, not a border, and that is load-bearing twice
+   over. (a) An outline is drawn outside the border box and takes no layout, so
+   the absolutely-positioned canvas below — which fills the CONTENT box — now
+   matches the stage rect exactly instead of being two border-widths short; the
+   render check asserts those two rects agree, and it was passing on the old 1px
+   border only because the 2px slack it allows is exactly what a 1px border
+   costs. (b) It can therefore be the site's own 2px ink divider rather than the
+   light-on-ink `--border` alias this subtree redefines: the edge is on the LIGHT
+   ground, where a light tint is invisible, so it takes `--color-divider` like
+   every other structural box on the site. */
+.graph-stage {
+  position: relative; height: min(74vh, 720px); min-height: 440px;
+  background: var(--bg-deep); outline: 2px solid var(--color-divider);
+  border-radius: var(--radius); overflow: hidden;
+}
+/* `width`/`height` are NOT optional here, and `inset: 0` cannot replace them. A <canvas> is a
+   REPLACED element: when its width/height compute to `auto`, an absolutely positioned box takes its
+   INTRINSIC size (canvas defaults to 300x150) and the over-constrained `right`/`bottom` are simply
+   dropped — the rule that stretches a <div> to its containing block does not apply. Measured on the
+   published page: the stage was 1272x720 while the canvas stayed 300x150, so all 1,137 nodes were
+   drawn into a corner tile that the controls panel then covered. The viewer was never at fault; it
+   fits to `cv.clientWidth/clientHeight` and was told the picture was 300x150. */
+.graph-stage canvas {
+  display: block; position: absolute; inset: 0; width: 100%; height: 100%;
+  cursor: grab; touch-action: none;
+}
+.graph-stage canvas.is-dragging { cursor: grabbing; }
+
+/* rgba of the site ink (#201e1d), not the cool near-black this used to carry:
+   these panels float over an ink stage, and two different blacks on one surface
+   is the same "colour outside the palette" problem as a second grey. */
+.graph-controls, .graph-legend {
+  position: absolute; background: rgba(32, 30, 29, .86);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+}
+.graph-controls { top: 14px; left: 14px; width: 232px; bottom: 14px; overflow-y: auto; }
+.graph-controls fieldset { border: 0; margin: 0; padding: 12px 14px; }
+.graph-controls fieldset + fieldset, .graph-controls .graph-find, .graph-controls .graph-detail {
+  border-top: 1px solid var(--border-subtle);
+}
+.graph-controls legend, .graph-find > span {
+  padding: 0; font-family: var(--font-mono); font-size: 10px; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--text-muted);
+}
+.graph-controls legend { display: block; margin-bottom: 8px; }
+/* radius 0, like everything else on this site — the 6px these controls used to
+   carry (and the 4px on the cycle badge below) were the only rounded corners
+   anywhere, and the design guide's one absolute is "radius 0". */
+.seg { display: flex; clear: both; border: 1px solid var(--input-border); border-radius: 0; overflow: hidden; }
+.seg label { flex: 1; position: relative; }
+.seg input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+.seg span {
+  display: block; text-align: center; padding: 6px 3px;
+  font-size: 12px; color: var(--text-secondary); transition: background .12s, color .12s;
+}
+.seg label + label span { border-left: 1px solid var(--input-border); }
+.seg input:checked + span { background: var(--accent); color: var(--text-on-accent); font-weight: 600; }
+.seg input:focus-visible + span { outline: 2px solid var(--accent-hover); outline-offset: -2px; }
+
+.graph-find { display: grid; padding: 12px 14px; }
+.graph-find input {
+  box-sizing: border-box; margin-top: 8px; padding: 7px 9px;
+  font-family: var(--font-mono); font-size: 12px; color: var(--text);
+  background: var(--bg); border: 1px solid var(--input-border); border-radius: 0;
+}
+.graph-find input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.graph-detail { padding: 12px 14px; min-height: 84px; font-family: var(--font-mono); }
+.graph-detail .empty { margin: 0; color: var(--text-muted); font-size: 11.5px; line-height: 1.6; }
+.graph-detail .name { font-size: 13px; font-weight: 600; word-break: break-all; color: var(--text); }
+.graph-detail .dir { margin-top: 2px; font-size: 10.5px; color: var(--text-muted); word-break: break-all; }
+.graph-detail ul { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 3px; }
+.graph-detail li { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--text-secondary); }
+.graph-detail li b { color: var(--text); }
+.graph-detail .cyc {
+  display: inline-block; margin-top: 8px; padding: 2px 7px; border-radius: 0;
+  background: #f2994a; color: #2a1705; font-size: 10px; font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.graph-legend {
+  bottom: 14px; right: 14px; list-style: none; margin: 0; padding: 11px 13px;
+  display: grid; gap: 5px; font-family: var(--font-mono);
+}
+.graph-legend li { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-secondary); }
+/* The one round thing that stays round. It is not chrome: it is a swatch of the
+   glyph the canvas draws, and the canvas draws nodes with `arc()`. A square here
+   would make the legend disagree with the picture it labels. */
+.graph-legend i { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.graph-legend em { margin-left: auto; font-style: normal; color: var(--text-muted);
+  font-variant-numeric: tabular-nums; }
+
+.graph-figure figcaption {
+  margin-top: 12px; font-family: var(--font-mono); font-size: 11.5px; line-height: 1.6;
+  color: var(--text-secondary);
+}
+.graph-figure .graph-src { display: block; margin-top: 5px; color: var(--text-muted); font-size: 10.5px; }
+
+/* 56px and a ruled 24px h2: the same section rhythm `.docs-content section` and
+   `.docs-content h2` give the other four documentation pages, so a reader moving
+   between them does not meet a third vertical scale. */
+.graph-notes { margin-top: 56px; max-width: 76ch; }
+.graph-notes h2 { margin: 0 0 16px; padding-bottom: 8px; border-bottom: var(--rule);
+  font-size: 24px; letter-spacing: -.02em; }
+.graph-notes dl { margin: 0; display: grid; gap: 18px; }
+.graph-notes dt { font-weight: 600; font-size: 14.5px; margin-bottom: 4px; }
+.graph-notes dd { margin: 0; color: var(--text-secondary); font-size: 14px; line-height: 1.65; }
+
+@media (max-width: 860px) {
+  /* The controls stop floating over a small canvas and drop into the flow beneath it, so the
+     picture keeps its whole width. The stage keeps a real height — a graph in a 200px strip is
+     not a graph. */
+  /* The panel STAYS INK when it drops out of the overlay and into the flow. It
+     used to switch to `--bg-alt`, the light tint — but every piece of type
+     inside it resolves the light-on-ink aliases this subtree redefines
+     (`--text-secondary` is #d7d3d3 here, `--text-muted` #9b9797), so below
+     860px the "Colour by"/"Size by" legends, the unselected segment labels, the
+     Find label and the whole detail panel rendered light grey on near-white.
+     It is still inside the ink stage; it should look like it. */
+  .graph-controls {
+    position: static; width: auto; max-height: none;
+    border: 0; border-bottom: 1px solid var(--border); border-radius: 0;
+    background: var(--bg-deep);
+    display: grid; grid-template-columns: 1fr 1fr;
+  }
+  .graph-controls fieldset + fieldset { border-top: 0; border-left: 1px solid var(--border-subtle); }
+  .graph-controls .graph-find, .graph-controls .graph-detail { grid-column: 1 / -1; }
+  .graph-stage { height: auto; min-height: 0; }
+  /* In flow, not absolute: this branch gives the stage `height: auto` so it is sized by its
+     children, and an absolutely positioned canvas contributes no height at all — it would overlay
+     the now-static controls instead of sitting under them, which is the opposite of what the
+     comment above asks for. */
+  .graph-stage canvas { position: static; width: 100%; height: 62vh; min-height: 320px; }
+  .graph-zoom { top: auto; bottom: 14px; right: 14px; }
+  .graph-zoom button { width: 40px; height: 40px; font-size: 18px; }
+  .graph-legend {
+    position: static; border: 0; border-top: 1px solid var(--border); border-radius: 0;
+    grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  }
+}
+@media (prefers-reduced-motion: reduce) { .seg span { transition: none; } }
+
+/* ── zoom controls ──────────────────────────────────────────────────────
+   A pinch is awkward one-handed and impossible from a keyboard, so the
+   gesture is not the only way in. */
+.graph-zoom {
+  position: absolute; right: 14px; top: 14px; display: grid; gap: 6px;
+}
+.graph-zoom button {
+  width: 34px; height: 34px; display: grid; place-items: center;
+  font-family: var(--font-mono); font-size: 16px; line-height: 1;
+  color: var(--text-secondary); background: rgba(32, 30, 29, .86);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.graph-zoom button:hover { color: var(--text); border-color: var(--input-border); }
+.graph-zoom button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+</head>
+<body>
+
+<!--zzop:nav-->
+<nav class="nav">
+  <span class="nav__brand">zzop</span>
+  <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:.1rem">
+    <a href="index.html" class="nav__link">개요</a>
+    <a href="index.html#p-arch" class="nav__link">구조</a>
+    <a href="index.html#p-usage" class="nav__link">사용법</a>
+    <a href="index.html#p-contract" class="nav__link">계약</a>
+    <a href="index.html#p-rules" class="nav__link">룰</a>
+    <a href="index.html#p-graph" class="nav__link">그래프</a>
+    <a href="x-showcase.html" class="nav__extra">실전</a>
+  </div>
+  <a class="langbtn" id="langlink" href="../graph.html" hreflang="en" aria-label="영어판으로 보기">EN · <b>KO</b></a>
+</nav>
+<!--/zzop:nav-->
+
+<!-- The same docs shell the other four documentation pages use, in its two-column variant. This page
+     was the one that had none: it declared its own max-width, centring margin and 24px gutter in the
+     scoped <style> above, so it sat outside the site's spacing system and was the only page in the
+     nav with no way to reach its siblings from the body. The RIGHT-HAND TOC is deliberately absent —
+     `.docs-layout--wide` has no third column — because the in-page TOC indexes `section[id]`
+     headings and this page has exactly one heading below the figure ("Reading it"): a one-entry
+     table of contents charging 210px to a canvas that reads better wide. -->
+<div class="docs-layout docs-layout--wide">
+
+  <button type="button" class="docs-nav-toggle" aria-expanded="false" aria-controls="docs-nav">
+    Docs menu
+  </button>
+
+  <aside class="docs-nav" id="docs-nav">
+    <div class="docs-nav__group">
+      <div class="docs-nav__group-label">Docs</div>
+      <a href="index.html" class="docs-nav__link">Overview</a>
+      <a href="architecture.html" class="docs-nav__link">Architecture</a>
+      <a href="graph.html" class="docs-nav__link is-active">Graph</a>
+      <a href="usage.html" class="docs-nav__link">Usage</a>
+      <a href="reference.html" class="docs-nav__link">Reference</a>
+      <a href="rules.html" class="docs-nav__link">Rules</a>
+    </div>
+  </aside>
+
+  <main class="graph-page">
+
+  <div class="graph-intro">
+    <p class="eyebrow">아키텍처 · 그림은 남이 그린다</p>
+    <h1>zzop 자신의 import 그래프, 상한 없이</h1>
+    <p class="lede">
+      Every file in this repository and every import between them — 1,624 nodes, 3,118 edges, nothing
+      dropped. zzop emitted two NDJSON tables and rendered none of it; the drawing below is a viewer
+      reading those tables, which is the whole point. Point the same command at your repository and you
+      get the same two files.
+    </p>
+    <pre class="graph-cmd"><code>zzop graph . --domain dep --format cosmograph-links &gt; links.ndjson
+zzop graph . --domain dep --format cosmograph-nodes &gt; nodes.ndjson</code></pre>
+    <p class="graph-cmd-note">스냅숏이다: 이 그림과 이 페이지의 모든 수치는 페이지를 재생성할 때마다
+      <code>scripts/site-graph-data.mjs</code> 가 다시 쓴다. 즉 <strong>그 재생성이 돌았던 트리</strong>를
+      설명한다. CI 가 이걸 걸어 두지 않았으므로 레포는 그 뒤로 움직였다. 지금 체크아웃에 대고 위 커맨드
+      둘을 다시 돌리는 것이 곧 재계수다.</p>
+  </div>
+
+  <figure class="graph-figure">
+    <div class="graph-stage">
+      <canvas id="depgraph" aria-label="Dependency graph of the zzop repository: 1624 files, 3118 imports"></canvas>
+
+      <div class="graph-controls">
+        <fieldset>
+          <legend>Colour by</legend>
+          <div class="seg">
+            <label><input type="radio" name="col" value="area" checked><span>Area</span></label>
+            <label><input type="radio" name="col" value="degree"><span>Degree</span></label>
+          </div>
+        </fieldset>
+        <fieldset>
+          <legend>Size by</legend>
+          <div class="seg">
+            <label><input type="radio" name="siz" value="degree" checked><span>Degree</span></label>
+            <label><input type="radio" name="siz" value="fanIn"><span>Fan-in</span></label>
+            <label><input type="radio" name="siz" value="fanOut"><span>Fan-out</span></label>
+          </div>
+        </fieldset>
+        <label class="graph-find">
+          <span>Find</span>
+          <input id="gq" type="search" placeholder="path fragment…" autocomplete="off" spellcheck="false">
+        </label>
+        <div class="graph-detail" id="gdetail"></div>
+      </div>
+
+
+      <div class="graph-zoom">
+        <button type="button" data-zoom="in" aria-label="Zoom in">+</button>
+        <button type="button" data-zoom="out" aria-label="Zoom out">−</button>
+        <button type="button" data-zoom="reset" aria-label="Reset the view">↻</button>
+      </div>
+
+      <ol class="graph-legend" id="glegend"></ol>
+    </div>
+
+    <figcaption><span id="gcensus"></span> <span class="graph-src">위 줄은 그 커맨드가 stderr 에 찍는
+      것이다 — stdout 은 파싱 가능한 표로 남는다. 레이아웃은 미리 계산돼 고정돼 있으므로 이 그림은
+      언제 와도 같다.</span></figcaption>
+  </figure>
+
+  <div class="graph-notes">
+    <h2>읽는 법</h2>
+    <dl>
+      <div>
+        <dt>Nodes are files, edges are imports</dt>
+        <dd>Direction is importer → imported, the direction <code>ir.dep</code> already stores. Size is
+        degree by default; switch it to fan-in to find what everything depends on, or fan-out to find
+        what depends on everything.</dd>
+      </div>
+      <div>
+        <dt>Left to right is the dependency direction</dt>
+        <dd>A file's column is the longest chain of imports that reaches it, so the far left is what
+        nothing in the repository imports and the far right is what everything ends up leaning on.
+        Import cycles have no such depth — no member of a cycle sits above another — so each cycle
+        collapses into a single column rather than being broken at an arbitrarily chosen edge. Rows
+        group files by top-level area, which is why a domain reads as one body.</dd>
+      </div>
+      <div>
+        <dt>Zoomed out you get areas, zoomed in you get files</dt>
+        <dd>At a distance a dot per file is confetti, so the wide view draws one bubble per top-level
+        area — sized by how many files it holds, with arrows carrying the import counts between areas.
+        Zoom past that and the bubbles resolve into the files inside them. It is one drawing at two
+        grains: the bubbles are placed from the very file positions they summarise, so nothing you see
+        far out contradicts what you find close in.</dd>
+      </div>
+      <div>
+        <dt><code>cases/</code> is deliberately grey</dt>
+        <dd>It is a labelled defect benchmark — every file in it is intentionally wrong, scored against
+        <code>cases/EXPECTED.jsonc</code>. It is not product code, so it recedes.</dd>
+      </div>
+      <div>
+        <dt>The far-right block is the files nothing imports</dt>
+        <dd>A file with no imports in either direction has no depth to measure, so putting it in a
+        column would claim a rank the graph never gave it. There are 122 of them here, and they used to
+        be scattered across the frame at whatever bearing the old force layout's starting spiral
+        happened to give them — positions that looked like information and carried none. They now sit
+        in a block of their own past the right edge, grouped by area, so their position says the only
+        two things it honestly can: this file has no imports, and this is the area it belongs to.
+        Nothing is hidden by the move — the census below still counts every node.
+        <br><br>
+        Most of them are there for a reason that is not a defect: <strong>a runner calls them, so
+        nothing imports them by definition</strong> — cargo <code>[[test]]</code> and
+        <code>build.rs</code> targets, <code>[[bin]]</code> roots, npm <code>bin</code> and
+        <code>scripts</code> entries, files a <code>&lt;script&gt;</code> tag loads, and the labelled
+        benchmark trees under <code>cases/</code>. This picture draws one relation, imports, and the
+        entry points of any project sit outside it. They are not drawn differently: deciding "is this a
+        runner entry point?" needs a per-language convention table, and a wrongly coloured node does not
+        announce that it is wrong. A sentence cannot be wrong that way.</dd>
+      </div>
+      <div>
+        <dt>Nothing is truncated</dt>
+        <dd>The mermaid format caps this domain at 40 nodes, because a flowchart with a thousand of them
+        is a black square that looks like information. This lane is uncapped instead, on the grounds that
+        a viewer with zoom does the job a cap does for a drawn picture.</dd>
+      </div>
+      <div>
+        <dt>Your own graph goes somewhere better than this page</dt>
+        <dd>These tables are a standard shape — <code>source</code>/<code>target</code> for links, an
+        <code>id</code> plus styling columns for nodes — so they load into Cosmograph, Gephi or any
+        force-graph library without conversion. See the <a href="usage.html">usage guide</a>.</dd>
+      </div>
+    </dl>
+  </div>
+
+  </main>
+
+</div>
+
+<!--zzop:foot-->
+<footer class="foot">
+  <span class="foot__brand">zzop</span>
+  <span>Zero Zone Of Pain · MIT</span>
+  
+  <a href="privacy.html">개인정보</a>
+  <a href="https://github.com/eezz4/zzop" target="_blank" rel="noreferrer">GitHub</a>
+</footer>
+<!--/zzop:foot-->
+
+<script src="assets/docs.js"></script>
+<script>
+/* zzop:dep-data:begin */
+window.ZZOP_DEP = {"f":["cases/trees/api-be/api","cases/trees/api-be/config","cases/trees/api-be","cases/trees/api-be/routes","cases/trees/api-be/services","cases/trees/api-be/spans","cases/trees/api-be/src/api","cases/trees/api-be/src/domains/orders/routes","cases/trees/api-be/src","cases/trees/be-articles","cases/trees/be-catalog-a","cases/trees/be-catalog-b","cases/trees/be-invoices","cases/trees/callgraph-handlers","cases/trees/callgraph","cases/trees/decoy/api","cases/trees/decoy","cases/trees/decoy/lib","cases/trees/decoy/services","cases/trees/decoy/web","cases/trees/depedge","cases/trees/fe-axios","cases/trees/fe-axios/pages","cases/trees/fe-axios/server","cases/trees/fe-axios/services","cases/trees/fe-catalog","cases/trees/fe-gensdk/api","cases/trees/fe-gensdk","cases/trees/fe-gensdk/server","cases/trees/graph","cases/trees/island","cases/trees/java-svc/src/main/java/com/example/svc","cases/trees/java-svc/src/main/java/com/example/svc/services","cases/trees/rust-svc/migrations","cases/trees/rust-svc/src","cases/trees/sdk","cases/trees/sql-langs/Api.Tests","cases/trees/sql-langs/Api","cases/trees/sql-langs/alembic/versions","cases/trees/sql-langs/services","cases/trees/sql-langs/src/main/java/com/example/sqllangs","cases/trees/sql-langs/src/test/java/com/example/sqllangs","cases/trees/test-conventions/Api.Tests","cases/trees/test-conventions/Api","cases/trees/test-conventions/services","cases/trees/trpc","cases/trees/unresolved","cases/trees/web-fe/config","cases/trees/web-fe","cases/trees/web-fe/rules","cases/trees/worker","cases/trees/xlayer-be","cases/trees/xlayer-be2","cases/trees/xlayer-fe","crates/cache/src","crates/cache/src/evict","crates/cache/src/store","crates/config","crates/config/src","crates/config/src/mapper","crates/config/src/mapper/options","crates/config/src/mapper/tests","crates/config/src/workspaces","crates/config/tests","crates/core/src","crates/core/src/attributes","crates/core/src/callgraph","crates/core/src/dsl","crates/core/src/dsl/attr_gate","crates/core/src/dsl/def","crates/core/src/dsl/def/matcher","crates/core/src/dsl/ir_scan","crates/core/src/dsl/markers","crates/core/src/dsl/method_scan","crates/core/src/dsl/source","crates/core/src/dsl/tests_diagnostics","crates/core/src/dsl/tests_fragments","crates/core/src/dsl/tests_ir_scan","crates/core/src/dsl/tests_line_scan","crates/core/src/dsl/tests_markers","crates/core/src/dsl/veto_window","crates/core/src/file_nodes","crates/core/src/graph","crates/core/src/io","crates/core/src/io/facts","crates/core/src/io/link","crates/core/src/io/link/tests","crates/core/src/ir","crates/core/src/noncycle","crates/core/src/normalized","crates/core/src/pack_loader","crates/core/src/registry","crates/core/src/registry/redact","crates/core/tests/envelope_schema_parity","crates/core/tests","crates/engine","crates/engine/examples","crates/engine/examples/fastapi_overlay_adapter","crates/engine/src/analyze","crates/engine/src/analyze/assemble","crates/engine/src/analyze/assemble/collect","crates/engine/src/analyze/assemble/dep_graph","crates/engine/src/analyze/assemble/helpers","crates/engine/src/analyze/assemble/nuxt_auto_import","crates/engine/src/analyze/assemble/provides","crates/engine/src/analyze/assemble/rules","crates/engine/src/analyze/assemble/rules/config_entries","crates/engine/src/analyze/assemble/rules/framework_entries","crates/engine/src/analyze/assemble/rules/io_scan","crates/engine/src/analyze/assemble/warnings","crates/engine/src/analyze/compose","crates/engine/src/analyze/compose/body_refs","crates/engine/src/analyze/compose/client_base","crates/engine/src/analyze/compose/config_client_base","crates/engine/src/analyze/compose/response_refs","crates/engine/src/analyze/compose/router_mounts","crates/engine/src/analyze/compose/shape_merge","crates/engine/src/analyze/compose/trpc","crates/engine/src/analyze/diagnostics","crates/engine/src/analyze/diagnostics/degraded_files","crates/engine/src/analyze/diagnostics/git_collect","crates/engine/src/analyze/diagnostics/overlay_provenance","crates/engine/src/analyze/diagnostics/pack_scope","crates/engine/src/analyze/native_rules/callgraph","crates/engine/src/analyze/native_rules","crates/engine/src","crates/engine/src/cache","crates/engine/src/channel_direction","crates/engine/src/cross_layer_findings","crates/engine/src/dead_exports","crates/engine/src/disclosure","crates/engine/src/disclosure/registry","crates/engine/src/dispatch","crates/engine/src/envelope","crates/engine/src/envelope/callgraph","crates/engine/src/envelope/merge","crates/engine/src/envelope/overlay","crates/engine/src/envelope/tests","crates/engine/src/file_routes","crates/engine/src/framework_silence","crates/engine/src/framework_silence/csharp_base_route","crates/engine/src/framework_silence/fetch_wrapper","crates/engine/src/framework_silence/partial_route_silence","crates/engine/src/io","crates/engine/src/output","crates/engine/src/pipeline","crates/engine/src/pipeline/csharp_index","crates/engine/src/pipeline/fresh","crates/engine/src/pipeline/go_module","crates/engine/src/pipeline/java_index","crates/engine/src/pipeline/package_json","crates/engine/src/pipeline/parsers","crates/engine/src/pipeline/rust_workspace","crates/engine/src/pipeline/tsconfig","crates/engine/src/pipeline/tsconfig/emission","crates/engine/src/recognizers","crates/engine/src/trees","crates/engine/src/trees/unreported_read_drift","crates/engine/src/vocabulary","crates/engine/src/vocabulary/compilable","crates/engine/tests","crates/engine/tests/integration","crates/engine/tests/rule_contracts","crates/facade/src","crates/facade/src/config","crates/facade/src/config/overlays","crates/facade/src/explain","crates/facade/src/output","crates/facade/src/query","crates/facade/src/query_coverage","crates/facade/src/query_file","crates/facade/src/request","crates/facade/tests","crates/git/src","crates/git/src/parse","crates/git/src/rebase","crates/metrics/src","crates/metrics/src/aggregates","crates/metrics/src/criticality","crates/metrics/src/cross_layer_co_churn","crates/metrics/src/diagnostics","crates/metrics/src/health","crates/metrics/src/recommendations","crates/metrics/src/recommendations/tests","crates/metrics/src/report_excludes","crates/metrics/src/scores","crates/metrics/src/scores/compute","crates/metrics/src/scores/config","crates/metrics/src/scores/meanings","crates/metrics/src/scores/public_api","crates/metrics/src/scores/shared","crates/metrics/src/scores/types","crates/metrics/src/scores/types/reports","crates/metrics/src/seams","crates/summary/src/analyze","crates/summary/src/analyze/coverage_gaps","crates/summary/src","crates/summary/src/cross","crates/summary/src/facts","crates/summary/src/graph","crates/summary/src/graph/cochange","crates/summary/src/graph/cosmograph","crates/summary/src/graph/dep","crates/summary/src/graph/dep/folded","crates/summary/src/graph/fold","crates/summary/src/graph/posture","crates/summary/src/graph/risk","crates/summary/src/manifest","crates/summary/src/output","crates/summary/src/output/rule_prose","crates/summary/src/warnings","crates/summary/tests","crates/test-support/src","examples/adapters/adapter-kit","examples/adapters/adapter-kit/lib","examples/adapters/adapter-kit/test","examples/adapters/auth-overlay-adapter","examples/adapters/auth-overlay-adapter/test","examples/adapters/java-imports-adapter","examples/adapters/java-imports-adapter/test","examples/adapters/java-imports-adapter/test/fixture/src/main/java/com/example/app","examples/adapters/java-imports-adapter/test/fixture/src/main/java/com/example/model","examples/adapters/java-imports-adapter/test/fixture/src/main/java/com/example/util","examples/adapters/override-required/src","examples/adapters/override-required/src/util","examples/adapters/override-required/util","examples/adapters/python-package-alias-adapter","examples/adapters/python-package-alias-adapter/test","examples/adapters/python-package-alias-adapter/test/fixture/common","examples/adapters/python-package-alias-adapter/test/fixture/core","examples/adapters/python-package-alias-adapter/test/fixture/core/config","examples/adapters/python-package-alias-adapter/test/fixture","examples/packs/tests","packages/cli-bin/src/cli","packages/cli-bin/src/cli/help","packages/cli-bin/src/cli/run","packages/cli-bin/src","packages/cli-bin/tests","packages/cli/bin","packages/cli/scripts","packages/cli/test","packages/mcp","packages/mcp/src/bin","packages/mcp/src","packages/mcp/src/server","packages/mcp/src/tools","packages/mcp/tests","parser/parser-csharp/src/adapters","parser/parser-csharp/src/adapters/ef_core","parser/parser-csharp/src/adapters/http_clients","parser/parser-csharp/src/adapters/provides","parser/parser-csharp/src/lang","parser/parser-csharp/src/lang/call_sites","parser/parser-csharp/src/lang/imports","parser/parser-csharp/src/lang/loop_spans","parser/parser-csharp/src/lang/namespaces","parser/parser-csharp/src/lang/string_literals","parser/parser-csharp/src/lang/symbols","parser/parser-csharp/src/lang/used_names","parser/parser-csharp/src","parser/parser-csharp/src/node_kinds","parser/parser-csharp/src/project","parser/parser-csharp/tests","parser/parser-go/src/adapters","parser/parser-go/src/adapters/gin","parser/parser-go/src/adapters/gorm","parser/parser-go/src/adapters/http_clients","parser/parser-go/src/adapters/net_http","parser/parser-go/src/lang","parser/parser-go/src/lang/call_sites","parser/parser-go/src/lang/imports","parser/parser-go/src/lang/loop_spans","parser/parser-go/src/lang/resolve","parser/parser-go/src/lang/string_literals","parser/parser-go/src/lang/symbols","parser/parser-go/src/lang/used_names","parser/parser-go/src","parser/parser-go/src/node_kinds","parser/parser-go/tests","parser/parser-java-21/src","parser/parser-java-21/src/http_clients","parser/parser-java-21/src/jpa","parser/parser-java-21/src/lang","parser/parser-java-21/src/lang/call_sites","parser/parser-java-21/src/lang/calls","parser/parser-java-21/src/lang/imports","parser/parser-java-21/src/lang/loop_spans","parser/parser-java-21/src/lang/string_literals","parser/parser-java-21/src/lang/symbols","parser/parser-java-21/src/lang/used_names","parser/parser-java-21/src/node_kinds","parser/parser-java-21/src/project","parser/parser-java-21/src/provides","parser/parser-java-21/src/security","parser/parser-java-21/src/spring_security","parser/parser-java-21/tests","parser/parser-prisma/src","parser/parser-prisma/tests","parser/parser-python-3/src/adapters","parser/parser-python-3/src/adapters/const_map","parser/parser-python-3/src/adapters/django","parser/parser-python-3/src/adapters/django_routes","parser/parser-python-3/src/adapters/django_routes/guard","parser/parser-python-3/src/adapters/fastapi","parser/parser-python-3/src/adapters/fastapi/guard","parser/parser-python-3/src/adapters/guard_vocab","parser/parser-python-3/src/adapters/http_clients","parser/parser-python-3/src/adapters/sqlalchemy","parser/parser-python-3/src/lang","parser/parser-python-3/src/lang/call_sites","parser/parser-python-3/src/lang/calls","parser/parser-python-3/src/lang/loop_spans","parser/parser-python-3/src/lang/string_literals","parser/parser-python-3/src/lang/symbols","parser/parser-python-3/src","parser/parser-python-3/tests","parser/parser-rust/src/adapters","parser/parser-rust/src/adapters/axum","parser/parser-rust/src/adapters/http_clients","parser/parser-rust/src/adapters/raw_sql","parser/parser-rust/src/lang","parser/parser-rust/src/lang/call_sites","parser/parser-rust/src/lang/calls","parser/parser-rust/src/lang/extractor_guards","parser/parser-rust/src/lang/imports","parser/parser-rust/src/lang/loop_spans","parser/parser-rust/src/lang/resolve","parser/parser-rust/src/lang/string_literals","parser/parser-rust/src/lang/symbols","parser/parser-rust/src/lang/test_spans","parser/parser-rust/src/lang/used_names","parser/parser-rust/src","parser/parser-rust/tests","parser/parser-sql/src","parser/parser-sql/src/consume","parser/parser-sql/src/extract","parser/parser-sql/tests","parser/parser-typescript/src/adapters","parser/parser-typescript/src/adapters/class_shapes","parser/parser-typescript/src/adapters/controller_decorators","parser/parser-typescript/src/adapters/controller_decorators/tests","parser/parser-typescript/src/adapters/db_table_consume","parser/parser-typescript/src/adapters/egress","parser/parser-typescript/src/adapters/egress/collector","parser/parser-typescript/src/adapters/egress/generated_client","parser/parser-typescript/src/adapters/hono_client","parser/parser-typescript/src/adapters/nest_middleware","parser/parser-typescript/src/adapters/next_pages_api","parser/parser-typescript/src/adapters/pathname_dispatch","parser/parser-typescript/src/adapters/pathname_dispatch/routes","parser/parser-typescript/src/adapters/pathname_dispatch/tests","parser/parser-typescript/src/adapters/raw_sql","parser/parser-typescript/src/adapters/router_mounts","parser/parser-typescript/src/adapters/trpc_router","parser/parser-typescript/src/adapters/typeorm_repository","parser/parser-typescript/src/adapters/wrapper_calls","parser/parser-typescript/src/adapters/wrapper_calls/defs","parser/parser-typescript/src","parser/parser-typescript/src/asset_refs","parser/parser-typescript/src/call_sites","parser/parser-typescript/src/exported_names","parser/parser-typescript/src/lang","parser/parser-typescript/src/lang/calls","parser/parser-typescript/src/lang/resolve","parser/parser-typescript/src/lang/resolve/dep_graph","parser/parser-typescript/src/lang/resolve/framework_alias","parser/parser-typescript/src/lang/resolve/workspace","parser/parser-typescript/src/nuxt_config","parser/parser-typescript/src/parse","parser/parser-typescript/src/prescan","parser/parser-typescript/src/sfc_imports","parser/parser-typescript/src/signature_refs","parser/parser-typescript/src/string_literals","parser/parser-typescript/src/symbol_shapes","parser/parser-typescript/src/symbol_shapes/class","parser/parser-typescript/tests","parser/tests","rules/dsl/browser","rules/dsl/db","rules/dsl/egress","rules/dsl/go","rules/dsl/http","rules/dsl","rules/dsl/perf","rules/dsl/react","rules/dsl/redis","rules/dsl/reliability","rules/dsl/security","rules/dsl/sql","rules/native/rules-cross-layer/src/cross_layer","rules/native/rules-cross-layer/src/cross_layer/all_consumes_unjoined","rules/native/rules-cross-layer/src/cross_layer/body_field_drift","rules/native/rules-cross-layer/src/cross_layer/external_base_url_drift","rules/native/rules-cross-layer/src/cross_layer/external_host_fanout","rules/native/rules-cross-layer/src/cross_layer/external_ip_literal","rules/native/rules-cross-layer/src/cross_layer/external_shadow_internal","rules/native/rules-cross-layer/src/cross_layer/external_version_inconsistent","rules/native/rules-cross-layer/src/cross_layer/prefix_drift","rules/native/rules-cross-layer/src/cross_layer/retrying_write_no_idempotency","rules/native/rules-cross-layer/src/cross_layer/route_near_miss","rules/native/rules-cross-layer/src/cross_layer/sdk_import_no_visible_consume","rules/native/rules-cross-layer/src/cross_layer/sensitive_response_field","rules/native/rules-cross-layer/src/cross_layer/shared_db_table","rules/native/rules-cross-layer/src/cross_layer/unconsumed_endpoint","rules/native/rules-cross-layer/src/cross_layer/unconsumed_mutation_endpoint","rules/native/rules-cross-layer/src/cross_layer/unprovided_mutation_call","rules/native/rules-cross-layer/src","rules/native/rules-graph/src","rules/native/rules-graph/src/cache_lane_file_read","rules/native/rules-graph/src/dead_candidates","rules/native/rules-graph/src/dead_exports","rules/native/rules-graph/src/unreachable","rules/native/rules-http/src","rules/native/rules-http/src/duplicate_route","rules/native/rules-http/src/http_scan","rules/native/rules-http/src/mutating_route_no_auth","rules/native/rules-http/src/route_shadowing","rules/native/rules-http/src/unprovided_consume","rules/native/rules-schema/src","rules/native/rules-schema/src/join","rules/native/rules-schema/src/message","rules/native/rules-schema/src/structural","rules/native/rules-schema/src/structural/rules","rules/native/rules-schema/src/usage","rules/src","scripts","scripts/lib","scripts/measure","scripts/site-render-check","scripts/site","site-src/content","site/assets"],"n":[["be-reliability.fetch-no-timeout.ts",0,1,0,0,-438.1,-106.3],["cross-layer.sensitive-response-field.ts",0,1,0,0,-438.1,-101.4],["http.dev-path-no-guard-hint.ts",0,1,0,0,-438.1,-96.5],["http.protected-path-no-auth-evidence.ts",0,1,0,0,-438.1,-91.5],["sql.count-in-loop.ts",0,1,0,0,-438.1,-86.6],["sql.nplus1.ts",0,1,0,0,-438.1,-81.7],["sql.race-condition-toctou.ts",0,1,0,0,-438.1,-76.7],["env.ts",1,1,0,0,-313.5,-76.7],["index.ts",2,0,71,0,-482.9,-106.3],["sql.race-condition-toctou-toproutes.ts",3,1,0,0,-438.1,-71.8],["be-db.client-per-request.ts",4,1,0,0,-438.1,-66.8],["be-db.empty-catch-on-write.ts",4,1,0,0,-432.4,-106.3],["be-db.external-call-in-tx.ts",4,1,0,0,-432.4,-101.4],["be-db.float-money-compare.ts",4,1,0,0,-432.4,-96.5],["be-db.pagination-no-orderby.ts",4,1,0,0,-432.4,-91.5],["be-db.unawaited-write.ts",4,1,0,0,-432.4,-86.6],["be-db.unbounded-user-limit.ts",4,1,0,0,-432.4,-81.7],["be-db.update-delete-no-where.ts",4,1,0,0,-432.4,-76.7],["be-redis.flushall-in-code.ts",4,1,0,0,-432.4,-71.8],["be-reliability.async-route-no-catch.ts",4,1,0,0,-432.4,-66.8],["be-reliability.await-in-map.ts",4,1,0,0,-426.7,-106.3],["be-reliability.body-limit-missing.ts",4,1,0,0,-426.7,-101.4],["be-reliability.console-in-be.cs",4,0,0,0,471.5,-106.3],["be-reliability.console-in-be.go",4,0,0,0,471.5,-101.4],["be-reliability.console-in-be.ts",4,1,0,0,-426.7,-96.5],["be-reliability.console-in-loop.cs",4,0,0,0,471.5,-96.5],["be-reliability.console-in-loop.go",4,0,0,0,471.5,-91.5],["be-reliability.console-in-loop.ts",4,1,0,0,-426.7,-91.5],["be-reliability.debug-true-committed.ts",4,1,0,0,-426.7,-86.6],["be-reliability.env-nonnull-assert.ts",4,1,0,0,-426.7,-81.7],["be-reliability.env-outside-config.cs",4,0,0,0,471.5,-86.6],["be-reliability.env-outside-config.go",4,0,0,0,471.5,-81.7],["be-reliability.env-outside-config.java",4,0,0,0,471.5,-76.7],["be-reliability.env-outside-config.rs",4,0,0,0,471.5,-71.8],["be-reliability.env-outside-config.ts",4,1,1,0,-426.7,-76.7],["be-reliability.interval-no-clear.ts",4,1,0,0,-426.7,-71.8],["be-reliability.json-parse-no-try.ts",4,1,0,0,-426.7,-66.8],["be-reliability.process-exit-in-lib.ts",4,1,0,0,-421,-106.3],["be-reliability.promise-all-writes.ts",4,1,0,0,-421,-101.4],["be-reliability.sync-fs-in-handler.ts",4,1,0,0,-421,-96.5],["be-security.api-key-in-url.ts",4,1,0,0,-421,-91.5],["be-security.bcrypt-cost-too-low.ts",4,1,0,0,-421,-86.6],["be-security.cors-credentials-wildcard.ts",4,1,0,0,-421,-81.7],["be-security.cors-wildcard.ts",4,1,0,0,-421,-76.7],["be-security.dangerous-html-concat.ts",4,1,0,0,-421,-71.8],["be-security.error-leak-to-client.ts",4,1,0,0,-421,-66.8],["be-security.high-entropy-secret.ts",4,1,0,0,-415.3,-106.3],["be-security.insecure-cookie.ts",4,1,0,0,-415.3,-101.4],["be-security.jwt-no-expiry.ts",4,1,0,0,-415.3,-96.5],["be-security.jwt-none-algorithm.ts",4,1,0,0,-415.3,-91.5],["be-security.jwt-sign-literal-secret.ts",4,1,0,0,-415.3,-86.6],["be-security.mass-assignment.ts",4,1,0,0,-415.3,-81.7],["be-security.open-redirect.ts",4,1,0,0,-415.3,-76.7],["be-security.path-traversal.ts",4,1,0,0,-415.3,-71.8],["be-security.raw-query-interpolation.ts",4,1,0,0,-415.3,-66.8],["be-security.shell-exec-interpolation.ts",4,1,0,0,-409.6,-106.3],["be-security.ssrf-user-url.ts",4,1,0,0,-409.6,-101.4],["be-security.timing-unsafe-compare.ts",4,1,0,0,-409.6,-96.5],["be-security.weak-crypto.go",4,0,0,0,471.5,-66.8],["be-security.weak-crypto.py",4,0,0,0,477.2,-106.3],["be-security.weak-crypto.ts",4,1,0,0,-409.6,-91.5],["be-security.weak-password-hash.cs",4,0,0,0,477.2,-101.4],["be-security.weak-password-hash.py",4,0,0,0,477.2,-96.5],["be-security.weak-password-hash.ts",4,1,0,0,-409.6,-86.6],["be-security.weak-token-random.ts",4,1,0,0,-409.6,-81.7],["fullstack.localhost-egress-committed.ts",4,1,0,0,-409.6,-76.7],["fullstack.ws-no-auth.ts",4,1,0,0,-409.6,-71.8],["perf.api-in-loop.ts",4,1,0,0,-409.6,-66.8],["security.taint-flow.ts",4,1,0,0,-403.9,-106.3],["sql.app-side-aggregation-filter-length.ts",4,1,0,0,-403.9,-101.4],["sql.app-side-aggregation-reduce.ts",4,1,0,0,-403.9,-96.5],["sql.query-logic-density.ts",4,1,0,0,-403.9,-91.5],["db.empty-catch-and-write.span.ts",5,1,0,0,-403.9,-86.6],["db.multi-write-no-tx.span.ts",5,1,0,0,-403.9,-81.7],["db.update-delete-no-where.span.ts",5,1,0,0,-403.9,-76.7],["security.html-response-from-request.span.ts",5,1,0,0,-403.9,-71.8],["security.insecure-cookie.span.ts",5,1,0,0,-403.9,-66.8],["security.mass-assignment.span.ts",5,1,0,0,-398.2,-106.3],["security.open-redirect.span.ts",5,1,0,0,-398.2,-101.4],["security.path-traversal.span.ts",5,1,0,0,-398.2,-96.5],["security.ssrf-user-url.span.ts",5,1,0,0,-398.2,-91.5],["security.taint-flow.span.ts",5,1,0,0,-398.2,-86.6],["sql.nplus1-nested.ts",6,1,0,0,-398.2,-81.7],["sql.nplus1-domain.ts",7,1,0,0,-398.2,-76.7],["queries.ts",8,1,0,0,-398.2,-71.8],["index.ts",9,0,1,0,-482.9,-101.4],["routes.ts",9,1,0,0,-392.5,-76.7],["index.ts",10,0,1,0,-482.9,-96.5],["provides.ts",10,1,0,0,-386.8,-101.4],["index.ts",11,0,1,0,-482.9,-91.5],["provides.ts",11,1,0,0,-386.8,-71.8],["index.ts",12,0,1,0,-482.9,-86.6],["routes.ts",12,1,0,0,-381.1,-101.4],["readEndpoint.ts",13,0,0,0,477.2,-91.5],["writeEndpoint.ts",13,0,0,0,477.2,-86.6],["index.ts",14,0,2,0,-482.9,-81.7],["readEndpoint.ts",14,1,0,0,-381.1,-86.6],["writeEndpoint.ts",14,1,0,0,-381.1,-81.7],["reliability.console-in-be.decoy.ts",15,1,0,0,-381.1,-71.8],["sql.nplus1.decoy.ts",15,1,0,0,-381.1,-66.8],["sql.race-condition-toctou.decoy.ts",15,1,0,0,-375.4,-106.3],["index.ts",16,0,36,0,-482.9,-76.7],["browser.no-document-write.decoy.ts",17,1,0,0,-375.4,-101.4],["browser.no-system-dialogs.decoy.ts",17,1,0,0,-375.4,-96.5],["db.float-money-compare.decoy.ts",17,1,0,0,-375.4,-91.5],["db.unawaited-write.decoy.ts",17,1,0,0,-375.4,-86.6],["db.update-delete-no-where.decoy.ts",17,1,0,0,-375.4,-81.7],["dead.dynamic-import.decoy.ts",17,1,0,0,-313.5,-71.8],["dead.dynamic-loader.ts",17,1,1,0,-375.4,-76.7],["dead.reexport-chain.decoy.ts",17,1,0,0,-313.5,-106.3],["egress.http-url-literal.decoy.ts",17,1,0,0,-375.4,-71.8],["redis.flushall-in-code.decoy.ts",17,1,0,0,-375.4,-66.8],["reexports.ts",17,1,1,0,-369.7,-106.3],["reliability.body-limit-missing.decoy.ts",17,1,0,0,-369.7,-101.4],["reliability.console-in-loop.decoy.ts",17,1,0,0,-369.7,-96.5],["reliability.console-write.decoy.cs",17,0,0,0,477.2,-81.7],["reliability.console-write.decoy.go",17,0,0,0,477.2,-76.7],["reliability.console-write.decoy.java",17,0,0,0,477.2,-71.8],["reliability.interval-no-clear.decoy.ts",17,1,0,0,-369.7,-91.5],["security.api-key-in-url.decoy.ts",17,1,0,0,-369.7,-86.6],["security.cmd-injection.decoy.java",17,0,0,0,477.2,-66.8],["security.conn-string-credentials.decoy.ts",17,1,0,0,-369.7,-81.7],["security.cors-wildcard.decoy.ts",17,1,0,0,-369.7,-76.7],["security.dangerous-html-concat.decoy.ts",17,1,0,0,-369.7,-71.8],["security.eval-dynamic-code.decoy.ts",17,1,0,0,-369.7,-66.8],["security.hardcoded-secret.decoy.ts",17,1,0,0,-364,-106.3],["security.hash-call.decoy.py",17,0,0,0,482.9,-106.3],["security.high-entropy-secret.decoy.ts",17,1,0,0,-364,-101.4],["security.jwt-none-algorithm.decoy.ts",17,1,0,0,-364,-96.5],["security.localstorage-jwt.decoy.ts",17,1,0,0,-364,-91.5],["security.process-exec.decoy.ts",17,1,0,0,-364,-86.6],["security.raw-query-unsafe-api.decoy.ts",17,1,0,0,-364,-81.7],["security.shell-exec-interpolation.decoy.ts",17,1,0,0,-364,-76.7],["security.timing-unsafe-compare.decoy.ts",17,1,0,0,-364,-71.8],["security.weak-password-hash.decoy.ts",17,1,0,0,-364,-66.8],["security.weak-token-random.decoy.ts",17,1,0,0,-358.3,-106.3],["sql.app-side-aggregation.decoy.ts",17,1,0,0,-358.3,-101.4],["sql.no-where.decoy.ts",17,1,0,0,-358.3,-96.5],["sql.select-star.decoy.ts",17,1,0,0,-358.3,-91.5],["reliability.fetch-no-timeout.decoy.ts",18,1,0,0,-358.3,-86.6],["reliability.json-parse-no-try.decoy.ts",18,1,0,0,-358.3,-81.7],["security.secret-env-in-fe.decoy.ts",19,1,0,0,-358.3,-76.7],["barrelInner.ts",20,1,1,0,-263,-106.3],["barrelOuter.ts",20,1,1,0,-313.5,-86.6],["chart.tsx",20,1,0,0,-313.5,-101.4],["host.tsx",20,1,1,0,-352.6,-101.4],["index.ts",20,0,4,0,-482.9,-71.8],["reexportBarrel.ts",20,1,1,0,-352.6,-96.5],["reexportImpl.ts",20,1,0,0,-313.5,-91.5],["tfunc.ts",20,1,0,0,-218.2,-106.3],["typeConsumer.ts",20,1,1,0,-352.6,-91.5],["typeCycleA.ts",20,2,1,0,-352.6,-86.6],["typeCycleB.ts",20,1,1,0,-346.9,-101.4],["index.ts",21,0,4,0,-482.9,-66.8],["articles.ts",22,1,0,0,-352.6,-76.7],["loader.ts",23,1,0,0,-352.6,-71.8],["client.ts",24,1,1,0,-352.6,-66.8],["settings.ts",21,2,0,0,-313.5,-66.8],["consumes.ts",25,1,0,0,-398.2,-66.8],["index.ts",25,0,1,0,-477.2,-106.3],["Api.ts",26,1,1,0,-392.5,-71.8],["httpClient.ts",26,2,0,0,-313.5,-81.7],["index.ts",27,0,3,0,-477.2,-101.4],["loader.ts",28,1,0,0,-392.5,-66.8],["circularA.ts",29,2,1,0,-386.8,-96.5],["circularB.ts",29,1,1,0,-346.9,-96.5],["duplicateRoute.ts",29,1,0,0,-386.8,-91.5],["index.ts",29,0,3,0,-477.2,-96.5],["routeShadowing.ts",29,1,0,0,-386.8,-86.6],["deadA.ts",30,1,2,0,-477.2,-91.5],["deadB.ts",30,1,1,0,-477.2,-86.6],["index.ts",30,0,1,0,-477.2,-81.7],["live.ts",30,1,0,0,-381.1,-76.7],["orphan.ts",30,1,0,0,-386.8,-66.8],["CredentialsConfig.java",31,0,0,0,482.9,-101.4],["LambdaRoutes.java",31,0,0,0,482.9,-96.5],["PayloadCipher.java",31,0,0,0,482.9,-91.5],["UnsafeController.java",31,0,0,0,482.9,-86.6],["UserRepository.java",31,0,0,0,482.9,-81.7],["XmlBootstrap.java",31,0,0,0,482.9,-76.7],["ConsoleHygiene.java",32,0,0,0,482.9,-71.8],["v2_backfill.rs",33,0,0,0,482.9,-66.8],["config.rs",34,0,0,0,488.6,-106.3],["credentials.rs",34,0,0,0,488.6,-101.4],["dynamic_queries.rs",34,0,0,0,488.6,-96.5],["handlers.rs",34,0,0,0,488.6,-91.5],["inline_fixtures.rs",34,0,0,0,488.6,-86.6],["queries.rs",34,0,0,0,488.6,-81.7],["billingPage.ts",35,1,0,0,-358.3,-71.8],["index.ts",35,0,3,0,-477.2,-76.7],["ordersPage.ts",35,1,0,0,-358.3,-66.8],["usersPage.ts",35,1,0,0,-352.6,-106.3],["QueriesTests.cs",36,0,0,0,488.6,-76.7],["Queries.cs",37,0,0,0,488.6,-71.8],["0001_backfill_ids.py",38,0,0,0,488.6,-66.8],["queries.go",39,0,0,0,494.3,-106.3],["queries.py",39,0,0,0,494.3,-101.4],["queries_test.go",39,0,0,0,494.3,-96.5],["test_queries.py",39,0,0,0,494.3,-91.5],["Queries.java",40,0,0,0,494.3,-86.6],["QueriesTest.java",41,0,0,0,494.3,-81.7],["UserTests.cs",42,0,0,0,494.3,-76.7],["UserService.cs",43,0,0,0,494.3,-71.8],["handler.go",44,0,0,0,494.3,-66.8],["handler_test.go",44,0,0,0,500,-106.3],["login.py",44,0,0,0,500,-101.4],["test_login.py",44,0,0,0,500,-96.5],["index.ts",45,0,1,0,-477.2,-71.8],["router.ts",45,1,0,0,-352.6,-81.7],["gateway.ts",46,1,0,0,-346.9,-106.3],["index.ts",46,0,1,0,-477.2,-66.8],["env.ts",47,1,0,0,-313.5,-96.5],["index.ts",48,0,6,0,-471.5,-106.3],["be-security.localstorage-jwt.ts",49,1,0,0,-392.5,-106.3],["be-security.secret-env-in-fe.tsx",49,1,1,0,-392.5,-101.4],["browser.no-document-write.ts",49,1,0,0,-392.5,-96.5],["browser.no-system-dialogs.ts",49,1,0,0,-392.5,-91.5],["dead.orphan.tsx",49,0,0,0,500,-91.5],["fullstack.get-with-body.ts",49,1,0,0,-392.5,-86.6],["fullstack.mixed-content-egress.ts",49,1,0,0,-392.5,-81.7],["index.ts",50,0,1,0,-471.5,-101.4],["jobs.ts",50,1,0,0,-386.8,-106.3],["index.ts",51,0,2,0,-471.5,-96.5],["provides.ts",51,1,0,0,-386.8,-81.7],["session.controller.ts",51,1,0,0,-386.8,-76.7],["index.ts",52,0,1,0,-471.5,-91.5],["provides.ts",52,1,0,0,-381.1,-106.3],["consumes.ts",53,1,0,0,-381.1,-96.5],["consumesSession.ts",53,1,0,0,-381.1,-91.5],["index.ts",53,0,2,0,-471.5,-86.6],["evict.rs",54,1,1,0,15.8,-188],["tests.rs",55,1,0,0,72,-197.9],["hash.rs",54,2,0,0,66.3,-192.9],["ir_slice.rs",54,3,1,0,72,-212.7],["key.rs",54,3,0,0,72,-207.7],["lib.rs",54,4,5,0,-23.4,-202.8],["store.rs",54,2,7,0,15.8,-183.1],["atomic.rs",56,1,0,0,72,-178.1],["entries.rs",56,1,5,0,44.2,-192.9],["integrity.rs",56,1,0,0,72,-173.2],["tests.rs",56,1,1,0,77.7,-212.7],["build.rs",57,0,0,0,482.9,-212.7],["jsonc.rs",58,2,0,0,-435.2,-197.9],["lib.rs",58,11,10,0,-488.6,-212.7],["lib_tests.rs",58,1,1,0,-435.2,-212.7],["load.rs",58,1,4,0,-488.6,-207.7],["mapper.rs",58,7,8,0,-488.6,-202.8],["options.rs",59,2,5,0,-488.6,-197.9],["rules_map.rs",60,1,1,0,-488.6,-192.9],["paths.rs",59,7,0,0,-366.9,-173.2],["severity.rs",59,3,3,0,-488.6,-188],["tests.rs",59,6,5,0,-488.6,-183.1],["options.rs",61,1,6,0,-488.6,-178.1],["overlays.rs",61,1,3,0,-488.6,-173.2],["severity.rs",61,1,4,0,-482.9,-212.7],["shape.rs",61,1,4,0,-482.9,-207.7],["topology.rs",61,1,2,0,-482.9,-202.8],["topology.rs",59,1,2,0,-482.9,-197.9],["validation.rs",59,3,2,0,-482.9,-192.9],["warnings.rs",59,2,0,0,-361.2,-212.7],["paths.rs",58,2,0,0,-313.5,-212.7],["template.rs",58,2,0,0,-384,-183.1],["template_tests.rs",58,1,3,0,-482.9,-188],["test_support.rs",58,6,0,0,-313.5,-207.7],["trees.rs",58,1,1,0,-435.2,-207.7],["workspaces.rs",58,3,4,0,-482.9,-183.1],["glob.rs",62,1,1,0,-482.9,-178.1],["manifest.rs",62,1,0,0,-361.2,-188],["tests.rs",62,1,1,0,-361.2,-183.1],["config_parity.rs",63,0,0,0,482.9,-207.7],["attributes.rs",64,7,1,0,406.2,-207.7],["tests.rs",65,1,0,0,422.5,-212.7],["call_sites.rs",64,3,0,0,406.2,-197.9],["callgraph.rs",64,20,3,0,362.1,-212.7],["bfs.rs",66,2,1,0,362.1,-207.7],["resolve.rs",66,1,2,0,362.1,-202.8],["tests.rs",66,1,2,0,362.1,-197.9],["coupling.rs",64,1,0,0,345,-173.2],["dsl.rs",64,26,33,0,300.2,-212.7],["attr_gate.rs",67,2,6,0,300.2,-192.9],["tests.rs",68,1,4,0,300.2,-188],["call_scan.rs",67,2,5,0,300.2,-183.1],["axis.rs",69,1,0,0,356.4,-178.1],["expand.rs",69,1,2,0,300.2,-178.1],["matcher.rs",69,5,6,0,356.4,-197.9],["call_scan.rs",70,1,2,0,362.1,-192.9],["line_scan.rs",70,1,1,0,362.1,-188],["literal_scan.rs",70,1,0,0,384.2,-183.1],["method_scan.rs",70,1,1,0,362.1,-183.1],["mod.rs",69,15,6,0,300.2,-173.2],["pattern_fields.rs",69,1,2,0,305.9,-212.7],["provenance.rs",69,1,0,0,356.4,-173.2],["diagnostics.rs",67,6,1,0,305.9,-207.7],["eval.rs",67,2,9,0,305.9,-202.8],["fragments.rs",67,2,0,0,356.4,-207.7],["inline_census_tests.rs",67,1,2,0,305.9,-197.9],["ir_scan.rs",67,4,8,0,305.9,-192.9],["patterns.rs",71,1,0,0,356.4,-192.9],["line_scan.rs",67,2,5,0,305.9,-188],["literal_scan.rs",67,2,6,0,305.9,-183.1],["channel.rs",72,1,1,0,305.9,-178.1],["mod.rs",72,7,2,0,305.9,-173.2],["path.rs",72,1,1,0,311.6,-212.7],["method_scan.rs",67,2,6,0,311.6,-207.7],["gates.rs",73,1,1,0,345,-192.9],["prefilter.rs",67,2,2,0,311.6,-202.8],["regex_cache.rs",67,1,0,0,345,-212.7],["line_shape.rs",74,1,0,0,406.2,-188],["mod.rs",74,9,5,0,384.2,-173.2],["string_mask.rs",67,1,0,0,345,-207.7],["test_support.rs",67,16,6,0,311.6,-197.9],["tests_call_scan.rs",67,1,4,0,311.6,-192.9],["tests_diagnostics.rs",67,2,5,0,311.6,-188],["family_cases.rs",75,1,5,0,311.6,-183.1],["tests_eval.rs",67,1,3,0,311.6,-178.1],["byte_identity.rs",76,1,2,0,311.6,-173.2],["expansion_tests.rs",76,1,1,0,317.3,-212.7],["mod.rs",76,6,5,0,317.3,-207.7],["name_census.rs",76,1,1,0,317.3,-202.8],["superset.rs",76,1,1,0,317.3,-197.9],["tests_http_conventions.rs",67,1,4,0,317.3,-192.9],["gates_tests.rs",77,1,2,0,384.2,-202.8],["io_scan_tests.rs",77,1,1,0,384.2,-197.9],["mod.rs",77,1,3,0,345,-202.8],["symbol_scan_tests.rs",77,1,1,0,384.2,-192.9],["comment_leaders.rs",78,1,0,0,356.4,-183.1],["enclosing_call_exclude.rs",78,1,1,0,317.3,-188],["mod.rs",78,1,5,0,317.3,-183.1],["prev_line_exclude.rs",78,1,1,0,317.3,-178.1],["tests_literal_scan.rs",67,1,4,0,317.3,-173.2],["channel_tests.rs",79,1,1,0,323,-212.7],["hash_leader_tests.rs",79,1,0,0,345,-188],["mod.rs",79,3,5,0,323,-207.7],["near_miss_tests.rs",79,1,1,0,323,-202.8],["tests_method_scan.rs",67,1,4,0,323,-197.9],["tests_method_scan_after.rs",67,1,2,0,323,-192.9],["tests_method_scan_same_fn.rs",67,1,2,0,323,-188],["tests_shipped_matcher_kinds.rs",67,1,2,0,323,-183.1],["tests_test_regions.rs",67,1,2,0,323,-178.1],["tests_trigger_in_loop.rs",67,1,2,0,323,-173.2],["veto_window.rs",67,2,2,0,345,-197.9],["enclosing.rs",80,1,0,0,384.2,-178.1],["tests.rs",80,1,1,0,362.1,-178.1],["file_nodes.rs",64,1,3,0,350.7,-212.7],["tests.rs",81,1,1,0,384.2,-212.7],["time.rs",81,1,0,0,384.2,-207.7],["finding.rs",64,18,0,0,356.4,-188],["fragments.rs",64,1,0,0,350.7,-207.7],["graph.rs",64,1,1,0,350.7,-202.8],["tests.rs",82,1,0,0,384.2,-188],["io.rs",64,44,4,0,422.5,-197.9],["facts.rs",83,2,1,0,438.9,-212.7],["shapes.rs",84,1,0,0,455.2,-212.7],["key.rs",83,2,0,0,438.9,-207.7],["link.rs",83,2,7,0,422.5,-192.9],["consume_join.rs",85,1,1,0,438.9,-197.9],["host_rekey.rs",85,2,0,0,455.2,-207.7],["provider_index.rs",85,1,0,0,438.9,-192.9],["tests.rs",85,4,5,0,422.5,-188],["gates.rs",86,1,2,0,422.5,-183.1],["hosts.rs",86,1,2,0,422.5,-178.1],["wildcard.rs",86,1,2,0,422.5,-173.2],["wildcard.rs",83,2,0,0,438.9,-202.8],["ir.rs",64,21,3,0,406.2,-202.8],["imports.rs",87,1,0,0,422.5,-207.7],["kinds.rs",87,1,0,0,422.5,-202.8],["lib.rs",64,452,24,0,300.2,-197.9],["node.rs",64,3,0,0,406.2,-212.7],["noncycle.rs",64,2,2,0,350.7,-197.9],["tests.rs",88,1,2,0,362.1,-173.2],["normalized.rs",64,3,7,0,350.7,-192.9],["hints.rs",89,2,2,0,367.8,-212.7],["hints_tests.rs",89,1,1,0,389.9,-212.7],["tests.rs",89,1,1,0,389.9,-207.7],["validate.rs",89,1,2,0,367.8,-207.7],["version.rs",89,1,0,0,389.9,-202.8],["pack_loader.rs",64,3,6,0,300.2,-202.8],["marker_collisions.rs",90,1,1,0,328.7,-212.7],["provenance.rs",90,1,1,0,328.7,-207.7],["retired_fields.rs",90,1,0,0,345,-183.1],["rule_issues.rs",90,1,1,0,328.7,-202.8],["tests.rs",90,1,0,0,345,-178.1],["paths.rs",64,1,0,0,350.7,-188],["recognizer.rs",64,14,0,0,389.9,-197.9],["registry.rs",64,7,5,0,300.2,-207.7],["config.rs",91,3,2,0,328.7,-197.9],["merge.rs",91,1,3,0,328.7,-192.9],["native_stub.rs",91,1,1,0,328.7,-188],["redact.rs",91,2,3,0,328.7,-183.1],["tests.rs",92,1,3,0,328.7,-178.1],["tests.rs",91,1,2,0,328.7,-173.2],["rule_channels.rs",64,3,1,0,356.4,-202.8],["schema.rs",64,1,0,0,350.7,-183.1],["serde_util.rs",64,1,0,0,350.7,-178.1],["sightline.rs",64,1,0,0,350.7,-173.2],["string_literals.rs",64,3,0,0,406.2,-192.9],["vocab_norm.rs",64,1,0,0,356.4,-212.7],["enum_parity.rs",93,1,1,0,-355.5,-207.7],["id_uniqueness_parity.rs",93,1,0,0,-355.5,-202.8],["import_key_table.rs",93,1,0,0,-355.5,-197.9],["key_parity.rs",93,1,0,0,-355.5,-192.9],["main.rs",93,0,9,0,-482.9,-173.2],["probes.rs",93,1,0,0,-355.5,-188],["required_nullable.rs",93,1,1,0,-355.5,-183.1],["samples.rs",93,1,1,0,-355.5,-178.1],["span_contract_ownership.rs",93,1,0,0,-355.5,-173.2],["wire_variants.rs",93,1,1,0,-349.8,-212.7],["key_normalization_fixture.rs",94,0,1,0,-477.2,-212.7],["build.rs",95,0,0,0,482.9,-202.8],["bench.rs",96,0,1,0,-477.2,-207.7],["corpus_rule_counts.rs",96,0,1,0,-477.2,-202.8],["cross_layer_rule_counts.rs",96,0,1,0,-477.2,-197.9],["dep_graph_export.rs",96,0,1,0,-477.2,-192.9],["main.rs",97,0,4,0,-477.2,-188],["overlay.rs",97,2,2,0,-361.2,-207.7],["scan.rs",97,2,2,0,-361.2,-202.8],["java_provides_project.rs",96,0,0,0,482.9,-197.9],["self_scan.rs",96,0,1,0,-477.2,-183.1],["xlayer_dump.rs",96,0,1,0,-477.2,-178.1],["assemble.rs",98,2,16,0,-102.4,-197.9],["collect.rs",99,2,8,0,-102.4,-192.9],["candidates.rs",100,1,0,0,-23.4,-197.9],["census.rs",100,1,1,0,-102.4,-188],["scans.rs",100,1,2,0,-102.4,-183.1],["types.rs",100,1,2,0,-102.4,-178.1],["declared.rs",99,1,1,0,-29.1,-173.2],["dep_graph.rs",99,1,9,0,-102.4,-173.2],["fan_in.rs",101,1,1,0,-12,-192.9],["merge.rs",101,1,3,0,-96.7,-212.7],["diagnose.rs",99,1,4,0,-96.7,-207.7],["helpers.rs",99,4,4,0,-96.7,-202.8],["csharp.rs",102,1,1,0,-96.7,-197.9],["java.rs",102,1,1,0,-96.7,-192.9],["rust.rs",102,1,1,0,-96.7,-188],["metrics.rs",99,1,6,0,-96.7,-183.1],["nuxt_auto_import.rs",99,3,5,0,66.3,-188],["app_dir.rs",103,1,1,0,111.1,-178.1],["dirs.rs",103,2,1,0,89.1,-183.1],["referrers.rs",103,2,0,0,116.8,-207.7],["tests.rs",103,1,2,0,89.1,-178.1],["orm.rs",99,2,1,0,-17.7,-197.9],["prescan.rs",99,1,1,0,-23.4,-212.7],["provides.rs",99,1,8,0,-96.7,-178.1],["consume_chain.rs",104,1,2,0,-12,-197.9],["rules.rs",99,1,11,0,-96.7,-173.2],["config_entries.rs",105,3,1,0,32.9,-202.8],["tests.rs",106,1,1,0,44.2,-188],["entries.rs",105,1,2,0,-12,-188],["framework_entries.rs",105,3,2,0,32.9,-197.9],["tests.rs",107,1,1,0,44.2,-183.1],["graph_inputs.rs",105,1,0,0,-12,-183.1],["io_scan.rs",105,1,4,0,-91,-212.7],["tests.rs",108,1,2,0,-91,-207.7],["manifest_boundaries.rs",105,1,0,0,-12,-178.1],["warnings.rs",99,1,1,0,-23.4,-207.7],["wrong_key.rs",109,1,1,0,15.8,-197.9],["compose.rs",98,3,13,0,27.2,-183.1],["body_refs.rs",110,1,3,0,77.7,-207.7],["tests.rs",111,1,2,0,111.1,-207.7],["client_base.rs",110,1,2,0,77.7,-202.8],["tests.rs",112,1,0,0,111.1,-197.9],["config_client_base.rs",110,2,2,0,77.7,-197.9],["tests.rs",113,1,2,0,89.1,-173.2],["config_mounts.rs",110,1,2,0,77.7,-192.9],["const_map.rs",110,1,1,0,77.7,-188],["controller_prefix.rs",110,1,1,0,77.7,-183.1],["global_prefix.rs",110,2,1,0,111.1,-173.2],["pages_api.rs",110,1,1,0,77.7,-178.1],["response_refs.rs",110,1,3,0,77.7,-173.2],["tests.rs",114,1,1,0,128.2,-192.9],["router_mounts.rs",110,1,2,0,83.4,-212.7],["tests.rs",115,1,1,0,111.1,-212.7],["walk.rs",115,0,1,0,-477.2,-173.2],["shape_merge.rs",110,5,1,0,153.1,-192.9],["tests.rs",116,1,2,0,158.8,-197.9],["trpc.rs",110,1,2,0,83.4,-207.7],["tests.rs",117,1,1,0,111.1,-202.8],["wrapper_consumes.rs",110,1,1,0,83.4,-202.8],["diagnostics.rs",98,6,10,0,-91,-202.8],["capability.rs",118,1,1,0,-91,-197.9],["config_filters.rs",118,1,1,0,-91,-192.9],["coverage_report.rs",118,1,3,0,-91,-188],["degraded_files.rs",118,2,4,0,-91,-183.1],["tests.rs",119,1,4,0,-91,-178.1],["git_collect.rs",118,1,4,0,-91,-173.2],["cache.rs",120,1,0,0,-12,-173.2],["tests.rs",120,1,0,0,-6.3,-212.7],["overlay_provenance.rs",118,1,2,0,-85.3,-212.7],["tests.rs",121,1,0,0,-46.1,-212.7],["pack_scope.rs",118,5,6,0,-85.3,-207.7],["rule_admission.rs",122,1,1,0,-40.4,-197.9],["scope_warnings.rs",122,1,1,0,-85.3,-202.8],["uncovered_extension.rs",122,1,1,0,-85.3,-197.9],["vetoed_files.rs",122,1,1,0,-85.3,-192.9],["vetoed_files_tests.rs",122,1,3,0,-85.3,-188],["suppression.rs",118,1,0,0,-34.8,-202.8],["unmatched_suppression_tests.rs",118,1,3,0,-85.3,-183.1],["unparsed_extension_tests.rs",118,1,1,0,-85.3,-178.1],["mod.rs",98,10,3,0,-85.3,-173.2],["native_rules.rs",98,4,6,0,-79.6,-212.7],["cache_lane.rs",123,1,2,0,-34.8,-197.9],["decorator_gate.rs",123,1,3,0,-79.6,-207.7],["java_guard.rs",123,1,1,0,-34.8,-192.9],["mod.rs",123,1,8,0,-79.6,-202.8],["python_guard.rs",123,2,1,0,-34.8,-207.7],["rust_guard.rs",123,1,2,0,-79.6,-197.9],["csharp_provides.rs",124,1,1,0,-46.1,-207.7],["delegates.rs",124,1,1,0,-46.1,-202.8],["java_provides.rs",124,1,1,0,-46.1,-197.9],["prisma_client_getter_consistency_tests.rs",124,1,0,0,-46.1,-192.9],["schema_join.rs",124,1,3,0,-79.6,-192.9],["cache.rs",125,3,7,0,-79.6,-188],["manifest_version.rs",126,1,0,0,-17.7,-192.9],["surface.rs",126,1,0,0,-17.7,-188],["tests.rs",126,1,1,0,-17.7,-183.1],["channel_direction.rs",125,3,2,0,66.3,-207.7],["table.rs",127,1,2,0,94.8,-212.7],["config.rs",125,1,3,0,-79.6,-183.1],["coverage.rs",125,1,1,0,-34.8,-188],["blindness_caveat.rs",128,2,1,0,27.2,-178.1],["diagnosed.rs",128,1,1,0,-6.3,-207.7],["join_maps.rs",128,1,1,0,-6.3,-202.8],["merge_config.rs",128,1,2,0,-79.6,-178.1],["mod.rs",128,2,8,0,-79.6,-173.2],["partition.rs",128,1,3,0,-6.3,-197.9],["unconsumed_family.rs",128,1,5,0,-6.3,-192.9],["dead_exports.rs",125,3,4,0,111.1,-188],["covered_extensions_pin.rs",129,1,1,0,128.2,-188],["disclosure.rs",125,2,4,0,-34.8,-183.1],["document.rs",130,1,1,0,-6.3,-188],["registry.rs",130,1,5,0,27.2,-173.2],["analysis.rs",131,1,0,0,89.1,-212.7],["extraction.rs",131,1,0,0,89.1,-207.7],["input.rs",131,1,0,0,89.1,-202.8],["trust.rs",131,1,0,0,89.1,-197.9],["tests.rs",130,1,1,0,32.9,-212.7],["types.rs",130,3,0,0,72,-202.8],["dispatch.rs",125,12,3,0,27.2,-197.9],["non_source.rs",132,2,0,0,111.1,-183.1],["tests.rs",132,1,1,0,66.3,-183.1],["wire.rs",132,1,1,0,44.2,-178.1],["envelope.rs",125,6,14,0,-73.9,-212.7],["callgraph.rs",133,1,5,0,-73.9,-207.7],["disclosure.rs",134,1,0,0,-40.4,-192.9],["dep_edges.rs",133,2,1,0,-46.1,-188],["file_pass.rs",133,3,4,0,-40.4,-188],["gate.rs",133,1,1,0,-46.1,-183.1],["ingest.rs",133,1,6,0,-73.9,-202.8],["merge.rs",133,2,3,0,-46.1,-178.1],["collisions.rs",135,1,1,0,32.9,-192.9],["native_pass.rs",133,1,3,0,-73.9,-197.9],["overlay.rs",133,2,6,0,-46.1,-173.2],["application.rs",136,1,1,0,32.9,-173.2],["facts.rs",136,1,0,0,38.5,-212.7],["reports.rs",136,1,0,0,38.5,-207.7],["reserved.rs",133,4,0,0,27.2,-207.7],["resolve.rs",133,3,1,0,-40.4,-183.1],["shapes.rs",133,1,1,0,-40.4,-212.7],["tests.rs",133,5,6,0,-73.9,-192.9],["ingest.rs",137,1,3,0,-73.9,-188],["overlay.rs",137,1,2,0,-73.9,-183.1],["reserved_and_mounts.rs",137,1,3,0,-73.9,-178.1],["rules_and_diagnostics.rs",137,1,3,0,-73.9,-173.2],["topology_freeze.rs",133,1,2,0,-68.2,-212.7],["warnings_pass.rs",133,1,4,0,-68.2,-207.7],["medusa.rs",138,1,1,0,-6.3,-183.1],["mod.rs",138,4,5,0,-34.8,-178.1],["next.rs",138,1,1,0,-6.3,-178.1],["remix.rs",138,1,1,0,-6.3,-173.2],["tests.rs",138,1,1,0,32.9,-188],["framework_silence.rs",125,1,20,0,-34.8,-173.2],["app_buckets.rs",139,2,0,0,234.1,-192.9],["builtin_fetch.rs",139,3,3,0,197.9,-207.7],["call_graph_language.rs",139,2,1,0,83.4,-173.2],["channel_consequence.rs",139,1,2,0,38.5,-202.8],["client_library_import.rs",139,2,1,0,153.1,-178.1],["committed_spec_io_silence.rs",139,2,1,0,153.1,-173.2],["controller_silence.rs",139,7,0,0,234.1,-202.8],["csharp_base_route.rs",139,2,2,0,38.5,-197.9],["scan.rs",140,1,1,0,44.2,-173.2],["csharp_base_route_tests.rs",139,1,1,0,66.3,-178.1],["egress_intent.rs",139,3,0,0,234.1,-207.7],["fetch_wrapper.rs",139,3,4,0,158.8,-212.7],["census.rs",141,1,1,0,158.8,-192.9],["gateway_declaration.rs",139,1,0,0,38.5,-192.9],["orm_schema_silence.rs",139,2,0,0,158.8,-207.7],["partial_route_silence.rs",139,1,2,0,38.5,-188],["tests.rs",142,1,0,0,72,-192.9],["python_mount_prefix.rs",139,1,1,0,38.5,-183.1],["python_mount_prefix_tests.rs",139,1,1,0,83.4,-197.9],["route_language_zero_extraction.rs",139,1,2,0,38.5,-178.1],["rust_router_layer.rs",139,1,2,0,38.5,-173.2],["server_framework_import.rs",139,3,1,0,158.8,-202.8],["tests.rs",139,3,7,0,116.8,-202.8],["unknown_verb_range.rs",139,1,1,0,44.2,-212.7],["unread_io_kind.rs",139,1,1,0,44.2,-207.7],["generated_banner.rs",125,1,0,0,-29.1,-212.7],["io.rs",125,1,2,0,-29.1,-207.7],["tests.rs",143,1,0,0,15.8,-192.9],["lib.rs",125,162,23,0,-102.4,-202.8],["output.rs",125,1,6,0,-68.2,-202.8],["native_analyses.rs",144,1,1,0,-29.1,-202.8],["packs_loaded.rs",144,1,2,0,-68.2,-197.9],["pipeline.rs",125,20,21,0,-68.2,-192.9],["artifact.rs",145,1,9,0,-68.2,-188],["csharp_index.rs",145,1,1,0,-23.4,-192.9],["tests.rs",146,1,0,0,27.2,-192.9],["findings.rs",145,4,6,0,-17.7,-178.1],["fresh.rs",145,3,10,0,-68.2,-183.1],["call_sites.rs",147,1,2,0,-12,-212.7],["oversized.rs",147,1,8,0,-68.2,-178.1],["spans.rs",147,2,1,0,-12,-202.8],["string_literals.rs",147,1,2,0,-12,-207.7],["go_module.rs",145,1,1,0,-23.4,-188],["tests.rs",148,1,0,0,27.2,-188],["io_projection.rs",145,1,3,0,-68.2,-173.2],["java_index.rs",145,1,1,0,-23.4,-183.1],["tests.rs",149,1,0,0,32.9,-207.7],["manifest.rs",145,3,0,0,27.2,-202.8],["package_json.rs",145,1,2,0,-23.4,-178.1],["tests.rs",150,1,1,0,32.9,-183.1],["parsers.rs",145,3,3,0,-17.7,-173.2],["tests.rs",151,1,0,0,44.2,-202.8],["rust_workspace.rs",145,1,1,0,-23.4,-173.2],["tests.rs",152,1,0,0,44.2,-197.9],["testutil.rs",145,4,0,0,66.3,-197.9],["tsconfig.rs",145,2,3,0,-17.7,-212.7],["emission.rs",153,1,2,0,-0.6,-212.7],["tests.rs",154,1,1,0,15.8,-212.7],["tests.rs",153,1,1,0,15.8,-207.7],["walking.rs",145,1,1,0,-17.7,-207.7],["recognizers.rs",125,1,2,0,-29.1,-197.9],["zero_extraction.rs",155,1,1,0,27.2,-212.7],["rule_channels.rs",125,1,1,0,-29.1,-192.9],["sightlines.rs",125,1,1,0,-29.1,-188],["tests.rs",125,1,1,0,-29.1,-183.1],["cross_tree_imports.rs",156,1,3,0,-62.5,-212.7],["join_io_filter.rs",156,1,1,0,-40.4,-178.1],["mod.rs",156,2,8,0,-62.5,-207.7],["parallel_impl.rs",156,1,1,0,-40.4,-173.2],["unreported_read_drift.rs",156,1,2,0,-34.8,-212.7],["tests.rs",157,1,0,0,15.8,-202.8],["wildcard_disclosure.rs",156,1,2,0,-62.5,-202.8],["vocabulary.rs",125,5,5,0,-29.1,-178.1],["built_in.rs",158,1,1,0,-0.6,-207.7],["compilable.rs",158,1,2,0,-0.6,-202.8],["tests.rs",159,1,0,0,15.8,-178.1],["normalizers.rs",158,1,0,0,32.9,-178.1],["resolved.rs",158,1,1,0,-0.6,-197.9],["test_paths.rs",158,1,1,0,-0.6,-192.9],["analyze_parse_census.rs",160,0,1,0,-471.5,-212.7],["git_spawn_census.rs",160,0,1,0,-471.5,-207.7],["analyze_adapter_overlay.rs",161,1,2,0,-435.2,-192.9],["analyze_asset_ref.rs",161,1,1,0,-435.2,-188],["analyze_attribute_injection.rs",161,1,4,0,-435.2,-183.1],["analyze_axios_base_prefix_e2e.rs",161,1,1,0,-435.2,-178.1],["analyze_be_framework_coverage_warning.rs",161,1,1,0,-435.2,-173.2],["analyze_cache.rs",161,1,2,0,-429.5,-212.7],["analyze_cache_lane_file_read.rs",161,1,1,0,-429.5,-207.7],["analyze_callgraph.rs",161,1,1,0,-429.5,-202.8],["analyze_callgraph_rust.rs",161,1,1,0,-429.5,-197.9],["analyze_channels.rs",161,1,2,0,-429.5,-192.9],["analyze_config_entries.rs",161,1,1,0,-429.5,-188],["analyze_controller_prefix_ref.rs",161,1,1,0,-429.5,-183.1],["analyze_coverage_census.rs",161,1,1,0,-429.5,-178.1],["analyze_cross_layer_exclude.rs",161,1,2,0,-429.5,-173.2],["analyze_cross_layer_findings.rs",161,1,1,0,-423.9,-212.7],["analyze_cross_layer_retry_write.rs",161,1,3,0,-423.9,-207.7],["analyze_cross_layer_severity_override.rs",161,1,2,0,-423.9,-202.8],["analyze_cross_layer_test_io_filter.rs",161,1,1,0,-423.9,-197.9],["analyze_cross_layer_vocabulary.rs",161,1,1,0,-423.9,-192.9],["analyze_cross_layer_wildcard_route.rs",161,1,1,0,-423.9,-188],["analyze_cross_tree_import_disclosure.rs",161,1,1,0,-423.9,-183.1],["analyze_csharp_cross_layer.rs",161,1,1,0,-423.9,-178.1],["analyze_csharp_module.rs",161,1,1,0,-423.9,-173.2],["analyze_dead_exports.rs",161,1,1,0,-418.2,-212.7],["analyze_diagnostics.rs",161,1,2,0,-418.2,-207.7],["analyze_envelope.rs",161,1,2,0,-418.2,-202.8],["analyze_exclude_score_channels.rs",161,1,4,0,-418.2,-197.9],["analyze_git.rs",161,1,4,0,-418.2,-192.9],["analyze_git_tree_coordinates.rs",161,1,1,0,-418.2,-188],["analyze_gitignore.rs",161,1,1,0,-418.2,-183.1],["analyze_glob_override_disclosure.rs",161,1,2,0,-418.2,-178.1],["analyze_go_cross_layer.rs",161,1,1,0,-418.2,-173.2],["analyze_go_module.rs",161,1,1,0,-412.5,-212.7],["analyze_http_pack_io_scan.rs",161,1,2,0,-412.5,-207.7],["analyze_io.rs",161,1,2,0,-412.5,-202.8],["analyze_io_java.rs",161,1,1,0,-412.5,-197.9],["analyze_io_java_project.rs",161,1,1,0,-412.5,-192.9],["analyze_io_natives.rs",161,1,2,0,-412.5,-188],["analyze_io_scan_tree.rs",161,1,3,0,-412.5,-183.1],["analyze_java_cross_layer.rs",161,1,1,0,-412.5,-178.1],["analyze_java_imports.rs",161,1,1,0,-412.5,-173.2],["analyze_java_imports_overlay.rs",161,1,1,0,-406.8,-212.7],["analyze_loop_spans_languages.rs",161,1,2,0,-406.8,-207.7],["analyze_minified.rs",161,1,2,0,-406.8,-202.8],["analyze_multi_tree.rs",161,1,2,0,-406.8,-197.9],["analyze_multi_tree_java.rs",161,1,1,0,-406.8,-192.9],["analyze_multi_tree_nestjs.rs",161,1,1,0,-406.8,-188],["analyze_native_middleware.rs",161,1,1,0,-406.8,-183.1],["analyze_no_applicable_dsl_rules.rs",161,1,2,0,-406.8,-178.1],["analyze_nuxt_auto_import.rs",161,1,1,0,-406.8,-173.2],["analyze_override_displacement.rs",161,1,1,0,-401.1,-212.7],["analyze_prescan_imports.rs",161,1,1,0,-401.1,-207.7],["analyze_prisma_db_table_provide.rs",161,1,1,0,-401.1,-202.8],["analyze_profiling.rs",161,1,2,0,-401.1,-197.9],["analyze_python_cross_layer.rs",161,1,1,0,-401.1,-192.9],["analyze_python_package_roots.rs",161,1,1,0,-401.1,-188],["analyze_response_shape.rs",161,1,1,0,-401.1,-183.1],["analyze_routes_hono.rs",161,1,1,0,-401.1,-178.1],["analyze_routes_pathname_dispatch.rs",161,1,1,0,-401.1,-173.2],["analyze_rule_admission.rs",161,1,2,0,-395.4,-212.7],["analyze_rule_config.rs",161,1,2,0,-395.4,-207.7],["analyze_rust_cross_layer.rs",161,1,1,0,-395.4,-202.8],["analyze_rust_self.rs",161,1,1,0,-395.4,-197.9],["analyze_rust_test_spans.rs",161,1,2,0,-395.4,-192.9],["analyze_schema_natives.rs",161,1,2,0,-395.4,-188],["analyze_self_output_exclusion.rs",161,1,1,0,-395.4,-183.1],["analyze_side_effect_import.rs",161,1,1,0,-395.4,-178.1],["analyze_sql_db_table.rs",161,1,1,0,-395.4,-173.2],["analyze_suppress_markers.rs",161,1,1,0,-389.7,-212.7],["analyze_test_path_vocabulary.rs",161,1,2,0,-389.7,-207.7],["analyze_topology_config.rs",161,1,1,0,-389.7,-202.8],["analyze_tsconfig_paths.rs",161,1,1,0,-389.7,-197.9],["analyze_type_only_export_cycle.rs",161,1,2,0,-389.7,-192.9],["analyze_uncompilable_rule.rs",161,1,2,0,-389.7,-188],["analyze_uncovered_language.rs",161,1,2,0,-389.7,-183.1],["analyze_unparsed_extensions.rs",161,1,2,0,-389.7,-178.1],["analyze_vocabulary_config.rs",161,1,1,0,-389.7,-173.2],["analyze_workspace_alias.rs",161,1,1,0,-384,-212.7],["analyze_zero_scope_packs.rs",161,1,2,0,-384,-207.7],["cache_vocabulary_invalidation.rs",161,1,2,0,-384,-202.8],["db_table_key_cross_crate_consistency.rs",161,1,0,0,-384,-197.9],["main.rs",161,0,83,0,-471.5,-202.8],["pack_prisma_schema.rs",161,1,2,0,-384,-192.9],["policy_value_pins.rs",161,1,0,0,-384,-188],["bare_words.rs",162,1,1,0,-384,-178.1],["call_kind_readers.rs",162,1,1,0,-384,-173.2],["capability_matrix.rs",162,1,2,0,-378.3,-212.7],["catalog_sync.rs",162,1,1,0,-378.3,-207.7],["channel_direction.rs",162,1,4,0,-378.3,-202.8],["config_surface.rs",162,1,0,0,-378.3,-197.9],["dsl_messages.rs",162,1,0,0,-378.3,-192.9],["envelope_contract_version.rs",162,1,0,0,-378.3,-188],["finding_data_keys.rs",162,1,0,0,-378.3,-183.1],["host_vocabulary.rs",162,1,0,0,-378.3,-178.1],["id_hygiene.rs",162,1,1,0,-378.3,-173.2],["io_kind_readers.rs",162,1,0,0,-372.6,-212.7],["java_lane_evidence.rs",162,1,0,0,-372.6,-207.7],["kernel_vocabulary.rs",162,1,2,0,-372.6,-202.8],["literal_scan_threshold.rs",162,1,1,0,-372.6,-197.9],["main.rs",162,0,30,0,-471.5,-197.9],["markers.rs",162,1,1,0,-372.6,-192.9],["native_analyses.rs",162,1,2,0,-372.6,-188],["native_messages.rs",162,1,0,0,-372.6,-183.1],["pack_loading.rs",162,1,1,0,-372.6,-178.1],["path_anchor_pin.rs",162,1,1,0,-372.6,-173.2],["policy_pins.rs",162,1,2,0,-366.9,-212.7],["recognizer_channels.rs",162,1,2,0,-366.9,-207.7],["recognizer_drift.rs",162,1,0,0,-366.9,-202.8],["reference_unit_tests.rs",162,1,0,0,-366.9,-197.9],["reference_validation.rs",162,1,0,0,-366.9,-192.9],["rule_axis.rs",162,1,0,0,-366.9,-188],["rule_channels.rs",162,1,2,0,-366.9,-183.1],["surface_parity.rs",162,1,0,0,-366.9,-178.1],["analyze.rs",163,1,4,0,-184.8,-212.7],["analyze_tests.rs",163,1,3,0,-218.2,-178.1],["config.rs",163,5,6,0,-135,-192.9],["declared.rs",164,1,2,0,-118.7,-192.9],["mounts.rs",164,1,2,0,-118.7,-188],["overlays.rs",164,1,2,0,-118.7,-183.1],["tests.rs",165,1,0,0,-102.4,-207.7],["config_tests.rs",163,1,2,0,-218.2,-173.2],["envelope.rs",163,2,4,0,-157,-207.7],["envelope_tests.rs",163,1,2,0,-212.5,-212.7],["explain.rs",163,4,6,0,-268.7,-212.7],["field_coverage_tests.rs",166,1,2,0,-263,-173.2],["from_config.rs",166,1,4,0,-257.3,-212.7],["output_ids.rs",166,1,2,0,-223.9,-212.7],["render.rs",166,1,3,0,-212.5,-207.7],["scope.rs",166,2,2,0,-223.9,-207.7],["tests.rs",166,1,2,0,-257.3,-207.7],["lib.rs",163,9,23,0,-218.2,-192.9],["output.rs",163,3,6,0,-135,-207.7],["mirrors.rs",167,1,1,0,-118.7,-212.7],["native_analyses_legend.rs",167,1,0,0,-118.7,-207.7],["packs_legend.rs",167,1,1,0,-118.7,-202.8],["packs_tests.rs",163,1,2,0,-212.5,-202.8],["query.rs",163,3,1,0,-157,-212.7],["scan.rs",168,1,1,0,-151.3,-192.9],["query_coverage.rs",163,1,7,0,-184.8,-207.7],["blind_spots.rs",169,1,1,0,-162.7,-212.7],["dispatch_meaning.rs",169,1,0,0,-162.7,-207.7],["io_channels.rs",169,1,2,0,-162.7,-202.8],["io_channels_tests.rs",169,1,0,0,-135,-197.9],["join_visibility.rs",169,1,0,0,-162.7,-197.9],["recognizers.rs",169,1,0,0,-162.7,-192.9],["tests.rs",169,1,0,0,-162.7,-188],["unread.rs",169,1,0,0,-162.7,-183.1],["query_e2e_tests.rs",163,1,2,0,-212.5,-197.9],["query_file.rs",163,1,2,0,-184.8,-202.8],["facets.rs",170,1,0,0,-162.7,-178.1],["tests.rs",170,1,0,0,-162.7,-173.2],["query_tests.rs",163,1,1,0,-184.8,-197.9],["request.rs",163,9,4,0,-102.4,-212.7],["envelope.rs",171,1,2,0,-62.5,-197.9],["git.rs",171,1,0,0,-40.4,-207.7],["parsers.rs",171,1,0,0,-40.4,-202.8],["route_injection.rs",163,1,1,0,-184.8,-192.9],["rule_pack.rs",163,1,1,0,-184.8,-188],["rule_pack_tests.rs",163,1,1,0,-212.5,-192.9],["test_region_promise_tests.rs",163,1,1,0,-184.8,-183.1],["test_support.rs",163,5,0,0,-190.5,-178.1],["version.rs",163,1,0,0,-268.7,-207.7],["parser_glob_overrides.rs",172,0,1,0,-471.5,-192.9],["error.rs",173,2,0,0,-355.5,-212.7],["iso_date.rs",173,2,0,0,-361.2,-192.9],["lib.rs",173,4,9,0,-471.5,-188],["parse.rs",173,1,8,0,-471.5,-183.1],["commit.rs",174,1,4,0,-471.5,-178.1],["rename.rs",174,1,0,0,-361.2,-178.1],["process.rs",173,3,2,0,-471.5,-173.2],["rebase.rs",173,1,2,0,-465.8,-212.7],["tests.rs",175,1,1,0,-435.2,-202.8],["subject.rs",173,3,0,0,-361.2,-173.2],["tags.rs",173,3,1,0,-465.8,-207.7],["tests.rs",173,1,1,0,-361.2,-197.9],["aggregates.rs",176,1,2,0,15.8,-173.2],["tests.rs",177,1,0,0,89.1,-192.9],["commit_tags.rs",176,1,0,0,21.5,-212.7],["coupling.rs",176,7,1,0,197.9,-197.9],["criticality.rs",176,1,3,0,21.5,-207.7],["tests.rs",178,1,0,0,66.3,-212.7],["cross_layer_co_churn.rs",176,1,3,0,21.5,-202.8],["tests.rs",179,1,0,0,66.3,-202.8],["diagnostics.rs",176,2,2,0,21.5,-197.9],["config_reports.rs",180,1,1,0,49.9,-212.7],["tests.rs",180,1,0,0,66.3,-173.2],["generic_interface_keys.rs",176,1,0,0,21.5,-192.9],["health.rs",176,1,3,0,21.5,-188],["tests.rs",181,1,1,0,72,-188],["types.rs",181,1,0,0,72,-183.1],["lib.rs",176,9,14,0,-17.7,-202.8],["recommendations.rs",176,1,7,0,21.5,-183.1],["enrich.rs",182,1,4,0,83.4,-192.9],["evidence.rs",182,1,4,0,83.4,-188],["rules.rs",182,2,4,0,116.8,-212.7],["tests.rs",182,1,5,0,83.4,-183.1],["evidence.rs",183,1,0,0,116.8,-197.9],["pipeline.rs",183,1,1,0,116.8,-192.9],["rules.rs",183,1,0,0,116.8,-188],["types.rs",182,4,3,0,153.1,-197.9],["report_excludes.rs",176,3,3,0,111.1,-192.9],["tests.rs",184,1,1,0,153.1,-188],["roi.rs",176,7,1,0,197.9,-212.7],["bus_factor.rs",185,2,4,0,116.8,-183.1],["cohesion.rs",185,2,4,0,116.8,-178.1],["compute.rs",185,1,19,0,83.4,-178.1],["tests.rs",186,1,2,0,116.8,-173.2],["config.rs",185,18,1,0,197.9,-188],["feature_sliced_design.rs",187,1,0,0,234.1,-188],["coupling.rs",185,2,3,0,122.5,-212.7],["detail_cap.rs",185,9,0,0,153.1,-202.8],["diamond.rs",185,2,5,0,122.5,-207.7],["feature_sliced_design.rs",185,2,4,0,122.5,-202.8],["file_size_compliance.rs",185,2,4,0,122.5,-197.9],["fix_ratio.rs",185,2,3,0,122.5,-192.9],["god_file.rs",185,2,4,0,122.5,-188],["hierarchy.rs",185,2,5,0,122.5,-183.1],["main_sequence.rs",185,2,4,0,122.5,-178.1],["meanings.rs",185,2,1,0,197.9,-202.8],["tests.rs",188,1,0,0,234.1,-212.7],["mod.rs",185,1,21,0,21.5,-178.1],["modularity.rs",185,2,4,0,122.5,-173.2],["public_api.rs",185,2,7,0,128.2,-212.7],["legend_tests.rs",189,1,1,0,153.1,-212.7],["tests.rs",189,1,0,0,153.1,-207.7],["rename.rs",185,2,3,0,128.2,-207.7],["sdp.rs",185,2,4,0,128.2,-202.8],["shared.rs",185,10,2,0,153.1,-183.1],["tests.rs",190,1,0,0,197.9,-183.1],["sibling_cross.rs",185,2,5,0,128.2,-197.9],["types.rs",185,23,2,0,197.9,-192.9],["reports.rs",191,1,2,0,234.1,-197.9],["aggregate.rs",192,1,0,0,261.9,-212.7],["violations.rs",191,2,0,0,261.9,-207.7],["seams.rs",176,1,3,0,21.5,-173.2],["tests.rs",193,1,1,0,89.1,-188],["adjacent_config.rs",194,1,0,0,-223.9,-188],["architecture.rs",194,1,0,0,-223.9,-183.1],["census.rs",195,1,0,0,-184.8,-173.2],["mod.rs",195,1,1,0,-223.9,-178.1],["coverage_gaps_tests.rs",194,1,1,0,-223.9,-173.2],["mod.rs",194,2,7,0,-268.7,-202.8],["shape.rs",194,1,1,0,-218.2,-212.7],["tests.rs",194,1,2,0,-257.3,-202.8],["args.rs",196,2,0,0,-263,-178.1],["contracts.rs",196,5,0,0,-135,-178.1],["contracts_tests.rs",196,1,1,0,-268.7,-197.9],["coverage.rs",196,1,0,0,-268.7,-192.9],["cross.rs",196,1,2,0,-268.7,-188],["native_analyses.rs",197,1,0,0,-218.2,-188],["cross_test.rs",196,1,1,0,-268.7,-183.1],["endpoint.rs",196,1,0,0,-268.7,-178.1],["facts.rs",196,2,1,0,-268.7,-173.2],["tests.rs",198,1,1,0,-257.3,-197.9],["file.rs",196,1,0,0,-263,-212.7],["cochange.rs",199,4,3,0,-218.2,-207.7],["folded.rs",200,1,1,0,-212.5,-188],["render.rs",200,0,1,0,-465.8,-202.8],["tests.rs",200,1,1,0,-190.5,-212.7],["collect.rs",199,1,1,0,-223.9,-202.8],["cosmograph.rs",199,1,3,0,-223.9,-197.9],["census.rs",201,1,0,0,-190.5,-197.9],["tests.rs",201,1,1,0,-190.5,-192.9],["dep.rs",199,4,6,0,-190.5,-188],["disagreement.rs",202,1,0,0,-157,-197.9],["folded.rs",202,1,2,0,-157,-192.9],["tests.rs",203,1,0,0,-135,-188],["node.rs",202,2,0,0,-135,-183.1],["render.rs",202,0,1,0,-465.8,-197.9],["tests.rs",202,2,1,0,-157,-202.8],["window.rs",202,1,0,0,-157,-188],["fold.rs",199,5,1,0,-135,-202.8],["tests.rs",204,1,0,0,-118.7,-197.9],["mermaid.rs",199,1,1,0,-223.9,-192.9],["mod.rs",199,3,11,0,-263,-207.7],["model.rs",199,3,0,0,-190.5,-202.8],["posture.rs",199,2,1,0,-218.2,-202.8],["tests.rs",205,1,0,0,-190.5,-207.7],["risk.rs",199,2,1,0,-218.2,-197.9],["tests.rs",206,1,0,0,-190.5,-183.1],["tests.rs",199,1,1,0,-257.3,-192.9],["vocabulary.rs",199,1,5,0,-257.3,-188],["lib.rs",196,2,20,0,-313.5,-202.8],["diff.rs",207,1,1,0,-257.3,-183.1],["mod.rs",207,3,2,0,-263,-202.8],["tests.rs",207,1,1,0,-257.3,-178.1],["bucket_keys.rs",208,1,0,0,-157,-183.1],["by_rule_legend.rs",208,1,0,0,-157,-178.1],["cache_signal.rs",208,1,0,0,-157,-173.2],["deployment_role.rs",208,0,0,0,482.9,-192.9],["disclosure.rs",208,1,1,0,-151.3,-212.7],["filters.rs",208,1,1,0,-179.1,-212.7],["mod.rs",208,9,9,0,-190.5,-173.2],["cost.rs",209,1,1,0,-151.3,-188],["mod.rs",209,2,2,0,-151.3,-207.7],["tests.rs",209,1,0,0,-135,-212.7],["tests.rs",208,1,0,0,-151.3,-202.8],["timings.rs",208,1,0,0,-151.3,-197.9],["truncation.rs",208,1,1,0,-179.1,-207.7],["siblings.rs",196,1,0,0,-263,-197.9],["suggest.rs",196,1,0,0,-263,-192.9],["warnings.rs",196,1,1,0,-263,-188],["rule_filter.rs",210,1,0,0,-218.2,-183.1],["wire_contract_tests.rs",196,1,1,0,-263,-183.1],["cross_native_analyses.rs",211,0,0,0,482.9,-188],["disclosure_fold.rs",211,0,1,0,-465.8,-192.9],["host_dispatch.rs",211,0,1,0,-465.8,-188],["overlay_fragment_collision_disclosure.rs",211,0,0,0,482.9,-183.1],["reply_keyset_parity.rs",211,0,0,0,482.9,-178.1],["reply_prose_grammar.rs",211,0,0,0,482.9,-173.2],["wildcard_route_disclosure.rs",211,0,0,0,488.6,-212.7],["lib.rs",212,6,0,0,-184.8,-178.1],["index.js",213,3,3,0,-392.5,0],["envelope.js",214,2,0,0,-313.5,0],["keys.js",214,2,0,0,-313.5,4.9],["walk.js",214,2,0,0,-313.5,9.9],["envelope.test.js",215,0,1,0,-480.1,0],["keys.test.js",215,0,1,0,-480.1,4.9],["walk.test.js",215,0,1,0,-480.1,9.9],["adapter.mjs",216,0,1,0,-480.1,14.8],["adapter.test.mjs",217,0,0,0,477.2,0],["adapter.mjs",218,0,1,0,-480.1,19.7],["adapter.test.mjs",219,0,0,0,477.2,4.9],["App.java",220,0,2,0,-480.1,24.7],["Config.java",221,2,0,0,-313.5,14.8],["TextUtil.java",222,1,1,0,-392.5,4.9],["app.py",223,0,0,0,477.2,9.9],["__init__.py",224,0,0,0,477.2,14.8],["config.py",224,0,0,0,477.2,19.7],["__init__.py",225,0,0,0,477.2,24.7],["config.py",225,0,0,0,477.2,29.6],["adapter.mjs",226,0,1,0,-480.1,29.6],["adapter.test.mjs",227,0,0,0,477.2,34.6],["__init__.py",228,0,0,0,477.2,39.5],["utils.py",228,0,0,0,482.9,0],["__init__.py",229,0,0,0,482.9,4.9],["__init__.py",230,0,0,0,482.9,9.9],["base_config.py",230,0,0,0,482.9,14.8],["train.py",231,0,0,0,482.9,19.7],["aggregation.rs",232,0,0,0,482.9,24.7],["code_hygiene.rs",232,1,3,0,-480.1,34.6],["console_in_be.rs",232,0,0,0,482.9,29.6],["console_in_loop.rs",232,0,0,0,482.9,34.6],["eager_relation_declared.rs",232,0,2,0,-480.1,39.5],["egress_handoff.rs",232,0,0,0,482.9,39.5],["env_nonnull_assert.rs",232,0,0,0,488.6,0],["env_outside_config.rs",232,0,0,0,488.6,4.9],["jpa_eager_fetch.rs",232,0,2,0,-474.4,0],["language_scope.rs",232,0,0,0,488.6,9.9],["localhost_egress.rs",232,0,0,0,488.6,14.8],["orm_eager.rs",232,1,1,0,-474.4,4.9],["process_exit_and_race.rs",232,0,0,0,488.6,19.7],["query_logic_density.rs",232,0,0,0,488.6,24.7],["select_like.rs",232,0,0,0,488.6,29.6],["sql_preferences.rs",232,1,3,0,-474.4,9.9],["sqlalchemy_eager_relationship.rs",232,0,2,0,-474.4,14.8],["suppression.rs",232,0,0,0,488.6,34.6],["system_dialogs.rs",232,0,0,0,488.6,39.5],["w2_languages.rs",232,0,0,0,494.3,0],["analysis.rs",233,1,3,0,-392.5,82.8],["args.rs",233,3,0,0,-313.5,68],["fail_on.rs",233,2,0,0,-313.5,58.1],["help.rs",233,2,1,0,-313.5,53.2],["tests.rs",234,1,1,0,-313.5,87.7],["mod.rs",233,3,5,0,-392.5,53.2],["run.rs",233,1,3,0,-392.5,87.7],["init.rs",235,1,0,0,-313.5,82.8],["main.rs",236,0,1,0,-477.2,53.2],["cli.rs",237,0,0,0,485.8,53.2],["zzop.js",238,0,0,0,485.8,58.1],["place-artifacts.mjs",239,0,0,0,485.8,63],["sync-versions.mjs",239,0,0,0,485.8,68],["shim.test.js",240,0,0,0,485.8,72.9],["build.rs",241,0,1,0,-477.2,58.1],["zzop-mcp.rs",242,0,0,0,485.8,77.9],["lib.rs",243,0,5,0,-477.2,63],["resources.rs",243,1,1,0,-392.5,63],["server.rs",243,2,3,0,-392.5,68],["orientation.rs",244,1,0,0,-313.5,63],["tests.rs",244,1,1,0,-392.5,92.7],["staleness.rs",243,1,0,0,-392.5,72.9],["stamp_floor.rs",243,2,0,0,-392.5,58.1],["tools.rs",243,1,4,0,-392.5,77.9],["definitions.rs",245,1,0,0,-313.5,72.9],["tests.rs",245,1,0,0,-313.5,77.9],["nested_reply_shape_prose.rs",246,0,0,0,485.8,82.8],["server_bin.rs",246,0,0,0,485.8,87.7],["surface_prose.rs",246,0,0,0,485.8,92.7],["ef_core.rs",247,2,5,0,-280.1,-159.5],["dbset.rs",248,1,3,0,-251.6,-120],["table_attribute.rs",248,1,2,0,-229.6,-159.5],["tests.rs",248,1,0,0,-229.6,-154.6],["http_clients.rs",247,1,3,0,-280.1,-154.6],["tests.rs",249,1,0,0,-229.6,-144.7],["mod.rs",247,1,3,0,-330.6,-159.5],["attribute_controller.rs",250,3,2,0,-223.9,-159.5],["minimal_api.rs",250,2,2,0,-229.6,-120],["mod.rs",250,1,4,0,-280.1,-149.6],["tests.rs",250,1,0,0,-229.6,-129.9],["call_sites.rs",251,1,3,0,-280.1,-134.8],["tests.rs",252,1,0,0,-218.2,-144.7],["imports.rs",251,1,3,0,-280.1,-129.9],["tests.rs",253,1,0,0,-218.2,-125],["loop_spans.rs",251,1,2,0,-280.1,-125],["tests.rs",254,1,0,0,-212.5,-134.8],["mod.rs",251,1,7,0,-330.6,-154.6],["namespaces.rs",251,1,2,0,-280.1,-120],["tests.rs",255,1,0,0,-212.5,-125],["string_literals.rs",251,2,3,0,-274.4,-159.5],["tests.rs",256,1,2,0,-245.9,-159.5],["member.rs",257,1,2,0,-229.6,-139.8],["mod.rs",257,1,4,0,-274.4,-154.6],["tests.rs",257,1,0,0,-229.6,-134.8],["used_names.rs",251,1,2,0,-274.4,-149.6],["tests.rs",258,1,0,0,-229.6,-125],["lib.rs",259,1,6,0,-398.2,-159.5],["node_kinds.rs",259,2,1,0,-330.6,-149.6],["tests.rs",260,1,1,0,-307.8,-149.6],["collect.rs",261,1,3,0,-307.8,-144.7],["mod.rs",261,3,7,0,-330.6,-144.7],["partial_tests.rs",261,1,0,0,-268.7,-149.6],["resolve.rs",261,1,1,0,-307.8,-139.8],["tests.rs",261,1,0,0,-268.7,-144.7],["util.rs",259,16,0,0,-184.8,-144.7],["no_panic_proptest.rs",262,0,2,0,-480.1,-159.5],["gin.rs",263,2,6,0,-307.8,-134.8],["cross_file.rs",264,1,3,0,-307.8,-129.9],["shapes.rs",264,1,2,0,-268.7,-125],["tests.rs",264,1,1,0,-307.8,-125],["gorm.rs",263,2,4,0,-268.7,-120],["naming.rs",265,1,0,0,-212.5,-120],["tests.rs",265,1,1,0,-245.9,-154.6],["http_clients.rs",263,1,5,0,-307.8,-120],["instances.rs",266,1,1,0,-251.6,-139.8],["tests.rs",266,1,0,0,-251.6,-134.8],["mod.rs",263,6,6,0,-330.6,-134.8],["net_http.rs",263,1,4,0,-302.1,-159.5],["tests.rs",267,1,1,0,-302.1,-154.6],["call_sites.rs",268,1,3,0,-263,-144.7],["tests.rs",269,1,0,0,-223.9,-154.6],["imports.rs",268,1,3,0,-263,-139.8],["tests.rs",270,1,0,0,-223.9,-129.9],["loop_spans.rs",268,1,2,0,-263,-134.8],["tests.rs",271,1,0,0,-218.2,-139.8],["mod.rs",268,1,7,0,-330.6,-129.9],["resolve.rs",268,1,1,0,-263,-129.9],["tests.rs",272,1,0,0,-218.2,-120],["string_literals.rs",268,2,3,0,-263,-125],["tests.rs",273,1,2,0,-245.9,-149.6],["symbols.rs",268,1,3,0,-263,-120],["tests.rs",274,1,0,0,-206.8,-159.5],["used_names.rs",268,1,2,0,-257.3,-159.5],["tests.rs",275,1,0,0,-229.6,-149.6],["lib.rs",276,1,5,0,-398.2,-154.6],["node_kinds.rs",276,2,1,0,-330.6,-125],["tests.rs",277,1,1,0,-302.1,-149.6],["util.rs",276,15,0,0,-218.2,-149.6],["no_panic_proptest.rs",278,0,2,0,-480.1,-154.6],["http_clients.rs",279,1,3,0,-324.9,-134.8],["tests.rs",280,1,0,0,-263,-159.5],["jpa.rs",279,1,3,0,-324.9,-129.9],["tests.rs",281,1,0,0,-257.3,-154.6],["call_sites.rs",282,1,4,0,-257.3,-144.7],["hash_call.rs",283,1,1,0,-223.9,-149.6],["tests.rs",283,1,0,0,-223.9,-144.7],["calls.rs",282,1,4,0,-257.3,-139.8],["tests.rs",284,1,0,0,-223.9,-125],["imports.rs",282,1,3,0,-257.3,-134.8],["tests.rs",285,1,0,0,-218.2,-134.8],["loop_spans.rs",282,1,2,0,-257.3,-129.9],["tests.rs",286,1,0,0,-212.5,-159.5],["mod.rs",282,1,7,0,-324.9,-125],["string_literals.rs",282,2,3,0,-257.3,-125],["tests.rs",287,1,2,0,-245.9,-144.7],["member.rs",288,1,3,0,-184.8,-139.8],["mod.rs",288,5,4,0,-184.8,-149.6],["tests.rs",288,1,1,0,-157,-159.5],["used_names.rs",282,1,2,0,-257.3,-120],["tests.rs",289,1,0,0,-206.8,-154.6],["lib.rs",279,1,10,0,-398.2,-149.6],["node_kinds.rs",279,2,1,0,-324.9,-120],["tests.rs",290,1,1,0,-302.1,-144.7],["collect.rs",291,2,4,0,-302.1,-139.8],["mod.rs",291,4,5,0,-319.2,-159.5],["resolve.rs",291,2,2,0,-302.1,-134.8],["tests.rs",291,1,0,0,-280.1,-144.7],["walk.rs",291,1,4,0,-302.1,-129.9],["annotations.rs",292,4,1,0,-184.8,-154.6],["extract.rs",292,1,4,0,-212.5,-154.6],["mod.rs",292,4,3,0,-268.7,-129.9],["tests.rs",292,1,2,0,-212.5,-149.6],["security.rs",279,2,4,0,-319.2,-154.6],["tests.rs",293,1,2,0,-302.1,-125],["spring_security.rs",279,5,5,0,-319.2,-149.6],["clauses.rs",294,3,2,0,-302.1,-120],["fold.rs",294,1,3,0,-296.4,-159.5],["siblings.rs",294,1,3,0,-296.4,-154.6],["tests.rs",294,1,1,0,-296.4,-149.6],["util.rs",279,20,0,0,-157,-154.6],["no_panic_proptest.rs",295,0,2,0,-480.1,-149.6],["analysis.rs",296,1,1,0,-398.2,-144.7],["lib.rs",296,0,5,0,-480.1,-144.7],["orchestrator_tests.rs",296,1,0,0,-398.2,-139.8],["parse.rs",296,2,1,0,-319.2,-139.8],["tests.rs",296,1,1,0,-398.2,-134.8],["no_panic_proptest.rs",297,0,1,0,-480.1,-139.8],["const_map.rs",298,1,1,0,-319.2,-134.8],["tests.rs",299,1,0,0,-263,-154.6],["django.rs",298,2,2,0,-319.2,-129.9],["tests.rs",300,1,1,0,-296.4,-144.7],["django_routes.rs",298,1,4,0,-319.2,-125],["convert_path.rs",301,1,0,0,-251.6,-159.5],["guard.rs",301,2,3,0,-251.6,-154.6],["tests.rs",302,1,1,0,-245.9,-139.8],["tests.rs",301,1,0,0,-251.6,-149.6],["fastapi.rs",298,2,4,0,-319.2,-120],["guard.rs",303,1,3,0,-251.6,-129.9],["depends.rs",304,1,2,0,-212.5,-144.7],["tests.rs",304,1,0,0,-212.5,-139.8],["mounts.rs",303,1,2,0,-296.4,-139.8],["tests.rs",303,1,0,0,-251.6,-125],["guard_vocab.rs",298,4,1,0,-184.8,-159.5],["tests.rs",305,1,1,0,-184.8,-134.8],["http_clients.rs",298,1,3,0,-392.5,-154.6],["instances.rs",306,1,2,0,-392.5,-149.6],["tests.rs",306,1,0,0,-330.6,-120],["mod.rs",298,1,7,0,-392.5,-144.7],["sqlalchemy.rs",298,2,2,0,-313.5,-159.5],["tests.rs",307,1,1,0,-296.4,-134.8],["call_sites.rs",308,1,3,0,-313.5,-149.6],["hash_call.rs",309,1,0,0,-274.4,-120],["tests.rs",309,1,0,0,-268.7,-159.5],["calls.rs",308,1,3,0,-313.5,-144.7],["tests.rs",310,1,0,0,-268.7,-139.8],["imports.rs",308,1,1,0,-313.5,-139.8],["loop_spans.rs",308,1,1,0,-313.5,-134.8],["tests.rs",311,1,0,0,-263,-149.6],["mod.rs",308,1,8,0,-392.5,-139.8],["resolve.rs",308,1,1,0,-313.5,-129.9],["resolve_tests.rs",308,1,0,0,-257.3,-149.6],["string_literals.rs",308,2,3,0,-392.5,-134.8],["tests.rs",312,1,2,0,-392.5,-129.9],["symbols.rs",308,1,2,0,-313.5,-125],["tests.rs",313,1,0,0,-251.6,-144.7],["used_names.rs",308,1,0,0,-313.5,-120],["lib.rs",314,3,3,0,-398.2,-125],["no_panic_proptest.rs",315,0,2,0,-480.1,-134.8],["axum.rs",316,2,5,0,-274.4,-144.7],["entries.rs",317,1,3,0,-245.9,-134.8],["tests.rs",317,1,0,0,-223.9,-139.8],["util.rs",317,2,0,0,-223.9,-120],["http_clients.rs",316,1,4,0,-274.4,-139.8],["tests.rs",318,1,0,0,-218.2,-159.5],["url.rs",318,1,1,0,-218.2,-154.6],["mod.rs",316,1,3,0,-307.8,-154.6],["raw_sql.rs",316,1,3,0,-274.4,-134.8],["tests.rs",319,1,0,0,-218.2,-129.9],["call_sites.rs",320,1,2,0,-324.9,-159.5],["tests.rs",321,1,0,0,-280.1,-139.8],["calls.rs",320,2,4,0,-392.5,-125],["expr.rs",322,1,2,0,-392.5,-120],["tests.rs",322,1,0,0,-307.8,-159.5],["extractor_guards.rs",320,1,3,0,-386.8,-159.5],["tests.rs",323,1,0,0,-330.6,-139.8],["imports.rs",320,1,3,0,-324.9,-154.6],["tests.rs",324,1,0,0,-274.4,-129.9],["loop_spans.rs",320,1,1,0,-324.9,-149.6],["tests.rs",325,1,0,0,-268.7,-154.6],["mod.rs",320,1,10,0,-386.8,-154.6],["resolve.rs",320,2,1,0,-274.4,-125],["tests.rs",326,1,0,0,-212.5,-129.9],["string_literals.rs",320,2,2,0,-324.9,-144.7],["tests.rs",327,1,2,0,-296.4,-129.9],["symbols.rs",320,4,4,0,-386.8,-149.6],["emit.rs",328,1,3,0,-386.8,-144.7],["tests.rs",328,1,0,0,-319.2,-144.7],["test_spans.rs",320,5,1,0,-223.9,-134.8],["tests.rs",329,1,1,0,-206.8,-149.6],["used_names.rs",320,1,1,0,-324.9,-139.8],["tests.rs",330,1,0,0,-268.7,-134.8],["lib.rs",331,3,3,0,-398.2,-120],["no_panic_proptest.rs",332,0,2,0,-480.1,-129.9],["consume.rs",333,2,2,0,-392.5,-159.5],["tests.rs",334,1,1,0,-386.8,-139.8],["extract.rs",333,3,2,0,-313.5,-154.6],["tests.rs",335,1,1,0,-296.4,-125],["lib.rs",333,0,3,0,-480.1,-125],["no_panic_proptest.rs",336,0,1,0,-480.1,-120],["class_shapes.rs",337,1,2,0,183.6,-139.8],["tests.rs",338,1,0,0,234.1,-154.6],["client_base.rs",337,3,2,0,234.1,-149.6],["client_base_generated.rs",337,1,2,0,183.6,-134.8],["client_base_tests.rs",337,1,1,0,183.6,-129.9],["controller_decorators.rs",337,6,4,0,183.6,-125],["context.rs",339,2,1,0,256.2,-134.8],["method_facts.rs",339,3,1,0,283.9,-149.6],["provides.rs",339,1,3,0,234.1,-134.8],["tests.rs",339,3,6,0,200.7,-159.5],["body_shape.rs",340,1,2,0,200.7,-154.6],["guards.rs",340,1,1,0,200.7,-149.6],["provides.rs",340,1,2,0,200.7,-144.7],["provides_shapes.rs",340,1,2,0,200.7,-139.8],["response_shape.rs",340,1,2,0,200.7,-134.8],["db_table_consume.rs",337,1,4,0,183.6,-120],["receivers.rs",341,1,1,0,234.1,-125],["recognize.rs",341,2,0,0,256.2,-125],["tests.rs",341,1,0,0,234.1,-120],["egress.rs",337,14,17,0,256.2,-159.5],["angular.rs",342,2,2,0,256.2,-120],["binding_census.rs",342,2,1,0,261.9,-159.5],["body_shape.rs",342,6,4,0,261.9,-154.6],["collector.rs",342,2,13,0,261.9,-149.6],["tests.rs",343,1,2,0,261.9,-144.7],["concat.rs",342,2,3,0,261.9,-139.8],["consts.rs",342,2,1,0,261.9,-134.8],["correlation.rs",342,2,2,0,261.9,-129.9],["generated_client.rs",342,2,4,0,261.9,-125],["tests.rs",344,1,1,0,261.9,-120],["keying.rs",342,2,1,0,283.9,-159.5],["local_consts.rs",342,5,3,0,256.2,-154.6],["matchers.rs",342,7,1,0,267.6,-159.5],["matchers_tests.rs",342,1,1,0,267.6,-154.6],["object_shape.rs",342,2,2,0,267.6,-149.6],["react_query.rs",342,2,3,0,267.6,-144.7],["retry.rs",342,2,0,0,283.9,-154.6],["url_resolve.rs",342,4,2,0,267.6,-139.8],["url_resolve_tests.rs",342,1,1,0,267.6,-134.8],["entity_decorators.rs",337,1,1,0,189.3,-159.5],["global_prefix.rs",337,1,1,0,189.3,-154.6],["hono_client.rs",337,2,4,0,189.3,-149.6],["consume.rs",345,1,2,0,228.4,-139.8],["scan.rs",345,2,0,0,256.2,-139.8],["tests.rs",345,1,2,0,200.7,-129.9],["mod.rs",337,2,19,0,144.5,-154.6],["nest_middleware.rs",337,2,1,0,189.3,-144.7],["tests.rs",346,1,1,0,200.7,-125],["next_pages_api.rs",337,1,4,0,144.5,-149.6],["collector.rs",347,1,2,0,144.5,-144.7],["resolve.rs",347,2,1,0,144.5,-139.8],["tests.rs",347,1,0,0,195,-129.9],["pathname_dispatch.rs",337,3,7,0,189.3,-139.8],["classify.rs",348,2,3,0,200.7,-120],["collector.rs",348,1,3,0,206.4,-159.5],["ctx.rs",348,4,1,0,228.4,-120],["regex_path.rs",348,2,0,0,256.2,-129.9],["mod.rs",349,2,5,0,206.4,-154.6],["scan.rs",349,1,1,0,228.4,-159.5],["tests.rs",348,5,4,0,234.1,-144.7],["branch_symbol.rs",350,1,1,0,239.8,-154.6],["guards.rs",350,1,1,0,239.8,-149.6],["regex.rs",350,1,1,0,239.8,-144.7],["shapes.rs",350,1,1,0,239.8,-139.8],["raw_sql.rs",337,2,2,0,189.3,-134.8],["tests.rs",351,1,2,0,206.4,-149.6],["router_mounts.rs",337,9,12,0,189.3,-129.9],["build.rs",352,3,5,0,206.4,-144.7],["chain.rs",352,4,1,0,234.1,-159.5],["guard.rs",352,5,3,0,206.4,-139.8],["guard_tests.rs",352,1,4,0,206.4,-134.8],["idempotency.rs",352,3,0,0,234.1,-139.8],["idempotency_tests.rs",352,1,5,0,206.4,-129.9],["tests_express.rs",352,1,3,0,206.4,-125],["tests_express_receivers.rs",352,1,3,0,206.4,-120],["tests_express_require_mounts.rs",352,1,3,0,212.1,-159.5],["tests_hono.rs",352,6,2,0,212.1,-154.6],["use_classify.rs",352,2,5,0,212.1,-149.6],["trpc_consume.rs",337,1,1,0,189.3,-125],["trpc_router.rs",337,2,2,0,189.3,-120],["extract.rs",353,1,1,0,239.8,-159.5],["tests.rs",353,1,2,0,212.1,-144.7],["typeorm_repository.rs",337,2,2,0,195,-159.5],["tests.rs",354,1,1,0,212.1,-139.8],["wrapper_calls.rs",337,2,4,0,195,-154.6],["calls.rs",355,1,1,0,228.4,-154.6],["defs.rs",355,1,2,0,228.4,-149.6],["collect.rs",356,1,0,0,256.2,-149.6],["tests.rs",355,1,2,0,212.1,-134.8],["asset_refs.rs",357,2,2,0,144.5,-134.8],["tests.rs",358,1,1,0,144.5,-129.9],["call_sites.rs",357,1,4,0,144.5,-125],["hash_call.rs",359,1,1,0,195,-120],["process_exec.rs",359,2,0,0,234.1,-129.9],["call_sites_tests.rs",357,1,2,0,144.5,-120],["cjs_exports.rs",357,2,2,0,150.2,-159.5],["cjs_require.rs",357,2,1,0,195,-125],["dead_export_facts.rs",357,1,4,0,150.2,-154.6],["export_aliases.rs",357,2,1,0,150.2,-149.6],["exported_names.rs",357,2,3,0,150.2,-144.7],["tests.rs",360,1,1,0,150.2,-139.8],["factory.rs",357,3,2,0,150.2,-134.8],["framework_recognizers.rs",357,1,1,0,183.6,-159.5],["function_spans.rs",357,1,1,0,150.2,-129.9],["ident_refs.rs",357,1,1,0,150.2,-125],["imports.rs",357,8,3,0,150.2,-120],["calls.rs",361,1,3,0,183.6,-154.6],["tests.rs",362,1,0,0,228.4,-144.7],["mod.rs",361,3,3,0,155.9,-159.5],["resolve.rs",361,1,5,0,155.9,-154.6],["dep_graph.rs",363,3,6,0,155.9,-149.6],["edge_tests.rs",364,1,3,0,155.9,-144.7],["noncycle_tests.rs",364,1,3,0,155.9,-139.8],["framework_alias.rs",363,2,2,0,195,-149.6],["tests.rs",365,1,1,0,212.1,-129.9],["specifier.rs",363,5,0,0,256.2,-144.7],["tsconfig.rs",363,3,1,0,228.4,-134.8],["workspace.rs",363,3,3,0,195,-139.8],["tests.rs",366,1,1,0,212.1,-125],["write_site.rs",361,1,1,0,183.6,-149.6],["lib.rs",357,27,28,0,144.5,-159.5],["loop_spans.rs",357,1,1,0,155.9,-134.8],["nuxt_config.rs",357,2,2,0,155.9,-129.9],["tests.rs",367,1,1,0,155.9,-125],["parse.rs",357,1,2,0,183.6,-144.7],["hygiene_pin_tests.rs",368,1,0,0,228.4,-129.9],["memo.rs",368,1,0,0,228.4,-125],["prescan.rs",357,2,4,0,155.9,-120],["tests.rs",369,1,1,0,161.6,-159.5],["project.rs",357,1,4,0,161.6,-154.6],["re_exports.rs",357,2,3,0,161.6,-149.6],["sfc_imports.rs",357,3,3,0,161.6,-144.7],["tests.rs",370,1,1,0,161.6,-139.8],["signature_refs.rs",357,2,2,0,161.6,-134.8],["tests.rs",371,1,1,0,161.6,-129.9],["string_literals.rs",357,2,3,0,161.6,-125],["tests.rs",372,1,2,0,161.6,-120],["symbol_shapes.rs",357,2,3,0,167.3,-159.5],["class.rs",373,1,4,0,167.3,-154.6],["members.rs",374,1,0,0,195,-144.7],["symbols.rs",357,1,7,0,167.3,-149.6],["symbols_tests.rs",357,1,3,0,167.3,-144.7],["test_util.rs",357,2,1,0,195,-134.8],["no_panic_proptest.rs",375,0,2,0,-474.4,-159.5],["input_strategy.rs",376,8,0,0,-398.2,-129.9],["browser.rs",377,9,13,0,-500,-53.2],["dialogs.rs",377,1,1,0,-500,-48.2],["javascript_url.rs",377,1,1,0,-500,-43.3],["jquery_html.rs",377,1,1,0,-500,-38.4],["location_assign.rs",377,1,1,0,-500,-33.4],["location_assign_guards.rs",377,1,1,0,-500,-28.5],["markdown_html.rs",377,1,1,0,-500,-23.5],["postmessage.rs",377,1,1,0,-500,-18.6],["unsafe_html.rs",377,1,1,0,-500,-13.7],["vue_v_html.rs",377,1,1,0,-494.3,-53.2],["client_lifecycle.rs",378,1,0,0,-395.4,-53.2],["db.rs",378,1,11,0,-494.3,-48.2],["money_and_catch.rs",378,1,0,0,-395.4,-48.2],["queries.rs",378,1,0,0,-395.4,-43.3],["races.rs",378,1,0,0,-395.4,-38.4],["raw_sql_writes.rs",378,1,1,0,-494.3,-43.3],["transactions.rs",378,1,0,0,-395.4,-33.4],["writes.rs",378,1,0,0,-395.4,-28.5],["egress.rs",379,0,7,0,-494.3,-38.4],["generated_banner_exemption.rs",379,1,0,0,-395.4,-18.6],["http_shapes.rs",379,1,0,0,-395.4,-13.7],["sockets_and_routes.rs",379,1,0,0,-389.7,-53.2],["go.rs",380,0,3,0,-494.3,-33.4],["goroutine_in_loop.rs",380,1,0,0,-389.7,-38.4],["dev_path_no_guard_hint.rs",381,1,1,0,-494.3,-28.5],["http.rs",381,2,6,0,-494.3,-23.5],["protected_path_no_auth_evidence.rs",381,1,1,0,-494.3,-18.6],["message_order_pins.rs",382,8,0,0,-389.7,-48.2],["message_order_verdicts.rs",382,8,0,0,-389.7,-43.3],["api_in_loop.rs",383,1,1,0,-494.3,-13.7],["perf.rs",383,1,3,0,-488.6,-53.2],["react.rs",384,0,3,0,-488.6,-48.2],["setstate_after_async_unguarded.rs",384,1,0,0,-395.4,-23.5],["client_no_error_listener.rs",385,1,1,0,-488.6,-43.3],["flushall_in_code.rs",385,1,1,0,-488.6,-38.4],["keys_command_in_code.rs",385,1,1,0,-488.6,-33.4],["redis.rs",385,6,10,0,-488.6,-28.5],["redis_counter_get_set.rs",385,1,1,0,-488.6,-23.5],["redis_lock_get_then_set.rs",385,1,1,0,-488.6,-18.6],["redis_lock_no_ttl.rs",385,1,1,0,-488.6,-13.7],["allsettled_landing.rs",386,1,1,0,-482.9,-53.2],["config_flags.rs",386,1,1,0,-482.9,-48.2],["fetch_and_process.rs",386,1,1,0,-482.9,-43.3],["reliability.rs",386,8,12,0,-482.9,-38.4],["routes_and_handlers.rs",386,1,1,0,-482.9,-33.4],["rust_reqwest.rs",386,1,1,0,-482.9,-28.5],["server_hygiene.rs",386,1,1,0,-482.9,-23.5],["suppression.rs",386,1,1,0,-482.9,-18.6],["writes_and_parsing.rs",386,1,1,0,-482.9,-13.7],["algorithm_cutover_landing.rs",387,1,1,0,-477.2,-53.2],["bound_parameter_landing.rs",387,1,1,0,-477.2,-48.2],["conn_string_credentials.rs",387,1,1,0,-477.2,-43.3],["cors_csp.rs",387,1,1,0,-477.2,-38.4],["crypto.rs",387,1,1,0,-477.2,-33.4],["frontend_exposure.rs",387,1,1,0,-477.2,-28.5],["html_injection.rs",387,1,1,0,-477.2,-23.5],["http_exposure.rs",387,1,1,0,-477.2,-18.6],["interpolated_statements.rs",387,1,1,0,-477.2,-13.7],["java_moved_rules.rs",387,1,1,0,-471.5,-53.2],["java_security.rs",387,1,1,0,-471.5,-48.2],["jwt.rs",387,1,1,0,-471.5,-43.3],["jwt_sign_secret.rs",387,1,1,0,-471.5,-38.4],["mass_assignment.rs",387,1,1,0,-471.5,-33.4],["open_redirect_authority.rs",387,1,1,0,-471.5,-28.5],["open_redirect_veto.rs",387,1,1,0,-471.5,-23.5],["private_key_committed.rs",387,1,1,0,-471.5,-18.6],["request_targets.rs",387,1,1,0,-471.5,-13.7],["rotation_landing.rs",387,1,1,0,-465.8,-53.2],["rust_rules.rs",387,1,1,0,-465.8,-48.2],["scan_scope.rs",387,1,1,0,-465.8,-43.3],["secrets.rs",387,1,1,0,-465.8,-38.4],["secrets_annotated.rs",387,1,1,0,-465.8,-33.4],["secrets_vetoes.rs",387,1,1,0,-465.8,-28.5],["security.rs",387,31,35,0,-465.8,-23.5],["shell_exec.rs",387,1,1,0,-465.8,-18.6],["shell_routing_landing.rs",387,1,1,0,-465.8,-13.7],["sql_injection.rs",387,1,1,0,-460.1,-53.2],["taint_and_eval.rs",387,1,1,0,-460.1,-48.2],["template_output.rs",387,1,1,0,-460.1,-43.3],["timing_compare.rs",387,1,1,0,-460.1,-38.4],["vendor_token_committed.rs",387,1,1,0,-460.1,-33.4],["aggregation.rs",388,1,1,0,-460.1,-28.5],["destructive_migration.rs",388,1,1,0,-460.1,-23.5],["language_scope.rs",388,1,1,0,-460.1,-18.6],["no_where.rs",388,1,1,0,-460.1,-13.7],["nplus1.rs",388,1,1,0,-454.4,-53.2],["raw_sql_check_then_write.rs",388,1,1,0,-454.4,-48.2],["sql.rs",388,9,13,0,-454.4,-43.3],["suppression.rs",388,1,1,0,-454.4,-38.4],["toctou.rs",388,1,1,0,-454.4,-33.4],["truncate.rs",388,1,1,0,-454.4,-28.5],["all_consumes_unjoined.rs",389,2,3,0,111.1,-13.7],["subsume.rs",390,1,1,0,155.9,-18.6],["tests.rs",390,1,3,0,128.2,-53.2],["ambiguous_consume.rs",389,1,2,0,116.8,-53.2],["blindness.rs",389,1,0,0,116.8,-48.2],["body_field_drift.rs",389,1,2,0,116.8,-43.3],["tests.rs",391,1,2,0,150.2,-28.5],["cross_tree_route_shadowing.rs",389,1,2,0,74.8,-33.4],["duplicate_route.rs",389,1,2,0,116.8,-38.4],["external_base_url_drift.rs",389,1,4,0,74.8,-28.5],["tests.rs",392,1,0,0,122.5,-43.3],["external_duplicated_integration.rs",389,1,3,0,74.8,-23.5],["external_host_fanout.rs",389,1,4,0,74.8,-18.6],["tests.rs",393,1,0,0,122.5,-28.5],["external_ip_literal.rs",389,1,4,0,74.8,-13.7],["tests.rs",394,1,0,0,122.5,-18.6],["external_secret_in_url.rs",389,1,3,0,80.5,-53.2],["external_shadow_internal.rs",389,1,4,0,80.5,-48.2],["tests.rs",395,1,0,0,111.1,-38.4],["external_url.rs",389,1,0,0,116.8,-33.4],["external_version_inconsistent.rs",389,1,5,0,80.5,-43.3],["tests.rs",396,1,1,0,80.5,-38.4],["method_mismatch.rs",389,1,3,0,80.5,-33.4],["mod.rs",389,22,33,0,74.8,-38.4],["path_near_miss.rs",389,1,3,0,80.5,-28.5],["prefix_drift.rs",389,1,3,0,80.5,-23.5],["tests.rs",397,1,0,0,122.5,-33.4],["retrying_write_no_idempotency.rs",389,1,3,0,80.5,-18.6],["tests.rs",398,1,2,0,122.5,-23.5],["route_near_miss.rs",389,5,5,0,74.8,-53.2],["dimensions.rs",399,1,0,0,111.1,-48.2],["tests.rs",399,1,0,0,111.1,-43.3],["sdk_import_no_visible_consume.rs",389,1,3,0,80.5,-13.7],["tests.rs",400,1,0,0,122.5,-13.7],["sensitive_response_field.rs",389,1,3,0,116.8,-28.5],["message.rs",401,1,0,0,150.2,-23.5],["tests.rs",401,1,2,0,150.2,-18.6],["shared_db_table.rs",389,1,3,0,116.8,-23.5],["tests.rs",402,1,2,0,155.9,-38.4],["shared_tests.rs",389,1,0,0,116.8,-18.6],["trpc_mount.rs",389,1,1,0,86.2,-53.2],["unconsumed_endpoint.rs",389,2,6,0,86.2,-48.2],["fold.rs",403,1,2,0,86.2,-43.3],["tests.rs",403,1,1,0,86.2,-38.4],["unconsumed_mutation_endpoint.rs",389,3,5,0,74.8,-48.2],["tests.rs",404,1,1,0,111.1,-33.4],["unconsumed_procedure.rs",389,1,3,0,86.2,-33.4],["unknown_verb_route.rs",389,1,1,0,116.8,-13.7],["unprovided_mutation_call.rs",389,1,4,0,86.2,-28.5],["tests.rs",405,1,1,0,122.5,-38.4],["unresolved_consume_ratio.rs",389,1,3,0,86.2,-23.5],["version_skew.rs",389,1,4,0,86.2,-18.6],["vocab.rs",389,3,0,0,122.5,-48.2],["write_methods.rs",389,1,0,0,122.5,-53.2],["lib.rs",406,2,2,0,32.9,-53.2],["cache_lane_file_read.rs",407,1,3,0,197.9,-53.2],["tests.rs",408,1,2,0,234.1,-53.2],["circular.rs",407,1,1,0,197.9,-48.2],["dead_candidates.rs",407,2,5,0,197.9,-43.3],["findings.rs",409,1,2,0,197.9,-23.5],["framework_roots.rs",409,1,1,0,234.1,-48.2],["tests.rs",409,1,0,0,234.1,-43.3],["dead_exports.rs",407,2,6,0,197.9,-38.4],["findings.rs",410,1,2,0,197.9,-18.6],["patterns.rs",410,1,1,0,234.1,-38.4],["propagate.rs",410,1,0,0,234.1,-33.4],["tests.rs",410,1,1,0,234.1,-28.5],["types.rs",410,1,1,0,234.1,-23.5],["lib.rs",407,1,6,0,150.2,-53.2],["unreachable.rs",407,3,3,0,261.9,-53.2],["patterns.rs",411,1,0,0,283.9,-53.2],["tests.rs",411,1,0,0,283.9,-48.2],["duplicate_route.rs",412,1,3,0,111.1,-28.5],["boundary.rs",413,1,0,0,150.2,-13.7],["tests.rs",413,1,0,0,155.9,-53.2],["version.rs",413,1,0,0,155.9,-48.2],["http_scan.rs",412,5,6,0,150.2,-43.3],["non_idempotent.rs",414,1,3,0,155.9,-13.7],["sightlines.rs",414,1,2,0,161.6,-53.2],["symbol_index.rs",414,1,1,0,197.9,-33.4],["tests.rs",414,1,2,0,197.9,-28.5],["unsafe_read.rs",414,1,3,0,161.6,-48.2],["lib.rs",412,1,6,0,74.8,-43.3],["mutating_route_no_auth.rs",412,6,9,0,111.1,-53.2],["candidates.rs",415,1,3,0,128.2,-48.2],["guard_reach.rs",415,1,4,0,128.2,-43.3],["message.rs",415,1,2,0,128.2,-38.4],["qualifier.rs",415,2,0,0,150.2,-38.4],["tests.rs",415,1,2,0,150.2,-48.2],["vocab.rs",415,3,0,0,150.2,-33.4],["route_shadowing.rs",412,1,1,0,111.1,-23.5],["tests.rs",416,1,0,0,155.9,-33.4],["unprovided_consume.rs",412,2,4,0,111.1,-18.6],["fold.rs",417,1,2,0,128.2,-33.4],["message.rs",417,2,0,0,155.9,-43.3],["tests.rs",417,1,0,0,155.9,-28.5],["vocab.rs",417,1,0,0,155.9,-23.5],["join.rs",418,2,2,0,-313.5,-38.4],["tests.rs",419,1,1,0,-263,-43.3],["lib.rs",418,0,5,0,-454.4,-23.5],["message.rs",418,1,7,0,-389.7,-33.4],["index_build.rs",420,2,0,0,-263,-38.4],["landing.rs",420,2,0,0,-263,-33.4],["sightline.rs",420,1,0,0,-313.5,-48.2],["tests.rs",420,1,3,0,-313.5,-43.3],["structural.rs",418,4,3,0,-263,-28.5],["rules.rs",421,2,4,0,-263,-23.5],["coverage.rs",422,1,0,0,-218.2,-48.2],["relation.rs",422,1,2,0,-263,-18.6],["tests.rs",421,1,1,0,-218.2,-53.2],["usage.rs",418,2,4,0,-313.5,-53.2],["tests.rs",423,1,1,0,-263,-53.2],["tokens.rs",423,1,0,0,-263,-48.2],["lib.rs",424,0,0,0,485.8,-53.2],["gen-site-rules.mjs",425,0,0,0,482.9,106.3],["gen-site.mjs",425,0,1,0,-477.2,106.3],["gen-third-party-notices.mjs",425,1,0,0,-392.5,121.2],["catalog-native-ids.mjs",426,0,0,0,482.9,111.3],["benchmark.mjs",427,0,0,0,482.9,116.2],["classify-method-scan-spans.mjs",427,0,0,0,482.9,121.2],["config-warnings-gate.mjs",427,0,0,0,482.9,126.1],["diff.mjs",427,0,1,0,-477.2,111.3],["gen-scale-tree.mjs",427,0,0,0,482.9,131],["plant-revert-selftest.mjs",427,0,1,0,-477.2,116.2],["plant-revert.mjs",427,2,0,0,-392.5,116.2],["resolve-folded-message.mjs",427,2,0,0,-392.5,111.3],["self-analysis-gate.mjs",427,0,2,0,-477.2,121.2],["selftest-benchmark-cases.mjs",427,0,0,0,482.9,136],["selftest-stub.rs",427,0,0,0,482.9,140.9],["snapshot.mjs",427,0,0,0,482.9,145.8],["site-graph-data.mjs",425,0,0,0,488.6,106.3],["check.mjs",428,0,0,0,488.6,111.3],["render.mjs",429,1,0,0,-392.5,106.3],["test-notices-harvest.mjs",425,0,1,0,-477.2,126.1],["arch.mjs",430,0,0,0,482.9,159.5],["contract.mjs",430,0,0,0,482.9,164.5],["graph.mjs",430,0,0,0,482.9,169.4],["graph.page.mjs",430,0,0,0,482.9,174.3],["index.mjs",430,0,0,0,482.9,179.3],["privacy.mjs",430,0,0,0,482.9,184.2],["redirects.mjs",430,0,0,0,482.9,189.1],["reference.page.mjs",430,0,0,0,482.9,194.1],["rules.mjs",430,0,0,0,482.9,199],["rules.page.mjs",430,0,0,0,488.6,159.5],["shell.mjs",430,0,0,0,488.6,164.5],["showcase.mjs",430,0,0,0,488.6,169.4],["usage.mjs",430,0,0,0,488.6,174.3],["docs.js",431,0,0,0,485.8,212.7]],"l":[[8,0],[8,1],[8,2],[8,3],[8,4],[8,5],[8,6],[8,9],[8,10],[8,11],[8,12],[8,13],[8,14],[8,15],[8,16],[8,17],[8,18],[8,19],[8,20],[8,21],[8,24],[8,27],[8,28],[8,29],[8,34],[8,35],[8,36],[8,37],[8,38],[8,39],[8,40],[8,41],[8,42],[8,43],[8,44],[8,45],[8,46],[8,47],[8,48],[8,49],[8,50],[8,51],[8,52],[8,53],[8,54],[8,55],[8,56],[8,57],[8,60],[8,63],[8,64],[8,65],[8,66],[8,67],[8,68],[8,69],[8,70],[8,71],[8,72],[8,73],[8,74],[8,75],[8,76],[8,77],[8,78],[8,79],[8,80],[8,81],[8,82],[8,83],[8,84],[34,7],[85,86],[87,88],[89,90],[91,92],[95,96],[95,97],[101,98],[101,99],[101,100],[101,102],[101,103],[101,104],[101,105],[101,106],[101,108],[101,110],[101,111],[101,112],[101,113],[101,114],[101,118],[101,119],[101,121],[101,122],[101,123],[101,124],[101,125],[101,127],[101,128],[101,129],[101,130],[101,131],[101,132],[101,133],[101,134],[101,135],[101,136],[101,137],[101,138],[101,139],[101,140],[101,141],[108,107],[112,109],[142,149],[143,142],[145,144],[146,145],[146,147],[146,150],[146,151],[147,148],[150,143],[151,152],[152,151],[153,154],[153,155],[153,156],[153,157],[156,157],[159,158],[160,161],[162,160],[162,161],[162,163],[164,165],[165,164],[167,164],[167,166],[167,168],[169,170],[169,173],[170,169],[171,172],[189,188],[189,190],[189,191],[207,208],[210,209],[212,213],[212,214],[212,215],[212,216],[212,218],[212,219],[214,211],[220,221],[222,223],[222,224],[225,226],[229,227],[229,228],[230,231],[233,366],[235,230],[235,232],[235,233],[235,234],[235,236],[236,233],[236,234],[236,237],[236,238],[236,239],[236,240],[236,366],[238,232],[238,233],[238,234],[238,236],[238,366],[240,366],[243,242],[243,244],[243,245],[243,246],[243,260],[243,261],[243,262],[243,263],[243,264],[243,265],[244,263],[245,242],[245,243],[245,246],[245,265],[246,243],[246,247],[246,249],[246,250],[246,251],[246,257],[246,258],[246,259],[247,243],[247,248],[247,249],[247,250],[247,258],[248,243],[250,243],[250,247],[250,249],[251,252],[251,253],[251,254],[251,255],[251,256],[252,243],[252,246],[252,249],[252,251],[252,259],[252,263],[253,246],[253,251],[253,263],[254,246],[254,249],[254,250],[254,251],[255,243],[255,246],[255,249],[255,251],[256,246],[256,251],[257,243],[257,258],[258,243],[258,249],[262,243],[262,261],[262,263],[264,260],[265,243],[265,266],[265,267],[265,268],[266,265],[268,263],[270,271],[273,274],[273,275],[273,276],[274,273],[275,273],[275,363],[276,274],[276,363],[278,279],[278,281],[278,289],[278,292],[278,293],[278,294],[278,295],[278,296],[278,298],[278,299],[278,301],[278,303],[278,305],[278,306],[278,308],[278,309],[278,310],[278,311],[278,312],[278,314],[278,317],[278,320],[278,323],[278,327],[278,329],[278,332],[278,334],[278,335],[278,336],[278,337],[278,338],[278,339],[278,340],[279,270],[279,280],[279,289],[279,346],[279,366],[279,384],[280,270],[280,278],[280,279],[280,366],[281,289],[281,292],[281,301],[281,308],[281,346],[283,289],[283,294],[284,285],[284,286],[284,287],[284,288],[284,350],[284,363],[285,272],[285,284],[286,284],[288,284],[289,282],[289,283],[289,284],[289,290],[289,291],[289,366],[290,284],[290,289],[292,289],[293,281],[293,289],[293,296],[293,298],[293,299],[293,303],[293,305],[293,308],[293,346],[295,289],[295,317],[296,270],[296,289],[296,292],[296,297],[296,301],[296,308],[296,346],[296,350],[298,289],[298,292],[298,301],[298,308],[298,346],[299,289],[299,292],[299,301],[299,308],[299,346],[299,395],[300,278],[301,300],[301,302],[302,301],[303,289],[303,292],[303,301],[303,304],[303,308],[303,346],[304,308],[305,289],[305,308],[308,272],[308,307],[308,350],[308,363],[308,395],[310,270],[310,278],[310,296],[310,346],[310,350],[310,363],[311,278],[311,310],[311,346],[311,366],[312,278],[312,310],[312,313],[312,346],[312,363],[313,270],[313,296],[313,310],[313,312],[313,363],[314,278],[314,293],[314,310],[315,317],[315,366],[316,366],[317,289],[317,315],[317,316],[317,318],[317,319],[318,317],[319,317],[320,278],[320,310],[320,350],[320,363],[321,270],[321,350],[322,350],[323,321],[323,322],[323,324],[324,363],[326,310],[327,278],[327,310],[327,325],[327,326],[327,328],[328,310],[329,278],[329,310],[329,346],[329,366],[330,332],[332,278],[332,310],[332,330],[332,331],[332,333],[333,332],[334,278],[334,310],[334,346],[334,363],[335,278],[335,310],[336,278],[336,310],[337,289],[337,317],[338,278],[338,310],[339,278],[339,310],[340,341],[340,342],[342,340],[343,344],[343,345],[343,367],[344,367],[348,349],[350,351],[350,353],[350,354],[350,362],[351,352],[354,351],[354,353],[354,355],[354,356],[354,357],[354,358],[354,362],[355,356],[358,350],[358,354],[358,359],[358,360],[358,361],[359,350],[359,358],[360,350],[360,358],[361,350],[361,358],[363,350],[363,364],[363,365],[366,270],[366,272],[366,273],[366,277],[366,278],[366,343],[366,346],[366,347],[366,348],[366,350],[366,363],[366,367],[366,368],[366,370],[366,376],[366,382],[366,383],[366,384],[366,391],[366,392],[366,393],[366,394],[366,395],[366,396],[368,363],[368,369],[369,363],[369,368],[370,350],[370,363],[370,371],[370,372],[370,373],[370,374],[370,375],[371,350],[371,370],[372,350],[373,363],[374,370],[374,371],[376,278],[376,377],[376,378],[376,379],[376,380],[376,381],[377,278],[378,278],[380,278],[384,385],[384,386],[384,387],[384,388],[384,390],[385,346],[385,366],[386,346],[386,366],[386,385],[387,384],[388,346],[388,385],[388,389],[389,346],[389,384],[389,388],[390,346],[390,366],[391,383],[397,366],[401,397],[401,398],[401,399],[401,400],[401,402],[401,403],[401,404],[401,405],[401,406],[403,366],[404,366],[406,366],[407,366],[409,599],[410,599],[411,599],[412,599],[413,366],[413,414],[413,415],[413,599],[414,366],[414,415],[415,366],[415,414],[417,599],[418,599],[419,366],[419,420],[419,425],[419,426],[419,429],[419,430],[419,434],[419,435],[419,440],[419,441],[419,442],[419,444],[419,454],[419,478],[419,599],[419,603],[420,366],[420,421],[420,422],[420,423],[420,424],[420,430],[420,599],[420,603],[422,603],[423,430],[423,603],[424,366],[424,603],[425,366],[426,363],[426,366],[426,427],[426,428],[426,478],[426,499],[426,599],[426,603],[426,842],[427,366],[428,363],[428,366],[428,603],[429,366],[429,420],[429,478],[429,599],[430,431],[430,432],[430,433],[430,603],[431,603],[432,603],[433,603],[434,363],[434,366],[434,498],[434,599],[434,842],[434,882],[435,436],[435,437],[435,438],[435,439],[435,526],[436,1360],[437,435],[439,437],[439,438],[440,366],[441,366],[442,366],[442,430],[442,440],[442,443],[442,456],[442,499],[442,599],[442,603],[443,366],[443,456],[444,366],[444,445],[444,447],[444,448],[444,450],[444,451],[444,453],[444,498],[444,499],[444,599],[444,603],[445,446],[446,445],[447,445],[447,448],[448,435],[448,449],[449,448],[451,366],[451,452],[451,498],[451,599],[452,366],[452,599],[454,455],[455,366],[456,457],[456,459],[456,461],[456,463],[456,464],[456,465],[456,466],[456,467],[456,468],[456,470],[456,473],[456,475],[456,477],[457,366],[457,458],[457,473],[458,366],[458,473],[459,366],[459,460],[461,366],[461,462],[462,366],[462,461],[463,366],[463,466],[464,366],[465,366],[466,366],[467,366],[468,366],[468,469],[468,473],[469,366],[470,366],[470,471],[471,366],[472,366],[473,474],[474,366],[474,473],[475,366],[475,476],[476,366],[477,366],[478,479],[478,480],[478,481],[478,482],[478,484],[478,487],[478,489],[478,495],[478,496],[478,497],[479,599],[480,599],[481,366],[481,599],[481,842],[482,419],[482,483],[482,599],[482,603],[483,419],[483,482],[483,599],[483,603],[484,366],[484,485],[484,486],[484,599],[487,488],[487,541],[489,490],[489,491],[489,492],[489,493],[489,494],[489,599],[490,366],[491,489],[492,489],[493,489],[494,366],[494,489],[494,599],[496,366],[496,478],[496,599],[497,478],[498,456],[498,478],[498,499],[499,503],[499,506],[499,507],[499,508],[499,509],[499,510],[500,273],[500,366],[501,366],[501,504],[501,599],[502,366],[503,366],[503,498],[503,500],[503,501],[503,502],[503,504],[503,505],[503,599],[504,273],[505,273],[505,603],[506,366],[507,366],[508,366],[510,366],[510,498],[510,599],[511,235],[511,366],[511,512],[511,513],[511,514],[511,537],[511,599],[514,366],[515,366],[515,516],[516,366],[516,515],[517,366],[517,599],[517,842],[518,366],[519,366],[520,366],[521,366],[522,366],[522,599],[523,366],[523,519],[523,520],[523,521],[523,522],[523,524],[523,525],[523,599],[524,350],[524,366],[524,1530],[525,350],[525,366],[525,519],[525,1505],[525,1520],[526,366],[526,527],[526,1360],[526,1544],[527,526],[528,529],[528,530],[528,535],[528,536],[529,528],[530,531],[530,532],[530,533],[530,534],[530,536],[535,536],[537,538],[537,539],[537,540],[539,538],[540,537],[541,542],[541,544],[541,545],[541,546],[541,547],[541,548],[541,550],[541,551],[541,555],[541,556],[541,557],[541,558],[541,563],[541,564],[542,366],[542,498],[542,543],[542,556],[542,599],[544,545],[545,366],[545,376],[545,544],[545,555],[546,366],[547,366],[547,384],[547,498],[547,545],[547,556],[547,599],[548,366],[548,549],[548,551],[549,366],[550,366],[550,498],[550,599],[551,366],[551,548],[551,552],[551,553],[551,554],[551,555],[552,366],[556,366],[557,366],[558,366],[558,559],[558,560],[558,561],[558,562],[558,599],[559,366],[559,541],[559,558],[560,541],[560,558],[561,366],[561,541],[561,558],[562,366],[562,541],[562,558],[563,366],[563,599],[564,366],[564,498],[564,555],[564,599],[565,566],[566,366],[566,565],[566,567],[566,568],[566,569],[567,566],[568,566],[569,366],[570,571],[570,572],[570,573],[570,574],[570,575],[570,576],[570,577],[570,578],[570,581],[570,582],[570,584],[570,585],[570,586],[570,588],[570,590],[570,591],[570,592],[570,593],[570,594],[570,595],[572,571],[572,577],[572,581],[573,366],[574,366],[574,515],[575,577],[576,577],[578,579],[578,580],[579,578],[580,593],[582,572],[582,577],[582,581],[582,583],[583,582],[586,587],[586,592],[588,589],[589,593],[590,383],[590,573],[591,366],[591,1558],[592,577],[593,572],[593,575],[593,576],[593,577],[593,582],[593,585],[593,592],[594,366],[595,366],[597,366],[597,598],[599,366],[599,498],[599,511],[599,515],[599,517],[599,518],[599,523],[599,526],[599,528],[599,537],[599,541],[599,566],[599,570],[599,596],[599,597],[599,600],[599,603],[599,631],[599,633],[599,634],[599,635],[599,638],[599,643],[600,278],[600,366],[600,599],[600,601],[600,602],[600,842],[601,366],[602,366],[602,599],[603,235],[603,278],[603,363],[603,366],[603,384],[603,511],[603,599],[603,604],[603,605],[603,607],[603,608],[603,613],[603,615],[603,616],[603,618],[603,619],[603,621],[603,623],[603,625],[603,626],[603,630],[604,235],[604,278],[604,366],[604,511],[604,537],[604,599],[604,603],[604,607],[604,608],[605,606],[607,278],[607,363],[607,366],[607,376],[607,384],[607,537],[608,366],[608,537],[608,599],[608,603],[608,607],[608,609],[608,610],[608,611],[608,612],[608,621],[609,366],[609,537],[610,366],[610,537],[610,599],[610,603],[610,607],[610,608],[610,611],[610,621],[611,537],[612,366],[612,537],[613,614],[615,366],[615,537],[615,599],[616,617],[619,618],[619,620],[620,625],[621,363],[621,366],[621,622],[623,624],[626,618],[626,627],[626,629],[627,626],[627,628],[628,625],[629,625],[630,537],[631,366],[631,632],[632,383],[633,366],[634,366],[635,366],[636,599],[636,638],[636,1360],[637,366],[638,366],[638,523],[638,599],[638,636],[638,637],[638,639],[638,640],[638,642],[639,366],[640,366],[640,641],[642,366],[642,599],[643,644],[643,645],[643,647],[643,648],[643,649],[644,643],[645,643],[645,646],[648,643],[649,643],[650,599],[651,599],[652,366],[652,599],[653,599],[654,366],[654,599],[654,1559],[654,1586],[655,599],[656,599],[657,366],[657,599],[658,599],[659,599],[660,599],[661,599],[661,963],[662,599],[663,599],[664,599],[665,366],[665,599],[666,599],[667,366],[667,599],[667,1530],[668,366],[668,599],[669,599],[670,599],[671,599],[672,599],[673,599],[674,599],[675,599],[676,366],[676,599],[677,366],[677,599],[678,366],[678,599],[678,842],[678,963],[679,366],[679,599],[679,842],[679,963],[680,599],[681,599],[682,366],[682,599],[683,599],[684,599],[685,366],[685,599],[686,366],[686,599],[687,599],[688,599],[689,366],[689,599],[690,366],[690,599],[690,1559],[691,599],[692,599],[693,599],[694,366],[694,599],[695,366],[695,599],[696,366],[696,599],[697,599],[698,599],[699,599],[700,366],[700,599],[701,599],[702,599],[703,599],[704,599],[705,366],[705,599],[706,599],[707,599],[708,599],[709,599],[710,599],[711,366],[711,599],[712,366],[712,599],[713,599],[714,599],[715,366],[715,599],[716,366],[716,599],[717,599],[718,599],[719,599],[720,599],[721,366],[721,599],[722,599],[723,599],[724,366],[724,599],[725,366],[725,599],[726,366],[726,599],[727,366],[727,599],[728,599],[729,599],[730,366],[730,599],[731,235],[731,599],[733,652],[733,653],[733,654],[733,655],[733,656],[733,657],[733,658],[733,659],[733,660],[733,661],[733,662],[733,663],[733,664],[733,665],[733,666],[733,667],[733,668],[733,669],[733,670],[733,671],[733,672],[733,673],[733,674],[733,675],[733,676],[733,677],[733,678],[733,679],[733,680],[733,681],[733,682],[733,683],[733,684],[733,685],[733,686],[733,687],[733,688],[733,689],[733,690],[733,691],[733,692],[733,693],[733,694],[733,695],[733,696],[733,697],[733,698],[733,699],[733,700],[733,701],[733,702],[733,703],[733,704],[733,705],[733,706],[733,707],[733,708],[733,709],[733,710],[733,711],[733,712],[733,713],[733,714],[733,715],[733,716],[733,717],[733,718],[733,719],[733,720],[733,721],[733,722],[733,723],[733,724],[733,725],[733,726],[733,727],[733,728],[733,729],[733,730],[733,731],[733,732],[733,734],[733,735],[734,366],[734,599],[736,366],[737,366],[738,366],[738,599],[739,366],[740,366],[740,383],[740,391],[740,599],[746,366],[749,366],[749,599],[750,366],[751,366],[751,599],[751,736],[751,737],[751,738],[751,739],[751,740],[751,741],[751,742],[751,743],[751,744],[751,745],[751,746],[751,747],[751,748],[751,749],[751,750],[751,752],[751,753],[751,754],[751,755],[751,756],[751,757],[751,758],[751,759],[751,760],[751,761],[751,762],[751,763],[751,764],[752,366],[753,366],[753,599],[755,366],[756,366],[757,366],[757,1360],[758,366],[758,383],[763,366],[763,391],[765,599],[765,767],[765,783],[765,804],[766,782],[766,812],[766,963],[767,366],[767,599],[767,768],[767,769],[767,770],[767,804],[768,599],[768,804],[769,599],[769,804],[770,366],[770,771],[772,767],[772,782],[773,366],[773,767],[773,783],[773,804],[774,782],[774,812],[775,366],[775,776],[775,777],[775,778],[775,780],[775,781],[776,366],[776,775],[777,366],[777,767],[777,775],[777,804],[778,599],[778,854],[779,278],[779,366],[779,780],[780,366],[780,779],[781,366],[781,775],[782,278],[782,366],[782,599],[782,765],[782,766],[782,767],[782,772],[782,773],[782,774],[782,783],[782,787],[782,788],[782,790],[782,799],[782,800],[782,803],[782,804],[782,808],[782,809],[782,810],[782,811],[782,812],[782,842],[783,366],[783,599],[783,784],[783,785],[783,786],[783,842],[784,599],[786,599],[787,782],[787,812],[788,789],[789,788],[790,791],[790,792],[790,793],[790,795],[790,796],[790,797],[790,798],[791,366],[793,599],[793,794],[799,782],[799,812],[800,801],[800,802],[803,788],[804,366],[804,805],[804,806],[804,807],[805,366],[805,804],[808,804],[809,773],[810,782],[811,366],[814,782],[817,366],[817,815],[817,816],[817,818],[817,821],[817,822],[817,824],[817,825],[817,826],[818,366],[818,816],[818,817],[818,819],[818,820],[818,821],[818,824],[818,825],[819,366],[819,821],[819,824],[819,825],[821,815],[821,817],[822,817],[822,823],[823,366],[825,817],[826,963],[827,366],[827,828],[830,366],[831,366],[831,832],[831,852],[833,366],[833,830],[833,834],[835,836],[835,837],[836,835],[839,840],[839,841],[839,882],[840,882],[842,366],[842,827],[842,829],[842,830],[842,831],[842,833],[842,835],[842,838],[842,839],[842,843],[842,852],[842,854],[842,872],[842,886],[843,366],[843,844],[843,845],[843,846],[843,847],[843,851],[843,854],[844,366],[844,851],[844,852],[844,854],[845,366],[845,846],[845,851],[845,854],[846,366],[846,830],[846,851],[846,854],[847,366],[847,830],[847,848],[847,849],[847,850],[849,366],[851,366],[851,830],[851,854],[852,366],[852,853],[852,882],[853,882],[854,366],[855,366],[855,859],[855,862],[855,882],[856,366],[856,859],[856,879],[856,882],[857,366],[857,855],[857,856],[857,858],[857,859],[857,861],[857,863],[857,864],[857,865],[857,866],[857,867],[857,868],[857,869],[857,873],[857,874],[857,877],[857,878],[857,881],[857,882],[858,859],[858,882],[859,860],[861,366],[861,859],[861,882],[863,366],[863,859],[863,862],[863,879],[863,882],[864,366],[864,859],[864,879],[864,882],[865,366],[865,859],[865,862],[865,882],[866,366],[866,859],[866,882],[867,366],[867,859],[867,862],[867,882],[868,366],[868,859],[868,862],[868,879],[868,882],[869,366],[869,859],[869,879],[869,882],[870,871],[872,855],[872,856],[872,857],[872,859],[872,861],[872,862],[872,863],[872,864],[872,865],[872,866],[872,867],[872,868],[872,869],[872,870],[872,873],[872,874],[872,877],[872,878],[872,879],[872,881],[872,882],[873,366],[873,859],[873,879],[873,882],[874,366],[874,859],[874,862],[874,875],[874,876],[874,879],[874,882],[875,870],[877,366],[877,862],[877,882],[878,366],[878,859],[878,879],[878,882],[879,859],[879,880],[881,366],[881,859],[881,862],[881,879],[881,882],[882,883],[882,885],[883,884],[883,885],[886,366],[886,830],[886,887],[887,830],[891,890],[892,944],[893,888],[893,889],[893,891],[893,892],[893,894],[893,895],[893,944],[894,944],[895,893],[895,944],[898,897],[900,901],[900,944],[902,944],[904,905],[905,904],[907,908],[907,910],[907,923],[908,907],[909,907],[910,923],[911,927],[912,913],[912,914],[912,915],[914,921],[915,916],[915,917],[915,919],[915,921],[915,922],[915,923],[917,918],[917,919],[920,915],[921,923],[923,924],[925,927],[926,907],[926,911],[926,912],[926,915],[926,923],[926,925],[926,927],[926,928],[926,930],[926,932],[926,933],[928,929],[930,931],[932,926],[933,907],[933,915],[933,926],[933,928],[933,930],[934,775],[934,782],[934,813],[934,893],[934,896],[934,897],[934,898],[934,899],[934,900],[934,902],[934,903],[934,904],[934,906],[934,926],[934,936],[934,944],[934,951],[934,952],[934,953],[934,955],[935,936],[936,935],[936,937],[937,936],[942,897],[943,944],[944,938],[944,939],[944,940],[944,942],[944,943],[944,946],[944,948],[944,949],[944,950],[945,946],[946,945],[946,947],[950,944],[953,954],[955,782],[957,897],[958,963],[964,965],[964,966],[964,967],[968,965],[969,966],[970,967],[971,964],[973,964],[975,976],[975,977],[977,976],[983,964],[992,366],[992,599],[992,992],[995,366],[995,599],[999,366],[999,599],[1002,1002],[1006,366],[1006,599],[1006,1006],[1007,366],[1007,599],[1011,1012],[1011,1013],[1011,1016],[1014,1015],[1015,1014],[1016,1011],[1016,1012],[1016,1013],[1016,1014],[1016,1017],[1017,1012],[1017,1016],[1017,1018],[1019,1016],[1025,1033],[1027,1028],[1027,1029],[1027,1032],[1027,1033],[1027,1034],[1028,897],[1029,934],[1029,1030],[1029,1031],[1031,1029],[1034,896],[1034,934],[1034,1035],[1034,1036],[1040,366],[1040,1041],[1040,1042],[1040,1043],[1040,1075],[1041,366],[1041,1040],[1041,1075],[1042,366],[1042,1075],[1044,366],[1044,1045],[1044,1075],[1046,1040],[1046,1044],[1046,1049],[1047,366],[1047,1075],[1048,366],[1048,1075],[1049,366],[1049,1047],[1049,1048],[1049,1050],[1051,366],[1051,1052],[1051,1075],[1053,366],[1053,1054],[1053,1075],[1055,1056],[1055,1075],[1057,1051],[1057,1053],[1057,1055],[1057,1058],[1057,1060],[1057,1063],[1057,1065],[1058,1059],[1058,1075],[1060,366],[1060,1061],[1060,1075],[1061,366],[1061,1060],[1062,366],[1062,1075],[1063,366],[1063,1062],[1063,1064],[1063,1075],[1065,1066],[1065,1075],[1067,383],[1067,1046],[1067,1057],[1067,1068],[1067,1071],[1067,1075],[1068,1069],[1069,1068],[1070,1047],[1070,1071],[1070,1075],[1071,366],[1071,1047],[1071,1048],[1071,1070],[1071,1072],[1071,1073],[1071,1074],[1073,1071],[1076,1067],[1076,1384],[1077,366],[1077,1078],[1077,1079],[1077,1080],[1077,1087],[1077,1108],[1078,366],[1078,1077],[1078,1108],[1079,366],[1079,1108],[1080,1087],[1081,366],[1081,1082],[1081,1083],[1081,1108],[1083,1081],[1084,366],[1084,1085],[1084,1086],[1084,1087],[1084,1108],[1085,1108],[1087,366],[1087,1077],[1087,1081],[1087,1084],[1087,1088],[1087,1108],[1088,366],[1088,1087],[1088,1089],[1088,1108],[1089,1087],[1090,366],[1090,1091],[1090,1108],[1092,366],[1092,1093],[1092,1108],[1094,1095],[1094,1108],[1096,1090],[1096,1092],[1096,1094],[1096,1097],[1096,1099],[1096,1101],[1096,1103],[1097,1098],[1099,366],[1099,1100],[1099,1108],[1100,366],[1100,1099],[1101,366],[1101,1102],[1101,1108],[1103,1104],[1103,1108],[1105,383],[1105,1087],[1105,1096],[1105,1106],[1105,1108],[1106,1107],[1107,1106],[1109,1105],[1109,1384],[1110,366],[1110,1111],[1110,1150],[1112,366],[1112,1113],[1112,1150],[1114,366],[1114,1115],[1114,1116],[1114,1150],[1115,1150],[1117,273],[1117,366],[1117,1118],[1117,1150],[1119,366],[1119,1120],[1119,1150],[1121,1122],[1121,1150],[1123,1114],[1123,1117],[1123,1119],[1123,1121],[1123,1124],[1123,1127],[1123,1129],[1124,366],[1124,1125],[1124,1150],[1125,366],[1125,1124],[1126,366],[1126,1127],[1126,1150],[1127,366],[1127,1126],[1127,1128],[1127,1150],[1128,366],[1129,1130],[1129,1150],[1131,383],[1131,1110],[1131,1112],[1131,1123],[1131,1132],[1131,1135],[1131,1141],[1131,1143],[1131,1145],[1131,1150],[1132,1133],[1133,1132],[1134,1127],[1134,1135],[1134,1141],[1134,1150],[1135,366],[1135,1134],[1135,1136],[1135,1137],[1135,1138],[1136,1135],[1136,1141],[1138,366],[1138,1134],[1138,1135],[1138,1136],[1139,1150],[1140,366],[1140,1127],[1140,1139],[1140,1150],[1141,1139],[1141,1140],[1141,1142],[1142,366],[1142,1139],[1143,1127],[1143,1139],[1143,1144],[1143,1150],[1144,1141],[1144,1143],[1145,1146],[1145,1147],[1145,1148],[1145,1149],[1145,1150],[1146,1145],[1146,1150],[1147,1145],[1147,1146],[1147,1150],[1148,1145],[1148,1146],[1148,1150],[1149,1145],[1151,1131],[1151,1384],[1152,1155],[1153,383],[1153,1152],[1153,1154],[1153,1155],[1153,1156],[1155,366],[1156,366],[1157,1384],[1158,1159],[1160,366],[1160,1161],[1161,1160],[1162,366],[1162,1163],[1162,1164],[1162,1166],[1164,366],[1164,1165],[1164,1173],[1165,1164],[1167,366],[1167,1168],[1167,1171],[1167,1172],[1168,366],[1168,1169],[1168,1170],[1169,366],[1169,1173],[1171,366],[1171,1167],[1173,1174],[1174,1173],[1175,366],[1175,1176],[1175,1177],[1176,366],[1176,1197],[1178,1158],[1178,1160],[1178,1162],[1178,1167],[1178,1173],[1178,1175],[1178,1179],[1179,366],[1179,1180],[1180,1179],[1181,366],[1181,1182],[1181,1183],[1184,273],[1184,366],[1184,1185],[1186,366],[1187,1188],[1189,1181],[1189,1184],[1189,1186],[1189,1187],[1189,1190],[1189,1192],[1189,1194],[1189,1196],[1190,1191],[1192,366],[1192,1193],[1192,1197],[1193,366],[1193,1192],[1194,366],[1194,1195],[1197,383],[1197,1178],[1197,1189],[1198,1197],[1198,1384],[1199,366],[1199,1200],[1199,1201],[1199,1202],[1199,1228],[1200,366],[1200,1199],[1200,1202],[1203,366],[1203,1204],[1203,1205],[1203,1228],[1205,366],[1206,1199],[1206,1203],[1206,1207],[1207,366],[1207,1208],[1207,1228],[1209,366],[1209,1210],[1211,273],[1211,1212],[1211,1213],[1211,1225],[1212,273],[1212,1211],[1214,273],[1214,1215],[1214,1225],[1216,366],[1216,1217],[1216,1221],[1218,1219],[1220,1209],[1220,1211],[1220,1214],[1220,1216],[1220,1218],[1220,1221],[1220,1223],[1220,1225],[1220,1228],[1220,1230],[1221,1222],[1223,366],[1223,1224],[1224,366],[1224,1223],[1225,366],[1225,1226],[1225,1227],[1225,1232],[1226,366],[1226,1225],[1226,1232],[1228,1229],[1229,1228],[1230,1231],[1232,383],[1232,1206],[1232,1220],[1233,1232],[1233,1384],[1234,1235],[1234,1236],[1235,1234],[1236,366],[1236,1237],[1237,1236],[1238,383],[1238,1234],[1238,1236],[1239,1384],[1240,366],[1240,1241],[1242,366],[1242,1271],[1243,366],[1243,1242],[1244,1242],[1245,1246],[1245,1247],[1245,1248],[1245,1249],[1246,1247],[1247,366],[1248,366],[1248,1246],[1248,1247],[1249,366],[1249,1250],[1249,1251],[1249,1252],[1249,1253],[1249,1254],[1250,366],[1250,1245],[1251,1245],[1252,1245],[1252,1249],[1253,1245],[1253,1249],[1254,366],[1254,1245],[1255,366],[1255,1256],[1255,1257],[1255,1258],[1256,1257],[1259,1260],[1259,1261],[1259,1262],[1259,1263],[1259,1265],[1259,1266],[1259,1267],[1259,1268],[1259,1270],[1259,1271],[1259,1272],[1259,1273],[1259,1274],[1259,1275],[1259,1276],[1259,1277],[1259,1278],[1260,1262],[1260,1272],[1261,1259],[1262,366],[1262,1259],[1262,1272],[1262,1274],[1263,366],[1263,1260],[1263,1262],[1263,1264],[1263,1266],[1263,1267],[1263,1268],[1263,1270],[1263,1271],[1263,1272],[1263,1275],[1263,1276],[1263,1277],[1264,1259],[1264,1263],[1265,1259],[1265,1271],[1265,1277],[1266,1259],[1267,1259],[1267,1272],[1268,1259],[1268,1262],[1268,1269],[1268,1272],[1269,1259],[1270,366],[1271,1259],[1271,1261],[1271,1277],[1272,1262],[1273,1259],[1274,366],[1274,1259],[1275,1259],[1275,1262],[1275,1272],[1277,1265],[1277,1271],[1278,1259],[1279,366],[1280,366],[1281,366],[1281,1282],[1281,1283],[1281,1284],[1282,366],[1282,1283],[1284,366],[1284,1281],[1285,1240],[1285,1242],[1285,1243],[1285,1244],[1285,1245],[1285,1255],[1285,1259],[1285,1279],[1285,1280],[1285,1281],[1285,1286],[1285,1288],[1285,1292],[1285,1304],[1285,1306],[1285,1318],[1285,1319],[1285,1322],[1285,1324],[1286,1287],[1287,1286],[1288,366],[1288,1289],[1288,1290],[1288,1291],[1289,366],[1289,1290],[1290,1345],[1292,366],[1292,1293],[1292,1294],[1292,1295],[1292,1296],[1292,1297],[1292,1299],[1293,366],[1293,1292],[1293,1295],[1294,366],[1294,1295],[1294,1297],[1295,1296],[1297,366],[1297,1292],[1297,1293],[1297,1295],[1297,1298],[1298,366],[1299,1300],[1299,1301],[1299,1302],[1299,1303],[1300,1299],[1301,1299],[1302,1299],[1303,1299],[1304,366],[1304,1305],[1305,366],[1305,1304],[1306,366],[1306,1307],[1306,1308],[1306,1309],[1306,1310],[1306,1311],[1306,1312],[1306,1313],[1306,1314],[1306,1315],[1306,1316],[1306,1317],[1307,366],[1307,1308],[1307,1309],[1307,1311],[1307,1317],[1308,366],[1309,1306],[1309,1307],[1309,1308],[1310,366],[1310,1306],[1310,1309],[1310,1316],[1312,366],[1312,1306],[1312,1309],[1312,1311],[1312,1316],[1313,366],[1313,1306],[1313,1316],[1314,366],[1314,1306],[1314,1316],[1315,366],[1315,1306],[1315,1316],[1316,366],[1316,1306],[1317,366],[1317,1306],[1317,1307],[1317,1308],[1317,1309],[1318,366],[1319,1320],[1319,1321],[1320,366],[1321,366],[1321,1319],[1322,366],[1322,1323],[1323,1322],[1324,366],[1324,1325],[1324,1326],[1324,1328],[1325,366],[1326,366],[1326,1327],[1328,366],[1328,1324],[1329,1330],[1329,1360],[1330,1329],[1331,366],[1331,1332],[1331,1333],[1331,1360],[1332,1333],[1334,366],[1334,1360],[1335,366],[1335,1360],[1336,366],[1337,366],[1337,1338],[1337,1360],[1337,1370],[1338,1345],[1339,1340],[1339,1345],[1339,1360],[1340,1339],[1341,366],[1341,1360],[1342,383],[1343,1360],[1344,1360],[1345,366],[1345,1336],[1345,1360],[1346,273],[1346,366],[1346,1347],[1348,1346],[1348,1349],[1348,1359],[1349,1350],[1349,1353],[1349,1355],[1349,1356],[1349,1357],[1350,366],[1350,1351],[1350,1352],[1350,1355],[1350,1356],[1350,1357],[1351,366],[1351,1350],[1351,1360],[1352,366],[1352,1350],[1352,1360],[1353,1354],[1353,1355],[1354,1353],[1356,1355],[1357,1355],[1357,1356],[1357,1358],[1358,1357],[1359,366],[1360,1285],[1360,1329],[1360,1331],[1360,1334],[1360,1335],[1360,1336],[1360,1337],[1360,1338],[1360,1339],[1360,1341],[1360,1342],[1360,1343],[1360,1344],[1360,1345],[1360,1348],[1360,1361],[1360,1362],[1360,1364],[1360,1367],[1360,1369],[1360,1370],[1360,1371],[1360,1373],[1360,1375],[1360,1377],[1360,1380],[1360,1381],[1360,1382],[1361,1360],[1362,1360],[1362,1363],[1363,1362],[1364,1365],[1364,1366],[1367,366],[1367,1345],[1367,1368],[1367,1371],[1368,1367],[1369,366],[1369,1285],[1369,1348],[1369,1360],[1370,366],[1370,1345],[1370,1360],[1371,366],[1371,1345],[1371,1372],[1372,1371],[1373,1360],[1373,1374],[1374,1373],[1375,366],[1375,1360],[1375,1376],[1376,366],[1376,1375],[1377,366],[1377,1360],[1377,1378],[1378,366],[1378,1341],[1378,1360],[1378,1379],[1380,366],[1380,1335],[1380,1341],[1380,1345],[1380,1348],[1380,1360],[1380,1377],[1381,366],[1381,1360],[1381,1382],[1382,366],[1383,1360],[1383,1384],[1385,366],[1385,599],[1385,1386],[1385,1387],[1385,1388],[1385,1389],[1385,1390],[1385,1391],[1385,1392],[1385,1393],[1385,1394],[1385,1412],[1385,1413],[1386,1385],[1387,1385],[1388,1385],[1389,1385],[1390,1385],[1391,1385],[1392,1385],[1393,1385],[1394,1385],[1396,366],[1396,599],[1396,1395],[1396,1397],[1396,1398],[1396,1399],[1396,1400],[1396,1401],[1396,1402],[1396,1412],[1396,1413],[1400,1396],[1403,366],[1403,599],[1403,1404],[1403,1405],[1403,1406],[1403,1412],[1403,1413],[1407,366],[1407,599],[1407,1408],[1409,1410],[1410,366],[1410,599],[1410,1409],[1410,1411],[1410,1412],[1410,1413],[1411,1410],[1414,1415],[1415,366],[1415,599],[1415,1414],[1416,366],[1416,599],[1416,1417],[1418,1421],[1419,1421],[1420,1421],[1421,366],[1421,599],[1421,1412],[1421,1413],[1421,1418],[1421,1419],[1421,1420],[1421,1422],[1421,1423],[1421,1424],[1422,1421],[1423,1421],[1424,1421],[1425,1428],[1426,1428],[1427,1428],[1428,366],[1428,599],[1428,1412],[1428,1413],[1428,1425],[1428,1426],[1428,1427],[1428,1429],[1428,1430],[1428,1431],[1428,1432],[1428,1433],[1429,1428],[1430,1428],[1431,1428],[1432,1428],[1433,1428],[1434,1458],[1435,1458],[1436,1458],[1437,1458],[1438,1458],[1439,1458],[1440,1458],[1441,1458],[1442,1458],[1443,1458],[1444,1458],[1445,1458],[1446,1458],[1447,1458],[1448,1458],[1449,1458],[1450,1458],[1451,1458],[1452,1458],[1453,1458],[1454,1458],[1455,1458],[1456,1458],[1457,1458],[1458,366],[1458,599],[1458,1412],[1458,1413],[1458,1434],[1458,1435],[1458,1436],[1458,1437],[1458,1438],[1458,1439],[1458,1440],[1458,1441],[1458,1442],[1458,1443],[1458,1444],[1458,1445],[1458,1446],[1458,1447],[1458,1448],[1458,1449],[1458,1450],[1458,1451],[1458,1452],[1458,1453],[1458,1454],[1458,1455],[1458,1456],[1458,1457],[1458,1459],[1458,1460],[1458,1461],[1458,1462],[1458,1463],[1458,1464],[1458,1465],[1459,1458],[1460,1458],[1461,1458],[1462,1458],[1463,1458],[1464,1458],[1465,1458],[1466,1472],[1467,1472],[1468,1472],[1469,1472],[1470,1472],[1471,1472],[1472,366],[1472,599],[1472,1412],[1472,1413],[1472,1466],[1472,1467],[1472,1468],[1472,1469],[1472,1470],[1472,1471],[1472,1473],[1472,1474],[1472,1475],[1473,1472],[1474,1472],[1475,1472],[1476,366],[1476,1477],[1476,1478],[1477,366],[1478,350],[1478,366],[1478,1476],[1479,350],[1479,366],[1481,366],[1481,1482],[1482,350],[1482,366],[1483,366],[1483,1499],[1484,350],[1484,366],[1485,350],[1485,366],[1485,1486],[1485,1499],[1487,350],[1487,366],[1487,1499],[1488,350],[1488,366],[1488,1489],[1488,1499],[1490,350],[1490,366],[1490,1491],[1490,1499],[1492,350],[1492,366],[1492,1499],[1493,350],[1493,366],[1493,1494],[1493,1499],[1496,350],[1496,366],[1496,1497],[1496,1499],[1496,1528],[1497,1499],[1498,350],[1498,366],[1498,1499],[1499,1476],[1499,1479],[1499,1480],[1499,1481],[1499,1483],[1499,1484],[1499,1485],[1499,1487],[1499,1488],[1499,1490],[1499,1492],[1499,1493],[1499,1495],[1499,1496],[1499,1498],[1499,1500],[1499,1501],[1499,1503],[1499,1505],[1499,1508],[1499,1510],[1499,1513],[1499,1515],[1499,1516],[1499,1517],[1499,1520],[1499,1522],[1499,1523],[1499,1524],[1499,1526],[1499,1527],[1499,1528],[1499,1529],[1500,350],[1500,366],[1500,1499],[1501,366],[1501,1502],[1501,1505],[1503,366],[1503,1499],[1503,1504],[1504,350],[1504,366],[1505,350],[1505,366],[1505,1499],[1505,1506],[1505,1507],[1508,366],[1508,1499],[1508,1509],[1510,366],[1510,1511],[1510,1512],[1512,350],[1512,366],[1513,350],[1513,366],[1513,1514],[1514,350],[1514,366],[1516,1499],[1517,350],[1517,366],[1517,1499],[1517,1505],[1517,1518],[1517,1519],[1518,366],[1518,1517],[1519,1520],[1520,350],[1520,366],[1520,1499],[1520,1505],[1520,1521],[1521,350],[1522,350],[1522,366],[1522,1499],[1523,366],[1524,350],[1524,366],[1524,1499],[1524,1525],[1525,350],[1526,350],[1526,366],[1526,1499],[1527,350],[1527,366],[1527,1499],[1527,1528],[1530,366],[1530,1499],[1531,273],[1531,366],[1531,1532],[1532,273],[1532,366],[1533,366],[1534,366],[1534,1535],[1534,1536],[1534,1537],[1534,1545],[1535,366],[1535,1534],[1536,366],[1538,366],[1538,1539],[1538,1540],[1538,1541],[1538,1542],[1538,1543],[1539,366],[1539,1538],[1540,1545],[1542,366],[1543,366],[1544,366],[1544,1531],[1544,1533],[1544,1534],[1544,1538],[1544,1545],[1545,366],[1545,1546],[1545,1547],[1548,1549],[1548,1550],[1548,1551],[1552,366],[1552,1553],[1552,1554],[1552,1555],[1552,1556],[1552,1557],[1553,273],[1553,366],[1553,1552],[1554,366],[1554,1552],[1555,366],[1556,273],[1556,366],[1557,273],[1557,366],[1557,1552],[1558,366],[1558,1548],[1558,1552],[1558,1559],[1558,1566],[1558,1568],[1559,273],[1559,366],[1559,1552],[1559,1560],[1559,1561],[1559,1562],[1559,1563],[1559,1564],[1559,1565],[1560,366],[1560,1559],[1560,1565],[1561,273],[1561,1559],[1561,1563],[1561,1565],[1562,366],[1562,1559],[1564,273],[1564,366],[1566,1567],[1568,1569],[1568,1570],[1568,1571],[1568,1572],[1569,1568],[1569,1570],[1573,366],[1573,1574],[1574,366],[1575,366],[1575,1573],[1575,1576],[1575,1581],[1575,1586],[1576,366],[1576,1573],[1576,1577],[1576,1578],[1576,1579],[1576,1580],[1576,1581],[1580,366],[1580,1577],[1580,1578],[1581,366],[1581,1582],[1581,1585],[1582,366],[1582,1581],[1582,1583],[1582,1584],[1584,366],[1584,1582],[1585,366],[1586,366],[1586,1581],[1586,1587],[1586,1588],[1587,366],[1591,1608],[1597,1601],[1599,1600],[1602,1600],[1602,1601],[1609,1592]],"d":[["crates",734,-17.3,-260.2,90],["parser",345,-75,-98.3,69.9],["cases",230,-253.8,-108.8,61.8],["rules",205,-176.7,0.4,59.8],["examples",47,112.2,16.5,42.2],["packages",29,-99.4,79.5,38.7],["scripts",20,68.4,119.4,36.6],["site-src",13,484.1,156.7,34.5],["site",1,486.3,231.5,28.4]],"dl":[[0,1,4],[0,3,9],[1,0,152],[3,0,125],[4,0,10],[5,0,4]]};
+/* zzop:dep-data:end */
+</script>
+<script>
+/* Dependency-graph viewer. The LAYOUT IS PRECOMPUTED — coordinates ride in the data,
+   so this file runs no simulation: it draws, pans and zooms. Two consequences, both
+   deliberate: the page costs nothing on load, and the picture is identical on every
+   visit, which is the same determinism promise the analyzer itself makes. */
+(function () {
+  /* The data block is a SEPARATE script tag delimited by markers, so scripts/site-graph-data.mjs
+     can regenerate it without touching a line of this viewer. Without that seam the page would be a
+     97 KB fossil: correct on the day it was built and unreproducible after. */
+  var D = window.ZZOP_DEP;
+
+  /* One hue per top-level area. `cases` is the most desaturated on purpose — a labelled
+     defect tree, not product code.
+
+     THESE EIGHT ARE THE ONE PLACE THE SITE PALETTE DOES NOT REACH, and that is a decision
+     rather than an oversight. The palette is a single accent over a neutral ramp, which is
+     the right vocabulary for a document and the wrong one for a CATEGORICAL encoding: eight
+     domains need eight mutually distinguishable hues, and a ramp of one hue can only offer
+     lightness, which this drawing has already spent on degree (radius) and dimming (alpha).
+     Rendering the areas in ramp steps would leave the legend saying eight things the picture
+     cannot say — a capability cut, which this repository asks for evidence before making. So
+     the data keeps its hues; everything that is CHROME rather than data was moved onto the
+     ramp below, which is where the real mismatch was (two different greys, one warm and one
+     cool, on the same stage). */
+  var AREA = {
+    crates: '#34d399', parser: '#56b6f0', rules: '#f2994a', packages: '#b58df1',
+    examples: '#e0c264', scripts: '#ef7fa8', site: '#8fa3b8', cases: '#545c6b'
+  };
+  var FALLBACK = '#545c6b', CYCLE = '#f2994a';
+
+  /* Chrome, and it is the site's own: `--color-bg` for light-on-ink type (the exact pair
+     `pre` already uses across the site), `--color-neutral-500` for the quiet strokes, and
+     `--color-accent-500` for the single thing a hover lights up. Literals rather than
+     `getComputedStyle` lookups because a canvas takes a colour string and this page must
+     draw identically from `file://` with no stylesheet resolution in the loop. The hover
+     highlight used to be `#34d399` — which is also the `crates` hue, so a lit edge and a
+     crates node were the same colour and the reader had no way to tell them apart. */
+  var INK_ON_STAGE = '#f3f2f2';   /* --color-bg */
+  var QUIET_RGB = '155,151,151';  /* --color-neutral-500 */
+  var HILITE = '#ff563c';         /* --color-accent-500 */
+
+  var folders = D.f;
+  var nodes = D.n.map(function (r, i) {
+    var dir = folders[r[1]];
+    return {
+      i: i, label: r[0], dir: dir, area: dir.split('/')[0] || '',
+      path: (dir ? dir + '/' : '') + r[0],
+      fanIn: r[2], fanOut: r[3], degree: r[2] + r[3], cycle: !!r[4],
+      x: r[5], y: r[6]
+    };
+  });
+  var links = D.l.map(function (p) {
+    return { a: nodes[p[0]], b: nodes[p[1]], cycle: nodes[p[0]].cycle && nodes[p[1]].cycle };
+  });
+
+  /* The domain summary, for the zoomed-out view. It is GENERATED, not derived here: each bubble is
+     seeded at the centroid of the very coordinates above and then nudged only as far as it takes to
+     clear its neighbours, so the two grains stay one drawing. Deriving them in the browser would let
+     the summary drift from the detail the moment the layout changed. `dl` weights count only
+     cross-domain edges — a domain's internal traffic is not an edge between bubbles. */
+  var domains = (D.d || []).map(function (r) {
+    return { a: r[0], n: r[1], x: r[2], y: r[3], r: r[4] };
+  });
+  var domainLinks = D.dl || [];
+
+  var adj = new Map();
+  nodes.forEach(function (n) { adj.set(n, new Set()); });
+  links.forEach(function (l) { adj.get(l.a).add(l.b); adj.get(l.b).add(l.a); });
+
+  var maxDeg = nodes.reduce(function (m, n) { return Math.max(m, n.degree); }, 1);
+  var counts = {};
+  nodes.forEach(function (n) { counts[n.area] = (counts[n.area] || 0) + 1; });
+
+  document.getElementById('gcensus').textContent =
+    nodes.length.toLocaleString() + ' of ' + nodes.length.toLocaleString() + ' files, ' +
+    links.length.toLocaleString() + ' of ' + links.length.toLocaleString() +
+    ' import edges, 0 circular finding(s). UNCAPPED, --top does not apply to this format.';
+
+  document.getElementById('glegend').innerHTML = Object.keys(counts)
+    .sort(function (a, b) { return counts[b] - counts[a]; })
+    .map(function (a) {
+      return '<li><i style="background:' + (AREA[a] || FALLBACK) + '"></i>' + a +
+             '<em>' + counts[a] + '</em></li>';
+    }).join('');
+
+  var cv = document.getElementById('depgraph'), ctx = cv.getContext('2d');
+  var W = 0, H = 0, view = { k: 1, x: 0, y: 0 }, fitted = false;
+  var COLOUR = 'area', SIZE = 'degree', hover = null, query = '';
+
+  function resize() {
+    var dpr = Math.min(2, window.devicePixelRatio || 1);
+    W = cv.clientWidth; H = cv.clientHeight;
+    if (!W || !H) return;
+    cv.width = W * dpr; cv.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (!fitted) {
+      /* Coordinates arrive normalised into a 1000-unit box, so the opening fit is arithmetic rather
+         than a measurement — no first-paint jump while something sizes itself. The old floor is gone
+         and a CEILING replaced it: the first frame is always the domain summary, on a phone and on a
+         large monitor alike, because a viewport big enough to fit every file dot is still not a
+         viewport on which a thousand of them say anything. Zooming in is what asks for detail, and
+         asking is what the detail is for. */
+      view.k = Math.min(Math.min(W, H) / 1120, LOD_K * 0.95);
+      view.x = W / 2; view.y = H / 2;
+      fitted = true;
+    }
+    draw();
+  }
+
+  var sx = function (n) { return n.x * view.k + view.x; };
+  var sy = function (n) { return n.y * view.k + view.y; };
+
+  /* ONE zoom clamp, shared by the dots and the lines that connect them — and sharing it is the
+     whole point. They used to be written separately: `radius()` capped its scale at 1.7 while the
+     edge width scaled with `view.k` unbounded. Below the cap the two stayed in proportion (an edge
+     is ~7% of a small node's diameter, which is what the picture was tuned to look like); above it
+     the dots froze and the lines kept thickening, reaching 36% at the zoom ceiling of 9. Zoomed in,
+     that reads as the edges painting over the nodes — reported 2026-08-05 from the published page,
+     and invisible to every gate here because "is this drawing legible" is not a property any of
+     them measure. A ratio that only holds inside part of its own range is not a ratio; the fix is
+     one owner for the clamp, not a second hand-tuned constant. */
+  function zoomScale() { return Math.min(1.7, Math.max(0.5, view.k)); }
+
+  function radius(n) {
+    var v = SIZE === 'degree' ? n.degree : SIZE === 'fanIn' ? n.fanIn : n.fanOut;
+    return (2 + Math.sqrt(v) * 1.45) * zoomScale();
+  }
+
+  function colourOf(n) {
+    if (COLOUR === 'degree') {
+      /* A ramp from the site accent toward the cycle amber: low degree stays green,
+         a hub goes warm. Same two hues the rest of the page already uses. */
+      var t = Math.min(1, Math.sqrt(n.degree / maxDeg));
+      return 'rgb(' + Math.round(52 + t * 190) + ',' +
+                      Math.round(211 - t * 58) + ',' +
+                      Math.round(153 - t * 79) + ')';
+    }
+    return AREA[n.area] || FALLBACK;
+  }
+
+  var raf = null;
+  function schedule() {
+    if (raf) return;
+    raf = requestAnimationFrame(function () { raf = null; draw(); });
+  }
+
+  /* Level of detail. Zoomed out, a dot per file carries no information a reader can use at this
+     repository's size — the frame is confetti, and the one question a wide view CAN answer ("which
+     parts of this repository lean on which") is the question the dots hide. Below LOD_K the page draws the generated domain summary
+     instead: one bubble per top-level area at that area's own centroid, sized by file count, joined by
+     the cross-domain edge weights. Zoom in past the threshold and the files come back, so the two
+     views are one drawing at two grains rather than two different pictures.
+     The threshold is in SCREEN terms on purpose. view.k is pixels per layout unit, so LOD_K asks the
+     only question that matters — is there room to draw a file legibly — and it answers the same way on
+     a phone and on a desktop, where a fixed zoom step would not.
+     A search escapes to the file view at any zoom: a query names files, and answering it with a
+     bubble would be answering a different question. */
+  var LOD_K = 0.8;
+  function domainView() { return domains.length > 0 && view.k < LOD_K && !query; }
+
+  function drawDomains() {
+    /* These edges are DRAWN DIRECTED, unlike the file edges, and the asymmetry is deliberate. Between
+       files, direction is legible from position alone: everything imports rightward, so a line's own
+       endpoints say which way it runs. Between domains it is not — `parser` imports `crates` 143 times
+       and `crates` imports `parser` twice, and both pairs land as one line between the same two
+       bubbles. Without a head the reader would see a thick rope and have no way to tell which side is
+       leaning on which, which is the single fact this view exists to show. The head sits on the target
+       bubble's rim rather than at its centre, where the disc would swallow it. */
+    for (var e = 0; e < domainLinks.length; e++) {
+      var dl = domainLinks[e], da = domains[dl[0]], db = domains[dl[1]];
+      if (!da || !db) continue;
+      var ax = sx(da), ay = sy(da), bx = sx(db), by = sy(db);
+      var ux = bx - ax, uy = by - ay, len = Math.hypot(ux, uy);
+      if (len < 1) continue;
+      ux /= len; uy /= len;
+      var w = Math.max(0.6, Math.min(7, Math.sqrt(dl[2]) * 0.7));
+      /* Each direction is shifted off the centre line, so a mutual pair draws as two lanes instead of
+         the heavier one painting over the lighter. It matters here: `parser`→`crates` is 143 imports
+         against 2 coming back, and a single line would report that as a two-way relationship. The
+         shift is signed by the pair's index order, so the two lanes always land on opposite sides. */
+      var side = (dl[0] < dl[1] ? 1 : -1) * (w / 2 + 3);
+      ax += -uy * side; ay += ux * side; bx += -uy * side; by += ux * side;
+      var tipX = bx - ux * db.r * view.k, tipY = by - uy * db.r * view.k;
+      ctx.strokeStyle = 'rgba(' + QUIET_RGB + ',.34)';
+      ctx.lineWidth = w;
+      ctx.beginPath();
+      ctx.moveTo(ax + ux * da.r * view.k, ay + uy * da.r * view.k);
+      ctx.lineTo(tipX, tipY);
+      ctx.stroke();
+      var head = 7 + w * 1.6;
+      ctx.fillStyle = 'rgba(' + QUIET_RGB + ',.55)';
+      ctx.beginPath();
+      ctx.moveTo(tipX, tipY);
+      ctx.lineTo(tipX - ux * head + uy * head * 0.45, tipY - uy * head - ux * head * 0.45);
+      ctx.lineTo(tipX - ux * head - uy * head * 0.45, tipY - uy * head + ux * head * 0.45);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.font = '12px ui-monospace, SFMono-Regular, "Cascadia Code", Menlo, Consolas, monospace';
+    ctx.textAlign = 'center';
+    for (var d = 0; d < domains.length; d++) {
+      var dom = domains[d];
+      /* The radius arrives in the same normalised units as the coordinates and scales with the same
+         view.k, so the summary zooms as one piece with the detail instead of swelling or shrinking
+         against it. The bubble is a SYMBOL for the domain, not its bounding box: it is sized by file
+         count and nudged clear of its neighbours, so it sits near its files without claiming to
+         enclose them. */
+      var r = dom.r * view.k;
+      ctx.beginPath();
+      ctx.arc(sx(dom), sy(dom), r, 0, 6.2832);
+      ctx.fillStyle = AREA[dom.a] || FALLBACK;
+      ctx.globalAlpha = 0.5;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = 'rgba(243,242,242,.35)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.fillStyle = INK_ON_STAGE;
+      ctx.fillText(dom.a + ' · ' + dom.n, sx(dom), sy(dom) + r + 15);
+    }
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    if (domainView()) { drawDomains(); return; }
+    var near = hover ? adj.get(hover) : null;
+    var hitSet = null;
+    if (query) {
+      hitSet = new Set();
+      for (var q = 0; q < nodes.length; q++) {
+        if (nodes[q].path.toLowerCase().indexOf(query) >= 0) hitSet.add(nodes[q]);
+      }
+    }
+
+    for (var i = 0; i < links.length; i++) {
+      var l = links[i], lit = hover && (l.a === hover || l.b === hover);
+      ctx.globalAlpha = lit ? 1 : hover ? 0.09
+        : hitSet && !(hitSet.has(l.a) || hitSet.has(l.b)) ? 0.05 : 0.5;
+      ctx.strokeStyle = lit ? HILITE
+        : l.cycle ? 'rgba(242,153,74,.45)' : 'rgba(' + QUIET_RGB + ',.22)';
+      ctx.lineWidth = lit ? 1.5 : Math.max(0.35, 0.55 * zoomScale());
+      ctx.beginPath();
+      ctx.moveTo(sx(l.a), sy(l.a));
+      ctx.lineTo(sx(l.b), sy(l.b));
+      ctx.stroke();
+    }
+
+    for (var j = 0; j < nodes.length; j++) {
+      var n = nodes[j];
+      var dim = (hover && n !== hover && !near.has(n)) || (hitSet && !hitSet.has(n));
+      ctx.globalAlpha = dim ? 0.15 : 1;
+      ctx.beginPath();
+      ctx.arc(sx(n), sy(n), radius(n), 0, 6.2832);
+      ctx.fillStyle = colourOf(n);
+      ctx.fill();
+      if (n.cycle) { ctx.strokeStyle = CYCLE; ctx.lineWidth = 1.2; ctx.stroke(); }
+      if (n === hover) { ctx.strokeStyle = INK_ON_STAGE; ctx.lineWidth = 1.6; ctx.stroke(); }
+    }
+    ctx.globalAlpha = 1;
+
+    /* Semantic zoom: the degree a node needs before it earns a label falls as you go in,
+       so a wide view names only hubs and a close view names what is in front of you. */
+    var floor = Math.max(0, 13 - view.k * 9);
+    ctx.font = '10px ui-monospace, SFMono-Regular, "Cascadia Code", Menlo, Consolas, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = INK_ON_STAGE;
+    for (var m = 0; m < nodes.length; m++) {
+      var p = nodes[m];
+      var show = p === hover ||
+                 (hitSet && hitSet.has(p)) ||
+                 (!hover && !hitSet && p.degree >= floor && view.k > 0.3);
+      if (!show) continue;
+      var X = sx(p), Y = sy(p);
+      if (X < -70 || X > W + 70 || Y < -20 || Y > H + 20) continue;
+      ctx.globalAlpha = p === hover ? 1 : 0.78;
+      ctx.fillText(p.label, X, Y - radius(p) - 4);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  var detail = document.getElementById('gdetail');
+  var EMPTY = '<p class="empty">Zoomed out you see one bubble per top-level area; zoom in and it resolves into the files inside. Left is what nothing imports, right is what everything leans on. Hover a file for its path and degree.</p>';
+
+  function showDetail(n) {
+    if (!n) { detail.innerHTML = EMPTY; return; }
+    detail.innerHTML =
+      '<div class="name"></div><div class="dir"></div>' +
+      '<ul><li>imported by <b></b></li><li>imports <b></b></li><li>degree <b></b></li></ul>' +
+      (n.cycle ? '<span class="cyc">in cycle</span>' : '');
+    /* textContent rather than string concatenation: a path is repository data, and this page
+       has no business deciding it is safe to interpolate as markup. */
+    detail.querySelector('.name').textContent = n.label;
+    detail.querySelector('.dir').textContent = (n.dir || '.') + '/';
+    var b = detail.querySelectorAll('li b');
+    b[0].textContent = n.fanIn; b[1].textContent = n.fanOut; b[2].textContent = n.degree;
+  }
+  showDetail(null);
+
+  /* A fingertip is a much blunter instrument than a cursor, so the hit radius follows the pointer
+     the device actually has: 14px for a mouse, 24px for touch. */
+  var COARSE = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+  var HIT = COARSE ? 576 : 196;
+
+  function pick(mx, my) {
+    /* Nothing to pick while the domain bubbles are up. The file dots are not on screen, so naming one
+       in the detail panel would report on something the reader cannot see — and setting `hover` would
+       silently change what the next frame draws. */
+    if (domainView()) return null;
+    var best = null, bd = HIT;
+    for (var i = 0; i < nodes.length; i++) {
+      var dx = sx(nodes[i]) - mx, dy = sy(nodes[i]) - my, d = dx * dx + dy * dy;
+      if (d < bd) { bd = d; best = nodes[i]; }
+    }
+    return best;
+  }
+
+  /* Pointer handling covers mouse and touch through one path. Every live pointer is tracked, so
+     two fingers become a pinch without a separate touch-event branch: one pointer pans, two
+     pinch-zoom about their own midpoint. A wheel listener alone left touch devices with no zoom
+     at all — and because the canvas sets `touch-action: none` to receive drags, the browser's own
+     pinch was suppressed too, so the gesture had to be implemented rather than merely allowed. */
+  var live = new Map(), pan = null, pinch = null, lastTap = 0;
+
+  function zoomAbout(k, px, py) {
+    k = Math.max(0.1, Math.min(9, k));
+    view.x = px - (px - view.x) * (k / view.k);
+    view.y = py - (py - view.y) * (k / view.k);
+    view.k = k;
+  }
+  function twoPointers() {
+    var it = live.values(), a = it.next().value, b = it.next().value;
+    return {
+      d: Math.hypot(a.x - b.x, a.y - b.y) || 1,
+      cx: (a.x + b.x) / 2,
+      cy: (a.y + b.y) / 2
+    };
+  }
+
+  cv.addEventListener('pointerdown', function (e) {
+    cv.setPointerCapture(e.pointerId);
+    live.set(e.pointerId, { x: e.offsetX, y: e.offsetY });
+
+    if (live.size === 2) { pinch = twoPointers(); pan = null; return; }
+    if (live.size > 2) return;
+
+    pan = { x: e.offsetX - view.x, y: e.offsetY - view.y };
+    cv.classList.add('is-dragging');
+
+    /* Touch has no hover, so a tap has to do the job — and a double tap zooms in, the gesture a
+       one-handed reader reaches for before a pinch. */
+    var n = pick(e.offsetX, e.offsetY);
+    if (n !== hover) { hover = n; showDetail(n); schedule(); }
+    var now = e.timeStamp || 0;
+    if (now - lastTap < 320 && !n) { zoomAbout(view.k * 1.9, e.offsetX, e.offsetY); schedule(); }
+    lastTap = now;
+  });
+
+  cv.addEventListener('pointermove', function (e) {
+    if (!live.has(e.pointerId)) {
+      // Mouse hover: no button held, so this is the only branch that runs on a desktop idle move.
+      var h = pick(e.offsetX, e.offsetY);
+      if (h !== hover) { hover = h; showDetail(h); schedule(); }
+      return;
+    }
+    live.set(e.pointerId, { x: e.offsetX, y: e.offsetY });
+
+    if (live.size >= 2 && pinch) {
+      var now = twoPointers();
+      zoomAbout(view.k * (now.d / pinch.d), pinch.cx, pinch.cy);
+      view.x += now.cx - pinch.cx;
+      view.y += now.cy - pinch.cy;
+      pinch = now;
+      schedule();
+      return;
+    }
+    if (pan) { view.x = e.offsetX - pan.x; view.y = e.offsetY - pan.y; schedule(); }
+  });
+
+  function release(e) {
+    live.delete(e.pointerId);
+    if (live.size < 2) pinch = null;
+    if (live.size === 0) { pan = null; cv.classList.remove('is-dragging'); }
+  }
+  cv.addEventListener('pointerup', release);
+  cv.addEventListener('pointercancel', release);
+  cv.addEventListener('pointerleave', function (e) {
+    release(e);
+    if (e.pointerType === 'mouse' && hover) { hover = null; showDetail(null); schedule(); }
+  });
+
+  cv.addEventListener('wheel', function (e) {
+    e.preventDefault();
+    zoomAbout(view.k * Math.exp(-e.deltaY * 0.0014), e.offsetX, e.offsetY);
+    schedule();
+  }, { passive: false });
+
+  /* Explicit zoom buttons: a pinch is awkward one-handed, and they are the only zoom a keyboard
+     user has. Wired here so the markup carries no behaviour of its own. */
+  Array.prototype.forEach.call(document.querySelectorAll('[data-zoom]'), function (btn) {
+    btn.addEventListener('click', function () {
+      var f = btn.getAttribute('data-zoom');
+      if (f === 'reset') { fitted = false; resize(); return; }
+      zoomAbout(view.k * (f === 'in' ? 1.6 : 1 / 1.6), W / 2, H / 2);
+      schedule();
+    });
+  });
+
+  document.querySelector('.graph-controls').addEventListener('change', function (e) {
+    if (e.target.name === 'col') COLOUR = e.target.value;
+    if (e.target.name === 'siz') SIZE = e.target.value;
+    schedule();
+  });
+  document.getElementById('gq').addEventListener('input', function (e) {
+    query = e.target.value.trim().toLowerCase();
+    schedule();
+  });
+
+  if (window.ResizeObserver) new ResizeObserver(resize).observe(cv);
+  else window.addEventListener('resize', resize);
+  resize();
+})();
+</script>
+</body>
+</html>

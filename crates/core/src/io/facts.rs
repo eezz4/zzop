@@ -47,7 +47,12 @@ pub use shapes::{ConsumeBodyShape, ProvideBodyField, ProvideBodyShape, ProvideRe
 /// future-proofing/consistency; this type is shared with `docs/NORMALIZED_AST.md`'s envelope
 /// input contract (via `FileProjection.io`), but since no field name actually changes there is no casing
 /// conflict to resolve (unlike `SourceSymbol` — see that type's doc).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// **`Default` is for FIXTURES only** — same ruling as `SourceFile` (2026-08-09): `route_version` cost
+/// 68 construction sites, and the derive collapses the test half. **Reviewers: a production adapter
+/// must keep listing every field** — a fact riding along as a silent default is a fact silently NOT
+/// extracted, and a build error is the only thing that catches it.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IoProvide {
     pub kind: IoKind,
@@ -57,6 +62,14 @@ pub struct IoProvide {
     /// Handler/owner symbol id (e.g. the controller method) for richer edges.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub symbol: Option<String>,
+    /// The version scope this route was declared under (`route-version-v1`), for a framework versioning
+    /// by something the URL never carries — a header or media type (NestJS `VersioningType.HEADER`/
+    /// `CUSTOM`), where routes otherwise have byte-identical `key`s. Set for URI versioning too. **A
+    /// normalized EXPRESSION TEXT, never a resolved version** (whitespace stripped, array elements
+    /// sorted). Two DIFFERENT texts mean two different scopes and nothing more, NOT that they are
+    /// disjoint; `None` is "not measured". Rationale: `zzop_rules_http::duplicate_route`'s `version`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route_version: Option<String>,
     /// Request-body contract the handler declares, when statically visible (`@Body()` param with
     /// a class DTO type). See `ProvideBodyShape` — additive/optional, absent everywhere it does
     /// not apply, so the envelope contract is untouched.

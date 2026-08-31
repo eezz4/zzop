@@ -779,7 +779,13 @@ fn mcp_token_has_named_twin(token: &str, norm: &str, subcommands: &[String]) -> 
 /// delete the fact the sentence is there to deliver — which host can run this and which cannot.
 const CLI_NO_TWIN_EXEMPTIONS: [(&str, &str, &str); 2] = [
     (
-        "crates/engine/src/disclosure.rs",
+        // Repathed TWICE now, both times caught by this guard in the same commit that moved the text:
+        // 2026-08-17 when the ROWS left `disclosure.rs` for `registry.rs` on the file-line cap, and
+        // again the same day when `registry.rs` split one module per taxonomy group. An exemption keyed
+        // on a file its literal has left is a pre-armed hole, which is what its own failure message
+        // says — and a path that has moved twice is a standing argument for keying on the literal
+        // rather than the file, if it moves a third time.
+        "crates/engine/src/disclosure/registry/analysis.rs",
         "`zzop coverage",
         "the sightline census's own text says `the CLI-only `zzop coverage` lane ... (it has no MCP \
          tool twin; an MCP host reads the same declarations out of this document)` — it names the CLI \

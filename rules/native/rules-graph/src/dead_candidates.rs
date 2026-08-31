@@ -5,7 +5,12 @@
 //! independently), as are tool-entry files (dev-tool config, ambient `.d.ts` — see `is_tool_entry_file`) and
 //! `package.json`-referenced files (`main`/`module`/`bin`/`exports` entries, plus paths found in `scripts`
 //! commands): all are loaded by a tool/runtime rather than imported, so `fan_in == 0` on them is expected,
-//! not a dead-code signal.
+//! not a dead-code signal. The same `extra_entries` channel carries a THIRD group the engine resolves:
+//! every source path a tool CONFIG names (a bundler `input`/`entry`, including in a second config only a
+//! `--config` flag reaches). Exempting the config file while discarding the entries it declares was
+//! measured at 3 false positives on one tree — the config vocabulary that decides which files are read
+//! is `is_tool_config_file`, and the reading itself is `zzop_engine`'s `assemble::rules::config_entries`,
+//! which cannot be done here (this crate resolves no paths and reads no files).
 //!
 //! ## Eligibility scope
 //! "No importers" is only meaningful when the dep graph could, in principle, have pointed an edge at the
@@ -38,8 +43,12 @@
 //! graph structurally cannot see these use shapes, not merely doesn't happen to. Each language's
 //! import-free-visibility mechanism:
 //! - `.rs`: trait impls (`impl Display for Foo`, reached through trait resolution), `#[derive(...)]`
-//!   expansion, and fully-qualified calls (`crate::a::f()`) never bind a local `use` — `lang::imports`' v1
-//!   scope is top-level `use`/`mod` items only.
+//!   expansion, and fully-qualified calls — `crate::a::f()` and equally a cross-crate
+//!   `some_crate::f()` — never bind a local `use`, and `lang::imports` reads only `use`/`mod` ITEMS.
+//!   That scope, its measured size, and why closing it is not free are owned by
+//!   `zzop_parser_rust::lang::imports`'s module doc (§"a dependency exercised WITHOUT a `use`"); this
+//!   line only states the consequence THIS rule depends on. The exclusion below outlives any fix to
+//!   it: trait-impl and `#[derive]` reach stay invisible either way.
 //! - `.go`: files in the SAME package share every top-level symbol with zero `import` between them (a
 //!   package is one compilation unit) — only cross-package `import`-bound edges are visible
 //!   (`merge_go_dep_edges`, engine side).
@@ -50,6 +59,24 @@
 //!   case), and ASP.NET adds framework discovery with no import edge at all — controllers are found by
 //!   attribute routing, MediatR/DI handlers by assembly scanning, and `Program.cs` is the runtime entry
 //!   point. So a `.cs` file's `fan_in == 0` is never dead evidence (`merge_csharp_dep_edges`, engine side).
+//!
+//! ## Framework path conventions
+//! A framework that turns a FILE into a route by its PATH leaves that file with zero in-repo importers by
+//! design, so `fan_in == 0` on it is the convention working rather than dead code — and the prescription
+//! this rule prints ("delete the file") takes a live endpoint off the air. Two of those sets are exempted
+//! here and they are anchored differently, on purpose:
+//! - **By filename shape alone** — the Next.js App Router / SvelteKit convention files, shared with
+//!   `dead_exports` through `unreachable::framework_route_patterns` so the set cannot drift between the
+//!   two rules. `page.tsx`, `+server.ts` and their siblings are spellings no ordinary module carries.
+//! - **By a declaration the tree makes about a DIRECTORY** — [`framework_roots`], for conventions whose
+//!   name is an ordinary word. `pages/` is a Next.js router only where a `next.config.*` sits beside it;
+//!   `src/pages/` is an Astro route directory only where an `astro.config.*` does. That module's doc owns
+//!   the rationale, the measured harvest of each shape, and the list of directions refused at harvest 0.
+//!
+//! The gate covers only frameworks we have measured, and it is structurally unable to cover the next one.
+//! That residue is carried by the finding message rather than the matcher: the text names this class
+//! BEFORE its imperative (`rule-quality.md` §27), so a reader meets "a framework may load a whole file
+//! from its own path" before meeting "delete the file".
 //!
 //! `dead_candidate_findings` is the `"dead-candidates"` native-analysis Finding-shaping wrapper the engine
 //! calls. One exemption lives engine-side rather than here, since it needs file text this crate stays free
@@ -65,14 +92,20 @@
 //! unreachable from any entrypoint — a "closed island" of files that reference each other but that nothing
 //! live reaches. A given file can therefore never be flagged by both.
 
+mod findings;
+mod framework_roots;
+
+pub use findings::dead_candidate_findings;
+
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
 use regex::Regex;
 
-use zzop_core::{disable_hint, DepGraph, FileNode, Finding, Severity};
+use zzop_core::{DepGraph, FileNode};
 
 use crate::unreachable::{framework_route_patterns, is_tool_entry_file};
+use framework_roots::FrameworkRoots;
 
 /// Default `max_changes` — a file changed more often than this is probably alive.
 pub const DEAD_MAX_CHANGES: u32 = 3;
@@ -88,6 +121,10 @@ pub fn find_dead_candidates(
     extra_entries: &std::collections::HashSet<String>,
 ) -> Vec<FileNode> {
     let participants = dep_graph_participants(dep);
+    // Scanned once per run, then asked about every surviving candidate — the answer depends on what
+    // OTHER files this tree holds (a framework config beside a directory), which no per-path regex can
+    // see. See the module doc's "Framework path conventions".
+    let framework_roots = FrameworkRoots::scan(nodes);
     let mut out: Vec<FileNode> = nodes
         .iter()
         .filter(|n| is_dead_candidate_eligible(&n.path, &participants))
@@ -102,6 +139,7 @@ pub fn find_dead_candidates(
         // it is expected. Delegating here keeps this analysis in sync with `dead_exports::is_entry_or_test`.
         .filter(|n| !zzop_core::is_test_file(&n.path))
         .filter(|n| !is_tool_entry_file(&n.path))
+        .filter(|n| !framework_roots.loads_by_path(&n.path))
         .filter(|n| !extra_entries.contains(&n.path))
         .cloned()
         .collect();
@@ -111,42 +149,6 @@ pub fn find_dead_candidates(
             .then_with(|| a.path.cmp(&b.path))
     });
     out
-}
-
-/// One `Finding` per dead-candidate file (native analysis id `"dead-candidates"`, matching
-/// `register_native_analyses`), gated at `DEAD_MAX_CHANGES`. See `find_dead_candidates`'s doc for
-/// `extra_entries`.
-pub fn dead_candidate_findings(
-    nodes: &[FileNode],
-    dep: &DepGraph,
-    extra_entries: &std::collections::HashSet<String>,
-) -> Vec<Finding> {
-    find_dead_candidates(nodes, dep, DEAD_MAX_CHANGES, extra_entries)
-        .into_iter()
-        .map(|n| Finding {
-            rule_id: "dead-candidates".to_string(),
-            severity: Severity::Info,
-            file: n.path,
-            line: 1,
-            message: format!(
-                "no importers found in this tree (candidate dead file — scoped to files that \
-                 participate in the dep graph: a `dep`-map key or edge target, or a TS-dispatch \
-                 extension ts/tsx/js/jsx/mjs/cjs/mts/cts as a fallback; dev-tool config files, \
-                 ambient `.d.ts` declarations, and package.json-referenced entry files are \
-                 excluded — they're loaded by a tool/runtime directly, not imported). Delete the \
-                 file if it is genuinely unused, or wire it up if it should be reachable. A file \
-                 carrying a machine-generated banner in its first 8 lines is skipped already \
-                 (`vocabulary.generatedFileMarkers` picks the banner vocabulary); a generator that \
-                 stamps NO banner is invisible to that, and the answer for it is an `exclude` entry \
-                 for its path — deleting the file is undone by the next regeneration. {} if your \
-                 build loads files this graph can't see (e.g. a custom bundler entry, a \
-                 template-string dynamic import).",
-                disable_hint("dead-candidates")
-            ),
-            evidence_paths: Vec::new(),
-            data: None,
-        })
-        .collect()
 }
 
 fn matches_any(path: &str, patterns: &[Regex]) -> bool {

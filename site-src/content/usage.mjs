@@ -344,12 +344,16 @@ export default {
           {
             ko: `<code>analyze</code> 와 <code>cross</code> 는 <code>--severity</code> · <code>--rule</code> · <code>--limit</code> 로 목록을 좁힌다.
       좁아지는 건 <strong>목록뿐</strong>이고 카운트는 언제나 전부를 덮으며, 잘렸다는 사실은 출력에 적힌다.
-      종료 코드는 <code>0</code> 성공 · <code>1</code> 실행 실패 · <code>2</code> 인자 모양 오류 —
-      심각도로 갈리는 종료 코드는 없으니 CI 게이트는 JSON 을 직접 읽어 만든다.`,
+      종료 코드는 <code>0</code> 성공 · <code>1</code> 실행 실패 · <code>2</code> 잘못 호출 · <code>3</code> <code>--fail-on</code> 문턱에 걸린 발견.
+      심각도 게이트는 <code>analyze --fail-on &lt;severity&gt;</code> 로 <strong>요청할 때만</strong> 켜지고, 안 주면 크리티컬이 가득해도 <code>0</code> 이다.
+      <code>cross</code> 는 트리별 심각도 집계가 없어 이 플래그를 조용히 통과시키지 않고 거부한다 — 트리마다 <code>analyze --fail-on</code> 을 걸어라.`,
             en: `<code>analyze</code> and <code>cross</code> narrow the list with <code>--severity</code>, <code>--rule</code> and
       <code>--limit</code> — only the <strong>list</strong>; counts always cover everything and truncation is disclosed.
-      Exit codes: <code>0</code> ran, <code>1</code> runtime failure, <code>2</code> bad argument shape. There is no
-      severity-gated exit code, so gate CI by reading the JSON yourself.`,
+      Exit codes: <code>0</code> ran, <code>1</code> runtime failure, <code>2</code> called wrong, <code>3</code> findings met the
+      <code>--fail-on</code> threshold. The severity gate exists but is <strong>opt-in</strong>: without
+      <code>analyze --fail-on &lt;severity&gt;</code> a tree full of criticals still exits <code>0</code>. It reads the full
+      counts, not the narrowed list, and <code>cross</code> refuses it rather than passing quietly (no per-tree severity
+      census there) — gate each tree with its own <code>analyze --fail-on</code>.`,
           },
         ],
         [

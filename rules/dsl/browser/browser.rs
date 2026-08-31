@@ -19,7 +19,9 @@
 //! whose value isn't a plain literal (`dangerously-set`); `// zzop-unsafe-html-sink-ok` suppresses it. It also
 //! carries a SANITIZER-PASSAGE veto (`html-sink-sanitized`): a finding is dropped only when a
 //! sanitizer-shaped call — `escape*`/`sanitize*`/`validate*`/`purify*`, optionally method-qualified, or a
-//! `*Safe`/`*Sanitized`/`*Escaped`/`*Purified` wrapper — is the ENTIRE value. The veto consumes the call's
+//! name carrying `Safe`/`Sanitized`/`Escaped`/`Purified` ANYWHERE in it (`jsonLdSafe`, `markdownToSafeHTML`)
+//! — is the ENTIRE value. Only the adjective half is position-free: the verb half stays start-anchored, so
+//! `htmlEscape(x)` still fires, and `Unsafe` is kept out by the token's capital `S` alone. The veto consumes the call's
 //! argument list and requires the value to end right after it, so a concat, ternary, or method chain around
 //! the sanitizer still fires; `JSON.stringify` is deliberately absent (it escapes neither `<` nor `>`).
 //! `unsafe_html.rs` holds one fixture per vetoed and per still-firing shape. Both rules are
@@ -59,6 +61,20 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use zzop_core::RulePackDef;
 use zzop_engine::{analyze_tree, AnalyzeOutput, DispatchConfig, EngineConfig, DEFAULT_SIZE_CAP};
+
+/// POSITION pins for this pack's rule messages — the shared module every pack root includes.
+/// One home, four named claims; see `rules/dsl/message_order_pins.rs` for which claim is which and
+/// why the summary form and the clause form are not interchangeable.
+#[path = "../message_order_pins.rs"]
+mod message_order_pins;
+
+/// The §27 COVERAGE guard — every DSL rule carries a position pin or a declared verdict about its own
+/// message, and a rule carrying neither turns this red. Included by every pack root that includes the
+/// pins above, deliberately: the guard reads the whole pack set off disk, so one copy would do the
+/// work, and being wired eight times is what keeps it from being dropped by a single edit.
+#[path = "../message_order_verdicts.rs"]
+mod message_order_verdicts;
+use message_order_pins::assert_disqualifier_clause_precedes_imperative;
 
 mod dialogs;
 mod javascript_url;

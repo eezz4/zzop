@@ -8,6 +8,16 @@ use super::controller_silence::MIN_PROVIDES_FLOOR;
 /// (`app.get(...)`, `router.post(...)`) rather than a decorator — invisible to `controller_decorator_re`
 /// above. Deliberately server frameworks ONLY: an HTTP CLIENT library (axios, got, ...) says nothing about
 /// whether THIS tree serves routes, so including one here would false-positive on an ordinary FE tree.
+///
+/// **This list is INCOMPLETE by construction and its silence proves nothing.** A hand-typed vocabulary
+/// leaves every framework outside it permanently green: gogs (`d460e50`) registers hundreds of routes
+/// through `gopkg.in/macaron.v1`, which no entry here covers, so S2 stayed silent while 0 http provides
+/// were extracted and none of that run's 27 warnings mentioned a route. The list is KEPT because it can
+/// name the framework and the idiom, which a derivable signal cannot; what changed is that it no longer
+/// presents itself as the floor — the emitted message says so, and the population-complete disclosure
+/// lives on the coverage surface (`ioChannels.zeroExtraction`), keyed on the tree's structural extension
+/// mix crossed with this build's own recognizer table rather than on any framework name. Adding a name
+/// here is therefore an improvement to the NAMING, never a fix for a class of silence.
 const SERVER_FRAMEWORK_SPECIFIERS: &[&str] = &[
     "express",
     "koa",
@@ -67,7 +77,7 @@ const SERVER_FRAMEWORK_SPECIFIERS: &[&str] = &[
 /// a whole, exact package identity (unlike `sdk_import_no_visible_consume`'s fragment vocab, e.g.
 /// `"sdk"`/`"openapi"`, which needs a real anchored regex to bound a free-form name), so a plain
 /// equals-or-prefix check is the exact-segment-boundary equivalent without the regex overhead.
-fn is_server_framework_specifier(specifier: &str) -> bool {
+pub(super) fn is_server_framework_specifier(specifier: &str) -> bool {
     SERVER_FRAMEWORK_SPECIFIERS.iter().any(|vocab| {
         specifier == *vocab
             || specifier.starts_with(&format!("{vocab}/"))
@@ -157,6 +167,10 @@ tree-wide: {spec_list} — the registration idiom may be a runtime method call (
 joins will be near-silent for this tree — project this tree's routes with a Mode B overlay adapter (see \
 the adapter examples) to restore cross-layer visibility: a partial envelope covering just the provide \
 channel is enough; contract: MCP resource `zzop://contract/envelope-guide` on MCP hosts (`zzop contract envelope-guide` with the CLI binary), docs/NORMALIZED_AST.md in \
-the repo."
+the repo. The package vocabulary this entry matched on is HAND-KEPT and is not a complete list of \
+server frameworks, so the absence of this warning never means a tree serves no routes — the \
+disclosure whose population is the tree rather than a vocabulary is the coverage query's \
+`ioChannels.zeroExtraction` cell, which names every language this build has a route extractor for \
+that contributed zero routes, with no framework name involved."
     ))
 }

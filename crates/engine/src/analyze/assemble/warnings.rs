@@ -6,10 +6,13 @@
 
 use std::collections::BTreeMap;
 
+mod wrong_key;
+
 /// Runs every framework-silence tripwire and returns each warning that fired, in the push order the
 /// calls below appear in (S6 slotted after S4 at introduction; S8 after S6, before the S3/S5/S7
 /// precheck block, since it needs no precheck; S3/S5 keep their pre-split tail positions; S7 slotted
-/// after S5, sharing S5's precheck block; everything from S9 on is appended in id order). Neither the
+/// after S5, sharing S5's precheck block; later ids are appended where their INPUT is in scope rather
+/// than in id order — S16 sits after S2 and S17 after S8, each beside the sibling it mirrors). Neither the
 /// count NOR the id range is written here — this doc said "seven, S1-S7" in one sentence and "eight,
 /// S1-S8" in the next while thirteen ran, and then said "S9-S13" after S14 landed. The roster is
 /// `crate::framework_silence`'s to state, and that module now declines to state it too: each tripwire
@@ -29,6 +32,9 @@ pub(super) fn framework_silence_warnings(
     csharp_rels: &[String],
     package_import_files: &BTreeMap<String, std::collections::BTreeSet<String>>,
     loc_by_path: &std::collections::HashMap<String, u32>,
+    // S17's measured half — extension -> structurally-read file count. Every other tripwire here keys
+    // on what was FOUND, which is exactly why they all go quiet when nothing was.
+    structural_by_ext: &BTreeMap<String, usize>,
     // The run's declared `vocabulary.fetchWrapperExportNames` — S7's wrapper-module recognizer.
     wrapper_export_names: &[&str],
     // The run's rule gate — S15's ONLY use, and the reason this function takes config at all: its
@@ -36,6 +42,11 @@ pub(super) fn framework_silence_warnings(
     // naming none. Deliberately `&RuleConfig` and not the whole `EngineConfig`: no other tripwire
     // here reads config, so widening the parameter would advertise a coupling that does not exist.
     rule_gate: &zzop_core::RuleConfig,
+    // What adapter overlays contributed. Every tripwire here asks "can zzop SEE this framework?", so
+    // each one must judge on the count zzop extracted — a merged total answers a different question
+    // ("does this tree have route visibility?") and answering the first with the second is what let an
+    // overlay silence the very warning that asked for it. See `diagnostics::overlay_provenance`.
+    overlay_io: &BTreeMap<String, crate::envelope::OverlayIoCounts>,
 ) -> Vec<String> {
     let mut warnings = Vec::new();
 
@@ -43,7 +54,10 @@ pub(super) fn framework_silence_warnings(
     // has a backend but produced zero `http` provides — an unsupported/unrecognized framework signal
     // (S1). Computed here, while `io_provides`/`io_consumes`/`ts_paths`/`java_rels`/`package_import_files`
     // are still in scope.
-    let http_count = io_provides.iter().filter(|p| p.kind == "http").count();
+    let http_count = crate::analyze::diagnostics::native_http_provides(
+        io_provides.iter().filter(|p| p.kind == "http").count(),
+        overlay_io,
+    );
     let mut candidate_rels: Vec<String> = ts_paths.iter().cloned().collect();
     candidate_rels.extend(java_rels.iter().cloned());
     candidate_rels.sort();
@@ -71,12 +85,35 @@ pub(super) fn framework_silence_warnings(
         warnings.push(w);
     }
 
+    // S16 — PARTIAL-silence tripwire (provide side). Every sibling above asks a tree-wide question and
+    // can therefore only see a tree with almost NO routes; this one asks per FILE, which is the shape a
+    // partial gap takes — and partial is the common one. It stays quiet when the tree extracted nothing
+    // (S1/S2 own that case and name the framework), so the two cannot double-report one silence.
+    // Judged on the NATIVE count for the same reason S1/S2 are: an overlay answers "does this tree have
+    // routes", not "can zzop see this framework".
+    let provide_files: std::collections::BTreeSet<String> = io_provides
+        .iter()
+        .filter(|p| p.kind == "http")
+        .map(|p| p.file.clone())
+        .collect();
+    if let Some(w) = crate::framework_silence::partial_route_silence_warning(
+        package_import_files,
+        &provide_files,
+        http_count,
+    ) {
+        provide_side_alarm = true;
+        warnings.push(w);
+    }
+
     // S4 — http-client import tripwire (consume side): an http-CLIENT package import present while
     // extracted `http` consumes stay near-zero — the consume-side dual of S2. Additive to S1-S3 above;
     // any subset may fire together. `http_consumes_count` counts ALL extracted `http`-kind consume
     // records — keyed AND unresolved — per `client_library_import_warning`'s own doc on why. Pure map
     // lookup over `package_import_files`, no disk IO, so unconditional.
-    let http_consumes_count = io_consumes.iter().filter(|c| c.kind == "http").count();
+    let http_consumes_count = crate::analyze::diagnostics::native_http_consumes(
+        io_consumes.iter().filter(|c| c.kind == "http").count(),
+        overlay_io,
+    );
     let mut consume_side_alarm = false;
     if let Some(w) = crate::framework_silence::client_library_import_warning(
         package_import_files,
@@ -107,6 +144,23 @@ pub(super) fn framework_silence_warnings(
         warnings.push(w);
     }
 
+    // S17 — S8's MIRROR, and the case S8 structurally cannot reach: S8 iterates the routes that WERE
+    // extracted, so a language this build finds none of leaves it silent exactly where the gap is
+    // largest (gogs: ~300 macaron registrations, 0 extracted, `warnings` byte-identical).
+    // Skipped when a sibling already reported this tree's empty provide channel: S1/S2 name the
+    // FRAMEWORK, which is the better answer, and two warnings for one silence read as two problems —
+    // the same carve-out S16 makes. And it does NOT set the alarm: S15 rides that flag to name the
+    // rules an empty channel silences, and S8/S9/S10/S11 (the family this mirrors) all leave it alone.
+    if !provide_side_alarm {
+        if let Some(w) = crate::framework_silence::route_language_zero_extraction_warning(
+            structural_by_ext,
+            io_provides,
+            io_consumes,
+        ) {
+            warnings.push(w);
+        }
+    }
+
     // S9 — method-unknown route RANGE self-report. Same shape as S8 and the opposite gap: these routes
     // ARE in a call-graph-covered language, they just carry no verb, so every write-gated rule filters
     // them out before evaluating. Also a pure pass over `io_provides`, so also unconditional.
@@ -130,38 +184,15 @@ pub(super) fn framework_silence_warnings(
         warnings.push(w);
     }
 
-    // S12 — unread gateway-declaration self-report. The one gap here whose symptom is a PLAUSIBLE
-    // FINDING rather than a silence: a rewrite zzop never read keys the provide side pre-rewrite while
-    // the consume side calls the post-rewrite path, so the join reports an unprovided consume for a
-    // route that is actually served. Content-gated and route-gated (see its module doc), and it touches
-    // disk, so it is gated on the tree having http provides at all.
-    let http_provides = io_provides.iter().filter(|p| p.kind == "http").count();
-    if let Some(w) = crate::framework_silence::gateway_declaration_warning(root, http_provides) {
-        warnings.push(w);
-    }
-
-    // S13 — inherited C# route prefix. Same WRONG-KEY family as S12 rather than the silence family:
-    // a controller deriving its prefix from a project base class is keyed without it.
-    if let Some(w) = crate::framework_silence::csharp_base_route_warning(root, csharp_rels) {
-        warnings.push(w);
-    }
-
-    // S14 — unread Python router-mount prefix. Third language in the WRONG-KEY family, and the one
-    // with a measured cost: on the 17-tree corpus join, 22 of 24 unprovided consumes were one skipped
-    // `prefix=settings.API_V1_STR`. Reads `.py` paths off `loc_by_path` rather than taking a new
-    // parameter — every walked file is already there, and a fourth per-language rel list threaded
-    // through `collect` for one lexical scan is plumbing nobody would keep in sync.
-    let mut py_rels: Vec<String> = loc_by_path
-        .keys()
-        .filter(|p| p.ends_with(".py"))
-        .cloned()
-        .collect();
-    py_rels.sort(); // HashMap iteration order is not stable; the message names examples.
-    if let Some(w) =
-        crate::framework_silence::python_mount_prefix_warning(root, &py_rels, http_provides)
-    {
-        warnings.push(w);
-    }
+    // S12/S13/S14 — the WRONG-KEY family, in their own module. The seam is the one their own comments
+    // already drew: every other tripwire here reports a SILENCE, while these three report a plausible
+    // FINDING produced by a prefix this build never read.
+    warnings.extend(wrong_key::wrong_key_warnings(
+        root,
+        io_provides,
+        csharp_rels,
+        loc_by_path,
+    ));
 
     // S3/S5/S7 prechecks. S3 mirrors its own function's internal gate (io near-zero in BOTH
     // directions). S5/S7 now run a PER-APP census: the sorted walked-rel list must be built FIRST so the

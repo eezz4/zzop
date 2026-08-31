@@ -9,7 +9,7 @@ use zzop_core::{Finding, ImportMap, IoConsume, IoProvide, ReExport};
 use crate::pipeline::FileArtifact;
 use crate::EngineConfig;
 
-use super::helpers::is_sfc_ext;
+use super::helpers::is_prescan_ext;
 
 mod candidates;
 mod census;
@@ -26,7 +26,19 @@ pub(in crate::analyze) use types::DegradedFile;
 /// manifest/index scans below ([`crate::pipeline::scan_rust_workspace`] / `scan_go_modules` /
 /// `scan_java_index` / `scan_csharp_index`) — see each resolver's own doc (`super::helpers::
 /// resolve_rust_import` / `resolve_go_import_package_dir` / `resolve_java_import` /
-/// `resolve_csharp_import`). `overlay_covered_paths` is described at its single use below.
+/// `resolve_csharp_import`).
+///
+/// `overlay_covered_paths` is the "bring an adapter" disclosure's exclusion set, handed down from
+/// `envelope::apply_adapter_overlays`' own return value (see its doc): the paths for which an overlay
+/// that PASSED validation actually merged at least one real extracted fact. A file an adapter really
+/// parsed is never told it "has no native parser" (the overlay IS its parser); every other file is,
+/// including one behind an overlay the apply step rejected outright and one whose projection carried
+/// no facts at all (G8b). Both were previously excluded here — read straight from `config` — which silenced the
+/// disclosure for files nothing had actually parsed. Sourcing the set from the apply result instead of
+/// from config is what makes "declared coverage" and "real coverage" impossible to confuse.
+///
+/// The `dead-candidates` `is_entry` union follows the same rule through the same return value's
+/// `entry_paths` half — `super::rules::GraphInputs::overlay_entry_paths` owns that half.
 pub(super) fn collect(
     root: &std::path::Path,
     artifacts: Vec<FileArtifact>,
@@ -52,6 +64,7 @@ pub(super) fn collect(
     let mut ts_paths: HashSet<String> = HashSet::new();
     let mut degraded: Vec<DegradedFile> = Vec::new();
     let mut minified: Vec<String> = Vec::new();
+    let mut suppress_markers: Vec<zzop_core::dsl::SuppressMarkerSite> = Vec::new();
     let mut parser_dispatched: usize = 0;
     let mut io_provides: Vec<IoProvide> = Vec::new();
     let mut io_consumes: Vec<IoConsume> = Vec::new();
@@ -87,29 +100,15 @@ pub(super) fn collect(
     let mut csharp_package_import_candidates: Vec<(String, String)> = Vec::new();
     let mut unparsed_extensions: std::collections::BTreeMap<String, (usize, Vec<String>)> =
         std::collections::BTreeMap::new();
-    // `.vue`/`.svelte` SFC pre-scan substrate — see `Collected::sfc_rels`'s doc.
-    let mut sfc_rels: Vec<String> = Vec::new();
-    // `overlay_covered_paths` — the "bring an adapter" disclosure's exclusion set, handed down from
-    // `envelope::apply_adapter_overlays`' own return value (see its doc): the paths for which an overlay
-    // that PASSED validation actually merged at least one real extracted fact. A file an adapter really
-    // parsed is never told it "has no native parser" (the overlay IS its parser); every other file is,
-    // including one behind an overlay the apply step rejected outright (`validate_envelope` failure —
-    // nothing of it merged, so nothing about it is covered) and one whose projection carried no facts at
-    // all (G8b). Both of those were previously excluded here — read straight from `config` — which
-    // silenced the disclosure for files nothing had actually parsed: the exact misleading-diagnosis shape
-    // `analyze::diagnostics::capability` exists to prevent. Sourcing the set from the apply result instead
-    // of from config is what makes "declared coverage" and "real coverage" impossible to confuse.
-    //
-    // The `dead-candidates` `is_entry` union in `super::rules` now follows the same rule, through the
-    // same return value's `entry_paths` half (`envelope::OverlayApplication`): it used to read
-    // `config.adapter_overlays` directly and so honored a REJECTED overlay's `is_entry`, leaving a dead
-    // file exempt forever. `super::rules::GraphInputs::overlay_entry_paths` carries the fix.
+    // Import pre-scan substrate — see `Collected::prescan_rels`'s doc.
+    let mut prescan_rels: Vec<String> = Vec::new();
 
     for artifact in artifacts {
         loc_by_path.insert(artifact.rel.clone(), artifact.loc);
         if artifact.minified_or_generated {
             minified.push(artifact.rel.clone());
         }
+        suppress_markers.extend(artifact.suppress_markers);
         // Computed once per artifact (was two separate `dispatch(...)` calls in the `else if` chain below,
         // plus now a third use for the unparsed-extension check) — `dispatch` is a pure path/extension
         // match, so caching it in a local is a free correctness-neutral simplification, not a behavior
@@ -141,11 +140,11 @@ pub(super) fn collect(
             overlay_covered_paths,
             &mut unparsed_extensions,
         );
-        // `.vue`/`.svelte` SFC pre-scan substrate: only dispatch-`None` files (a real structural-parser
+        // Import pre-scan substrate: only dispatch-`None` files (a real structural-parser
         // dispatch already produces a symbols/imports projection through the normal path below) whose
-        // extension is `.vue`/`.svelte` — see `Collected::sfc_rels`'s doc.
-        if dispatch_lang.is_none() && is_sfc_ext(&artifact.rel) {
-            sfc_rels.push(artifact.rel.clone());
+        // extension is an import pre-scan host — see `Collected::prescan_rels`'s doc.
+        if dispatch_lang.is_none() && is_prescan_ext(&artifact.rel) {
+            prescan_rels.push(artifact.rel.clone());
         }
         if let Some(imports) = artifact.imports {
             // F5 census staging — see `candidates::stage_package_import_candidate`'s doc.
@@ -273,6 +272,7 @@ pub(super) fn collect(
         ts_paths,
         degraded,
         minified,
+        suppress_markers,
         io_provides,
         io_consumes,
         dead_export_names_by_file,
@@ -295,6 +295,6 @@ pub(super) fn collect(
         go_modules,
         java_index,
         csharp_index,
-        sfc_rels,
+        prescan_rels,
     }
 }

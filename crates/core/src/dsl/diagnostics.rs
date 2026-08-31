@@ -138,6 +138,22 @@ impl<'a> RuleDiag<'a> {
         Some(out)
     }
 
+    /// `compile_opt` for a field evaluated against a multi-line window — the window `CallScan`
+    /// gives `line_exclude_pattern` (see `super::veto_window`). The `(?m)` prefix keeps it a strict
+    /// superset: `^`/`$` go on anchoring at line boundaries, so a pattern written for the single-line
+    /// shape matches exactly what it did before AND the wrapped one. It rides the same pattern-keyed
+    /// memo under its own key, because the prefixed source IS a different pattern.
+    pub(super) fn compile_opt_multiline(
+        &mut self,
+        field: &str,
+        pattern: Option<&String>,
+    ) -> Option<Option<regex::Regex>> {
+        match pattern {
+            Some(p) => self.compile(field, &format!("(?m){p}")).map(Some),
+            None => Some(None),
+        }
+    }
+
     /// A STRUCTURAL reason the rule cannot run (no pattern field at all, a `trigger` naming a label that
     /// is not in `patterns`, ...) — same silent-death class as a bad regex, same visibility. `why` is a
     /// lowercase clause completing "rule \"x\": <why> — the rule was SKIPPED ...".

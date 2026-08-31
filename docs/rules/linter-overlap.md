@@ -237,6 +237,16 @@ same span. Different precision, same neighbourhood — kept.
 | `security/weak-password-hash` | per-language, as above | stays — multi-language |
 | `security/sql-format-interpolation` | none for Rust — clippy has no such lint | stays — no tool |
 | `security/command-and-interpolation` | none for Rust | stays — no tool |
+| `security/sql-interpolated-statement` | per-language: `bandit` (`B608`), `gosec` (`G201`/`G202`) | stays — multi-language |
+| `security/command-interpolated-string` | per-language: `bandit` (`B602`/`B605`), `gosec` (`G204`) | stays — multi-language |
+
+The last two are the only rows in this table whose languages DO have a standard tool each, so their
+verdict is reach rather than absence and is stated as such: one rule and one config span Python and Go,
+where replacing them means adopting `bandit` and `gosec` both. The narrower half of the claim is the
+honest one — a project already running both tools gets most of this coverage from them, and what it
+still would not get is the shared judgment, since these two rules and their Java/Rust siblings report
+the same concept at the same severity with the same disclosed limits rather than four tools' four
+conventions.
 
 The first two are the call-kind rules: one rule, one config, six to eight languages. Replacing them
 means running four different tools. This is condition 2 at its strongest.

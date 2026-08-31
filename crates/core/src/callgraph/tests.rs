@@ -1,7 +1,10 @@
 //! Exercises `resolve_calls_for_file`'s resolution rules end-to-end, plus unit tests for
 //! `build_symbol_graph`/`bfs_depths`/`bfs_reachable` over this module's `SymbolGraph` shape.
+use std::collections::{HashMap, HashSet};
+
+use super::bfs::bfs_depths;
 use super::*;
-use crate::ir::ImportBinding;
+use crate::ir::{ImportBinding, ImportMap};
 
 fn call(from_symbol: &str, callee_name: &str, line: u32) -> RawCall {
     RawCall {
@@ -391,4 +394,28 @@ fn bfs_reachable_can_match_the_start_node_itself_at_depth_zero() {
     let graph = vec![edge("h", "a")];
     let found = bfs_reachable(&graph, "h", |id| id == "h");
     assert_eq!(found, Some(("h".to_string(), 0)));
+}
+
+/// An `extends`/`implements` name the resolver could not place is NOT a dropped call. The distinction
+/// is load-bearing on the consumer side: `mutating-route-no-auth` reads these names as calls the handler
+/// makes, and a superclass named `AuthorizedController` would otherwise clear an unguarded route on
+/// evidence that the code never invokes anything.
+#[test]
+fn an_unresolvable_heritage_name_is_excluded_from_the_dropped_calls() {
+    let (edges, unresolved) = resolve_calls_for_file_with_unresolved(
+        &[
+            heritage_call("a.ts#Child", "AuthorizedBase", 1),
+            call("a.ts#Child", "requireOwner", 4),
+        ],
+        &ImportMap::new(),
+        "a.ts",
+        &HashSet::new(),
+        &|_, _| None,
+    );
+    assert!(edges.is_empty(), "neither name resolves: {edges:?}");
+    assert_eq!(
+        unresolved,
+        vec![("a.ts#Child".to_string(), "requireOwner".to_string())],
+        "the real call is reported, the heritage name is not"
+    );
 }

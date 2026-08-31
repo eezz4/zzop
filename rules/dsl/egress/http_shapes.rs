@@ -74,6 +74,84 @@ fn mixed_content_ok_marker_suppresses_the_finding() {
     );
 }
 
+// --- the `example:` declaration carve-out (2026-08-26) ---
+//
+// The measured case: cal.com's `create-ics.input.ts` carries an OpenAPI sample value
+// `example: ["https://…", "http://…"]` inside an `@ApiProperty({ … })` decorator. That plain-http literal
+// is DOCUMENTATION the author labelled as such — a DECLARATION written in the scanned source, not an
+// inference drawn from the absence of something.
+//
+// The carve-out is deliberately the narrowest shape that covers it, because an exemption may be no wider
+// than the case that justified it: only the key `example`, only in KEY POSITION (opening the line, or
+// after `{`/`,`), and only for a URL literal that comes AFTER it on that line. The two tests below hold
+// that width from both sides. A THIRD guard is already standing and was not written for this: the
+// fixture in `plain_http_url_literal_is_flagged` above uses `http://example.com`, so a carve-out that
+// keyed on the bare word `example` turns that test red on its own.
+
+#[test]
+fn an_openapi_example_key_on_the_same_line_is_a_declared_sample_and_is_not_flagged() {
+    let dir = TempDir::new("zzop-egress");
+    dir.write(
+        "src/create-ics.input.ts",
+        "export class CreateIcsFeedInputDto {\n  @ApiProperty({\n    example: [\"https://cal.com/ics/feed.ics\", \"http://cal.com/ics/feed.ics\"],\n    description: \"An array of ICS URLs\",\n  })\n  urls!: string[];\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "http-url-literal").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+/// The near-misses. Each is one step outside the justifying shape and each must STILL fire — otherwise
+/// the carve-out is wider than the declaration that earned it:
+///
+/// - another key (`description:`, `summary:`) carrying the same literal — those are prose about the
+///   value, not a labelled sample of it;
+/// - `example` used somewhere that is not a key at all (a ternary arm, a parameter annotation);
+/// - the URL sitting BEFORE the key on the line, where the key cannot be labelling it;
+/// - `http://example.com` in ordinary code — the word is present, the key is not.
+#[test]
+fn keys_other_than_example_and_non_key_uses_of_the_word_still_fire() {
+    for (name, src) in [
+        (
+            "description",
+            "const meta = { description: \"http://legacy.internal/docs\" };\n",
+        ),
+        (
+            "summary",
+            "const meta = { summary: \"http://legacy.internal/docs\" };\n",
+        ),
+        (
+            "ternary",
+            "const u = pick ? example : \"http://legacy.internal/api\";\n",
+        ),
+        (
+            "param-annotation",
+            "function f(example: string) { return \"http://legacy.internal/api\"; }\n",
+        ),
+        (
+            "url-before-key",
+            "const cfg = { base: \"http://legacy.internal\", example: 1 };\n",
+        ),
+        (
+            "bare-word",
+            "export const home = \"http://example.com/api\";\n",
+        ),
+    ] {
+        let dir = TempDir::new("zzop-egress");
+        dir.write("src/client.ts", src);
+        let out = scan(&dir);
+        assert_eq!(
+            hits(&out, "http-url-literal").len(),
+            1,
+            "{name}: the `example` carve-out reached past the declared-sample shape that earned it: \
+             {:?}",
+            out.findings
+        );
+    }
+}
+
 // --- get-and-body ---
 
 #[test]
@@ -211,4 +289,46 @@ fn localhost_shapes_are_outside_this_rules_public_wire_scope() {
             out.findings
         );
     }
+}
+
+// --- `get-and-body`: the disqualifier has to arrive before the instruction (2026-08-26) ---
+
+/// This rule ships a clause that DISQUALIFIES its own finding — a measured counterexample in which the
+/// flagged code already IS what the remedy asks for, so following the advice cannot clear the finding —
+/// and that clause used to sit ~1,490 bytes BEHIND the imperative. A reader who acts on the first
+/// instruction never reaches it. The repair is the cheaper of the two available shapes: the disqualifier
+/// sentence is untouched and byte-identical, and the imperative now carries its own premise
+/// (`IF <premise>: <imperative>`), so the premise is evaluated before the verb.
+///
+/// Asserts POSITION, not presence. A `contains`-only pin stays GREEN with the clause shoved to the very
+/// end of the message — that is the documented hole in the `security/crypto.rs` precedent, and it is how
+/// this defect shipped green. INVALIDATION PROBE (re-run whenever this message is touched): move the
+/// condition to the END of the message with every token still spelled identically; `contains` passes and
+/// this assertion goes red naming both offsets. Verified 2026-08-26 — the imperative at byte 220, the
+/// condition at 1969.
+///
+/// The single-spelling assertions are load-bearing: an index comparison against a needle that occurs
+/// twice compares against whichever copy `find` reaches first, which is not the claim being made.
+///
+/// Detection is asserted in the same test: this repair is presentation only, so the count, the site and
+/// the anchored line must not move inside a message edit.
+#[test]
+fn get_and_body_message_puts_the_same_request_condition_before_the_use_post_imperative() {
+    let dir = TempDir::new("zzop-egress");
+    dir.write(
+        "src/client.ts",
+        "export function load() {\n  return fetch(url, {\n    method: 'GET',\n    body: JSON.stringify(data),\n  });\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "get-and-body");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 4);
+    assert_disqualifier_summary_precedes_imperative(
+        "get-and-body",
+        &h[0].message,
+        "IF THE `method` AND THE `body:` ARE ONE REQUEST",
+        "use POST (or another body-bearing method) or move the data to query params",
+        "that code already is the remedy this message prescribes, so following the advice cannot \
+         clear the finding",
+    );
 }

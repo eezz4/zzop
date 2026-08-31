@@ -26,6 +26,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveMessage } from "./resolve-folded-message.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, "..", "..");
@@ -124,31 +125,81 @@ if (onlyA.length || onlyB.length) {
 }
 
 // ---- ANCHOR SET DIFFERENCE — THE PRIMARY READ ----------------------------------------------------
+//
+// (tree, rule, file, line) IS NOT UNIQUE, and this file used to key on exactly that. Two findings can
+// share one line — `unimported-export` reports once per exported symbol, so one `export const a, b`
+// line yields two — and a Map keyed that way keeps the last and drops the rest SILENTLY. Measured
+// 2026-08-21 over a six-tree baseline: 14 of 3,217 findings collapsed (a floor — the two largest
+// rule x tree cells were themselves capped at MAX_LIMIT), and `duplicate-route` collapsed too, not
+// only `unimported-export`. The failure it produces is the precise one this file's header says it
+// exists to prevent: swap symbol A for symbol B on one line and the key does not move, so the run
+// prints `** anchor sets are IDENTICAL **`. A cap that shrinks the set aborts the harness; a KEY that
+// shrinks it was invisible.
+//
+// The discriminator was already in the payload — findings carry `data` with the structured subject
+// (`{"kind":"const","name":"default","reason":"unused"}`). Prefer those fields, in a fixed order so
+// the key is stable across runs; fall back to the message only when `data` has nothing to say.
+// DELIBERATELY NOT the whole message: a batch that rewords one message would then report every
+// finding of that rule as GONE + NEW, which destroys the reading for the batch that most needs it.
+// Old snapshots need no re-taking — they already store the full findings, so they re-key on read.
+//
+// The message fallback resolves through `messageRef` against the BLOCK the finding came from.
+// Reading `f.message` raw breaks this key in both directions the moment the reply folds repeated
+// prose: every finding of a folded rule carries the same pointer sentence (so the discriminator
+// stops discriminating), and a pre-fold snapshot compared against a post-fold run reports every
+// one of them as GONE + NEW — precisely the reading the paragraph above says this key exists to
+// protect. A block with no table resolves to the inline message, so old snapshots still need no
+// re-taking.
+const DISCRIMINATOR_FIELDS = ["name", "symbol", "key", "kind", "reason"];
+function discriminator(block, f) {
+  const d = f.data;
+  if (d && typeof d === "object") {
+    const parts = DISCRIMINATOR_FIELDS.filter((k) => d[k] != null).map((k) => `${k}=${d[k]}`);
+    if (parts.length) return parts.join(",");
+  }
+  return resolveMessage(block, f);
+}
+// A key that is not unique loses findings the same way a cap does, and unlike a cap nothing says so.
+// So the key checks ITSELF: any collision is reported on the same screen as the deltas and exits
+// nonzero, because a collapsed anchor set makes the whole primary read an under-count.
+function keyed(m, key, value, who) {
+  if (m.has(key)) {
+    untrustworthy.push(
+      `ANCHOR KEY COLLISION (${who}): two findings share "${key}" — the anchor set is an UNDER-COUNT ` +
+        `and a swap at this anchor would read as "no change". Add the distinguishing field to DISCRIMINATOR_FIELDS.`,
+    );
+  }
+  m.set(key, value);
+}
 function anchorsAxis1(run) {
   const m = new Map();
   for (const sid of Object.keys(run.trees)) {
-    for (const f of run.trees[sid].findings.shown || []) {
-      m.set([sid, f.ruleId, f.file, f.line].join(" | "), {
+    const block = run.trees[sid].findings;
+    for (const f of block.shown || []) {
+      keyed(m, [sid, f.ruleId, f.file, f.line, discriminator(block, f)].join(" | "), {
         tree: sid,
         rule: f.ruleId,
         file: f.file,
         line: f.line,
         severity: f.severity,
-      });
+        what: discriminator(block, f),
+      }, `axis 1, tree ${sid}`);
     }
   }
   return m;
 }
 function anchorsAxis2(run) {
   const m = new Map();
-  for (const f of (run.cross.crossLayerFindings || {}).shown || []) {
-    m.set(["<cross>", f.ruleId, f.file, f.line].join(" | "), {
+  const block = run.cross.crossLayerFindings || {};
+  for (const f of block.shown || []) {
+    keyed(m, ["<cross>", f.ruleId, f.file, f.line, discriminator(block, f)].join(" | "), {
       tree: f.data?.source ?? "<cross>",
       rule: f.ruleId,
       file: f.file,
       line: f.line,
       severity: f.severity,
-    });
+      what: discriminator(block, f),
+    }, "axis 2, cross-layer");
   }
   return m;
 }
@@ -163,15 +214,15 @@ function anchorDiff(title, ma, mb) {
   }
   for (const k of gone) {
     const v = ma.get(k);
-    line(`   - GONE  ${v.tree} | ${v.rule} | ${v.file}:${v.line} | ${v.severity}`);
+    line(`   - GONE  ${v.tree} | ${v.rule} | ${v.file}:${v.line} | ${v.severity} | ${v.what}`);
   }
   for (const k of born) {
     const v = mb.get(k);
-    line(`   + NEW   ${v.tree} | ${v.rule} | ${v.file}:${v.line} | ${v.severity}`);
+    line(`   + NEW   ${v.tree} | ${v.rule} | ${v.file}:${v.line} | ${v.severity} | ${v.what}`);
   }
 }
-anchorDiff("AXIS 1 analyze_repo (tree, rule, file, line)", anchorsAxis1(A), anchorsAxis1(B));
-anchorDiff("AXIS 2 cross-layer findings (rule, file, line)", anchorsAxis2(A), anchorsAxis2(B));
+anchorDiff("AXIS 1 analyze_repo (tree, rule, file, line, subject)", anchorsAxis1(A), anchorsAxis1(B));
+anchorDiff("AXIS 2 cross-layer findings (rule, file, line, subject)", anchorsAxis2(A), anchorsAxis2(B));
 
 // ---- axis 2: buckets + key identity ---------------------------------------------------------------
 line(`\n## AXIS 2 — cross_repo BUCKETS`);

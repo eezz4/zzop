@@ -19,7 +19,6 @@ pub enum ActionHintKey {
     HotChurnLeaf,
     Circular,
     HiddenCoupling,
-    KnowledgeSilo,
     VersioningCandidate,
 }
 
@@ -31,11 +30,22 @@ pub struct RecItem {
     /// Human-readable one-line context (e.g. "FIX 8 · risk 120").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
-    /// Estimated risk reduction (>= 0).
+    /// Ordering weight, NOT an estimate in any unit — `base_risk × reductionRatio × severityMultiplier`,
+    /// where the two multipliers are hardcoded per rule id and per severity (`roi.rs`) with no
+    /// calibration behind them, and `base_risk` is `calc_risk_score`, an UNNORMALISED sum of a commit
+    /// count, a line count and an edge count. Lines dominate that sum by orders of magnitude on any real
+    /// file, so read this as "churn-weighted, severity-tilted" rather than as risk that would go away.
+    /// It answers "which of these should I look at first", never "how much safer will I be".
     pub estimated_reduction: f64,
-    /// Estimated fix cost (>= 10, floor guaranteed).
+    /// Ordering weight for effort, same caveat: `max(10, loc + fanIn × 3)`. It is a size proxy, not a
+    /// claim about human effort — nothing here has ever been measured against how long a fix took.
     pub estimated_cost: f64,
-    /// ROI = reduction x severityMultiplier / cost.
+    /// `reduction × severityMultiplier / cost`. Dimensionless and comparable only WITHIN one reply's
+    /// item list; across runs or repos it means nothing, because both inputs are uncalibrated weights
+    /// rather than measured quantities. Since `cost` is size-dominated, ranking by `roi` ranks small
+    /// files up — that is the intended "cheap wins first" tilt, and it is a preference, not a finding.
+    /// The channel these fields ride is a RANKING (`docs/rules/catalog.md`'s recommendation table says
+    /// so outright); `findings` is where defects live.
     pub roi: f64,
     /// i18n key for the FE Labels `action[<key>]` lookup.
     pub action_hint_key: ActionHintKey,
@@ -70,7 +80,6 @@ pub struct RecommendationGates {
     pub fat_fan_out: u32,
     pub barrel_fan_out_ratio: f64,
     pub hidden_coupling_min: u32,
-    pub knowledge_silo_authors: u32,
     pub versioning_fan_in: u32,
     pub versioning_fix: u32,
 }
@@ -84,7 +93,6 @@ impl Default for RecommendationGates {
             fat_fan_out: 8,
             barrel_fan_out_ratio: 0.5,
             hidden_coupling_min: 10,
-            knowledge_silo_authors: 6,
             versioning_fan_in: 3,
             versioning_fix: 3,
         }

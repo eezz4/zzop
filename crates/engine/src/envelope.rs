@@ -54,7 +54,9 @@
 //! - [`shapes`] — Mode A's `body`/`response` dtoRef resolution (the native assemble passes, reused).
 
 mod callgraph;
+mod dep_edges;
 mod file_pass;
+mod gate;
 mod ingest;
 mod merge;
 mod native_pass;
@@ -69,4 +71,4 @@ mod warnings_pass;
 mod tests;
 
 pub use ingest::analyze_envelope;
-pub(crate) use overlay::{apply_adapter_overlays, OverlayApplication};
+pub(crate) use overlay::{apply_adapter_overlays, OverlayApplication, OverlayIoCounts};

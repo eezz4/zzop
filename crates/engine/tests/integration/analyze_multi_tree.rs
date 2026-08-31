@@ -399,6 +399,7 @@ fn user_injected_route_resolves_a_dropped_non_literal_be_route_across_trees() {
         file: "injected/routes.json".to_string(),
         line: 1,
         symbol: Some("list".to_string()),
+        ..Default::default()
     });
     let mut be_cfg = config("be");
     be_cfg.adapter_overlays = vec![NormalizedEnvelope {

@@ -184,6 +184,7 @@ pub(super) fn io_provide(kind: &str, key: &str, line: u32) -> IoProvide {
         file: "f.ts".into(),
         line,
         symbol: None,
+        ..Default::default()
     }
 }
 

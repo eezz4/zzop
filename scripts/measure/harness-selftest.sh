@@ -372,6 +372,80 @@ while IFS= read -r row; do
   fi
 done <<< "$bench_table"
 
+# =====================================================================================================
+# PHASE 3 — diff.mjs, the READER
+# =====================================================================================================
+# Phases 1 and 2 prove the harness refuses to RECORD and to SCORE a broken measurement. This proves it
+# refuses to READ one as "no change". diff.mjs's primary output is the anchor SET DIFFERENCE, so
+# anything that silently shrinks that set turns a real delta into "** anchor sets are IDENTICAL **" —
+# the same shape as a harness going quiet, one level further downstream.
+#
+# ## What phase 3 found on the day it was written (2026-08-21)
+# The anchor key WAS `(tree, rule, file, line)`, and that tuple is not unique: `unimported-export`
+# reports once per exported symbol, so one `export const a, b` line yields two findings that a Map
+# keyed that way collapses into one, keeping the last. Measured over a six-tree baseline: 14 of 3,217
+# findings collapsed, `duplicate-route` among them. Reproduced end to end on the fixture below — swap
+# one symbol for another on one line and the old script printed IDENTICAL with 1 distinct anchor. The
+# key now carries the finding's structured subject, and the two cases below are what keep it honest: a
+# cap that shrinks the set already aborts the harness, but a KEY that shrinks it was invisible.
+diff_root="$work/diffread"
+mkdir -p "$diff_root/good_a" "$diff_root/good_b" "$diff_root/collide"
+diff_meta='{"label":"t","axes":["cross_repo","analyze_repo"],"limit":1000,"configPath":"/x/zzop.config.jsonc","binary":{"path":"/x/zzop-mcp.exe","sha256":"deadbeef"},"trees":[{"sourceId":"t1","file":"tree-t1.json"}]}'
+diff_cross='{"buckets":{},"distinctBucketKeys":[],"edges":[],"crossLayerFindings":{"shown":[],"total":0},"sources":[{"sourceId":"t1","findingCount":2}]}'
+# One line, two findings, distinguished ONLY by their subject — the shape the old key collapsed.
+diff_tree() {
+  printf '%s' '{"fileCount":10,"findings":{"total":2,"shown":[{"ruleId":"unimported-export","file":"src/a.ts","line":2,"severity":"info","message":"m1","data":{"name":"alpha","kind":"const"}},{"ruleId":"unimported-export","file":"src/a.ts","line":2,"severity":"info","message":"m2","data":{"name":"'"$1"'","kind":"const"}}],"byRule":{"unimported-export":2},"bySeverity":{"info":2}}}'
+}
+for d in good_a good_b collide; do
+  printf '%s' "$diff_meta"  > "$diff_root/$d/meta.json"
+  printf '%s' "$diff_cross" > "$diff_root/$d/cross.json"
+done
+diff_tree beta  > "$diff_root/good_a/tree-t1.json"
+diff_tree gamma > "$diff_root/good_b/tree-t1.json"
+# Two findings identical all the way down INCLUDING the subject: the key cannot tell them apart, and
+# saying so is the only honest move left.
+printf '%s' '{"fileCount":10,"findings":{"total":2,"shown":[{"ruleId":"duplicate-route","file":"src/a.ts","line":2,"severity":"warning","message":"same","data":{"key":"GET /x"}},{"ruleId":"duplicate-route","file":"src/a.ts","line":2,"severity":"warning","message":"same","data":{"key":"GET /x"}}],"byRule":{"duplicate-route":2},"bySeverity":{"warning":2}}}' > "$diff_root/collide/tree-t1.json"
+
+echo "harness-selftest: PHASE 3 — proving diff.mjs neither collapses an anchor nor hides a collision"
+
+# 3a. A same-line SUBJECT SWAP must read as GONE 1 / NEW 1, never as IDENTICAL. This is the case the
+#     old key got wrong, so it proves the fix rather than merely exercising it.
+set +e
+diff_out="$(node "$repo_root/scripts/measure/diff.mjs" good_a good_b --runs "$diff_root" 2>&1)"
+diff_rc=$?
+set -e
+diff_problems=""
+grep -q "GONE 1,  NEW 1" <<< "$diff_out"                                  || diff_problems="$diff_problems; did not report GONE 1 / NEW 1"
+# Axis 2 is legitimately IDENTICAL here (this fixture declares no cross-layer findings), so the
+# assertion is on the COUNT: exactly one of the two axes may say it, and it must not be axis 1.
+[ "$(grep -c "anchor sets are IDENTICAL" <<< "$diff_out")" -eq 1 ] || diff_problems="$diff_problems; axis 1 read a same-line subject swap as IDENTICAL"
+grep -q "name=gamma" <<< "$diff_out"                                      || diff_problems="$diff_problems; did not name the subject that changed"
+[ "$diff_rc" -eq 0 ]                                              || diff_problems="$diff_problems; exited $diff_rc on a trustworthy pair"
+if [ -n "$diff_problems" ]; then
+  failed=1
+  echo "  FAIL  anchor-subject-swap$diff_problems" >&2
+  printf '%s\n' "$diff_out" | sed 's/^/    /' >&2
+else
+  echo "  ok    anchor-subject-swap -> GONE 1 / NEW 1, subject named"
+fi
+
+# 3b. A key COLLISION must be reported, not absorbed. It rides the same `untrustworthy` channel as
+#     every other reason a comparison cannot be believed, so the exit code moves with it.
+set +e
+coll_out="$(node "$repo_root/scripts/measure/diff.mjs" collide collide --runs "$diff_root" 2>&1)"
+coll_rc=$?
+set -e
+coll_problems=""
+grep -q "ANCHOR KEY COLLISION" <<< "$coll_out"                            || coll_problems="$coll_problems; did not name the collision"
+[ "$coll_rc" -ne 0 ]                                              || coll_problems="$coll_problems; exited 0 on a collapsed anchor set"
+if [ -n "$coll_problems" ]; then
+  failed=1
+  echo "  FAIL  anchor-key-collision$coll_problems" >&2
+  printf '%s\n' "$coll_out" | sed 's/^/    /' >&2
+else
+  echo "  ok    anchor-key-collision -> reported, exit $coll_rc"
+fi
+
 if [ "$failed" -ne 0 ]; then
   echo "" >&2
   echo "harness-selftest: FAILED. A validation branch in the measurement harness no longer fires." >&2
@@ -383,4 +457,5 @@ if [ "$failed" -ne 0 ]; then
 fi
 
 echo "harness-selftest: OK (phase 1: $checked/$checked snapshot aborts, none left a snapshot behind;"
-echo "                      phase 2: $bench_checked/$bench_checked scorer aborts, known-good still green)"
+echo "                      phase 2: $bench_checked/$bench_checked scorer aborts, known-good still green;"
+echo "                      phase 3: diff.mjs kept a same-line subject swap visible and named its key collision)"

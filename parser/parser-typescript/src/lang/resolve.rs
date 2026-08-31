@@ -9,11 +9,13 @@
 //! `dep_graph` (the `build_dep`/`build_dep_with_workspace` projection).
 
 mod dep_graph;
+mod framework_alias;
 mod specifier;
 mod tsconfig;
 mod workspace;
 
-pub use dep_graph::{build_dep, build_dep_with_workspace};
+pub use dep_graph::{build_dep, build_dep_with_workspace, build_dep_with_workspace_candidates};
+pub use framework_alias::NUXT_CONFIG_FILES;
 pub use specifier::{resolve_file, try_ext, RESOLVE_EXTS};
 pub use tsconfig::TsconfigPaths;
 pub use workspace::{match_workspace_pkg, resolve_file_with_workspace, WorkspacePkg};

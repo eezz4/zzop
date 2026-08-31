@@ -54,6 +54,14 @@
 //!   call graph — Rust routes are now IN `mutating-route-no-auth`'s range, and the one auth idiom the
 //!   engine cannot see there (a tower `.route_layer`) is mainstream rather than marginal.
 //!
+//! - S17 [`route_language_zero_extraction_warning`]: S8's MIRROR, and the case S8 cannot reach. S8
+//!   iterates the routes that WERE extracted, so a language whose routes this build finds none of
+//!   leaves it silent exactly where the gap is largest (gogs: ~300 macaron registrations, 0 extracted,
+//!   `warnings` byte-identical). This one is keyed on what the TREE is made of crossed with what the
+//!   BUILD declares, so no hand-typed framework list can leave a framework out — and it is narrowed to
+//!   the provide side and to call-graph-UNCOVERED extensions, which is what keeps it a warning rather
+//!   than the general fact table its cross would otherwise be.
+//!
 //! - S15 [`channel_consequence_warning`]: the only one that detects nothing. It RIDES the siblings
 //!   above — when one of them has already reported an empty io channel, it names the rules that
 //!   emptiness measurably silences AND the rules it measurably inflates, which are two different sets
@@ -110,7 +118,9 @@ mod egress_intent;
 mod fetch_wrapper;
 mod gateway_declaration;
 mod orm_schema_silence;
+mod partial_route_silence;
 mod python_mount_prefix;
+mod route_language_zero_extraction;
 mod rust_router_layer;
 mod server_framework_import;
 #[cfg(test)]
@@ -137,7 +147,9 @@ pub use fetch_wrapper::fetch_wrapper_census;
 pub(crate) use fetch_wrapper::WRAPPER_EXPORT_NAMES;
 pub use gateway_declaration::gateway_declaration_warning;
 pub use orm_schema_silence::orm_schema_silence_warning;
+pub use partial_route_silence::partial_route_silence_warning;
 pub use python_mount_prefix::python_mount_prefix_warning;
+pub use route_language_zero_extraction::route_language_zero_extraction_warning;
 pub use rust_router_layer::rust_router_layer_warning;
 pub use server_framework_import::{provide_blind_sources, server_framework_import_warning};
 pub use unknown_verb_range::unknown_verb_range_warning;

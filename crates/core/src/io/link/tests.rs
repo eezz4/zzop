@@ -20,6 +20,7 @@ fn provide(kind: &str, key: &str, file: &str, line: u32, symbol: Option<&str>) -
         file: file.into(),
         line,
         symbol: symbol.map(Into::into),
+        ..Default::default()
     }
 }
 fn consume(kind: &str, key: Option<&str>, file: &str, line: u32, raw: Option<&str>) -> IoConsume {

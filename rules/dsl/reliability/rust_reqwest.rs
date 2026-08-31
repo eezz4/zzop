@@ -4,6 +4,7 @@
 //! `prepare(` call, ...), none of which a Rust file can ever satisfy — so admitting `.rs` there would
 //! have shipped a rule that is structurally silent on every Rust tree while the catalog listed it.
 
+use crate::assert_disqualifier_clause_precedes_imperative;
 use crate::{hits, scan, TempDir};
 
 #[test]
@@ -17,6 +18,44 @@ fn a_reqwest_client_with_no_timeout_in_the_function_is_flagged() {
     let h = hits(&out, "reqwest-no-timeout");
     assert_eq!(h.len(), 1, "{:?}", out.findings);
     assert_eq!(h[0].line, 2);
+}
+
+/// §27 pin (2026-08-29). This rule's disqualifier is its "Scope, disclosed rather than assumed" block:
+/// the veto is FUNCTION-LOCAL and purely lexical, so a client built by a shared constructor elsewhere
+/// and merely used here reads as timeout-less, and a caller-side `tokio::time::timeout(...)` does not
+/// clear it either. That is the same shape `fetch-no-timeout` calls its biggest false-positive vector,
+/// and it sat BEHIND "Set one: `Client::builder().timeout(...)`".
+///
+/// WHAT MOVED, and why more than one sentence: the block moved WHOLE (scope disclosure + "`read_timeout`
+/// DOES clear it" + "`connect_timeout` deliberately does NOT"). Lifting only the disqualifying sentence
+/// would have broken the contrast the two `clear it` sentences carry — the emphatic "DOES clear it"
+/// answers the "does not clear it either" it used to follow — and that antecedent repair is the hidden
+/// cost §27 records for moves. Moving the imperative to sit after the block costs nothing instead:
+/// "Set one:" is followed immediately by `.timeout(Duration::from_secs(5))`, which re-establishes what
+/// "one" is inside five words. 1534 chars before and after, multiset identical.
+///
+/// `read_timeout`/`connect_timeout` are deliberately NOT the pinned needle. The matcher already vetoes
+/// on `.read_timeout(`, so that sentence is a FALSE-NEGATIVE disclosure, which §27's census criterion
+/// excludes by name. The pinned clause is the one that makes a LIVE finding wrong.
+#[test]
+fn reqwest_no_timeout_message_puts_the_function_local_scope_before_the_set_one_imperative() {
+    let dir = TempDir::new("zzop-rel-rust");
+    dir.write(
+        "src/client.rs",
+        "pub async fn fetch(url: &str) -> Result<String, reqwest::Error> {\n    let client = reqwest::Client::new();\n    client.get(url).send().await?.text().await\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "reqwest-no-timeout");
+    // Sentence repair only — the finding itself is unchanged.
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 2);
+
+    assert_disqualifier_clause_precedes_imperative(
+        "reqwest-no-timeout",
+        &h[0].message,
+        "a client built by a shared constructor elsewhere and merely used here is invisible to it",
+        "Set one: `Client::builder()",
+    );
 }
 
 #[test]

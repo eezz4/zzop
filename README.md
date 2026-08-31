@@ -131,10 +131,26 @@ zzop analyze .                          # analyze one repo/tree -> JSON findings
 zzop analyze --config ci/zzop.config.jsonc   # same, for a config that does not sit at the tree root
 zzop analyze . --severity critical --limit 10  # narrow the findings LIST (counts always cover everything)
 zzop cross --config zzop.config.jsonc   # cross-layer join, driven by that config
+zzop analyze . --fail-on critical       # THE CI GATE: exit 3 when anything at/above that severity exists
 zzop <subcommand> --help                # that one subcommand's own line (exit 0); `zzop help` prints them all
 ```
 
 `zzop --help` is the canonical subcommand list — this README does not repeat it.
+
+**The exit code is `0` unless you ask otherwise.** Without `--fail-on`, a run answers only "did zzop
+run", so a tree full of criticals still exits `0`; with it, findings at or above the named severity
+exit `3` (a third code, so a CI log can tell a broken config on `1` apart from a real finding) while
+the whole reply still goes to stdout. Check what your build does rather than this paragraph:
+`zzop analyze . --fail-on critical; echo $?`. The full code table, including the `2` a provably
+unmatchable `--rule` id lands on, is in
+[docs/getting-started.md](docs/getting-started.md#reading-the-output).
+
+**A run writes into the tree it analyzes.** The first analysis creates `.zzop/cache/` beside your
+config (the default `cacheDir`) and keeps the per-file analysis cache there — pure derived state,
+safe to delete, regenerated on the next run, and it grows with the tree rather than staying small
+(measure yours with `du -sh .zzop`; this repository's own is not a number worth printing here because
+it moves with every run). `zzop init` adds the anchored `**/.zzop/` line to that directory's
+`.gitignore` for you; set `"cacheDir": null` to write nothing at all.
 
 To track contract drift over time rather than at one instant, commit a **structural manifest** and diff
 a later run against it — the same shape a lint baseline file has, kept by you, not by zzop:
@@ -195,18 +211,37 @@ let report: serde_json::Value =
 
 This is what the two binaries above actually print — `findings` is a **census object**, not an array,
 because the reply is a shaped summary rather than a raw dump. The numbers below are a real run against
-this repository's own `cases/trees/api-be` fixture, so you can reproduce them:
-`zzop analyze --config cases/trees/api-be/zzop.config.jsonc`. (To the next editor: these numbers move
-whenever `cases/trees/api-be` changes **and whenever a release changes what is measured** — re-run that
-command and re-measure them, never patch one in isolation. Three of them were stale for exactly that
-second reason until 2026-08-11 — and the whole block was again on 2026-08-15, after v0.31.0 exported the
-`code-hygiene` pack out of the bundle and 114 findings became 85.)
+this repository's own `cases/trees/api-be` fixture, **measured with a `zzop` built from this
+checkout**: `zzop analyze --config cases/trees/api-be/zzop.config.jsonc`.
+
+**Which binary you reproduce them with is part of the claim.** `zzop version` prints the release
+number alone, and `main` keeps that number between releases — so an installed `@zzop/cli` and a build
+of this checkout can both answer `0.33.0` and legitimately report different findings, because they
+are different builds of one version string. `zzop version --verbose` is what tells them apart: it
+prints each parser's fingerprint and the engine hash. If your counts differ from the block below,
+compare that line before assuming either side is wrong.
+
+(To the next editor: these numbers move whenever `cases/trees/api-be` changes **and whenever a
+release changes what is measured** — re-run that command and re-measure them, never patch one in
+isolation. Three of them were stale for exactly that second reason until 2026-08-11 — and the whole
+block was again on 2026-08-15, after v0.31.0 exported the `code-hygiene` pack out of the bundle and
+114 findings became 85. It happened a THIRD time on 2026-08-21, and that time nothing about the
+fixture moved: a Prisma delegate-accessor fix changed what `schema/unreferenced-field-name` counts as
+referenced, one info finding went away, and 85 became 84 with this block untouched. The lesson the
+first two did not teach is in this paragraph's first sentence — "whenever a release changes what is
+measured" includes every rule change, not only the loud ones, and no guard here can catch it,
+because the only machine that knows the number is the run.
+
+An outside reader reported 87/73 for this block on the same day and was NOT reading a stale README:
+they measured with the published `@zzop/cli` 0.33.0, a different BUILD of the same version string,
+and got a legitimately different answer. That is what the paragraph above this one is for. The
+`disclosure` line below is deliberately no longer one of these numbers: see its own comment.)
 
 `pain` never travels alone. `painMeasuredWeight` / `painTotalWeight` is how much of the weight table this
 tree could actually be measured on, and `pain: null` means no metric had a population at all — absence of
 data, never a clean bill.
 
-**And `pain` is not a defect score.** It contains no rule findings whatever: the run below reports 85
+**And `pain` is not a defect score.** It contains no rule findings whatever: the run below reports 84
 findings, 5 of them critical, while its `defect` pain is `0`. `painByAxis` splits the number so that is
 visible instead of implied — `defect` (import cycles, the only entry), `opinion` (barrel discipline, FSD
 layering, SDP/Main Sequence, Newman modularity, LOC ceilings — a project that deliberately does the
@@ -218,8 +253,8 @@ code is arranged.
 {
   "fileCount": 84,
   "findings": {
-    "total": 85,
-    "bySeverity":  { "critical": 5, "warning": 71, "info": 9 },
+    "total": 84,
+    "bySeverity":  { "critical": 5, "warning": 71, "info": 8 },
     "byRule":      { "security/weak-crypto": 6, "db/unawaited-write": 1 },
     "shown":       [ /* 50 here — the listed slice, capped by --limit; each entry has ruleId, severity, file, line, message */ ]
   },
@@ -227,9 +262,21 @@ code is arranged.
                     "painByAxis": [ { "axis": "defect",  "pain": 0.0, "totalWeight": 3.0 },
                                     { "axis": "opinion", "pain": 7.5, "totalWeight": 15.0 },
                                     { "axis": "history", "pain": 0.0, "totalWeight": 0.6 } ],
-                    "topRecommendation": null, "criticalTop": [] },
+                    "topRecommendation": null, "criticalTop": [],
+                    /* + painMeaning / topRecommendationMeaning / criticalTopMeaning: the sentences
+                       that say what each of the three above is, and is NOT, on the wire */ },
   "coverage":     { /* how much of the tree zzop actually saw, per extension */ },
-  "disclosure":   { "classes": 18, "asserted": 6, "partial": 10, "notYetDetected": 2 },
+  "coverageGaps": { /* which principal extensions reached no resolved import edge, always present —
+                       each row's `kind` ("source" vs "data-config") is what says whether the zero
+                       means a missing parser or a filetype you have to open to judge */ },
+  "disclosure":   { /* the census of zzop's OWN known silent-failure classes, keyed
+                       classes / asserted / partial / notYetDetected, plus the `note`,
+                       `command` and `resource` that lead to the full text. No counts are
+                       copied here: the reply carries its own, and the two that were copied
+                       here went stale while the two beside them stayed right — which is
+                       indistinguishable from correct until someone re-runs it. Read them
+                       with `zzop contract disclosure-classes`, the command the field itself
+                       names. */ },
   "warnings":     [ /* anything this run could not provide */ ]
 }
 ```
@@ -251,8 +298,11 @@ route joins — which has no single-tree equivalent.
 Each repository is parsed into one language-neutral IR, so a Python route and a TypeScript `fetch` end
 up as the same kind of fact. The headline move is the cross-repo join: frontend calls are exact-matched
 against backend routes across the repo boundary, and the leftovers are named rather than dropped — a
-typo'd path segment, a version drift, a method mismatch each come back as a near-miss finding instead of
-a diff you have to do by hand. Alongside the join, the same engine runs a layered rule system (native
+casing or base-path difference, a version drift, a method mismatch each come back as a near-miss finding
+naming the dimension that differs, instead of a diff you have to do by hand. A near miss is judged on
+those axes, never on spelling: a plural or a typo (`/api/userss` against `/api/users`) is reported as an
+unmatched call, not paired with the route it probably meant — the per-rule scope is in
+[the catalog](docs/rules/catalog.md). Alongside the join, the same engine runs a layered rule system (native
 whole-graph analyses plus declarative JSON rule packs) over each repo individually, adding structural
 findings, dependency/dead-code analysis, and health scores to the same JSON document.
 
@@ -279,7 +329,7 @@ defaults — a house extension, your own guard names, a gateway prefix, a rule t
 | C# (`.cs`) | Native, full CST (tree-sitter-c-sharp 0.23.5): symbols (incl. nested types, dot-qualified method names, `public` visibility), imports/dep graph (namespace→files index, `using` package-directory-wide edges), ASP.NET Core route provides (attribute controllers with `[Route("api/[controller]")]` + `[HttpGet]`/… composition, plus same-file Minimal-API `app.MapGet`/`MapGroup`), `HttpClient` literal egress consumes, EF Core `DbSet<T>`/`[Table]` `db-table` provides, call sites — v1 scope |
 | Prisma schema (`.prisma`) | Native, lexical schema: models/fields (structural + usage-aware schema rules) + `db-table` provides joining the client-side consumes |
 | SQL (`.sql`) | Native, lexical: `CREATE TABLE` → `db-table` provides (migration files light up the db-table channel for MyBatis/JDBC-style stacks). The crate also owns the channel's consume-side statement reader, which other parsers call on the SQL strings they hold |
-| Anything else (Ruby, JSP, ...) | Lexical fallback in-tree (line count + `line-scan` rules only), or first-class support via an external parser adapter conforming to the [Normalized AST protocol](docs/NORMALIZED_AST.md) |
+| Anything else (Ruby, JSP, ...) | Lexical fallback in-tree: the files are walked and counted, and only `line-scan` rules can reach them. **That is a ceiling, not a promise of coverage** — a bundled rule reaches your language only if its own `file_pattern` names the extension, and for most languages outside the rows above none does, which is a zero this row deliberately does not spell as a number (it is per-language and it moves). Measure it on YOUR tree instead: `zzop analyze <tree>` and read `packsLoaded[].filesInScope` — `0` on a pack means not one of its rules' path gates admits a byte here, so that pack's zero findings are scope, never a clean bill — beside `coverageGaps`, whose row for the extension carries `kind: "source"`. Measured that way on a five-file Ruby tree, no bundled pack admitted a single `.rb` file. First-class support is an external parser adapter conforming to the [Normalized AST protocol](docs/NORMALIZED_AST.md). |
 
 Full precision-tier breakdown — exactly what each native parser extracts, Python's v1 scope note, and
 each parser's fingerprint — in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#language-support). (Those

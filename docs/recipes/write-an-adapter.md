@@ -20,6 +20,33 @@ Every number below was measured on this tree with the commands shown. Reproduce 
 (`cargo build --release --bin zzop`); the examples write `zzop` where a source checkout has
 `target/release/zzop`.
 
+## Before anything: if the only thing missing is routes, do not write an adapter
+
+There is a shortcut and neither this page nor the envelope guide used to mention it, so reviewers kept
+being sent the long way round. If zzop reads your tree fine except that it extracts no HTTP routes,
+declare the routes directly in `zzop.config.jsonc`:
+
+```jsonc
+{ "trees": [{ "root": "services/api", "routes": [
+  { "key": "GET /api/users" },
+  { "key": "POST /api/users" },
+  { "key": "GET /api/orders/{id}", "role": "provide" }
+]}]}
+```
+
+Six lines produce the same cross-layer joins a hand-authored overlay does — the whole array expands
+into one synthetic overlay internally, so it rides the identical path. Keys normalize through the same
+transform the extractors use, so `"get /api/users"` and `"GET /api/users/"` both land canonically, and
+`role: "consume"` declares a call this tree MAKES rather than a route it serves.
+
+Its provenance is also more honest than an overlay's for free: every injected route is attributed to
+the synthetic file `<injected-routes>`, so nothing in the output can be mistaken for something zzop
+read out of your source.
+
+Reach for an envelope when you need channels `routes` cannot express — import edges, symbols, call
+sites, attributes, response shapes — or when the route list is large enough that generating it beats
+maintaining it by hand. Everything below assumes you have checked this first.
+
 ---
 
 ## Step 1 — Which channel? Read it off the run, do not guess
@@ -133,17 +160,29 @@ zzop validate-envelope overlay.json     # or the validate_envelope MCP tool — 
 `{"valid":true,"issues":[],"hints":[]}`, exit 0. `issues` reject the envelope and decide the exit code;
 `hints` are shapes that are legal but probably not what you meant, and leave a valid envelope valid.
 
+You get the same `hints` from the run itself, not only from this command: an overlay that is accepted
+and applied carries each of its hints into that run's `warnings`, prefixed `was applied, but:` (Mode A
+says `envelope accepted, but:`). Before 2026-08-17 they were computed and dropped on those paths, so an
+unnormalized `http` key would silently cost you a join edge and then sit in `unconsumedProvides`
+looking like a real defect. A REJECTED overlay carries no hints — nothing of it was applied, so there
+is no consequence to advise about.
+
 Then wire it in and **recount**. `trees[].overlays[]` paths resolve relative to the **tree root**,
 while `trees[].root` resolves relative to the **config file's own directory** — the two are not the
 same base, and getting it wrong is a `configWarnings` entry, not a crash.
 
 The three ways this goes wrong, each measured against the 18-line envelope above:
 
-1. **Malformed** — a missing required field is a hard error before analysis starts, exit 1:
-   `zzop: zzop-facade: invalid analyzeTrees() config JSON: missing field 'loc' at line 1 column 394`.
-2. **Structurally invalid** — deserializes, fails validation. The overlay is skipped, the run
-   completes, `resolvedImportEdges` returns to its baseline 3, and one warning says so:
-   `adapter overlay 'hand-written/1' skipped: unknown format: 'not-zzop' (expected 'zzop-normalized-ast')`.
+1. **Malformed** — a missing required field. The overlay is skipped, the run completes, and one warning
+   names it: ``adapterOverlays[0]` (parser `hand-written/1`) does not match the normalized-envelope
+   shape and was SKIPPED: missing field `loc``. This used to be a hard error, exit 1, zero findings —
+   one bad overlay took the whole analysis with it, and the coordinate it printed (`at line 1 column
+   394`) indexed an internal re-serialization rather than your file. Fixed 2026-08-17; if you are
+   reading an older run's output, that exit 1 is what you are seeing.
+2. **Structurally invalid** — deserializes, fails validation. Also skipped, also one warning, and this
+   is the same outcome as case 1 by design; only the message differs, because a different layer caught
+   it: `adapter overlay 'hand-written/1' skipped: unknown format: 'not-zzop' (expected
+   'zzop-normalized-ast')`. `resolvedImportEdges` returns to its baseline 3 either way.
 3. **Valid, applied, and pointed at nothing** — this is the one a number will not catch. Typo the path
    to `embeding.py` and `resolvedImportEdges` still reports **5**, because a declared path matching no
    file becomes a synthetic entry whose own imports resolve from its declared directory. The count
@@ -152,6 +191,25 @@ The three ways this goes wrong, each measured against the 18-line envelope above
 
 So the verification is two-sided: a **before/after count** and a **clean overlay warning list**. Either
 alone can be green while the other is wrong.
+
+### Your adapter's facts stay labelled as yours
+
+Every run your overlay contributes to carries one warning naming it and what it supplied:
+`adapter overlay facts are part of this analysis: `your-adapter/1` (6 http route(s))`, plus the share of
+the tree's routes that were **declared rather than extracted**. When that share is all of them, it says
+so outright — zzop's own extractors read no routes in this tree.
+
+This is deliberate and it is not a complaint about your adapter. Once merged, nothing downstream can
+tell a declared fact from an extracted one, which is right for rules and joins and wrong for exactly one
+reader: the person deciding how much of the report is zzop's own sight. That warning is the only place
+the distinction survives.
+
+The same reasoning keeps the coverage warning that sent you here **alive after you fix it**. Writing the
+adapter answers "does this tree have route visibility?" — it does not answer "can zzop parse this
+framework?", and the framework-silence tripwires ask the second. They count what zzop extracted, so
+supplying six routes through an overlay no longer deletes the "server framework imported, zero routes
+extracted" warning. Before 2026-08-17 it did, and a reader handed only the after-run concluded the
+framework was natively supported.
 
 ## Step 5 — When are you done?
 

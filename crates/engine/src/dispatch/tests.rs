@@ -1,3 +1,4 @@
+use super::non_source::NON_SOURCE_EXTENSIONS;
 use super::*;
 
 fn cfg() -> DispatchConfig {
@@ -162,72 +163,81 @@ fn the_user_authored_zzop_dir_is_not_skipped() {
     assert!(!is_skip_dir("zzop", &config));
 }
 
-/// T2 policy pin: the exact `NON_SOURCE_EXTENSIONS` contents. Any edit to this list changes which
-/// extensions the "bring an adapter" per-extension disclosure stays silent about — pinned so a change
-/// is a conscious, reviewed decision, not an accidental drop/add.
+/// T2 policy pin: the exact `NON_SOURCE_EXTENSIONS` contents, KIND INCLUDED. Any edit to this list
+/// changes which extensions the "bring an adapter" per-extension disclosure stays silent about, and any
+/// edit to a kind changes which extensions the coverage-gap surfaces may report — pinned so a change to
+/// either is a conscious, reviewed decision, not an accidental drop/add/reclassify.
 #[test]
 fn non_source_extensions_pin() {
-    const EXPECTED: &[&str] = &[
+    use NonSourceKind::{DataConfig as D, NoFactsToLose as N};
+    const EXPECTED: &[(&str, NonSourceKind)] = &[
         // docs/text
-        "md",
-        "mdx",
-        "txt",
-        "rst",
-        "adoc", // data/config
-        "json",
-        "jsonc",
-        "json5",
-        "yaml",
-        "yml",
-        "toml",
-        "xml",
-        "csv",
-        "tsv",
-        "ini",
-        "properties",
-        "lock", // styles
-        "css",
-        "scss",
-        "sass",
-        "less",
-        "styl", // markup-as-asset
-        "html",
-        "htm", // images
-        "png",
-        "jpg",
-        "jpeg",
-        "gif",
-        "webp",
-        "svg",
-        "ico",
-        "bmp",
-        "avif", // fonts
-        "woff",
-        "woff2",
-        "ttf",
-        "otf",
-        "eot", // media
-        "mp3",
-        "mp4",
-        "webm",
-        "wav",
-        "ogg",
-        "mov", // binaries/archives
-        "zip",
-        "gz",
-        "tar",
-        "pdf",
-        "wasm",
-        "exe",
-        "dll",
-        "so",
-        "dylib",
-        "node",
-        "jar",
-        "map",
+        ("md", N),
+        ("mdx", N),
+        ("txt", N),
+        ("rst", N),
+        ("adoc", N),
+        // data/config
+        ("json", D),
+        ("jsonc", D),
+        ("json5", D),
+        ("yaml", D),
+        ("yml", D),
+        ("toml", D),
+        ("xml", D),
+        ("csv", D),
+        ("tsv", D),
+        ("ini", D),
+        ("properties", D),
+        ("lock", D),
+        // styles
+        ("css", N),
+        ("scss", N),
+        ("sass", N),
+        ("less", N),
+        ("styl", N),
+        // markup-as-asset
+        ("html", D),
+        ("htm", D),
+        // images
+        ("png", N),
+        ("jpg", N),
+        ("jpeg", N),
+        ("gif", N),
+        ("webp", N),
+        ("svg", N),
+        ("ico", N),
+        ("bmp", N),
+        ("avif", N),
+        // fonts
+        ("woff", N),
+        ("woff2", N),
+        ("ttf", N),
+        ("otf", N),
+        ("eot", N),
+        // media
+        ("mp3", N),
+        ("mp4", N),
+        ("webm", N),
+        ("wav", N),
+        ("ogg", N),
+        ("mov", N),
+        // binaries/archives
+        ("zip", N),
+        ("gz", N),
+        ("tar", N),
+        ("pdf", N),
+        ("wasm", N),
+        ("exe", N),
+        ("dll", N),
+        ("so", N),
+        ("dylib", N),
+        ("node", N),
+        ("jar", N),
+        ("map", N),
         // misc
-        "pem",
-        "crt",
+        ("pem", N),
+        ("crt", N),
     ];
     assert_eq!(
             NON_SOURCE_EXTENSIONS, EXPECTED,
@@ -238,9 +248,74 @@ fn non_source_extensions_pin() {
 
 #[test]
 fn is_non_source_extension_matches_every_pinned_entry() {
-    for ext in NON_SOURCE_EXTENSIONS {
+    for (ext, _) in NON_SOURCE_EXTENSIONS {
         assert!(is_non_source_extension(ext), "{ext}");
     }
+}
+
+/// The whole point of the split, in one assertion: the two questions must NOT have the same answer for
+/// every extension. Without this, a future edit that reclassifies every `DataConfig` entry back to
+/// `NoFactsToLose` restores the measured mall defect (114 `.xml` files holding 906 SQL statements,
+/// reported nowhere) while the pin above still passes with an internally consistent table.
+#[test]
+fn the_two_questions_disagree_on_the_data_config_group() {
+    // The extension the defect was measured on. Question 1 says "do not nag for an XML parser";
+    // question 2 says "an unread XML majority can absolutely have cost you something".
+    assert!(
+        is_non_source_extension("xml"),
+        "question 1 must still say yes"
+    );
+    assert!(
+        extraction_can_lose_facts("xml"),
+        "question 2 must say a dispatch-None on .xml can cost facts — this is the mall MyBatis case"
+    );
+    // ...and they must still AGREE where agreement is correct, or the split would just be noise.
+    for inert in ["png", "css", "woff2", "pem"] {
+        assert!(is_non_source_extension(inert), "{inert}");
+        assert!(
+            !extraction_can_lose_facts(inert),
+            "{inert} has no symbol/import/io fact to lose"
+        );
+    }
+    // `.md` answers both questions the same way as the inert group, for a DIFFERENT reason, and the
+    // reason is what a future reader needs: a VitePress/Nuxt `.md` page IS a Vue SFC and its
+    // `<script setup>` imports are real edges — they are not lost because the import pre-scan reads
+    // them (`zzop_parser_typescript::PRESCAN_IMPORT_HOSTS`, consumed by
+    // `assemble::helpers::is_prescan_ext`), not because they are absent. That gate is what makes this
+    // pair true; see the roster's doc. `prescan_roster_is_orthogonal_to_the_non_source_table` below
+    // nails those two facts together.
+    assert!(
+        is_non_source_extension("md"),
+        "no Markdown language frontend is a plausible ask, and this predicate is ALSO the \
+         dead-file-candidate exclusion — flipping it makes every prose page a deletion candidate"
+    );
+    assert!(
+        !extraction_can_lose_facts("md"),
+        "measured: flipping this adds a gap row on be-gin (6 of 40 files, zero script blocks) and \
+         NONE on koel (47 of 2773, ten script blocks) — it would fire where the phenomenon is absent \
+         and stay silent where it is present"
+    );
+    // Source extensions are outside the table entirely and answer both questions the other way.
+    for source in ["ts", "java", "vue"] {
+        assert!(!is_non_source_extension(source), "{source}");
+        assert!(extraction_can_lose_facts(source), "{source}");
+    }
+}
+
+/// The wire vocabulary is a CLOSED set with one owner, and every table entry maps into it. A surface
+/// spelling its own token is the drift this function exists to prevent.
+#[test]
+fn extension_content_kind_covers_the_table_and_the_source_case() {
+    for (ext, _) in NON_SOURCE_EXTENSIONS {
+        let kind = extension_content_kind(ext);
+        assert!(
+            kind == "data-config" || kind == "no-facts-to-lose",
+            "{ext} rendered as {kind:?}, which is not a non-source token"
+        );
+    }
+    assert_eq!(extension_content_kind("ts"), "source");
+    assert_eq!(extension_content_kind("XML"), "data-config");
+    assert_eq!(extension_content_kind("PNG"), "no-facts-to-lose");
 }
 
 #[test]
@@ -259,6 +334,71 @@ fn is_non_source_extension_rejects_real_source_and_template_dialects() {
     for ext in ["jsp", "erb", "vue", "svelte"] {
         assert!(!is_non_source_extension(ext), "{ext}");
     }
+}
+
+/// The import PRE-SCAN roster (`zzop_parser_typescript`, which owns it) is a THIRD extension question
+/// that cuts ACROSS this table, and this is the assertion that says so in both directions. It lives in
+/// THIS file because `NonSourceKind::NoFactsToLose`'s claim about `.md`/`.mdx` is only true while the
+/// roster carries them: a future edit that drops one back out (restoring the koel defect, or the MDX
+/// one) or that "tidies up" by pulling `.md` out of the non-source table instead (which would mint a
+/// dead-file candidate for every prose page in every tree) fails right here rather than in a corpus run
+/// nobody repeats.
+#[test]
+fn prescan_roster_is_orthogonal_to_the_non_source_table() {
+    use zzop_parser_typescript::{is_sfc_script_host, prescan_mode, PrescanMode};
+    use zzop_parser_typescript::{PRESCAN_IMPORT_HOSTS, SFC_SCRIPT_HOST_EXTENSIONS};
+    // Members on BOTH sides: `.md` and `.mdx` are non-source AND pre-scan hosts. These two lines are
+    // the defect the third axis exists for.
+    assert!(prescan_mode("md").is_some() && is_non_source_extension("md"));
+    assert!(prescan_mode("mdx").is_some() && is_non_source_extension("mdx"));
+    // ...and their answer to question 2 stays `false` BECAUSE the roster carries them — the imports are
+    // read, not absent. Drop either from the roster and its pair becomes a lie again.
+    assert!(!extraction_can_lose_facts("md") && !extraction_can_lose_facts("mdx"));
+    // Members on the other side only, so the two lists provably are not the same list. `astro` is here
+    // rather than in the table above on purpose: it keeps earning its coverage-gap row, because the
+    // frontmatter arm reads its IMPORTS and nothing else.
+    for host in ["vue", "svelte", "astro"] {
+        assert!(prescan_mode(host).is_some(), "{host}");
+        assert!(!is_non_source_extension(host), "{host}");
+    }
+    for non_host in ["ts", "png", "json", "txt", "html"] {
+        assert!(prescan_mode(non_host).is_none(), "{non_host}");
+    }
+    // `mdx`/`astro` are absent from the `<script>`-BLOCK roster and present on the wider one — their
+    // imports are not inside a `<script>` tag, so that lexical extract would find nothing, and the
+    // bare-ESM and frontmatter arms are what reads them instead. A `<script>`-roster row would be a
+    // name claiming reach the body lacks; the pair table is what tells the two apart.
+    for absent in ["mdx", "astro"] {
+        assert!(!is_sfc_script_host(absent), "{absent}");
+        assert!(prescan_mode(absent).is_some(), "{absent}");
+        assert_ne!(
+            prescan_mode(absent),
+            Some(PrescanMode::ScriptBlocks),
+            "{absent}"
+        );
+    }
+    assert!(
+        prescan_mode("MD").is_some() && prescan_mode("Astro").is_some(),
+        "case-insensitive, like non_source_kind"
+    );
+    assert_eq!(
+        SFC_SCRIPT_HOST_EXTENSIONS,
+        ["vue", "svelte", "md"],
+        "roster drifted — update deliberately"
+    );
+    // The wider table is pinned too, MODE INCLUDED — a new host arriving without an arm, or with the
+    // wrong one, is the drift a set-shaped pin could not see.
+    assert_eq!(
+        PRESCAN_IMPORT_HOSTS,
+        [
+            ("vue", PrescanMode::ScriptBlocks),
+            ("svelte", PrescanMode::ScriptBlocks),
+            ("md", PrescanMode::ScriptBlocks),
+            ("mdx", PrescanMode::BareEsm),
+            ("astro", PrescanMode::AstroFence),
+        ],
+        "pre-scan roster drifted — update deliberately"
+    );
 }
 
 /// Seals the config-facing language vocabulary in both directions.

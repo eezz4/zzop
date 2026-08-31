@@ -19,22 +19,26 @@
 /// The sibling channels already do this for the CONFIG dialect (`unknown_disabled_rule_ids` and
 /// friends), which is what makes the view filter's silence an asymmetry rather than a policy.
 ///
-/// ## Why this cannot simply consult the full id universe
+/// ## The id universe, and the half that used to be missing
 ///
 /// The exact answer is "every native id, plus every rule of every pack this run loaded". The first
-/// half is available ([`zzop_facade::native_analysis_ids`]); the second is not — the reply's
-/// `packsLoaded` carries each pack's id, rule COUNT and source, never its rule ids, and this crate is
-/// layered above the facade and must not reach past it into the engine's loaded config.
+/// half has always been available ([`zzop_facade::native_analysis_ids`]). The second was not — the
+/// reply's `packsLoaded` carried each pack's id, rule COUNT and source, never its rule ids — and this
+/// crate is layered above the facade and must not reach past it into the engine's loaded config. Since
+/// 2026-08-20 the run publishes the list (`packsLoaded[].ruleIds`; `zzop_engine::PackLoaded::rule_ids`
+/// owns the measurement that forced it and the size it costs), so both halves are readable from the
+/// reply with no layering violation.
 ///
-/// So the check is deliberately ONE-SIDED — it fires only where it can be certain, and stays silent
-/// where it cannot:
+/// The check still fires only where it can be certain, and stays silent where it cannot:
 /// - a BARE id (no `/`) is judged against the native ids in full. A DSL finding's `rule_id` is always
 ///   `"<pack>/<rule>"`, so a bare id that is not native can never match a finding — including a bare
 ///   PACK id, which is legal in `packs.disabled` and meaningless here.
-/// - a QUALIFIED id is judged on its PACK PREFIX only: if no loaded pack carries that id, nothing in
-///   this run could have produced the finding. If the pack IS loaded, this returns `None` even for a
-///   nonexistent rule inside it (`sql/definitely-not-a-rule`) — stated rather than hidden, because the
-///   alternative is a claim this layer has no evidence for.
+/// - a QUALIFIED id whose PACK is absent from `packsLoaded` could not have matched, whatever the tree
+///   holds. That reading carries its own prescription (below) because an exported pack is not a typo.
+/// - a QUALIFIED id whose pack IS loaded is judged against that pack's `ruleIds`. A missing `ruleIds`
+///   key (an older/edge reply shape) means NO DATA and returns `None` — never a refusal, which would
+///   be the false-positive direction and is exactly what validating against a compiled-in catalog
+///   would have done to a user pack loaded from `<tree>/zzop/rules/`.
 ///
 /// NOT applied to the cross-tree lane's `crossLayerFindings` (`crate::cross`), deliberately: every
 /// finding on that channel carries a NATIVE id (`cross-layer/*`, `schema/*`), so its id universe is a
@@ -63,24 +67,25 @@ pub(crate) fn unknown_rule_filter_warning(
     output_view: &serde_json::Value,
     rule: &str,
 ) -> Option<String> {
-    let loaded: Vec<&str> = output_view["packsLoaded"]
+    let packs: &[serde_json::Value] = output_view["packsLoaded"]
         .as_array()
-        .map(|packs| {
-            packs
-                .iter()
-                .filter_map(|p| p["id"].as_str())
-                .collect::<Vec<_>>()
-        })
+        .map(Vec::as_slice)
         .unwrap_or_default();
+
+    // Checked BEFORE the shape split, because the native registry answers for BOTH shapes and the
+    // qualified arm below cannot: a native analysis is namespaced exactly like a pack-qualified rule
+    // (`schema/god-model`, `cross-layer/route-near-miss`) and is compiled in rather than loaded, so it
+    // never appears in `packsLoaded`. Testing the prefix as a pack id alone reported "no pack `schema`
+    // was loaded" on a run whose `shown` held the `schema/god-model` finding.
+    if zzop_facade::native_analysis_ids()
+        .iter()
+        .any(|id| id == rule)
+    {
+        return None;
+    }
 
     match rule.split_once('/') {
         None => {
-            if zzop_facade::native_analysis_ids()
-                .iter()
-                .any(|id| id == rule)
-            {
-                return None;
-            }
             Some(format!(
                 "the `rule` filter names `{rule}`, which is not a native analysis id — and a DSL rule's \
                  id is always `<pack>/<rule>`, so no finding can ever match it. This reply's `shown: 0` \
@@ -88,9 +93,24 @@ pub(crate) fn unknown_rule_filter_warning(
                  this build ships."
             ))
         }
-        Some((pack, _)) => {
-            if loaded.contains(&pack) {
-                return None;
+        Some((pack, name)) => {
+            if let Some(entry) = packs.iter().find(|p| p["id"].as_str() == Some(pack)) {
+                // The pack loaded, so the only remaining question is whether it carries this rule —
+                // answerable from the ids it published, and from nothing else. An absent `ruleIds`
+                // key is NO DATA (older/edge shape) and must stay silent: a warning there would be
+                // the false-positive direction this channel refuses.
+                let ids = entry["ruleIds"].as_array()?;
+                if ids.iter().any(|id| id.as_str() == Some(name)) {
+                    return None;
+                }
+                return Some(format!(
+                    "the `rule` filter names `{rule}`, and pack `{pack}` DID load in this run but \
+                     carries no rule `{name}` — so no finding could match it and this reply's \
+                     `shown: 0` is the filter rather than a clean result. This is a spelling \
+                     mistake, not an unloaded pack: that pack's own `ruleIds` in `packsLoaded` \
+                     lists every id it could have reported here, and the `rule-catalog` contract \
+                     document lists every id this build ships."
+                ));
             }
             Some(format!(
                 "the `rule` filter names `{rule}`, but no pack `{pack}` was loaded in this run, so no \
@@ -142,24 +162,50 @@ mod tests {
         );
     }
 
-    /// The ONE-SIDED half, pinned so a later widening has to come here and say so: a nonexistent rule
-    /// inside a pack that IS loaded stays silent, because this layer cannot enumerate a loaded pack's
-    /// rule ids and a claim without evidence is the defect this whole channel exists to avoid.
+    /// The half that used to be silent: a typo inside a pack that IS loaded. Silent until the run
+    /// published `ruleIds`, and silent is the worst answer available here — `shown: 0` under a
+    /// misspelled filter reads exactly like a clean rule. The message must place the blame correctly:
+    /// this one IS a spelling mistake, unlike the unloaded-pack case above.
     #[test]
-    fn a_nonexistent_rule_inside_a_loaded_pack_is_deliberately_not_reported() {
-        let view = serde_json::json!({ "packsLoaded": [{ "id": "sql" }] });
-        assert_eq!(
-            unknown_rule_filter_warning(&view, "sql/definitely-not-a-rule"),
-            None
+    fn a_nonexistent_rule_inside_a_loaded_pack_is_reported_once_the_pack_publishes_its_ids() {
+        let view = serde_json::json!({
+            "packsLoaded": [{ "id": "sql", "ruleIds": ["nplus1", "count-in-loop"] }]
+        });
+        let w = unknown_rule_filter_warning(&view, "sql/definitely-not-a-rule")
+            .expect("a pack that published its ids and does not carry this one must be reported");
+        assert!(
+            w.contains("sql/definitely-not-a-rule") && w.contains("DID load"),
+            "the message must say the pack loaded, or the reader chases the wrong fix: {w}"
+        );
+        assert!(
+            w.contains("ruleIds"),
+            "the message must name the field holding the answer: {w}"
         );
     }
 
-    /// A real, loaded rule id must never warn — the non-vacuity leg. Without it the two tests above
-    /// pass just as well on a function that reports everything.
+    /// A real, loaded rule id must never warn — the non-vacuity leg. Without it the tests above pass
+    /// just as well on a function that reports everything.
     #[test]
     fn a_loaded_packs_rule_id_is_silent() {
-        let view = serde_json::json!({ "packsLoaded": [{ "id": "sql" }] });
+        let view = serde_json::json!({
+            "packsLoaded": [{ "id": "sql", "ruleIds": ["nplus1", "count-in-loop"] }]
+        });
         assert_eq!(unknown_rule_filter_warning(&view, "sql/nplus1"), None);
+    }
+
+    /// The one-sidedness that MUST survive the widening: a pack entry carrying no `ruleIds` is NO
+    /// DATA, and a claim without evidence is the defect this whole channel exists to avoid. This is
+    /// also the shape a user pack loaded out of `<tree>/zzop/rules/` would take on any reply older
+    /// than the field — refusing it would be the false-positive direction, which is the bug that was
+    /// fixed for native ids the same day and must not be reintroduced in a new spelling.
+    #[test]
+    fn a_pack_that_publishes_no_ids_is_never_turned_into_a_refusal() {
+        let view = serde_json::json!({ "packsLoaded": [{ "id": "sql" }] });
+        assert_eq!(
+            unknown_rule_filter_warning(&view, "sql/definitely-not-a-rule"),
+            None,
+            "no `ruleIds` means the reply cannot answer, not that the rule is absent"
+        );
     }
 
     /// A bare id is judged in full against the real registry, both directions. `dead-candidates` is a

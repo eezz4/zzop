@@ -63,6 +63,53 @@ pub struct LineScan {
     /// masked text as every other line regex when `strip_string_literals` is set.
     #[serde(default)]
     pub prev_line_exclude_pattern: Option<String>,
+    /// The missing half of [`Self::prev_line_exclude_pattern`]: the immediately FOLLOWING line, under
+    /// the same "exactly one line" contract and the same masking. A trigger that matches on the line
+    /// OPENING an options object puts the option itself one line down, where no veto could reach it.
+    ///
+    /// Measured before adding it (directus `06027c83`): `reliability/body-limit-missing` triggers on
+    /// `express.json({` at `api/src/app.ts:247` while `limit: env['MAX_PAYLOAD_SIZE']` sits at `:248`,
+    /// so the rule fired at the one place in the corpus that had actually taken its advice. Across
+    /// directus plus 38 corpus trees the trigger appears 33 times and its `limit:` veto matched on the
+    /// SAME line 0 times — the only real spelling of the fix was the one spelling the veto could not
+    /// see. That is cheat-sheet §9 head on: following the prescription has to make the finding go away.
+    ///
+    /// EXACTLY one line, deliberately, and this field is not a window: a span knob would grow a
+    /// per-rule policy value, and an unbounded walk is how a veto becomes body-scoped and silences a
+    /// genuine finding elsewhere in the same function. A trigger whose veto sits further away is out of
+    /// reach BY CONTRACT — see `unawaited-write`, whose `$transaction([` opener can be 14 lines up, and
+    /// which therefore needs the structural lane rather than another line field.
+    #[serde(default)]
+    pub next_line_exclude_pattern: Option<String>,
+    /// UPWARD veto over the ENCLOSING EXPRESSION: a matched line is skipped when the joined text of the
+    /// still-unclosed `(`/`[`/`{` OPENER LINES above it matches this regex. Multi-line by construction
+    /// (compiled with a `(?m)` prefix), unlike the two one-line fields above.
+    ///
+    /// Why a window is safe here where `next_line_exclude_pattern`'s doc says it is not: the window is
+    /// not a span of source. Only lines carrying an opener that is STILL OPEN at the site enter it —
+    /// every intervening statement, and every group the walk sees close (`])`, `})`), is dropped. A veto
+    /// keyword therefore cannot hide in text that merely happens to sit nearby, which is the exact
+    /// failure ("the veto goes body-scoped and silences a genuine finding elsewhere in the same
+    /// function") that pinned those fields to one line.
+    ///
+    /// What it exists for is a PRESCRIPTION that breaks the code, not a false positive. Prisma's array
+    /// transaction takes UN-awaited query builders as its elements — `await prisma.$transaction([ a, b
+    /// ])` — so `db/unawaited-write`'s remedy ("await the call") makes each element run immediately and
+    /// OUTSIDE the transaction. Measured on cal.com @ `b25beb5`: 18 findings, ALL 18 inside an enclosing
+    /// expression that consumes the promise (13 `$transaction([`, 4 `Promise.all([`, 1 `arr.push(`), with
+    /// opener->finding distances of 1..23 — three of which a one-line lookback reaches.
+    ///
+    /// A rule setting this must write the enclosing call's OWN promise consumption into the pattern
+    /// (`\b(?:await|return|yield)\b[^\n]*...`): an UNawaited `$transaction([...])` leaves the writes
+    /// genuinely unawaited, so vetoing on the opener's callee alone would hide a real bug.
+    ///
+    /// Residuals the walk declines rather than guesses, every one of them toward the site STILL FIRING
+    /// (see `super::super::super::veto_window::enclosing_window`): an opener past
+    /// `MAX_ENCLOSING_WALK_LINES`, any multi-line template literal crossed on the way up, any comment
+    /// line that is not whole-line-and-bracket-free, and any bracket left unbalanced by the masker.
+    /// Tested against the same masked text as every other line regex when `strip_string_literals` is set.
+    #[serde(default)]
+    pub enclosing_call_exclude_pattern: Option<String>,
     /// Structural LINE gate over the projected call-site channel: when set, a line that matched
     /// `line_pattern`/`any` only fires if a `SourceFile::call_sites` entry of exactly this `kind` sits
     /// on that SAME line. The line-scan twin of `MethodScan::require_call_kind`, at line rather than
@@ -165,6 +212,8 @@ impl Default for LineScan {
             any: None,
             exclude_pattern: None,
             prev_line_exclude_pattern: None,
+            next_line_exclude_pattern: None,
+            enclosing_call_exclude_pattern: None,
             line_call_kind: None,
             file_exclude_pattern: None,
             attr_present: None,

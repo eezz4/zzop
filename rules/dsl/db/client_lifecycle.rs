@@ -261,3 +261,28 @@ fn worker_pool_ctor_in_loop_in_a_file_with_no_db_driver_is_not_flagged() {
         out.findings
     );
 }
+
+/// §27 ordering pin (2026-08-26). The limitation this rule discloses is pinned as live behaviour above
+/// (`pool_connect_released_only_inside_a_helper_function_is_still_flagged`) — a release one call away,
+/// inside a helper, is invisible to a `MethodScan` `absent` veto and the finding still fires. That
+/// sentence sat ~320 bytes behind "Release it in a `finally` block", i.e. behind an instruction that, at
+/// such a site, adds a SECOND release to a connection that is already released. The remedy now carries
+/// the premise. The veto, the trigger and the `warning` band are untouched.
+#[test]
+fn connection_no_release_message_puts_the_helper_release_condition_before_the_finally_imperative() {
+    let dir = TempDir::new("zzop-db");
+    dir.write(
+        "src/service.ts",
+        "declare const pool: any;\nexport async function runQuery(sql: string) {\n  const conn = await pool.connect();\n  await conn.query(sql);\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "connection-no-release");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_disqualifier_summary_precedes_imperative(
+        "connection-no-release",
+        &h[0].message,
+        "IF NO HELPER CALLED FROM HERE ALREADY RELEASES IT",
+        "release it in a `finally` block",
+        "is invisible to this check and still fires",
+    );
+}

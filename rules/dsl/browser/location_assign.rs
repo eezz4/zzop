@@ -226,3 +226,58 @@ fn base_plus_query_suffix_concat_still_fires_after_the_concat_exclude() {
         Some("location-href")
     );
 }
+
+/// The two shapes that LOOK like an assignment to the global and are not, plus the control that a real
+/// sink on the same axis still fires. Both were measured, not imagined: koel's `openPopup` passes
+/// `window.open` a feature string whose `, location=no` is lexically an assignment (1 of that repo's
+/// 2 findings from this rule), and grafana routes a `location` PROP (`<GrafanaRoute location={location} />`,
+/// 6 lines). The discriminator is notation rather than vocabulary — a feature string and a JSX prop
+/// write `k=v` with no space, and no formatter writes a JS assignment that way — so it needs no list
+/// of feature names or component names to stay correct as either grows.
+#[test]
+fn a_feature_string_and_a_jsx_prop_are_not_assignments_but_a_spaced_assignment_still_fires() {
+    let dir = TempDir::new("zzop-browser");
+    dir.write(
+        "popup.ts",
+        concat!(
+            "export const openPopup = (url: string, w: number, h: number, parent: Window) => {\n",
+            "  return parent.open(url, \"p\", \"toolbar=no, location=no, directories=no, width=\" + w)\n",
+            "}\n",
+        ),
+    );
+    dir.write(
+        "Route.tsx",
+        concat!(
+            "declare const location: any;\n",
+            "declare const route: any;\n",
+            "export const R = () => <GrafanaRoute route={route} location={location} />;\n",
+        ),
+    );
+    // Two controls, in the same assertion. A real dynamic sink written the way source is written —
+    // and a `window.`-QUALIFIED write with no space, which the whitespace rule must NOT swallow:
+    // neither false-positive shape can produce one (a feature string writes bare `location=no`, and
+    // `<C window.location={x}/>` is not valid JSX), so requiring the space there would have cost
+    // recall for nothing. That branch is what the first version of this pin failed to hold.
+    dir.write(
+        "nav.ts",
+        "declare const returnUrl: string;\nexport function go() {\n  location.href = returnUrl;\n}\n",
+    );
+    dir.write(
+        "legacy.ts",
+        "declare const url: string;\nexport function go() {\n  window.location=url;\n}\n",
+    );
+    let out = scan(&dir);
+    let mut files: Vec<&str> = out
+        .findings
+        .iter()
+        .filter(|f| f.rule_id == "browser/location-assign-dynamic")
+        .map(|f| f.file.as_str())
+        .collect();
+    files.sort_unstable();
+    assert_eq!(
+        files,
+        vec!["legacy.ts", "nav.ts"],
+        "the two assignments are sinks and the feature string and JSX prop are not: {:?}",
+        out.findings
+    );
+}

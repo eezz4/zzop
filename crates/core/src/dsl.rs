@@ -31,7 +31,8 @@
 //! `RulePackDef::expand_fragments` uses), `source` (interpreter input + the minified-line-shape check), `eval` (pack
 //! evaluation entry points), `diagnostics` (rule-skip warning sink), `prefilter` (RegexSet line-scan
 //! pre-filter), `markers`
-//! (suppress-marker/require-file helpers), and one module per matcher family (`line_scan`,
+//! (suppress-marker/require-file helpers), `veto_window` (the multi-line text the lexical vetoes
+//! read), and one module per matcher family (`line_scan`,
 //! `method_scan`, `call_scan`, `ir_scan`). Every public item stays importable at `crate::dsl::X`.
 
 mod attr_gate;
@@ -49,6 +50,7 @@ mod prefilter;
 mod regex_cache;
 mod source;
 mod string_mask;
+mod veto_window;
 
 #[cfg(test)]
 mod inline_census_tests;
@@ -90,14 +92,19 @@ pub use def::{
     CallScan, IoDirection, IoScan, LabeledPattern, LineScan, LiteralScan, Matcher, MethodScan,
     RuleAxis, RuleDef, RulePackDef, SymbolScan,
 };
+// CRATE-INTERNAL, not public API: the one enumeration of "which matcher fields carry a pattern"
+// (`def::pattern_fields`), re-exported only so `pack_loader::rule_issues` can DERIVE its regex census
+// from the same walk `expand_fragments` drives instead of keeping a second, silently-staling list.
+pub(crate) use def::for_each_pattern_field;
 pub use eval::{eval_pack, eval_pack_into, eval_pack_profiled, eval_pack_profiled_into};
-pub use fragments::{test_path_re, FragmentError};
+pub use fragments::{declines_shared_test_paths, test_path_re, FragmentError};
 pub use ir_scan::{eval_pack_io_scan, eval_pack_io_scan_into, IoScanTreeContext};
 // The comment-leader table is public because `zzop-engine`'s generated-banner detector reads the same
 // knowledge and must not keep a second copy of it — see `markers::Leaders`.
 pub use markers::{
     leaders_for_path, marker_channel, marker_widening_prose, strip_comment_leader, suppress_hint,
-    Leaders, MarkerChannel, NEAR_MISS_MARKER_TOKEN_PATTERN,
+    suppress_marker_sites, Leaders, MarkerChannel, SuppressMarkerSite,
+    NEAR_MISS_MARKER_TOKEN_PATTERN,
 };
 pub use regex_cache::RegexCache;
 pub use source::{has_minified_line_shape, RuleContext, RuleTiming, SourceFile};

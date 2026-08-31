@@ -68,6 +68,7 @@ pub fn extract_db_table_provides(rel: &str, text: &str) -> Vec<IoProvide> {
             continue;
         };
         out.push(IoProvide {
+            route_version: None,
             response: None,
             kind: "db-table".to_string(),
             key: format!("table:{name}"),

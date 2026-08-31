@@ -78,6 +78,16 @@ pub(in crate::analyze::assemble) struct Collected {
     /// file's bytes) — "generated" is in the name because bundler output usually trips them, NOT because
     /// generation is detected. A generated file with ordinary line lengths is never flagged here.
     pub(in crate::analyze::assemble) minified: Vec<String>,
+    /// Every `zzop-<rule>-ok` suppression marker in the tree, each carrying its own file and 1-based line
+    /// (`pipeline::FileArtifact::suppress_markers`), in walk order — the substrate for
+    /// `suppressed_findings_warning`.
+    ///
+    /// This is the ONE silence with no trace in the output by construction: a suppressed finding is not
+    /// in `findings`, so `findings.total` simply reads one lower and a reviewer cannot tell a clean file
+    /// from a quieted one without grepping the tree themselves. It reports markers PRESENT rather than
+    /// findings suppressed, and `zzop_core::dsl::suppress_marker_sites` owns why that difference is the
+    /// honest one to report.
+    pub(in crate::analyze::assemble) suppress_markers: Vec<zzop_core::dsl::SuppressMarkerSite>,
     pub(in crate::analyze::assemble) io_provides: Vec<IoProvide>,
     pub(in crate::analyze::assemble) io_consumes: Vec<IoConsume>,
     /// `unimported-export`' per-file "used names" input — collected unconditionally (cheap, already cached by
@@ -179,11 +189,23 @@ pub(in crate::analyze::assemble) struct Collected {
     /// `super::dep_graph::merge_csharp_dep_edges`, so every C#-side resolution consults the SAME index —
     /// mirrors `java_index`'s own dual-consumer doc.
     pub(in crate::analyze::assemble) csharp_index: CSharpIndex,
-    /// `.vue`/`.svelte` SFC rels — every walked file whose dispatch is `None` (no structural parser
-    /// frontend) AND whose extension is `.vue`/`.svelte`. `super::sfc::collect_sfc_import_pairs` reads
-    /// each one off disk (uncached, assemble-time — same pattern `dead_exports.rs`'s re-read does) to
-    /// extract `<script>`-block imports, so a `.ts` symbol imported ONLY inside an SFC's script block
+    /// Pre-scan-host rels — every walked file whose dispatch is `None` (no structural parser frontend)
+    /// AND whose extension is an IMPORT PRE-SCAN HOST. **The roster has exactly one owner,
+    /// `zzop_parser_typescript::PRESCAN_IMPORT_HOSTS`, asked through `prescan_mode`**, and this doc
+    /// deliberately does not restate its members: it was `.vue`/`.svelte` until `.md` joined on
+    /// 2026-08-20 and `.mdx`/`.astro` on 2026-08-21, and the enumeration was hand-typed at fifteen
+    /// sites that then had to be found and corrected one by one. Say "pre-scan host" downstream and let
+    /// the predicate answer which extensions that is.
+    ///
+    /// The name is `prescan_*` and not `sfc_*` because the fact stopped being about SFCs: `.mdx` keeps
+    /// its imports as bare top-level ESM and `.astro` keeps them in a `---` frontmatter fence, neither
+    /// of which is a `<script>` block, and a field named for the mechanism of one member is false
+    /// evidence about the other two.
+    ///
+    /// `super::prescan::collect_prescan_import_pairs` reads each one off disk (uncached, assemble-time
+    /// — same pattern `dead_exports.rs`'s re-read does) and extracts its imports through whichever arm
+    /// the roster pairs with that extension, so a `.ts` symbol imported ONLY from one of these files
     /// still gets real fan-in for `unimported-export`/`dead-candidates` instead of false-firing. See
-    /// `zzop_parser_typescript::extract_sfc_script_imports`'s doc for why this needs no cache bump.
-    pub(in crate::analyze::assemble) sfc_rels: Vec<String>,
+    /// `zzop_parser_typescript::extract_prescan_imports`'s doc for why this needs no cache bump.
+    pub(in crate::analyze::assemble) prescan_rels: Vec<String>,
 }

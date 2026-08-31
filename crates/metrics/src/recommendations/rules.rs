@@ -19,7 +19,6 @@ const MAX_CIRCULAR: usize = 15;
 const MAX_HOT_CHURN: usize = 15;
 const MAX_FAT_FANOUT: usize = 15;
 const MAX_HIDDEN_COUPLING: usize = 15;
-const MAX_KNOWLEDGE_SILO: usize = 10;
 const MAX_VERSIONING_CANDIDATE: usize = 10;
 
 pub(super) fn tag_count(n: &FileNode, tag: &str) -> u32 {
@@ -172,30 +171,6 @@ pub(super) fn rule_hidden_coupling(
     }
     items.truncate(MAX_HIDDEN_COUPLING);
     vec![(RecId::HiddenCoupling, Severity::Warning, items)]
-}
-
-pub(super) fn rule_knowledge_silo(
-    nodes: &[FileNode],
-    g: &RecommendationGates,
-) -> Vec<(RecId, Severity, Vec<RawItem>)> {
-    let mut filtered: Vec<&FileNode> = nodes
-        .iter()
-        .filter(|n| n.author_count >= g.knowledge_silo_authors)
-        .collect();
-    filtered.sort_by_key(|n| std::cmp::Reverse(n.author_count));
-    filtered.truncate(MAX_KNOWLEDGE_SILO);
-    let items: Vec<RawItem> = filtered
-        .into_iter()
-        .map(|n| RawItem {
-            path: n.path.clone(),
-            note: Some(format!("authors {}", n.author_count)),
-        })
-        .collect();
-    if items.is_empty() {
-        vec![]
-    } else {
-        vec![(RecId::KnowledgeSilo, Severity::Info, items)]
-    }
 }
 
 /// volatile + many callers + repeated FIX -> in-place refactor hits legacy users; suggest parallel V2.

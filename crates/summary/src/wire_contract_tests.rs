@@ -306,3 +306,74 @@ fn reference_html_publishes_exactly_the_registry_s_output_fields() {
          {extra:?}. The registry is checked against the actual reply, so the page is the wrong side."
     );
 }
+
+/// THE FOLD'S CROSS-LANGUAGE SEAM. `crates/summary/src/output/rule_prose.rs` folds each repeated
+/// message text to one copy and points every finding at it with `messageRef`; the repo's JS
+/// consumers of that reply have to resolve through that FIELD. This pin holds both ends of the seam
+/// from the producing side, because the two ends are in different languages and nothing else looks
+/// at both.
+///
+/// Why it matters more than it looks: `scripts/measure/self-analysis-gate.mjs` is the ONLY place in
+/// this repo that renders a finding message as human text (`zzop analyze` has no text mode — JSON is
+/// the only output, and `--fail-on` reads counts). If it read `message` raw it would print the
+/// POINTER on the single screen where a person ever sees a finding's prescription, which is exactly
+/// the degradation the fold is not allowed to cause.
+///
+/// Scope, stated honestly: this reads SOURCE TEXT for the two tokens that make the seam work. It
+/// cannot prove the JS runs correctly — `scripts/measure/resolve-folded-message.mjs` owns that, and
+/// the reconstruction pin in `output::tests` owns the Rust half. What it does prove is that neither
+/// side has quietly stopped speaking the other's protocol, which is the failure a unit test on
+/// either side alone stays green through.
+#[test]
+fn the_repos_human_finding_renderer_resolves_prose_through_the_field() {
+    let resolver = read_repo_file("scripts/measure/resolve-folded-message.mjs");
+    // NEGATIVE CONTROL: an empty read must be RED, never a silent pass.
+    assert!(
+        resolver.len() > 200,
+        "the resolver file read as {} bytes — this pin would vouch for nothing",
+        resolver.len()
+    );
+    for token in [
+        "messageRef",
+        "ruleMessages",
+        "export function resolveMessage",
+    ] {
+        assert!(
+            resolver.contains(token),
+            "scripts/measure/resolve-folded-message.mjs no longer names {token:?} — the JS side has \
+             stopped speaking the protocol `output::rule_prose` writes"
+        );
+    }
+    // The producer really does emit the field the resolver reads. Spelled from the constant rather
+    // than typed twice, so a rename moves both ends or fails here.
+    assert_eq!(crate::output::message_ref_key(), "messageRef");
+
+    // The one human renderer resolves through it instead of reading the raw field.
+    let gate = read_repo_file("scripts/measure/self-analysis-gate.mjs");
+    assert!(
+        gate.len() > 1000,
+        "the gate file read as {} bytes",
+        gate.len()
+    );
+    assert!(
+        gate.contains("resolve-folded-message.mjs") && gate.contains("resolveMessage(run.findings, f)"),
+        "scripts/measure/self-analysis-gate.mjs is the repo's only human-readable finding renderer and \
+         must resolve each message through `messageRef`; reading `f.message` there prints the pointer \
+         instead of the prescription"
+    );
+
+    // And the measurement harness's anchor key, which falls back to the message when `data` is
+    // silent: unresolved, a pre-fold snapshot diffed against a post-fold run reports every finding
+    // of a folded rule as GONE + NEW.
+    let diff = read_repo_file("scripts/measure/diff.mjs");
+    assert!(
+        diff.len() > 1000,
+        "the diff file read as {} bytes",
+        diff.len()
+    );
+    assert!(
+        diff.contains("resolve-folded-message.mjs") && diff.contains("resolveMessage(block, f)"),
+        "scripts/measure/diff.mjs's anchor discriminator must resolve the folded message, or the \
+         anchor set silently stops discriminating between a rule's findings"
+    );
+}

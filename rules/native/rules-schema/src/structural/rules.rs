@@ -4,7 +4,13 @@
 
 use zzop_core::{SchemaField, SchemaModel, Severity};
 
-use super::{SchemaIssue, GOD_THRESHOLD, LOOKUP_FIELD_MAX};
+use super::{SchemaIssue, GOD_THRESHOLD};
+
+mod coverage;
+mod relation;
+
+use coverage::{index_coverage, Coverage};
+pub(super) use relation::{rule_implicit_fk, rule_nullable_fk};
 
 fn issue(rule: &str, severity: Severity, model: &str, field: Option<&str>) -> SchemaIssue {
     SchemaIssue {
@@ -25,10 +31,24 @@ pub(super) fn rule_god_model(model: &SchemaModel, out: &mut Vec<SchemaIssue>) {
     out.push(i);
 }
 
+/// NO FIELD-COUNT FLOOR — removed 2026-08-29, and the removal is the point rather than a cleanup.
+///
+/// A `LOOKUP_FIELD_MAX = 3` floor used to skip models with at most three fields, documented as
+/// "assumed lookup tables". Measured against the only Prisma schema in the 9-tree corpus
+/// (calcom/cal.com, 100 models; two clean release builds one constant apart), the floor exempted
+/// **exactly one model**, and the count barely noticed it: 53 findings at 3, 54 at 2, 52 at 4, 54
+/// with no floor at all. A gate that moves one finding in 54 is not splitting the judgment.
+///
+/// Worse, the one model it exempted was `UserPassword` (`hash`, `userId`, `user`) — a credential
+/// store, not a lookup table, and close to the model where "when was this row last written" is worth
+/// the most. The floor's stated class and the floor's actual effect were disjoint on the only
+/// evidence anyone has.
+///
+/// What it costs to remove, stated rather than left to be discovered: a genuinely tiny join model now
+/// draws an `info` finding it used to be spared. That class is empty in every measured tree (no model
+/// under three fields exists in the corpus), so the price is unmeasured rather than zero — but the
+/// exemption was NOT free either, and `UserPassword` is what it bought.
 pub(super) fn rule_missing_timestamps(model: &SchemaModel, out: &mut Vec<SchemaIssue>) {
-    if model.fields.len() <= LOOKUP_FIELD_MAX {
-        return;
-    }
     let names: std::collections::HashSet<&str> =
         model.fields.iter().map(|f| f.name.as_str()).collect();
     // A creation timestamp is satisfied by a field named `createdAt`, or by any `DateTime
@@ -199,45 +219,6 @@ pub(super) fn rule_fk_no_index(
     }
 }
 
-pub(super) fn rule_nullable_fk(
-    model: &SchemaModel,
-    field: &SchemaField,
-    out: &mut Vec<SchemaIssue>,
-) {
-    if field.optional {
-        out.push(issue(
-            "nullable-fk",
-            Severity::Warning,
-            &model.name,
-            Some(&field.name),
-        ));
-    }
-}
-
-pub(super) fn rule_implicit_fk(
-    model: &SchemaModel,
-    field: &SchemaField,
-    out: &mut Vec<SchemaIssue>,
-) {
-    if has_attr(field, "relation") || has_attr(field, "unique") {
-        return;
-    }
-    let modeled = model.fields.iter().any(|f| {
-        f.attrs
-            .iter()
-            .any(|a| a.name == "relation" && a.args.as_deref().unwrap_or("").contains(&field.name))
-    });
-    if modeled {
-        return;
-    }
-    out.push(issue(
-        "implicit-fk",
-        Severity::Info,
-        &model.name,
-        Some(&field.name),
-    ));
-}
-
 pub(super) fn is_fk_candidate(field: &SchemaField) -> bool {
     if field.name == "id" || field.name == "_id" {
         return false;
@@ -252,44 +233,44 @@ fn has_attr(field: &SchemaField, name: &str) -> bool {
     field.attrs.iter().any(|a| a.name == name)
 }
 
-/// A field's `@@index`/`@@unique` coverage relative to a single-column lookup: `Leading` if the field
-/// leads some group (fully covered — composite indexes serve lookups via their leading prefix);
-/// `NonLeading` if it appears later in a group but never leads one (covered only for queries that also
-/// constrain the leading column(s)); `None` if it never appears in any group.
-pub(crate) enum Coverage {
-    Leading,
-    NonLeading {
-        cols: Vec<String>,
-        kind: &'static str,
-    },
-    None,
+/// `@default(<literal>)` on a foreign-key-shaped column — the author PINNED a value the database stores
+/// when nobody supplies one, and a value the schema chose for itself is not a parent key. cal.com's
+/// `Avatar.teamId Int @default(0)` is the shape (`// e.g. NULL(0), organization ID or team logo`): every
+/// user avatar row carries `0`, so the `@relation` this rule would otherwise prescribe generates a
+/// FOREIGN KEY that Postgres rejects against the existing rows.
+///
+/// This is a SUPPRESSION, so its evidence has to be a declaration in the scanned source rather than a
+/// guess (rule-quality.md §24) — the `@default` attribute is exactly that, and it arrives on the same
+/// `field.attrs` channel `has_attr` already reads for `@relation`/`@unique`, so no new evidence kind and
+/// no new vocabulary enter with it (§26 ①).
+///
+/// LITERAL, not any default: `@default(uuid())`/`@default(autoincrement())`/`@default(now())` mint a
+/// fresh value per row and therefore pin nothing, so they say nothing about referential intent and do
+/// not silence the rule. `is_fk_candidate` admits only `String`/`Int`/`BigInt`, which leaves exactly two
+/// literal spellings reachable here — a number and a quoted string — and both are tested. Widening to
+/// "has any `@default`" would harvest 0 further findings on the 9-tree corpus (measured: the only
+/// FK-shaped columns carrying any `@default` at all are the two `Avatar` columns above), and §26 ③
+/// rejects a direction with no harvest.
+fn has_pinned_literal_default(field: &SchemaField) -> bool {
+    field.attrs.iter().any(|a| {
+        a.name == "default"
+            && a.args
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(is_pinned_literal)
+    })
 }
 
-/// Tie-break for a field in multiple groups: `uniques` is checked before `indexes`, first hit wins.
-fn index_coverage(field_name: &str, uniques: &[Vec<String>], indexes: &[Vec<String>]) -> Coverage {
-    let leads = |groups: &[Vec<String>]| {
-        groups
-            .iter()
-            .any(|g| g.first().map(String::as_str) == Some(field_name))
-    };
-    if leads(uniques) || leads(indexes) {
-        return Coverage::Leading;
+/// Positive test, never "does not look like a call": a literal is a number or a quoted string, and every
+/// other spelling — a generator call, a `dbgenerated(...)`, a list, a bare identifier — falls through to
+/// false. Asking the question the other way round would make an unrecognized spelling SUPPRESS, which is
+/// the wrong default for a veto.
+fn is_pinned_literal(arg: &str) -> bool {
+    let mut chars = arg.chars();
+    match chars.next() {
+        Some('"') => true,
+        Some(c) if c.is_ascii_digit() => true,
+        Some('-') | Some('+') => chars.next().is_some_and(|c| c.is_ascii_digit()),
+        _ => false,
     }
-    for g in uniques {
-        if g.iter().any(|c| c == field_name) {
-            return Coverage::NonLeading {
-                cols: g.clone(),
-                kind: "unique",
-            };
-        }
-    }
-    for g in indexes {
-        if g.iter().any(|c| c == field_name) {
-            return Coverage::NonLeading {
-                cols: g.clone(),
-                kind: "index",
-            };
-        }
-    }
-    Coverage::None
 }

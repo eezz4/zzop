@@ -62,7 +62,7 @@ impl RuleIoChannel {
         }
     }
 
-    /// The `"{side}:{kind}"` spelling — the SAME composite [`channel::DB`] already fixes for the db
+    /// The `"{side}:{kind}"` spelling — the SAME composite [`channel::DB_PROVIDES`] already fixes for the db
     /// provide side, recomputed rather than re-spelled so the two cannot diverge (pinned by
     /// [`tests::the_db_channel_constant_is_exactly_the_composite_this_type_computes`]).
     pub fn label(&self) -> String {
@@ -133,13 +133,13 @@ mod tests {
     use super::*;
     use crate::RULE_READ_IO_KINDS;
 
-    /// The composite spelling is REUSED, not reinvented. `channel::DB` is the one place this repo had
+    /// The composite spelling is REUSED, not reinvented. `channel::DB_PROVIDES` is the one place this repo had
     /// already written a `{side}:{kind}` channel name down; if [`RuleIoChannel::label`] ever stops
     /// reproducing it, two vocabularies exist for one fact and every consumer joining rules to
     /// recognizers silently splits into two buckets.
     #[test]
     fn the_db_channel_constant_is_exactly_the_composite_this_type_computes() {
-        assert_eq!(reads::DB_TABLE_PROVIDES.label(), channel::DB);
+        assert_eq!(reads::DB_TABLE_PROVIDES.label(), channel::DB_PROVIDES);
     }
 
     /// The named channels must span the kind vocabulary exactly — a kind no named channel covers is a

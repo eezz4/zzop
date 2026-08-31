@@ -293,3 +293,89 @@ fn undeclared_vocabulary_makes_no_judgment() {
     );
     assert!(sensitive_response_field_findings(&sites, &[], empty).is_empty());
 }
+
+/// §27 pin — POSITION, not existence, for the removal landing (2026-08-30).
+///
+/// This rule already satisfied §27 for the question *is this finding true*: the disqualifier ("the
+/// value may be benign ... an auth route returning a token can be by design") sits ahead of a
+/// CONDITIONED imperative ("Verify ...; if not, remove it"). What was absent is the third leg for the
+/// reader who answers "no, it does not belong" — the message never said the edit is class-scoped while
+/// the finding is route-scoped, and never said that nothing fails to build afterwards.
+///
+/// INVALIDATION PROBE: move `REMOVAL_LANDING` behind `Verify the field belongs` in `message.rs` and
+/// every token of it is still present — only the ordering assertions here go red.
+#[test]
+fn the_removal_landing_precedes_the_imperative() {
+    let sites = vec![site("be", "GET /me", "c.ts", 7, &["passwordHash"])];
+    let out = sensitive_response_field_findings(&sites, &[], SensitiveResponseVocab::built_in());
+    assert_eq!(out.len(), 1);
+    let msg = &out[0].message;
+    let disq = msg
+        .find("Evidence is the declared field NAME only")
+        .expect("the disqualifier is missing from the message");
+    let landing = msg
+        .find("WHAT REMOVAL COSTS IS NOT SCOPED")
+        .expect("the removal landing is missing from the message");
+    let verb = msg
+        .find("Verify the field belongs")
+        .expect("the imperative is missing from the message");
+    assert!(
+        disq < landing && landing < verb,
+        "order must be disqualifier({disq}) < landing({landing}) < imperative({verb}): {msg}"
+    );
+    // Each spelled ONCE, or an index comparison means nothing.
+    for needle in [
+        "WHAT REMOVAL COSTS IS NOT SCOPED",
+        "Verify the field belongs",
+    ] {
+        assert_eq!(
+            msg.matches(needle).count(),
+            1,
+            "`{needle}` must appear exactly once: {msg}"
+        );
+    }
+}
+
+/// The CRITICAL arm names the witnessed consumers as the population the edit breaks — the same count
+/// that escalated the finding. Its absence on the warning arm is designed, not an oversight: with no
+/// witnessed consumer there is no set to point at, and the exposure clause already says callers
+/// outside this analysis stay invisible.
+#[test]
+fn only_the_critical_arm_names_the_witnessed_consumers_as_the_broken_population() {
+    let sites = vec![site("be", "GET /me", "c.ts", 7, &["passwordHash"])];
+    let edges = vec![
+        http_edge_to("GET /me", "be", "c.ts", 7),
+        http_edge_to("GET /me", "be", "c.ts", 7),
+    ];
+    let hot = sensitive_response_field_findings(&sites, &edges, SensitiveResponseVocab::built_in());
+    assert_eq!(hot.len(), 1);
+    assert_eq!(hot[0].severity, Severity::Critical);
+    // Verb-agnostic needle, because agreement follows the count and the singular arm is the common
+    // one (the fixture's own critical finding has exactly one consumer).
+    let needle = "that population";
+    assert!(
+        hot[0]
+            .message
+            .contains("The 2 witnessed call sites counted above ARE that population"),
+        "the critical arm must name the witnessed consumers as what the edit breaks: {}",
+        hot[0].message
+    );
+    // And it must sit AHEAD of the imperative too — it is part of the landing, not a footnote.
+    let tail = hot[0].message.find(needle).expect("tail present");
+    let verb = hot[0]
+        .message
+        .find("Verify the field belongs")
+        .expect("imperative present");
+    assert!(
+        tail < verb,
+        "tail at {tail} must precede the imperative at {verb}"
+    );
+
+    let cold = sensitive_response_field_findings(&sites, &[], SensitiveResponseVocab::built_in());
+    assert_eq!(cold[0].severity, Severity::Warning);
+    assert!(
+        !cold[0].message.contains(needle),
+        "the warning arm has no witnessed consumer set to name: {}",
+        cold[0].message
+    );
+}

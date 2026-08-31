@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="{{lang}}">
+<head>
+<meta charset="utf-8">
+<title>{{title}}</title>
+<meta name="description" content="{{description}}">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+{{alternates}}
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+
+<!--zzop:nav--><!--/zzop:nav-->
+
+<!-- One column, on purpose: this page is reached from the footer, appears in neither nav, and is four
+     headings long, so the docs sidebar would be scaffolding around nothing. What it does need is the
+     shell's gutters — without `.docs-layout` the only padding in play is `.docs-content`'s
+     `min-width: 0`, i.e. none, and the prose ran into the 2px side rule. -->
+<div class="docs-layout docs-layout--solo">
+
+  <main class="docs-content">
+    <div class="docs-content-header">
+      <h1>{{h11}}</h1>
+      <p>{{p2}}</p>
+    </div>
+
+    <section id="what-zzop-does">
+      <h2>{{h23}}</h2>
+      <ul>
+        <li>{{li4}}</li>
+        <li>{{li5}}</li>
+        <li>{{li6}}</li>
+        <li>{{li7}}</li>
+        <li>{{li8}}</li>
+      </ul>
+    </section>
+
+    <section id="third-party">
+      <h2>{{h29}}</h2>
+      <p>{{p10}}</p>
+      <ul>
+        <li>{{li11}}</li>
+        <li>{{li12}}</li>
+      </ul>
+    </section>
+
+    <section id="changes">
+      <h2>{{h213}}</h2>
+      <p>{{p14}}</p>
+    </section>
+
+    <section id="contact">
+      <h2>{{h215}}</h2>
+      <p>{{p16}}</p>
+    </section>
+  </main>
+
+</div>
+
+<!--zzop:foot--><!--/zzop:foot-->
+
+</body>
+</html>

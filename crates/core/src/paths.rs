@@ -39,9 +39,91 @@ pub fn is_test_file(path: &str) -> bool {
     crate::dsl::test_path_re().is_match(path)
 }
 
+/// The ECOSYSTEM-FIXED build-surface path shapes: anything under `.github/` and any `*.example` template.
+/// Sibling of [`is_test_file`] on the same axis — "this file is how the project is built, released or
+/// documented, not what it ships" — and the second of the two path-shape inputs to the summary layer's
+/// deployment-role ordering (the first being the tree's OWN `package.json` `scripts` declaration, which
+/// is a manifest fact, not a path shape, and therefore travels on the wire instead of living here).
+///
+/// ## Why it is HERE and not in `dsl/shared_fragments.json`, next to `${test-paths}`
+/// The obvious home looks like the fragment file, since `${test-paths}` is exactly this kind of
+/// ecosystem-fixed vocabulary and lives there. It is the wrong home, and the reason is measurable rather
+/// than stylistic: a shared fragment is a value the bundled rules substitute into their own
+/// `file_exclude_pattern` (`dsl::fragments::is_shared_test_path_vocabulary` is what reads it back), so a
+/// `.github/` arm added THERE would stop those rules REPORTING on workflow files — a detection change,
+/// and this axis is ordering-only by contract (counts must not move). The two live at the same LAYER — a
+/// repo-relative path predicate every consumer shares, never a `vocabulary` key, because nobody can
+/// rename `.github/` or `.example` — and that layer is this module.
+///
+/// ## Why exactly these two arms
+/// Both are named by an ecosystem, not chosen by a project, which is the boundary `vocabulary`'s own
+/// template draws ("Framework-fixed names … nobody can rename those").
+///
+/// `.github/` is taken WHOLE rather than as `workflows/` alone. Measured on cal.com, where the narrower
+/// spelling left a CI secret in `.github/actions/docker-build-and-test/action.yml` sorting ahead of the
+/// tree's production findings: a composite action is the same machinery a workflow is, and the rest of
+/// that directory (issue/PR templates, `CODEOWNERS`, `labeler.yml`) is repository management too — none of
+/// it ships. One arm for the whole directory also cannot grow the class-of-one gap a list of
+/// subdirectories would.
+///
+/// Deliberately absent: `scripts/`, `tools/` and `bin/`. A repo that ships a CLI or an SDK of examples
+/// puts product code in all three, so a demotion keyed on those NAMES would be a guess — which is exactly
+/// why the manifest-declared half of this tier travels on the wire instead of being spelled here: a
+/// `package.json` naming `scripts/release.ts` is the project stating the fact, not us inferring it.
+pub fn is_build_path(path: &str) -> bool {
+    build_path_re().is_match(path)
+}
+
+/// [`is_build_path`]'s compiled pattern, exposed for a consumer that classifies many paths in one pass
+/// (the summary layer's ordering) — the same shape `dsl::test_path_re` offers for the test axis, so the
+/// two classifications are reached the same way.
+pub fn build_path_re() -> &'static regex::Regex {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    RE.get_or_init(|| {
+        regex::Regex::new(r"(?i)((^|/)\.github/|\.example$)")
+            .expect("the build-path pattern is a compile-time literal")
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn build_paths_are_repo_machinery_and_example_templates() {
+        assert!(is_build_path(".github/workflows/ci.yml"));
+        assert!(is_build_path("packages/app/.github/workflows/release.yaml"));
+        // The whole directory, not just `workflows/` — a composite action is the same machinery, and
+        // leaving it out was measured on cal.com as a CI secret outranking the tree's production findings.
+        assert!(is_build_path(
+            ".github/actions/docker-build-and-test/action.yml"
+        ));
+        assert!(is_build_path(".github/ISSUE_TEMPLATE/bug.md"));
+        assert!(is_build_path(".github/CODEOWNERS"));
+        assert!(is_build_path("apps/api/v2/.env.example"));
+        assert!(is_build_path(".env.example"));
+        // Whole-segment: a directory merely NAMED for github is not the dot-directory.
+        assert!(!is_build_path("src/github/client.ts"));
+        assert!(!is_build_path("vendor/github-api/index.ts"));
+        // Whole-suffix only: a file merely CONTAINING "example" is product code.
+        assert!(!is_build_path("src/examples/user.ts"));
+        assert!(!is_build_path("src/example.ts"));
+        // The deliberately-excluded directory names (see `is_build_path`'s doc): product code lives in
+        // all three in real trees, so a name-keyed demotion there would be a guess. `scripts/` reaches
+        // the tier only when the tree's own manifest names the file, which is a declaration, not a name.
+        assert!(!is_build_path("scripts/docker-start.ts"));
+        assert!(!is_build_path("tools/codegen.ts"));
+        assert!(!is_build_path("bin/cli.ts"));
+    }
+
+    /// The two axes are INDEPENDENT — neither predicate may quietly start answering the other's question.
+    #[test]
+    fn the_test_axis_and_the_build_axis_do_not_answer_for_each_other() {
+        assert!(!is_test_file(".github/workflows/ci.yml"));
+        assert!(!is_test_file("apps/api/v2/.env.example"));
+        assert!(!is_build_path("src/foo.test.ts"));
+        assert!(!is_build_path("pkg/foo_test.go"));
+    }
 
     #[test]
     fn e2e_infra_directories_are_test_paths() {

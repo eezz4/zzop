@@ -93,7 +93,8 @@
 //! `HashSet<(file, line)>` ([`ScanMutatingRouteNoAuthInput::decorator_guarded`]); its producers:
 //! - **NestJS `@UseGuards(...)`** (class/method) — `zzop_parser_typescript::extract_controller_guarded_lines`.
 //! - **Spring method security** `@PreAuthorize`/`@PostAuthorize`/`@Secured`/`@RolesAllowed` (class/method, SpEL
-//!   never interpreted) — `zzop_parser_java_21::extract_spring_guarded_lines` (the route method's anchor line).
+//!   never interpreted) — `zzop_parser_java_21::extract_spring_guarded_lines` (the route's own mapping-
+//!   annotation line, the same anchor its `IoProvide` carries).
 //! - **FastAPI `Depends(...)`** (route-decorator `dependencies=[...]`, a parameter default, an
 //!   `Annotated[..., Depends(...)]` parameter, or a tree-resolved `Annotated` alias) —
 //!   `zzop_parser_python_3::extract_fastapi_guarded_lines` (the route decorator's own anchor line).
@@ -102,16 +103,18 @@
 //!   `views.py`, the route anchor in `urls.py`), which the engine joins to a provide by its `symbol`.
 //! - **NestJS route-scoped middleware** — an auth-named `consumer.apply(AuthX).forRoutes({path, method})`
 //!   (`extract_nest_forroutes_guarded`); engine matches each (method,path) pattern (exact, prefix-anchored).
-//! - **Spring global `SecurityFilterChain`** — a secure-by-default `authorizeRequests()...anyRequest()
-//!   .authenticated()` chain (`extract_spring_security_posture`); a route is authenticated iff it escapes
-//!   every `.permitAll()` matcher. Strict parse-all-or-nothing: bails on any scoped/unrecognized form.
+//! - **Spring global `SecurityFilterChain`** — a secure-by-default `anyRequest().authenticated()` chain in
+//!   EITHER the classic fluent or the Spring-6 lambda-DSL spelling, folding two
+//!   `authorizeHttpRequests(..)` customizers on one chain (`extract_spring_security_posture`); a route is
+//!   authenticated iff it escapes every `.permitAll()` matcher. Strict parse-all-or-nothing: bails on any
+//!   scoped/unrecognized form, with a NAMED reason (`zzop_parser_java_21::SpringPostureBail`).
 //!
-//! **Residual:** NestJS global guards (`useGlobalGuards`/`APP_GUARD`) and Spring's lambda-DSL / path-scoped
-//! or `WebSecurity.ignoring()`-bearing configs aren't modeled — a route relying ENTIRELY on those fires.
+//! **Residual:** NestJS global guards (`useGlobalGuards`/`APP_GUARD`) and Spring configs that are
+//! path-scoped (`securityMatcher`), carry `WebSecurity.ignoring()`, hold more than one authorization
+//! chain, or whose matchers/`anyRequest` terminal aren't literally readable (a property-bound whitelist,
+//! an `.access(mgr == null ? ... : mgr)` terminal) aren't modeled — a route relying ENTIRELY on those fires.
 
-use std::collections::HashMap;
-
-use zzop_core::callgraph::{bfs_reachable, SymbolGraph};
+use zzop_core::callgraph::SymbolGraph;
 use zzop_core::{Finding, Severity, SourceSymbol};
 
 use crate::http_scan::{build_name_index, resolve_handler_scoped};
@@ -128,7 +131,6 @@ pub const DEFAULT_AUTH_GUARD_PATTERN: &str = r"(?i)(auth|guard|verify|session|to
 /// RULE vocabulary, never the kernel's — the store is queried by key, agnostic to what it means.
 pub const AUTH_GUARDED_ATTR: &str = "auth-guarded";
 
-use vocab::vocab_re;
 pub use vocab::{
     AUTH_ACQUISITION_CONDITIONAL_PATTERN, AUTH_ACQUISITION_STANDALONE_PATTERN,
     AUTH_FAMILY_PATH_PATTERN,
@@ -195,6 +197,22 @@ pub struct ScanMutatingRouteNoAuthInput<'a> {
     /// middleware guards) is exempt, the injection completion of the middleware "Precision limit". Pass an
     /// empty store (`&AttributeStore::default()`) when nothing is injected — old behavior is preserved.
     pub route_attr_store: &'a zzop_core::AttributeStore,
+    /// Calls the resolver could not place, indexed by caller symbol
+    /// (`zzop_core::callgraph::build_symbol_graph_with_unresolved`) — the NAMES of callees that drew no
+    /// edge. Pass an empty map to get the pre-2026-08-17 behaviour.
+    ///
+    /// Load-bearing, and the reason is a measured false positive at 8 of 16. This rule's own message
+    /// says it looks for a CALL WHOSE NAME LOOKS LIKE A GUARD, but the walk only ever saw resolved
+    /// symbol ids — so a guard declared inside a factory (not a top-level symbol, therefore no edge)
+    /// made the route read as reaching no guard at all. The rule already refuses to guess about an
+    /// unresolved HANDLER (`resolve_handler_scoped`, "do not guess"); it had no such discipline about an
+    /// unresolved CALLEE, and asserted the absence instead.
+    ///
+    /// A name here is weaker evidence than an edge and is used only in the direction that CLEARS a
+    /// finding: it can prove a guard is called, never that one is missing. Names that do NOT match stay
+    /// on the finding as `data.unresolvedCallees`, so a reader can dismiss the residue in seconds
+    /// instead of re-deriving why the graph is short an edge.
+    pub unresolved_callees: &'a std::collections::BTreeMap<String, Vec<String>>,
 }
 
 pub fn scan_mutating_route_no_auth(input: &ScanMutatingRouteNoAuthInput) -> Vec<Finding> {
@@ -207,25 +225,7 @@ pub fn scan_mutating_route_no_auth(input: &ScanMutatingRouteNoAuthInput) -> Vec<
     }
 
     let name_index = build_name_index(input.symbols);
-    let guard_re = vocab_re(input.auth_guard_pattern);
-    let qual_guard = |q: &str| qualifier::is_guard(q, &name_index, input.qualifier_guard_tokens);
-    let is_guard_id = |id: &str| -> bool {
-        let mut seg = id.rsplit(['#', '.']);
-        let tail = seg.next().unwrap_or(id);
-        guard_re.as_ref().is_some_and(|re| re.is_match(tail)) || seg.next().is_some_and(&qual_guard)
-    };
-
-    // Memoizes the per-handler BFS across every mutating endpoint sharing a handler symbol.
-    let cache: std::cell::RefCell<HashMap<String, bool>> = std::cell::RefCell::new(HashMap::new());
-    let reaches_guard = |handler_symbol: &str| -> bool {
-        if let Some(hit) = cache.borrow().get(handler_symbol) {
-            return *hit;
-        }
-        let found =
-            bfs_reachable(input.symbol_graph, handler_symbol, |id| is_guard_id(id)).is_some();
-        cache.borrow_mut().insert(handler_symbol.to_string(), found);
-        found
-    };
+    let guard_reach = guard_reach::GuardReach::new(input, &name_index);
 
     let mut out = Vec::new();
     for p in mutating {
@@ -243,10 +243,17 @@ pub fn scan_mutating_route_no_auth(input: &ScanMutatingRouteNoAuthInput) -> Vec<
         else {
             continue; // unresolved/ambiguous handler — do not guess
         };
-        if reaches_guard(&handler_symbol) {
+        if guard_reach.reaches(&handler_symbol) {
             continue;
         }
-        let hint = message::missing_auth_hint(method, path, handler_ref, input.auth_guard_pattern);
+        let unresolved = guard_reach.unresolved_residue(&handler_symbol);
+        let hint = message::missing_auth_hint(
+            method,
+            path,
+            handler_ref,
+            input.auth_guard_pattern,
+            &unresolved,
+        );
         out.push(Finding {
             rule_id: "mutating-route-no-auth".to_string(),
             severity: Severity::Info,
@@ -260,6 +267,10 @@ pub fn scan_mutating_route_no_auth(input: &ScanMutatingRouteNoAuthInput) -> Vec<
                 "handler": handler_ref,
                 "handlerSymbol": handler_symbol,
                 "hint": hint,
+                // Present only when there is something to say, the additive-disclosure convention: an
+                // always-present empty array reads as "the resolver placed every call", which is a
+                // stronger claim than "this handler had none it could not place".
+                "unresolvedCallees": (!unresolved.is_empty()).then_some(unresolved),
             })),
         });
     }
@@ -268,6 +279,7 @@ pub fn scan_mutating_route_no_auth(input: &ScanMutatingRouteNoAuthInput) -> Vec<
 }
 
 mod candidates;
+mod guard_reach;
 mod message;
 /// `pub` only so `QUALIFIER_GUARD_TOKENS` can be re-exported at the crate root as a declarable default —
 /// everything else in it stays `pub(super)`.

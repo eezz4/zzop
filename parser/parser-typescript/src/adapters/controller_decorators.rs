@@ -28,7 +28,17 @@
 //!   member, a deeper `A.B.C` chain, or the `{path: ref}` object form below — still skips the whole
 //!   controller outright.
 //! - Nest URI versioning: `{ path: 'x', version: '1' }` prefixes a `v<version>` segment ahead of the
-//!   path. A non-literal `version` best-effort skips just that segment, not the whole controller.
+//!   path. A non-literal `version` never enters the path — that would be a guess — and does not skip
+//!   the controller either.
+//! - **`route-version-v1`**: whatever the class declared as `version` is ALSO carried beside the key,
+//!   as `IoProvide::route_version` — the expression TEXT, normalized (whitespace stripped, array
+//!   elements sorted), never resolved. It exists because Nest's `VersioningType.HEADER`/`CUSTOM`
+//!   versions by something the URL never carries: cal.com splits one path across
+//!   `@Controller({path, version})` classes over a `cal-api-version` header, so the keys are
+//!   byte-identical and only this field separates them. The values there are workspace-level
+//!   identifiers two hops from any literal, which is why this carries text rather than resolving —
+//!   see `context::version_expr_text` for what that costs a consumer, and `zzop_core::IoProvide`'s
+//!   `route_version` for what may be concluded from two texts differing.
 //! - Method-level: `@Get`/`@Post`/`@Put`/`@Delete`/`@Patch` each imply their verb. Path comes from a
 //!   bare decorator (empty path), a string literal, or an array of string literals (one provide per
 //!   entry, mirroring Nest's own per-entry registration). A non-literal/mixed path skips the method.
@@ -41,7 +51,24 @@
 //! - Lexical name matching only — import source is never verified, so a same-named decorator from an
 //!   unrelated library plus a same-named class gate would false-positive (same tradeoff as the Java
 //!   annotation extractor; the required double collision makes it vanishingly rare).
-//! - Method-level `@Version()` overrides are not read.
+//! - Method-level `@Version()` overrides are not read: the CLASS scope is stamped on every route of
+//!   the controller UNCONDITIONALLY, including a method that declares its own. **That is not a
+//!   conservative direction** — an earlier version of this line claimed it was, and the claim was
+//!   false. `@Version(VERSION_NEUTRAL)` makes a handler answer at EVERY version, so it JOINS the
+//!   scopes rather than narrowing to one; stamping it with the class scope UNDER-reports its reach,
+//!   and a text that under-reports can be the very difference that demotes a real shadow. Two
+//!   controllers at one path with disjoint class versions, one of them holding a neutral method, DO
+//!   contend on a single router — and `duplicate-route` would report that pair at `info` while telling
+//!   the reader not to merge them.
+//!   Measured on cal.com (2026-08-22, `grep -rn "@Version(" --include=*.ts apps/ packages/`): 18
+//!   occurrences, all `VERSION_NEUTRAL`. 17 sit in the four `/v2/atoms` controllers, which declare the
+//!   SAME `path: "/v2/atoms"` and the same `version: API_VERSIONS_VALUES`, so no pair of them differs;
+//!   the 18th is in `app.controller.ts` under a bare `@Controller()` carrying no version at all, which
+//!   leaves `route_version` unmeasured — and an unmeasured side never buys a demotion. So the harmful
+//!   shape is unreachable in this corpus today and reading `@Version` stays outside v1 — but the
+//!   license is corpus reachability, not safety, and reading it is what removes the hazard. The
+//!   class-masks-method behaviour is pinned by a test that asserts the CLASS scope is what lands, not
+//!   merely that something is absent.
 //! - An array `path` prefix (`{ path: ['a','b'] }`) takes only the first literal entry, same
 //!   "first wins" simplification as `zzop_parser_java_21::provides`'s `first_quoted_string`.
 //! - Nested/child controllers, nested classes, `applyDecorators`, and inherited/abstract controller

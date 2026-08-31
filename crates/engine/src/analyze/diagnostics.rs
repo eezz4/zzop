@@ -12,7 +12,9 @@ mod config_filters;
 mod coverage_report;
 mod degraded_files;
 mod git_collect;
+mod overlay_provenance;
 mod pack_scope;
+mod suppression;
 
 #[cfg(test)]
 mod unmatched_suppression_tests;
@@ -22,19 +24,26 @@ mod unparsed_extension_tests;
 pub(super) use capability::{git_not_requested_warning, unparsed_extension_warning};
 pub(crate) use capability::{uncompilable_rule_warnings, zero_packs_warning};
 pub(crate) use config_filters::{
-    global_exclude_diagnostics, unmatched_global_exclude_warnings, unmatched_suppression_warnings,
+    global_exclude_diagnostics, skipped_dirs_warning, unmatched_global_exclude_warnings,
+    unmatched_suppression_warnings,
 };
 pub(crate) use coverage_report::{rule_overrides_applied, run_diagnostics};
 pub(super) use degraded_files::degraded_files_warning;
 pub(super) use git_collect::collect_git;
 pub(crate) use git_collect::GitCache;
+pub(crate) use overlay_provenance::{
+    native_http_consumes, native_http_provides, overlay_provenance_warning,
+};
+pub use pack_scope::MIN_UNCOVERED_EXTENSION_SHARE_PCT;
 pub(crate) use pack_scope::{
     compute_dsl_scope, compute_dsl_scope_filtered, pack_scope_warnings, DslScope,
 };
+pub(crate) use suppression::suppressed_findings_warning;
 
-/// Example paths a FILE-AXIS aggregate self-report names inline before collapsing the rest to a
-/// `+N more` count. Shared by every report whose subject is "these individual files fell out of the
-/// flow" — [`minified_files_warning`] here and `pack_scope::vetoed_files` — because they are read in the
+/// Example paths a PATH-AXIS aggregate self-report names inline before collapsing the rest to a
+/// `+N more` count. Shared by every report whose subject is "these individual paths fell out of the
+/// flow" — [`minified_files_warning`] here, `pack_scope::vetoed_files`, and (on the directory axis
+/// rather than the file axis) `config_filters::skipped_dirs_warning` — because they are read in the
 /// same sitting by the same reader, and a run that printed 3 examples for one and 8 for the other would
 /// be inviting a comparison of the sample sizes rather than of the counts. Three is enough to recognise
 /// a pattern ("oh, these are all fixtures") and small enough that the line stays one line; the exact

@@ -1,4 +1,4 @@
-use super::{hits, scan, TempDir};
+use super::{assert_disqualifier_clause_precedes_imperative, hits, scan, TempDir};
 
 // --- flushall-in-code ---
 
@@ -154,5 +154,42 @@ fn a_flush_command_with_an_async_modifier_still_fires() {
         1,
         "{:?}",
         out.findings
+    );
+}
+/// §27 pin (2026-08-29). `critical`, so the reader acts fast. The disqualifier is the rule's own
+/// RESIDUAL: the denylist gate counts words, so a TWO-word denylist is indistinguishable from a
+/// two-element command array and fires anyway. A reader of that finding who follows "Scope deletes to
+/// explicit keys ..." rewrites a table of forbidden NAMES into `UNLINK` calls — which is the very
+/// deletion the rule exists to prevent. At HEAD that sentence sat at byte 1155 and the imperative at
+/// byte 263.
+///
+/// The IMPERATIVE moved rather than the residual, and the residual is why: it opens on "a two-element
+/// command array" and "a two-element denylist", both of which are defined by the TOKEN-AS-DATA
+/// paragraph above it. Lifting it to the front would put those terms in front of their own definitions.
+/// The imperative carries no pronoun and no back-reference, so moving it costs no bridging sentence; it
+/// now sits directly in front of the suppression marker, where "what to do" reads as one block. 1972
+/// chars before and after, character multiset identical.
+///
+/// Deliberately NOT pinned: the two FALSE-NEGATIVE disclosures in this message (the gate dropping a real
+/// `.flushall(` call on a denylist-shaped line, and "Second residual, the FALSE-NEGATIVE side"). §27's
+/// criterion excludes false-negative disclosure by name — a silent rule misleads nobody into an edit.
+#[test]
+fn flushall_message_puts_the_two_word_denylist_residual_before_the_scope_deletes_imperative() {
+    let dir = TempDir::new("zzop-redis");
+    dir.write(
+        "src/cache.ts",
+        "declare const client: any;\nexport async function resetCache() {\n  await client.flushAll();\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "flushall-in-code");
+    // Sentence repair only — the finding itself is unchanged.
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 3);
+
+    assert_disqualifier_clause_precedes_imperative(
+        "flushall-in-code",
+        &h[0].message,
+        "Residual: a two-element command array is indistinguishable from a two-element denylist",
+        "Scope deletes to explicit keys",
     );
 }

@@ -232,6 +232,7 @@ fn io_facts_are_collected_and_surfaced_on_the_common_ir() {
         file: "Ctrl.jsp".to_string(),
         line: 3,
         symbol: None,
+        ..Default::default()
     });
     let env = envelope(vec![a]);
     let out = analyze_envelope(&env, &config());

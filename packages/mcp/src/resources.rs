@@ -201,8 +201,10 @@ mod tests {
     }
 
     /// Pins the `rule-catalog` resource: it serves the exact bytes of `docs/rules/catalog.md` — the
-    /// rule-id discoverability gap a live-fire round found (`packsLoaded` gives counts only, and the
-    /// dsl-reference resource points at this very file, which was NOT served over MCP before this).
+    /// rule-id discoverability gap a live-fire round found (`packsLoaded` gave counts only then; it
+    /// carries `ruleIds` since 2026-08-20, but only for the packs one RUN loaded, while this resource
+    /// answers with no run at all — and the dsl-reference resource points at this very file, which was
+    /// NOT served over MCP before this).
     #[test]
     fn rule_catalog_resource_is_the_full_rule_id_catalog_markdown() {
         let doc = zzop_summary::contracts::CONTRACT_DOCS

@@ -94,6 +94,65 @@ fn promise_all_with_a_store_suffixed_receiver_is_not_flagged() {
     );
 }
 
+// --- the result-shape counter-indication (2026-08-25) ---
+//
+// The remedy used to read "Wrap the writes in a transaction, or use `Promise.allSettled(...)` with
+// compensation logic", and its caveat warned about the WRONG AXIS: it said the rule cannot prove the
+// writes sit inside the array, which is a precision disclosure, not a warning about the fix. Swapping in
+// `Promise.allSettled(...)` changes the RESOLVED VALUE — settlement wrappers instead of the values — and
+// on cal.com apps/web/app/api/cron/bookingReminder/route.ts:117 the awaited array becomes a calendar
+// event's `attendees` list, so the swap ships a corrupted event with nothing failing loudly. Pinned the
+// same way `write-in-loop-no-tx`'s condition is pinned one pack over.
+
+#[test]
+fn promise_all_message_warns_about_the_result_shape_before_naming_all_settled() {
+    let dir = TempDir::new("zzop-be-rel");
+    // The bookingReminder shape, reduced: the awaited array is CONSUMED, not discarded.
+    dir.write(
+        "src/reminder.ts",
+        "declare const db: any;\ndeclare const attendees: any[];\ndeclare function translate(a: any): Promise<any>;\nexport async function remind() {\n  const attendeesList = await Promise.all(attendees.map((a) => translate(a)));\n  await db.reminderMail.create({ data: { attendees: attendeesList } });\n  return attendeesList;\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "promise-all-and-writes");
+    // Still fires — sentence repair only.
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 5);
+
+    let m = &h[0].message;
+    for needle in [
+        "IF ANY CODE CONSUMES THE RESOLVED ARRAY",
+        "DO NOT SWAP IN `Promise.allSettled(...)`",
+        "settlement wrappers",
+        // Which consumers the swap is actually silent on. Until 2026-08-25 this pinned "no compile
+        // error", carried by an exhibit that was the one site where the hazard CANNOT happen:
+        // cal.com route.ts:119 annotates `const evt: CalendarEvent` and :138 assigns the awaited
+        // array to `attendees`, whose type is `Person[]` (packages/types/Calendar.d.ts:32,173) — so
+        // `tsc` catches that swap. Right warning, wrong exhibit. The claim is now scoped to the
+        // consumers that really do stay quiet, with the compiler named as the GOOD case.
+        "the swap is silent exactly where the value is `any`",
+    ] {
+        assert!(
+            m.contains(needle),
+            "promise-all-and-writes' remedy no longer warns that `Promise.allSettled(...)` changes the \
+             RESOLVED VALUE — missing {needle:?}. The caveat it used to carry is about write location, \
+             which is a different axis and does not stop this. In: {m}"
+        );
+    }
+
+    // Condition before imperative, same discipline as the sibling rule.
+    let condition = m
+        .find("IF THE RESOLVED ARRAY IS DISCARDED")
+        .expect("the safe branch must be stated as a condition, not as a bare imperative");
+    let settled = m
+        .find("`Promise.allSettled(...)`")
+        .expect("the remedy must still name the settled fix for the discard case");
+    assert!(
+        condition < settled,
+        "`Promise.allSettled(...)` is named before the condition that decides whether it is safe \
+         (condition at {condition}, mention at {settled}). In: {m}"
+    );
+}
+
 // --- json-parse-no-try ---
 
 #[test]

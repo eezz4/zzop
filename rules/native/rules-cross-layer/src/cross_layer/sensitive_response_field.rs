@@ -30,6 +30,8 @@ use std::collections::BTreeMap;
 
 use zzop_core::{disable_hint, CrossLayerEdge, Finding, ProvideResponseShape, Severity};
 
+mod message;
+
 /// Sensitive-name SUBSTRING tokens, matched against a lowercased, `_`/`-`-stripped field name
 /// (`passwordHash` -> `passwordhash` contains `password`). Substring matching is reserved for
 /// tokens long/specific enough that no benign field name embeds them by accident.
@@ -232,17 +234,13 @@ pub fn sensitive_response_field_findings(
             )
         };
 
-        let message = format!(
-            "route `{}` declares a response shape containing sensitive-named {field_word} \
-             `{fields_list}`, {exposure}. Evidence is the declared field NAME only — the value may \
-             be benign (a public id) and an auth route returning a token can be by design — and the \
-             DECLARATION only: runtime serialization (`@Exclude` decorators, `toJSON` methods, interceptors) is not \
-             read. Verify the field belongs in the wire contract; if not, remove it from the \
-             response DTO or strip it before serialization. Distinct from the `security` pack's \
-             secret rules, which match literal secret VALUES in source — this reads declared \
-             response field names, so both can legitimately fire on one file. {}",
-            site.key,
-            disable_hint("cross-layer/sensitive-response-field"),
+        let message = message::finding_message(
+            &site.key,
+            field_word,
+            &fields_list,
+            &exposure,
+            consumer_count,
+            &disable_hint("cross-layer/sensitive-response-field"),
         );
 
         let mut data = serde_json::json!({

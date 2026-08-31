@@ -207,7 +207,81 @@ const UNREVIEWED_CEILING: usize = 0;
 /// change as the export**, for the 2026-08-09 reason one paragraph up: the audit that found this at 65
 /// against 57 found 8 rows of room, four times the gap that was judged a defect then. 57 measured
 /// 2026-08-12 (v0.30.0 release audit).
-const CONVENTION_CEILING: usize = 57;
+///
+/// RAISED to 58 on 2026-08-17, and the case has to be made here rather than in a commit message. The
+/// new row is `hardcoded-secret`'s third arm (`annotated-assignment`, for the TypeScript/Python shape
+/// where a TYPE sits between the name and the value). It carries the secret-parameter vocabulary a
+/// THIRD time — `assignment` and `rust-str-const` already each carry a copy — so it adds no NEW config
+/// need, only another copy of one already counted. The obvious fix is the one this DSL structurally
+/// cannot do: a `${NAME}` fragment is referenceable only as a value in WHOLE, never spliced into a
+/// larger pattern, so the shared half of three sibling arms cannot be named. That is why the debt
+/// repeats per arm instead of being shared, and why paying it off means moving the vocabulary to
+/// config (where all three copies leave together), not refactoring the patterns. Read this +1 as one
+/// debt getting louder rather than a new debt: when that config key lands, the ceiling drops by three.
+///
+/// RAISED to 59 on 2026-08-21, and again the case rather than the count. The new row is
+/// `browser.json:location-assign-dynamic`'s pattern, which moved here from `fact` in the same change
+/// that wrote it. The rationale it carried under `fact` — "JS fixes the notation" — was false:
+/// `location=url` with no space around the `=` is perfectly valid JavaScript, so nothing in the
+/// language forces that spacing. A FORMATTER does. Which means WE chose the discriminator, and a tree
+/// with unformatted sources or a committed bundle could reasonably want it looser — that is this
+/// axis's definition, and leaving the row under `fact` would have hidden a real choice behind a claim
+/// about the language. Its config home does not exist (`-> (none yet)`) and should not be invented for
+/// one arm: the key would have to be "how strictly may a rule read whitespace as authorial intent",
+/// which is a question no other row asks yet, and a config surface grown one arm at a time is how the
+/// vocabulary keys got where they are. Read this +1 as an honest reclassification rather than new debt
+/// — the row already existed one axis over, asserting something untrue about JavaScript.
+///
+/// RAISED to 60 on 2026-08-21. The new row is `body-limit-missing`'s `next_line_exclude_pattern`,
+/// and it holds the SAME STRING as that rule's `exclude_pattern` row — the option name `limit`, now
+/// read one line forward as well as one line back. So this +1 buys no NEW config need: the day that
+/// name moves to config, BOTH rows leave in one edit and the ceiling drops by two. It is a separate
+/// row rather than a folded one because the census keys on `<pack>:<rule>:<field>` and a FIELD is
+/// what a pack author sets, so one value serving two fields is two things an author can get wrong.
+/// Read it as the `hardcoded-secret` entry above asks its three arms to be read: one debt getting
+/// louder, not a second debt.
+/// RAISED to 61 on 2026-08-22. The new row is `open-redirect`'s `trigger_call_exclude_pattern`, and
+/// it is the first row on this axis that is a WHOLE VOCABULARY rather than one token: the names a
+/// project gives the helper that makes a redirect target safe (a safety word — `safe`/`sanitize`/
+/// `allowlist` — joined to a target word — `Url`/`Uri`/`Redirect`/`Link`). WE chose that shape, and a
+/// project whose helper is called `checkReturnTo` would want it different, so `convention` is the only
+/// honest axis for it. `-> (none yet)`, and NOT config from day one for the STRUCTURAL reason two
+/// entries up: a DSL matcher cannot read a `vocabulary.*` key, since its patterns compile from the
+/// pack JSON before any config resolves, and method-scan is under that exactly as much as line-scan.
+///
+/// Declared-ONLY was the alternative and it is wrong HERE specifically, which is why this row buys
+/// something the ones above it do not. The rule's own prescription was "validate the target against an
+/// allow-list"; cal.com does exactly that, in an origin allowlist, at 17 of its redirect sites, and every
+/// one of them stayed. A prescription that cannot turn its own finding green is worse than a missing
+/// config key, so the default ships and the debt is stated here instead of being paid by every project
+/// that has not heard of the key.
+///
+/// Both halves of the vocabulary are load-bearing and that is measured, not aesthetic: requiring only
+/// the safety half admits `escapePath` (629 corpus uses), `validatePath` (109), `normalizePath` (106)
+/// and `revalidatePath` (17 — a Next.js App Router call that lives in the same files as `redirect()`).
+/// With both halves, false vetoes against the rule's 34 corpus findings: 0.
+///
+/// RAISED to 62 on 2026-08-26. The new row is `config-file-secret`'s `file_exclude_pattern` — which
+/// paths are a TRANSLATION CATALOGUE (`locales/<tag>/…`, `i18n/<tag>.json`). It is the first row on this
+/// axis that SUPPRESSES rather than detects, so it is the one that most deserves a config home and is
+/// least able to have one: a DSL matcher's patterns compile from the pack JSON before any config
+/// resolves (the structural reason two entries up), and a suppression key has the OPPOSITE safe default
+/// from every other `vocabulary.*` key — undeclared means "make no judgment", which for a veto list
+/// means "veto nothing", so a project that never heard of the key would keep the false positives while
+/// one that typo'd it would silently keep them too. Shipping the default and stating the debt here is
+/// the same trade the `open-redirect` entry above makes, for the same reason: a prescription nobody
+/// enables is worse than a missing key.
+///
+/// What the +1 buys is measured rather than asserted, and it is the reason this is not "one more
+/// vocabulary": the 16-character value floor is a proxy for "looks like a secret" that collapses in
+/// writing systems which do not separate words with spaces, so the rule was reporting translated UI
+/// labels and reporting them UNEVENLY — 50 of cal.com's 59 findings, distributed km 24 / ja 14 / zh 5 /
+/// de 2 / fi 2 / da, no, sv 1 each. Over 9 trees the veto silences 87 findings, every one of them read
+/// individually and every one a UI label; it stops scanning 207 of 3978 rule-readable config files; and
+/// the three container words it DECLINES were each measured at 0 harvest first (`lang/` 40 files,
+/// `translations/` 19, ResourceBundle `messages_<tag>.properties` 9). The day a `vocabulary.*` key can
+/// reach a matcher, this row and the rule's two sibling `(none yet)` rows leave together.
+const CONVENTION_CEILING: usize = 62;
 
 /// [`CENSUS_FILE`] as an absolute path — one owner, so the reader and the writer cannot disagree about
 /// which file this census is. `real_dsl_dir()` is `<manifest>/../../rules/dsl`, so two levels up from it

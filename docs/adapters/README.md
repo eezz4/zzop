@@ -6,6 +6,26 @@ extractor) computes that key even slightly differently than the engine does, the
 silently. There is no error: the consume just lands in `unprovidedConsumes` / the provide in
 `unconsumedProvides` instead of forming an edge. Byte-identical keys are the whole contract.
 
+## If routes are the only gap, you do not need an adapter
+
+Before either mode: `trees[].routes` in `zzop.config.jsonc` declares HTTP routes directly and expands
+internally into one synthetic overlay, so it produces the SAME joins through the SAME path as a
+hand-authored envelope, with keys normalized by the very transform this document is about.
+
+```jsonc
+{ "trees": [{ "root": "services/api", "routes": [
+  { "key": "GET /api/users" },
+  { "key": "POST /api/orders", "role": "provide" },
+  { "key": "GET /api/billing/{id}", "role": "consume" }
+]}]}
+```
+
+Provenance comes out cleaner too: injected routes are attributed to the synthetic file
+`<injected-routes>`, so nothing in the output reads as source zzop parsed. Write an envelope when you
+need channels this cannot express (imports, symbols, call sites, attributes, response shapes) or when
+the list is big enough to be worth generating. See
+[../recipes/write-an-adapter.md](../recipes/write-an-adapter.md).
+
 ## Availability — Mode A vs Mode B
 
 An adapter can reach the engine two ways (see `docs/NORMALIZED_AST.md`'s "Adapter overlays" section for

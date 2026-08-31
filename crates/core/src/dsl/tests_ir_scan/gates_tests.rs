@@ -217,6 +217,7 @@ fn suppress_marker_recognizes_the_python_hash_comment_leader() {
         line: 5,
         symbol: None,
         body: None,
+        ..Default::default()
     }];
     let attrs = AttributeStore::from_attrs(Vec::new());
     let pack = rule_pack(
@@ -285,6 +286,7 @@ fn a_python_hash_near_miss_is_disclosed_and_ordinary_anchor_prose_is_not() {
         line: 5,
         symbol: None,
         body: None,
+        ..Default::default()
     }];
     let disclose = |text: &'static str| {
         let mut out = Vec::new();

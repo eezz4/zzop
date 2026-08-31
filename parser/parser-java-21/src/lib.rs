@@ -79,7 +79,7 @@ pub const FRAMEWORK_RECOGNIZERS: &[FrameworkRecognizer] = &[
     FrameworkRecognizer {
         framework: "jpa",
         extensions: &["java"],
-        emits: &[channel::DB],
+        emits: &[channel::DB_PROVIDES],
     },
 ];
 
@@ -99,7 +99,7 @@ pub use project::{extract_http_provides_project, ProjectProvidesReport};
 pub use provides::extract_http_provides;
 pub use security::extract_spring_guarded_lines;
 pub use spring_security::{
-    extract_spring_security_posture, SpringAntMatcher, SpringSecurityPosture,
+    extract_spring_security_posture, SpringAntMatcher, SpringPostureBail, SpringSecurityPosture,
 };
 
 /// Cache-bust token for `zzop-cache`: `parser-id/pinned-toolchain/last-change-version`. The

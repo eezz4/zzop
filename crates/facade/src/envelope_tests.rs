@@ -463,3 +463,57 @@ fn the_rule_pack_validate_reply_does_not_gain_a_hints_field() {
     let value: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
     assert!(value.get("hints").is_none(), "{value}");
 }
+
+/// Mode A's half of the same gap: `validate_envelope_only_json` (the authoring surface) reports a hint
+/// naming the exact normalized key, while `analyze_envelope_json` — the lane that actually runs the
+/// envelope and where the unjoined key becomes a misleading `unconsumedProvides` entry — used to take
+/// only the accept/reject half of the same verdict and discard the advice.
+#[test]
+fn analyze_envelope_json_surfaces_the_same_hints_the_validator_reports() {
+    let envelope = r#"{
+        "format": "zzop-normalized-ast",
+        "version": "0.27.0",
+        "parser": "test/1",
+        "source": "legacy",
+        "files": [
+            {"path": "a.ts", "loc": 2, "io": {"provides": [
+                {"kind": "http", "key": "get /api/users/:id/", "file": "a.ts", "line": 1}
+            ], "consumes": []}}
+        ]
+    }"#;
+    // The authoring surface's answer, which is the bar the analyze lane has to meet.
+    let report: serde_json::Value =
+        serde_json::from_str(&validate_envelope_only_json(envelope)).unwrap();
+    assert_eq!(report["valid"], true, "{report}");
+    let validator_hint = report["hints"][0].as_str().expect("a hint: {report}");
+    assert!(validator_hint.contains("GET /api/users/{}"), "{report}");
+
+    let out = analyze_envelope_json(envelope, r#"{"sourceId": "legacy"}"#)
+        .expect("a hint-worthy envelope is still VALID and must analyze normally");
+    let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let warnings = value["warnings"].as_array().unwrap();
+    assert!(
+        warnings.iter().any(|w| w.as_str().is_some_and(
+            |s| s.contains("envelope accepted, but") && s.contains("GET /api/users/{}")
+        )),
+        "the analyze lane must say what the validator says: {warnings:?}"
+    );
+}
+
+/// The clean case is silent — a well-formed envelope must not acquire a new warning just because this
+/// channel exists. Without this, "surface hints" is indistinguishable from "emit noise every run".
+#[test]
+fn a_clean_envelope_gains_no_hint_warning() {
+    let out = analyze_envelope_json(&tiny_envelope_json(), r#"{"sourceId": "legacy"}"#)
+        .expect("analyze_envelope_json should succeed");
+    let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert!(
+        !value["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w.as_str().is_some_and(|s| s.contains("accepted, but"))),
+        "{}",
+        value["warnings"]
+    );
+}

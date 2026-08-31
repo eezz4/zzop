@@ -19,10 +19,11 @@ mod diagnose;
 // `pub(in crate::analyze)`: `native_rules::callgraph`'s python/rust arms share these predicates and resolvers, reached as `assemble::helpers::*`. (`rules` below is the other cross-mod export.)
 pub(in crate::analyze) mod helpers;
 mod metrics;
+mod nuxt_auto_import;
 mod orm;
+mod prescan;
 mod provides;
 pub(in crate::analyze) mod rules; // pub for `analyze/mod.rs`'s re-surface of the profiled io-scan evaluator (Mode A reuse — see `rules`'s re-export comment)
-mod sfc;
 mod warnings;
 
 /// Consumes the fused pass's per-file artifacts and produces the final `AnalyzeOutput`. `artifacts` must
@@ -50,6 +51,7 @@ pub(crate) fn assemble(
         ts_paths,
         mut degraded,
         mut minified,
+        suppress_markers,
         io_provides,
         io_consumes,
         dead_export_names_by_file,
@@ -72,10 +74,15 @@ pub(crate) fn assemble(
         go_modules,
         java_index,
         csharp_index,
-        sfc_rels,
+        prescan_rels,
     } = collect::collect(root, artifacts, config, &overlay_applied.covered_paths);
 
-    let sfc_import_pairs = sfc::collect_sfc_import_pairs(root, &sfc_rels);
+    // Assemble-time disk reads for references the cached per-file pass cannot see: pre-scanned
+    // `<script>`/frontmatter imports, and Nuxt auto-import targets reached by bare symbol name (applied
+    // as a `fan_in` bump, never a `dep` node, by `dep_graph`'s third fan-in arm).
+    let prescan =
+        prescan::collect_prescan(root, &prescan_rels, &ts_paths, &dead_export_names_by_file);
+    let prescan_import_pairs = prescan.import_pairs;
     let provides::ProvidesResult {
         mut io_provides,
         mut io_consumes,
@@ -111,8 +118,9 @@ pub(crate) fn assemble(
         folders,
         commits,
         git_active,
-        sfc_targets,
+        prescan_targets,
         asset_targets,
+        auto_import_targets,
     } = dep_graph::build(
         root,
         config,
@@ -124,12 +132,14 @@ pub(crate) fn assemble(
         &ts_paths,
         &pkg_scan,
         &tsconfigs,
+        &all_symbols,
         &rust_workspace,
         &go_modules,
         &java_index,
         &csharp_index,
-        &sfc_import_pairs,
+        &prescan_import_pairs,
         &ts_asset_ref_pairs,
+        &prescan.auto_import_refs,
         git_cache,
     );
 
@@ -140,8 +150,10 @@ pub(crate) fn assemble(
             cycles: &cycles,
             nodes: &nodes,
             dep: &dep,
-            sfc_targets: &sfc_targets,
+            prescan_targets: &prescan_targets,
             asset_targets: &asset_targets,
+            auto_import_targets: &auto_import_targets,
+            auto_import_names: &prescan.auto_import_refs.names_by_target,
             overlay_entry_paths: &overlay_applied.entry_paths,
         },
         &pkg_scan,
@@ -159,7 +171,7 @@ pub(crate) fn assemble(
         &io_provides,
         &io_consumes,
         &mut rule_time,
-        &sfc_import_pairs,
+        &prescan_import_pairs,
         &mut per_file_findings,
         &mut warnings,
     );
@@ -180,6 +192,7 @@ pub(crate) fn assemble(
             config,
             rels: &rels,
             minified: &minified,
+            suppress_markers: &suppress_markers,
             degraded: &degraded,
             unparsed_extensions: &unparsed_extensions,
             ts_paths: &ts_paths,
@@ -187,6 +200,9 @@ pub(crate) fn assemble(
             csharp_rels: &csharp_rels,
             package_import_files: &package_import_files,
             loc_by_path: &loc_by_path,
+            all_symbols: &all_symbols,
+            dep: &dep,
+            overlay_io: &overlay_applied.io_by_parser,
         },
         &io_provides,
         &io_consumes,
@@ -218,13 +234,7 @@ pub(crate) fn assemble(
     warnings.extend(diagnostics_report.warnings);
     let config_warnings = diagnostics_report.config_warnings;
 
-    // `root.is_dir()` gates this so it doesn't duplicate `analyze_tree`'s more specific "root missing / not
-    // a directory" self-report (`lib.rs`'s `scope_warnings`); an existing-but-empty root gets no such one.
-    if file_count == 0 && root.is_dir() {
-        warnings.push(
-            "root produced 0 analyzable files — check the path exists and contains supported source files".to_string(),
-        );
-    }
+    warnings.extend(diagnose::empty_root_warning(file_count, root));
 
     let rule_timings = config
         .profile_rules
@@ -252,17 +262,7 @@ pub(crate) fn assemble(
         &ts_dynamic_import_pairs,
     );
 
-    // Gated like `scores`/`health`/`critical`/`seams`: `Some` only when git collection actually ran, so no
-    // consumer sees a window echoed for numbers that stayed empty.
-    let git_window = git_active
-        .then_some(config.git.as_ref())
-        .flatten()
-        .map(|g| crate::GitWindow {
-            recent_days: g.recent_days,
-            since: g.since.clone(),
-        });
-
-    let package_imports = crate::PackageImportSummary::census(package_import_files);
+    let git_window = metrics::git_window(config, git_active);
 
     AnalyzeOutput {
         ir,
@@ -271,9 +271,11 @@ pub(crate) fn assemble(
         // (`diagnostics::degraded_files`), which is where every other "what did this run fail to see"
         // sentence already lives, rather than widening a published array's element shape.
         degraded: degraded.into_iter().map(|d| d.rel).collect(),
+        // Sorted by its producer — a SET upstream, and §6 makes byte-identical output a contract.
+        build_script_paths: pkg_scan.sorted_script_paths(),
         file_count,
         coverage,
-        package_imports,
+        package_imports: crate::PackageImportSummary::census(package_import_files),
         attributes: attribute_store,
         nodes,
         scores,
@@ -285,6 +287,7 @@ pub(crate) fn assemble(
         layer_co_churn,
         co_change,
         packs_loaded: crate::PackLoaded::from_config(config, &dsl_scope),
+        native_analyses: crate::NativeAnalyses::of(&config.rule_config),
         warnings,
         config_warnings,
         // Set by `analyze_tree` after this returns (needs `pipeline::run_file_pass`'s private counters).

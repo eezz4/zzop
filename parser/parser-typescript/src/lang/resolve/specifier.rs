@@ -35,20 +35,19 @@ pub fn resolve_file(
         // dominant convention is `"@/*": ["./src/*"]`, so without this fallback every `@/` import
         // breaks and unimported-export/unreachable analysis misreports the whole `src/` tree as orphaned.
         // tsconfig `paths` isn't read here (yet); this covers the two conventional mappings, root first.
-        return try_ext(rest, all_paths).or_else(|| try_ext(&format!("src/{rest}"), all_paths));
+        // Nuxt spells its srcDir `@` as well, so an app-ANCHORED probe runs last — after the two
+        // mappings above, so every tree that resolves today keeps resolving to exactly what it does now.
+        return try_ext(rest, all_paths)
+            .or_else(|| try_ext(&format!("src/{rest}"), all_paths))
+            .or_else(|| {
+                super::framework_alias::resolve_framework_alias(specifier, from_file, all_paths)
+            });
     }
-    // SvelteKit reserves `$lib` for `src/lib` — a built-in, non-configurable alias every SvelteKit app
-    // relies on. It is normally wired through the generated `.svelte-kit/tsconfig.json`, which is absent
-    // from a fresh checkout (created by `svelte-kit sync` at build time), so resolve it directly here.
-    // Without this, `$lib/*` imports from `.svelte` components and `+page.server.js` routes all fail to
-    // resolve and unimported-export/dead-candidates misreport the whole `src/lib` tree as orphaned.
-    if specifier == "$lib" {
-        return try_ext("src/lib", all_paths);
-    }
-    if let Some(rest) = specifier.strip_prefix("$lib/") {
-        return try_ext(&format!("src/lib/{rest}"), all_paths);
-    }
-    None
+    // Framework-reserved aliases (SvelteKit's `$lib`, Nuxt's `~`/`~~`/`@@`) live in their own module.
+    // They share one cause — the mapping exists only in a config the framework GENERATES at build time,
+    // so a fresh checkout does not carry it — and keeping them together is what stops the next one being
+    // added as a fourth special case here. See `framework_alias`.
+    super::framework_alias::resolve_framework_alias(specifier, from_file, all_paths)
 }
 
 /// Strips a bundler RESOURCE QUERY off a specifier: `./worker?worker` -> `./worker`, `./a.svg?url` ->
@@ -246,7 +245,10 @@ mod tests {
 
     #[test]
     fn resolves_sveltekit_lib_alias() {
-        let all = paths(&["src/lib/api.ts", "src/lib/constants.js"]);
+        // The `svelte.config.js` is load-bearing, not scenery: `$lib` anchors to the Kit app the
+        // importing file belongs to, so a tree with no config resolves nothing. See
+        // `framework_alias`'s `anchor_dir`.
+        let all = paths(&["svelte.config.js", "src/lib/api.ts", "src/lib/constants.js"]);
         // `$lib/api` -> src/lib/api.ts; `$lib/constants.js` -> src/lib/constants.js (literal ext kept).
         assert_eq!(
             resolve_file("$lib/api", "src/routes/+page.svelte", &all).as_deref(),
@@ -265,7 +267,7 @@ mod tests {
 
     #[test]
     fn resolves_bare_sveltekit_lib_to_index() {
-        let all = paths(&["src/lib/index.ts"]);
+        let all = paths(&["svelte.config.js", "src/lib/index.ts"]);
         assert_eq!(
             resolve_file("$lib", "src/routes/+layout.svelte", &all).as_deref(),
             Some("src/lib/index.ts")

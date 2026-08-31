@@ -135,6 +135,7 @@ mod tests {
                     file: "CtrlAuthen.java".to_string(),
                     line: 40,
                     symbol: Some("getUserInfo".to_string()),
+                    ..Default::default()
                 }],
                 consumes: Vec::new(),
             },

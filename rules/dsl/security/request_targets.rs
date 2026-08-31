@@ -1,4 +1,4 @@
-use crate::{hits, scan, TempDir};
+use crate::{assert_disqualifier_summary_precedes_imperative, hits, scan, TempDir};
 
 // --- open-redirect ---
 
@@ -50,6 +50,45 @@ fn fetch_of_a_request_derived_url_in_the_same_function_is_flagged() {
     let h = hits(&out, "ssrf-user-url");
     assert_eq!(h.len(), 1, "{:?}", out.findings);
     assert_eq!(h[0].line, 4);
+}
+
+/// §27 pin (2026-08-29). This is the most honest message of the five repaired here and it was arranged
+/// the worst: it states outright that "Validating or allow-listing the target does NOT clear the finding
+/// either" -- and put that 350 characters BEHIND "Validate the target against an allow-list of hosts."
+/// A reader who acts on the first instruction does the allow-listing, re-runs, and sees the identical
+/// finding, which is how a channel gets switched off instead of followed.
+///
+/// WHAT MOVED: the imperative, not the clause. Moving the clause forward would have split "The `if` is
+/// load-bearing" from its antecedent -- the "if that value becomes part of the URL" in the opening
+/// sentence -- and stranded "for exactly that gap" in the closing one. Sending the imperative to the
+/// tail leaves every antecedent adjacent to its referent and moves one sentence. 986 characters before
+/// and after, character multiset identical (the separating space travels with it).
+///
+/// The clause pinned is the LATER of this rule's two disqualifiers, so the assertion also holds the
+/// earlier one -- "a handler that reads a query parameter for something else while calling a hard-coded
+/// endpoint fires identically" -- in front of the imperative.
+///
+/// INVALIDATION PROBE: put the imperative back after the opening sentence. Every token stays present and
+/// spelled exactly once, a `contains` pin stays green, and this assertion alone goes red.
+#[test]
+fn ssrf_user_url_remedy_does_not_clear_it_clause_precedes_the_validate_imperative() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/proxy.ts",
+        "declare const fetch: any;\nexport async function proxy(req: any) {\n  const url = req.query.url;\n  return fetch(url);\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "ssrf-user-url");
+    // Sentence order only -- the finding itself is unchanged.
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 4);
+    assert_disqualifier_summary_precedes_imperative(
+        "ssrf-user-url",
+        &h[0].message,
+        "Validating or allow-listing the target does NOT clear the finding either",
+        "Validate the target against an allow-list of hosts.",
+        "fires identically",
+    );
 }
 
 #[test]

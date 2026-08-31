@@ -87,3 +87,40 @@ fn location_assign_dynamic_inside_a_test_fixture_path_is_not_flagged() {
         out.findings
     );
 }
+
+/// **An arrow PARAMETER named `location` is not an assignment**, and until 2026-08-21 it was read as one:
+/// the negated class after `=` excluded `=` but not `>`, so `location => {` matched as `location = >`.
+/// Reproduced twice in apache/superset (`transformPropsUtil.ts`, `ScatterPlotOverlay.tsx`), where the
+/// printed snippet contained no navigation sink at all — which makes a reviewer distrust the printer
+/// before the rule. The rule's own message promises "only the bare global `location`/`window.location`
+/// is flagged"; a callback parameter is neither.
+///
+/// Three arrow shapes and the real sink in one call, because "arrows are quiet" and "the rule is dead"
+/// are the same assertion without the positive control.
+#[test]
+fn an_arrow_parameter_named_location_is_not_a_navigation_sink() {
+    let dir = TempDir::new("zzop-browser");
+    dir.write(
+        "src/geo.ts",
+        "export function plot(byLoc: Record<string, number>, marks: string[], userInput: string) {\n\
+        \x20 Object.keys(byLoc).forEach(location => { void location; });\n\
+        \x20 marks.map(location => location.length);\n\
+        \x20 const pick = (location: string) => location;\n\
+        \x20 void pick;\n\
+        \x20 window.location.href = userInput;\n\
+        }\n",
+    );
+    let out = scan(&dir);
+    let lines: Vec<u32> = out
+        .findings
+        .iter()
+        .filter(|f| f.rule_id == "browser/location-assign-dynamic")
+        .map(|f| f.line)
+        .collect();
+    assert_eq!(
+        lines,
+        vec![6],
+        "only the real `window.location.href =` sink on line 6 may fire: {:?}",
+        out.findings
+    );
+}

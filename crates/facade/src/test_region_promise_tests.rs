@@ -4,8 +4,10 @@
 //!
 //! ## Why a guard and not a list
 //! The flag has to be EXPLICIT — nothing derivable distinguishes "this rule judges the commit" from
-//! "this rule judges code that runs" (ten bundled rules carry no `file_exclude_pattern`; only seven of
-//! them are about credentials). But an explicit flag maintained by hand is exactly the artifact that
+//! "this rule judges code that runs" (a handful of bundled rules carry no `file_exclude_pattern`, and
+//! not every one of them is about credentials — the roster and its size are the `vetoed_files` doc's to
+//! recount, and are deliberately not retyped here, having gone stale twice when they were). But an
+//! explicit flag maintained by hand is exactly the artifact that
 //! rots: the next author adds a credential rule, writes "scans test paths too" in its catalog row, and
 //! forgets the flag — and the rule then reports a clean run over a committed key, silently, which is
 //! this repo's cardinal failure. Or the reverse: the flag is set and nothing published says so, and a
@@ -169,6 +171,24 @@ fn a_rule_message_that_promises_to_scan_test_paths_must_carry_the_flag() {
 /// the rule would skip `foo.test.ts` wholesale and then insist on judging `#[cfg(test)]` in the file
 /// next to it. Catching that here is what stops the flag from being pasted onto a rule that merely
 /// looked adjacent.
+///
+/// ## What the subject is, and why it stopped being "has a `file_exclude_pattern` at all" (2026-08-26)
+/// This clause read the FIELD'S PRESENCE for its whole life, which was sound only because the field was
+/// a synonym for the test decision: every bundled use of it was a `${test-paths…}` ref, so "excludes
+/// paths" and "excludes TEST paths" named the same set. `security/config-file-secret` broke the synonymy
+/// by taking a `file_exclude_pattern` that declines TRANSLATION CATALOGUES (`locales/<lang>/…`,
+/// `i18n/<lang>.json` — 87 measured false positives, all of them UI labels, weighted onto languages that
+/// do not put spaces between words). Nothing about that pattern says anything about test code, and this
+/// clause's own reasoning above — "the rule would skip `foo.test.ts` wholesale" — does not describe it.
+/// Reading presence would have forced the rule to give up `scan_test_regions`, which is the credential
+/// family's whole point: a key committed inside a fixture is still committed.
+///
+/// So the subject is now the QUESTION the clause is named after, asked directly:
+/// `zzop_core::dsl::declines_shared_test_paths`, which is true when the pattern carries a shared
+/// `test-paths*` body (as the whole value, the shape every bundled exclusion has, or as one alternative
+/// of a composite). The residual is that predicate's, restated in one line so a reader here need not
+/// chase it: a HAND-ROLLED test-path exclusion reads as `false` and would slip through — no bundled rule
+/// has one, and `tests_fragments::name_census` is the triage moment where a new spelling gets looked at.
 #[test]
 fn a_rule_that_scans_test_regions_must_not_also_exclude_test_paths() {
     let rules = bundled_rules();
@@ -176,9 +196,11 @@ fn a_rule_that_scans_test_regions_must_not_also_exclude_test_paths() {
         .iter()
         .filter(|(_, rule)| rule.scan_test_regions)
         .filter_map(|(id, rule)| {
-            file_exclude_pattern(rule).map(|p| {
-                format!("{id}: `scan_test_regions` is set, but `file_exclude_pattern` is {p:?}")
-            })
+            file_exclude_pattern(rule)
+                .filter(|p| zzop_core::dsl::declines_shared_test_paths(p))
+                .map(|p| {
+                    format!("{id}: `scan_test_regions` is set, but `file_exclude_pattern` is {p:?}")
+                })
         })
         .collect();
     assert!(
@@ -186,6 +208,42 @@ fn a_rule_that_scans_test_regions_must_not_also_exclude_test_paths() {
         "these rules decline SPAN-based test exclusion while still declining test PATHS — one of the \
          two is wrong:\n  {}",
         offenders.join("\n  ")
+    );
+}
+
+/// CLAUSE D's canary, both directions. Narrowing D's subject from "has a `file_exclude_pattern`" to
+/// "declines TEST paths" put a predicate between the guard and its population, and a predicate that
+/// answered `false` to everything would make D vacuously green — the exact failure the census clause
+/// below exists to catch one layer up. So: some bundled exclusion must read as a test-path exclusion
+/// (the needle works), and no bundled exclusion may read as one WITHOUT carrying a shared `test-paths*`
+/// body verbatim (nothing else is quietly being counted). Neither half names a rule or a count.
+#[test]
+fn the_test_path_exclusion_predicate_separates_the_two_kinds_of_path_veto() {
+    let rules = bundled_rules();
+    let excludes: Vec<&str> = rules.values().filter_map(file_exclude_pattern).collect();
+    assert!(
+        !excludes.is_empty(),
+        "no bundled rule carries a `file_exclude_pattern` at all — CLAUSE D has no population and is \
+         green over the empty set"
+    );
+    let declining = excludes
+        .iter()
+        .filter(|p| zzop_core::dsl::declines_shared_test_paths(p))
+        .count();
+    assert!(
+        declining > 0,
+        "not one of the {} bundled `file_exclude_pattern`s reads as a test-path exclusion — the \
+         predicate CLAUSE D now filters on is answering `false` to everything, which makes that clause \
+         green no matter what the packs say",
+        excludes.len()
+    );
+    // The throw-away half of the canary: a path exclusion that has nothing to do with test code must
+    // read as `false`, or the predicate is a constant in the other direction and CLAUSE D goes back to
+    // reading mere presence. Written out here rather than read off a rule, so no bundled id is named.
+    assert!(
+        !zzop_core::dsl::declines_shared_test_paths("(?:^|/)locales?/[a-z]{2,3}(?:/|\\.json$)"),
+        "a path exclusion naming no test convention reads as a test-path exclusion — the predicate is \
+         answering `true` to everything and CLAUSE D is now failing rules it was narrowed to admit"
     );
 }
 

@@ -26,9 +26,9 @@
 const RETIRED_KEYS: &[(&str, &str)] = &[
     (
         "failOn",
-        "it was accepted as a severity threshold for a CI gate, but no zzop binary has ever exited \
-         non-zero on findings, so setting it gated nothing. Delete it — the run is unchanged — and \
-         gate a build by reading the severities out of the JSON output yourself.",
+        "it was accepted as a severity threshold for a CI gate, but a CONFIG key never gated \
+         anything: it was read and forwarded nowhere. Delete it, the run is unchanged. A host \
+         option does gate now, which this notice denied until 2026-08-17.",
     ),
     (
         "format",

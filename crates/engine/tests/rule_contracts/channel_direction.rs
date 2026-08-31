@@ -310,6 +310,7 @@ fn donor_overlay(
                 symbol: None,
                 body: None,
                 response: None,
+                ..Default::default()
             });
         }
     }

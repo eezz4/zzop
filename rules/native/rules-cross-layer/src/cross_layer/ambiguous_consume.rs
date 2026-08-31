@@ -101,6 +101,7 @@ mod tests {
                 file: file.to_string(),
                 line,
                 symbol: None,
+                ..Default::default()
             },
         }
     }

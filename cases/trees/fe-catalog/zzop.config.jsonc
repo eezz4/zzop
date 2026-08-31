@@ -70,7 +70,13 @@
 
     // The Python side of the same guard question: what makes a dependency callable a gate, and the
     // three shapes that mean it reads or renders rather than rejects.
-    "pythonGuardSubstrings": ["authoriz","authentic","currentuser","activeuser","superuser","staffuser","permission","loginrequired","isauthenticated","isadminuser","requirelogin","requireauth","verifytoken","checktoken","jwtrequired","apikeyrequired"],
+    // The require-prefixed family is the FastAPI house idiom for a gate, and this list named only its
+    // login and auth members — so an admin gate spelled require_admin read as "not a guard" and every
+    // route it protected was reported as unauthorized. Measured 2026-08-16 on a 17-route FastAPI tree:
+    // 8 false alarms against 1 true one, all 8 cleared by that one string. The three admitted beside it
+    // close the same shape (require_staff, require_role) and the Django-style inversion (admin_required,
+    // whose login_required twin this list already covered).
+    "pythonGuardSubstrings": ["authoriz","authentic","currentuser","activeuser","superuser","staffuser","permission","loginrequired","isauthenticated","isadminuser","requirelogin","requireauth","requireadmin","requirestaff","requirerole","adminrequired","verifytoken","checktoken","jwtrequired","apikeyrequired"],
     "pythonGuardAnonymousVetoSubstrings": ["optional","ornone","maybe","anonymous"],
     "pythonGuardReportVetoPrefixes": ["list","count","serialize","render","format"],
     "pythonGuardReportVetoSuffixes": ["header","headers","serializer","serializers","handler","stats","metrics","report","summary"],

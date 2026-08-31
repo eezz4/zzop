@@ -44,7 +44,7 @@ pub(crate) use package_json::package_json_entries;
 // `dep_graph`/`provides`/`rules` all name it through here.
 pub(crate) use package_json::PackageJsonScan;
 pub(crate) use rust_workspace::{scan_rust_workspace, RustWorkspaceMap};
-pub(crate) use tsconfig::tsconfig_scan;
+pub(crate) use tsconfig::{tsconfig_preserves_type_imports, tsconfig_scan};
 
 /// WHY a file fell back to the lexical projection — the three, and only three, ways `FileArtifact`
 /// can be degraded. Each arm is a different LEVER for the caller, which is the whole reason the fact is
@@ -84,6 +84,8 @@ pub(crate) enum DegradeCause {
 /// roster), not `zzop_parser_typescript`'s resolver — see those functions' docs for why.
 pub(crate) struct FileArtifact {
     pub rel: String,
+    /// This file's `zzop-<rule>-ok` markers, set OUTSIDE the cache branches (see `suppress_marker_sites`).
+    pub suppress_markers: Vec<zzop_core::dsl::SuppressMarkerSite>,
     pub symbols: Vec<SourceSymbol>,
     pub imports: Option<ImportMap>,
     /// This file's re-exports (`export { x } from './y'` / `export * from './y'`, each carrying its own
@@ -104,7 +106,7 @@ pub(crate) struct FileArtifact {
     /// `new Worker`/`new SharedWorker`, `importScripts`, `new URL(<path>, import.meta.url)`) as RAW,
     /// unresolved path strings — `analyze::assemble`'s substrate for `merge_asset_ref_fan_in`, which
     /// resolves each against the tree's `public/`/`static/` root (or a relative module path) and bumps
-    /// the target's fan-in WITHOUT adding a dep node (mirroring the SFC fan-in bump), so a `public/*.js`
+    /// the target's fan-in WITHOUT adding a dep node (mirroring the import pre-scan's fan-in bump), so a `public/*.js`
     /// worklet/worker loaded only by URL string is not a `dead-candidates` false positive. Empty for
     /// non-TypeScript/degraded files, same convention as `dynamic_imports`.
     pub asset_refs: Vec<String>,
@@ -210,17 +212,24 @@ pub(crate) struct FileArtifact {
 /// Runs the fused per-file pass over every file under `root` (skipping `config.dispatch.skip_dirs`) and
 /// returns one `FileArtifact` per file, sorted by `rel`. `cache`/`counters` are `analyze_tree`'s
 /// already-opened cache handle and shared hit/miss counters — both `None` when caching is off.
+///
+/// `skipped_dirs` is an out-param carrying the walk's prune list up to the caller's diagnostics (see
+/// [`walking::Walked`]): the prune happens here but only `analyze_tree` assembles warnings, and a fact
+/// that never leaves this function is a fact the reply cannot disclose.
 pub(crate) fn run_file_pass(
     root: &Path,
     config: &EngineConfig,
     cache: Option<&AnalysisCache>,
     counters: Option<&CacheCounters>,
+    skipped_dirs: &mut Vec<String>,
 ) -> Vec<FileArtifact> {
     // `config.cache_dir` is handed to the walk, not just to the store: the directory this run writes its
     // own entries into must not be walked as source by the NEXT run (`walk_files`'s doc has the growth
     // numbers). It is passed even when `cache` is `None` — a cache directory that failed to OPEN may still
     // hold entries an earlier run wrote, and those are no more source than this run's are.
-    let files = walking::walk_files(root, &config.dispatch, config.cache_dir.as_deref());
+    let walked = walking::walk_files(root, &config.dispatch, config.cache_dir.as_deref());
+    let files = walked.files;
+    skipped_dirs.extend(walked.skipped_dirs);
     // Pack-level and per-rule `disabled_rules` gating happen once here, outside the per-file loop
     // (`pack_loader::applies_to` below is the remaining per-file pre-filter). A bare pack id drops the
     // whole pack; a `"{pack}/{rule}"` id drops just that rule.

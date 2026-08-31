@@ -5,22 +5,75 @@ use std::path::Path;
 
 use super::manifest::{
     collect_export_path_strings, collect_exports_dot_entry, is_package_json_path,
-    join_and_normalize, looks_like_script_path_token, package_json_dir,
+    is_run_lifecycle_script_key, join_and_normalize, looks_like_script_path_token,
+    package_json_dir,
 };
 
-/// `package_json_entries`' return: `extra_entries` plus `workspace_pkgs`, a `name -> WorkspacePkg` map
-/// from the same manifest walk. The workspace-alias import resolver needs a directory to resolve
-/// `<name>/subpath` specifiers and a resolved entry file to resolve a bare `<name>` specifier.
+/// `package_json_entries`' return: the two DEPLOYMENT ROLES a manifest names, plus `workspace_pkgs`, a
+/// `name -> WorkspacePkg` map from the same manifest walk. The workspace-alias import resolver needs a
+/// directory to resolve `<name>/subpath` specifiers and a resolved entry file to resolve a bare `<name>`
+/// specifier.
+///
+/// ## Why two sets and not one (2026-08-24)
+/// A single `extra_entries` field used to hold both, because its only consumer asks one question — "is
+/// this file reached by a mechanism the import graph cannot see?" — and both roles answer it `yes`. But
+/// the manifest states two DIFFERENT facts, and the second consumer (the summary layer's first-screen
+/// ordering) needs them apart:
+/// * `entry_paths` — the package's OWN code: what it exports (`main`/`module`/`bin`/`exports`) and what it
+///   RUNS (a token named by an npm run-lifecycle script — see `manifest::is_run_lifecycle_script_key`).
+/// * `script_paths` — path tokens named ONLY by other `scripts` keys. The package declaring how it is
+///   BUILT, released or checked. A finding in one of these is about the toolchain, not the product.
+///
+/// ⚠ The split is NOT "entry fields vs `scripts`", and reading it that way is the defect this shape was
+/// corrected for on 2026-08-24. `"start": "ts-node src/index.ts"` in a manifest with no `main` at all is
+/// the whole product of `corpus/x/xai-cookbook/.../telephony/xai` — three live Express servers sorted last
+/// in that tree because the first cut called every `scripts` token build surface. A `scripts` token means
+/// "not shipped" only for the keys that are not how the package is RUN.
+///
+/// The union is what `dead-candidates` reads and it is unchanged by either revision —
+/// [`PackageJsonScan::all_entry_paths`] is the one place that union is spelled, so no consumer can
+/// silently pick up half of it, and moving a path between the two sets cannot move a count.
 pub(crate) struct PackageJsonScan {
-    pub extra_entries: std::collections::HashSet<String>,
+    /// Files the manifest declares as the package's own code — SHIPPED (`main`/`module`/`bin`/`exports`)
+    /// or RUN (a path token named by `prestart`/`start`/`poststart`/the `restart` triple).
+    pub entry_paths: std::collections::HashSet<String>,
+    /// Files named only by non-run `scripts` keys, MINUS anything also in `entry_paths` — a path a package
+    /// both runs (or ships) and invokes from a build script is the product, and that role dominates.
+    /// Disjoint from `entry_paths` by construction, so the union below never double-counts and the
+    /// deployment-role classification downstream can never call one path two things.
+    pub script_paths: std::collections::HashSet<String>,
     pub workspace_pkgs: std::collections::HashMap<String, zzop_parser_typescript::WorkspacePkg>,
+}
+
+impl PackageJsonScan {
+    /// Every path any `package.json` field named, both roles together — the set `dead-candidates` seeds
+    /// as `extra_entries` (see [`crate::analyze`]'s `assemble::rules::entries`). Byte-for-byte the set
+    /// the pre-split single field held: the split is a classification, never a filter.
+    pub(crate) fn all_entry_paths(&self) -> std::collections::HashSet<String> {
+        self.entry_paths
+            .union(&self.script_paths)
+            .cloned()
+            .collect()
+    }
+
+    /// [`Self::script_paths`] as a sorted `Vec` — the wire form (`AnalyzeOutput::build_script_paths`).
+    /// Sorted HERE, at the one place the set becomes a sequence: `HashSet` iteration order is not stable
+    /// across runs, and `output-philosophy.md` §6 makes byte-identical output for the same config a
+    /// published contract, so every surface has to get the ordered form and none may re-derive it.
+    pub(crate) fn sorted_script_paths(&self) -> Vec<String> {
+        let mut v: Vec<String> = self.script_paths.iter().cloned().collect();
+        v.sort();
+        v
+    }
 }
 
 /// Collects file paths referenced by any `package.json` found during the walk that should be treated as
 /// entry-like regardless of `fan_in` (`find_dead_candidates`'s `extra_entries`): manifest entry fields
-/// (`main`/`module`/`bin`/`exports`) and lexically-scanned `scripts` path tokens. `all_paths` is the
-/// TS-dispatched universe used to resolve an extensionless/compiled manifest value via
-/// `zzop_parser_typescript::try_ext`.
+/// (`main`/`module`/`bin`/`exports`) and lexically-scanned `scripts` path tokens — kept APART by
+/// deployment role in the returned [`PackageJsonScan`] (see its doc), with the `scripts` half itself split
+/// by KEY so a run-lifecycle target lands on the entry side, and unioned back by
+/// [`PackageJsonScan::all_entry_paths`]. `all_paths` is the TS-dispatched universe used to resolve an
+/// extensionless/compiled manifest value via `zzop_parser_typescript::try_ext`.
 ///
 /// Also collects each manifest's `name` into `PackageJsonScan::workspace_pkgs` (own directory, plus a
 /// resolved bare-specifier entry tried in Node's own order: `main`, `module`, `exports["."]`, then a
@@ -34,7 +87,8 @@ pub(crate) fn package_json_entries(
     node_paths: impl Iterator<Item = String>,
     all_paths: &std::collections::HashSet<String>,
 ) -> PackageJsonScan {
-    let mut result = std::collections::HashSet::new();
+    let mut entry_paths = std::collections::HashSet::new();
+    let mut script_paths = std::collections::HashSet::new();
     let mut workspace_pkgs = std::collections::HashMap::new();
     for rel in node_paths.filter(|p| is_package_json_path(p)) {
         let Ok(text) = fs::read_to_string(root.join(&rel)) else {
@@ -64,11 +118,25 @@ pub(crate) fn package_json_entries(
         if let Some(exports) = value.get("exports") {
             collect_export_path_strings(exports, &mut candidates);
         }
+        // `scripts` splits by KEY, not as a block. A token named by an npm RUN-lifecycle key is the
+        // package's run entry and joins `candidates` beside `main`/`bin`/`exports`; every other key's
+        // tokens go to `script_candidates`, the build-surface role. See
+        // `manifest::is_run_lifecycle_script_key` for the key set, the measurement behind it, and both
+        // residuals. Both lists resolve through the same `try_ext` walk immediately below.
+        let mut script_candidates: Vec<String> = Vec::new();
         if let Some(serde_json::Value::Object(scripts)) = value.get("scripts") {
-            for cmd in scripts.values().filter_map(|v| v.as_str()) {
+            for (key, cmd) in scripts
+                .iter()
+                .filter_map(|(k, v)| v.as_str().map(|s| (k, s)))
+            {
+                let run_entry = is_run_lifecycle_script_key(key);
                 for tok in cmd.split_whitespace() {
                     if looks_like_script_path_token(tok) {
-                        candidates.push(tok.to_string());
+                        if run_entry {
+                            candidates.push(tok.to_string());
+                        } else {
+                            script_candidates.push(tok.to_string());
+                        }
                     }
                 }
             }
@@ -76,7 +144,13 @@ pub(crate) fn package_json_entries(
         for candidate in &candidates {
             let normalized = join_and_normalize(dir, candidate);
             if let Some(resolved) = zzop_parser_typescript::try_ext(&normalized, all_paths) {
-                result.insert(resolved);
+                entry_paths.insert(resolved);
+            }
+        }
+        for candidate in &script_candidates {
+            let normalized = join_and_normalize(dir, candidate);
+            if let Some(resolved) = zzop_parser_typescript::try_ext(&normalized, all_paths) {
+                script_paths.insert(resolved);
             }
         }
 
@@ -106,168 +180,20 @@ pub(crate) fn package_json_entries(
             );
         }
     }
+    // The package's own code dominates: subtracted ONCE here, over the fully accumulated sets, never per
+    // manifest — in a monorepo the entry field and the build-script token that name the same file
+    // routinely sit in DIFFERENT `package.json` files, and a per-manifest subtraction would leave the
+    // collision standing whenever the scripts manifest was read first. This is also what makes the
+    // run-lifecycle rescue compose: `"start": "ts-node src/index.ts"` beside
+    // `"dev": "nodemon --exec 'ts-node src/index.ts'"` puts the same path in both lists, and the file is
+    // the product, so the run role wins.
+    script_paths.retain(|p| !entry_paths.contains(p));
     PackageJsonScan {
-        extra_entries: result,
+        entry_paths,
+        script_paths,
         workspace_pkgs,
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::pipeline::testutil::TempDir;
-    use std::collections::HashSet;
-
-    #[test]
-    fn package_json_entries_resolves_extensionless_or_js_main_via_try_ext() {
-        let dir = TempDir::new("zzop-pkg-entries-main");
-        dir.write("package.json", r#"{"main": "dist/index.js"}"#);
-        let all_paths: HashSet<String> = ["dist/index.ts".to_string()].into_iter().collect();
-        let scan = package_json_entries(
-            dir.path(),
-            std::iter::once("package.json".to_string()),
-            &all_paths,
-        );
-        assert_eq!(scan.extra_entries, all_paths);
-    }
-
-    #[test]
-    fn package_json_entries_resolves_bin_object_with_multiple_entries() {
-        let dir = TempDir::new("zzop-pkg-entries-bin");
-        dir.write(
-            "package.json",
-            r#"{"bin": {"foo-cli": "./bin/foo.ts", "bar-cli": "./bin/bar.ts"}}"#,
-        );
-        let all_paths: HashSet<String> = ["bin/foo.ts".to_string(), "bin/bar.ts".to_string()]
-            .into_iter()
-            .collect();
-        let scan = package_json_entries(
-            dir.path(),
-            std::iter::once("package.json".to_string()),
-            &all_paths,
-        );
-        assert_eq!(scan.extra_entries, all_paths);
-    }
-
-    #[test]
-    fn package_json_entries_resolves_nested_exports_and_ignores_condition_keys() {
-        let dir = TempDir::new("zzop-pkg-entries-exports");
-        dir.write(
-            "package.json",
-            r#"{
-                "exports": {
-                    ".": { "import": "./src/index.mts", "require": "./src/index.cts" },
-                    "./sub": "./src/sub.ts"
-                }
-            }"#,
-        );
-        let all_paths: HashSet<String> = [
-            "src/index.mts".to_string(),
-            "src/index.cts".to_string(),
-            "src/sub.ts".to_string(),
-        ]
-        .into_iter()
-        .collect();
-        let scan = package_json_entries(
-            dir.path(),
-            std::iter::once("package.json".to_string()),
-            &all_paths,
-        );
-        assert_eq!(scan.extra_entries, all_paths);
-    }
-
-    #[test]
-    fn package_json_entries_lexically_scans_scripts_for_path_tokens() {
-        let dir = TempDir::new("zzop-pkg-entries-scripts");
-        dir.write(
-            "package.json",
-            r#"{
-                "scripts": {
-                    "build": "tsc && node scripts/postbuild.js",
-                    "test": "jest"
-                }
-            }"#,
-        );
-        let all_paths: HashSet<String> = ["scripts/postbuild.ts".to_string()].into_iter().collect();
-        let scan = package_json_entries(
-            dir.path(),
-            std::iter::once("package.json".to_string()),
-            &all_paths,
-        );
-        // "test": "jest" has no path-looking token — contributes nothing; "tsc" isn't a path either.
-        assert_eq!(scan.extra_entries, all_paths);
-    }
-
-    #[test]
-    fn package_json_entries_resolves_relative_to_own_directory_not_root() {
-        let dir = TempDir::new("zzop-pkg-entries-nested");
-        dir.write("packages/foo/package.json", r#"{"main": "./index.ts"}"#);
-        let all_paths: HashSet<String> =
-            ["packages/foo/index.ts".to_string()].into_iter().collect();
-        let scan = package_json_entries(
-            dir.path(),
-            std::iter::once("packages/foo/package.json".to_string()),
-            &all_paths,
-        );
-        assert_eq!(scan.extra_entries, all_paths);
-    }
-
-    // --- PackageJsonScan::workspace_pkgs ---
-
-    #[test]
-    fn package_json_entries_collects_workspace_pkg_name_to_main_entry() {
-        let dir = TempDir::new("zzop-pkg-entries-ws-main");
-        dir.write(
-            "packages/prisma/package.json",
-            r#"{"name": "@acme/prisma", "main": "index.ts"}"#,
-        );
-        let all_paths: HashSet<String> = ["packages/prisma/index.ts".to_string()]
-            .into_iter()
-            .collect();
-        let scan = package_json_entries(
-            dir.path(),
-            std::iter::once("packages/prisma/package.json".to_string()),
-            &all_paths,
-        );
-        let pkg = scan.workspace_pkgs.get("@acme/prisma").unwrap();
-        assert_eq!(pkg.dir, "packages/prisma");
-        assert_eq!(pkg.entry.as_deref(), Some("packages/prisma/index.ts"));
-    }
-
-    #[test]
-    fn package_json_entries_falls_back_to_index_ts_when_no_main_module_exports() {
-        let dir = TempDir::new("zzop-pkg-entries-ws-index-fallback");
-        dir.write("packages/lib/package.json", r#"{"name": "@acme/lib"}"#);
-        dir.write("packages/lib/index.ts", "export {};\n");
-        let all_paths: HashSet<String> =
-            ["packages/lib/index.ts".to_string()].into_iter().collect();
-        let scan = package_json_entries(
-            dir.path(),
-            std::iter::once("packages/lib/package.json".to_string()),
-            &all_paths,
-        );
-        let pkg = scan.workspace_pkgs.get("@acme/lib").unwrap();
-        assert_eq!(pkg.entry.as_deref(), Some("packages/lib/index.ts"));
-    }
-
-    #[test]
-    fn package_json_entries_workspace_pkg_entry_none_when_nothing_resolves() {
-        // A pure sub-path-only package with no entry point: no `main`/`module`/`exports`, no root
-        // `index.ts` — every import of it names a sub-path. `entry` staying `None` (rather than some
-        // guessed path) is the honest signal.
-        let dir = TempDir::new("zzop-pkg-entries-ws-no-entry");
-        dir.write("packages/lib/package.json", r#"{"name": "@acme/lib"}"#);
-        dir.write("packages/lib/tracking.ts", "export {};\n");
-        let all_paths: HashSet<String> = ["packages/lib/tracking.ts".to_string()]
-            .into_iter()
-            .collect();
-        let scan = package_json_entries(
-            dir.path(),
-            std::iter::once("packages/lib/package.json".to_string()),
-            &all_paths,
-        );
-        let pkg = scan.workspace_pkgs.get("@acme/lib").unwrap();
-        assert_eq!(pkg.dir, "packages/lib");
-        assert_eq!(pkg.entry, None);
-    }
-}
+mod tests;

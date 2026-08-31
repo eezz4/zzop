@@ -125,12 +125,29 @@ done < <(tr -d '\r' < "$REGISTRY")
 
 anchored_total=0
 declare -A ACTUAL=()
-for f in "${PAGES[@]}"; do
-  n="$(grep -ciE "$ANCHORED" "$f" 2>/dev/null || true)"
+# ONE grep for the whole page set, not one per page.
+#
+# `grep -c` over multiple files prints `file:count` per file, which is exactly the per-file number
+# this loop wants. `/dev/null` is appended so that multi-file format is GUARANTEED: given a single
+# argument grep prints a bare count, and this parse would then read that count as a filename and
+# silently register a page that does not exist. It also costs nothing — `/dev/null:0` is skipped
+# by the same zero test the real pages get.
+#
+# Why the shape changed (2026-08-18): this loop, the deictic loop, and the stability loop each
+# spawned a grep PER PAGE — 161 spawns for 74 files. Under MSYS2, which emulates fork by copying
+# the process, a spawn from bash costs the better part of a second on this machine; a trace
+# (`PS4='+ $EPOCHREALTIME|' bash -x`) put 65.1s of this guard's 89.6s inside those greps and 0.5s
+# in the 58 `case` statements around them. Same regex, same files, same counts — the scan simply
+# stopped paying a process per file. Filenames are assumed colon-free, which every tracked path in
+# this repo is; a path containing `:` would split wrong here, and git on Windows cannot produce one.
+while IFS= read -r line; do
+  n="${line##*:}"
+  f="${line%:*}"
+  [ "$f" = "/dev/null" ] && continue
   [ "${n:-0}" -gt 0 ] || continue
   ACTUAL["$f"]="$n"
   anchored_total=$((anchored_total + n))
-done
+done < <(grep -ciE "$ANCHORED" "${PAGES[@]}" /dev/null 2>/dev/null || true)
 
 if [ "$anchored_total" -eq 0 ]; then
   echo "check-version-relative-prose: 0 version-anchored claims found across ${#PAGES[@]} pages —" >&2
@@ -182,9 +199,18 @@ while IFS= read -r line; do
   EXEMPT_REASON["$path"]="$reason"
 done < <(tr -d '' < "$REGISTRY")
 
+# Same one-pass treatment as the anchored scan above, and for the same measured reason. `grep -l`
+# lists only the files that matched, so membership in this set is exactly what `grep -q` returned
+# per file. The loop still walks PAGES in its own order, so the diagnostics print in the order they
+# always did.
+declare -A HAS_DEICTIC=()
+while IFS= read -r hit; do
+  [ -n "$hit" ] && HAS_DEICTIC["$hit"]=1
+done < <(grep -liE "$DEICTIC" "${PAGES[@]}" /dev/null 2>/dev/null || true)
+
 deictic_hits=0
 for f in "${PAGES[@]}"; do
-  grep -qiE "$DEICTIC" "$f" 2>/dev/null || continue
+  [ -n "${HAS_DEICTIC[$f]:-}" ] || continue
   deictic_hits=$((deictic_hits + 1))
   if [ -n "${EXEMPT_REASON[$f]+x}" ]; then
     continue
@@ -194,8 +220,19 @@ for f in "${PAGES[@]}"; do
   echo "  Rewrite it to name the version it means (\"from v$version onward\"), or register an exemption with a reason." >&2
   FAIL=1
 done
+# Deliberately its OWN grep rather than a lookup in HAS_DEICTIC above: an exempted path need not be
+# in PAGES at all (it can be untracked, or excluded from the page globs), and answering from a set
+# that never scanned it would report a live exemption as stale. Asking grep about the exempt paths
+# directly keeps the old verdict in every case, including the file-does-not-exist one — grep fails,
+# the path is absent from the set, and the exemption is reported stale exactly as before.
+declare -A EXEMPT_HAS_DEICTIC=()
+if [ "${#EXEMPT_REASON[@]}" -gt 0 ]; then
+  while IFS= read -r hit; do
+    [ -n "$hit" ] && EXEMPT_HAS_DEICTIC["$hit"]=1
+  done < <(grep -liE "$DEICTIC" "${!EXEMPT_REASON[@]}" /dev/null 2>/dev/null || true)
+fi
 for path in "${!EXEMPT_REASON[@]}"; do
-  if ! grep -qiE "$DEICTIC" "$path" 2>/dev/null; then
+  if [ -z "${EXEMPT_HAS_DEICTIC[$path]:-}" ]; then
     echo "check-version-relative-prose: $REGISTRY exempts $path, which no longer contains a deictic" >&2
     echo "  (an exemption that outlives what it excuses is a hole nobody is watching — remove the line)" >&2
     FAIL=1
@@ -205,8 +242,15 @@ done
 # ── axis 3 ────────────────────────────────────────────────────────────────────────────────────────
 if [ "$major" -ge 1 ]; then
   stability_branch="ENFORCED (workspace MAJOR=$major)"
+  # One pass, like the two scans above. This branch does not run today (MAJOR is 0), so it is the
+  # one of the three whose cost was never measured — which is exactly why it is folded now rather
+  # than left as the per-file shape to be discovered on the day 1.0 ships and this arm wakes up.
+  declare -A HAS_STABILITY=()
+  while IFS= read -r hit; do
+    [ -n "$hit" ] && HAS_STABILITY["$hit"]=1
+  done < <(grep -lE "$STABILITY" "${PAGES[@]}" /dev/null 2>/dev/null || true)
   for f in "${PAGES[@]}"; do
-    grep -qE "$STABILITY" "$f" 2>/dev/null || continue
+    [ -n "${HAS_STABILITY[$f]:-}" ] || continue
     echo "check-version-relative-prose: $f still claims pre-1.0/0.x status at version $version:" >&2
     grep -nE "$STABILITY" "$f" | sed "s|^|    $f:|" >&2
     FAIL=1

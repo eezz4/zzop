@@ -44,6 +44,37 @@
 //! `lang::symbols` began walking inline `mod` bodies and qualifying what it finds. The behaviour here
 //! is still right, but it had been resting on a sibling that moved.)
 //!
+//! ## Scope note: a dependency exercised WITHOUT a `use` is not an edge
+//! This channel reads ITEMS (`Item::Use`, bodiless `Item::Mod`); everything else is skipped. So a
+//! crate that this file genuinely depends on, but only ever names through a fully-qualified path
+//! inside a function body — `zzop_parser_sql::extract_statement_table_refs(&masked)`, with no `use`
+//! anywhere in the file — binds nothing here and therefore contributes NO import edge. Same for
+//! `crate::a::f()` written inline, for a method reached through a trait impl, and for anything
+//! `#[derive(...)]` expands to.
+//!
+//! This is stated because it is the LARGEST hole in this channel's scope, not a corner: measured on
+//! this repo, 433 call sites across 151 files have a callee path headed by a workspace crate name,
+//! and ZERO of them have a matching `ImportMap` binding; at the crate level, 24 of the workspace's 56
+//! Cargo path-dependency pairs draw no edge at all (`crates/config` and `packages/cli-bin` render
+//! with none). Recount: compare `cargo metadata`'s path deps against
+//! `zzop graph . --domain dep --fold 2 --top 200`.
+//!
+//! What it does and does not cost. It costs the PICTURE — `--domain dep`, fan-in/fan-out, and the
+//! scores computed off them understate Rust coupling. It does not cost a finding: every consumer that
+//! could turn a missing in-edge into a false claim excludes `.rs` or neutralises it —
+//! `analyze::assemble::dep_graph` filters all-`.rs` cycles out of `circular`, `rules-graph`'s
+//! `dead_candidates` excludes `.rs` citing this mechanism, its `unreachable` promotes every
+//! `fan_in == 0` file to an entrypoint, and `dead_exports` is TypeScript-gated. A missing edge shows
+//! up as an island; this crate ranks that below a wrong edge, which is the side the fix would risk.
+//!
+//! Not a to-do written as scope. Closing it means minting synthetic bindings for path heads, and the
+//! head filter is load-bearing: `super::`/`self::` are depth-relative while this map is file-level —
+//! the same constraint the inline-`mod` decision above rests on — so only `crate::` and bare external
+//! heads are safe to admit. The real cost is not here either: synthetic bindings must not ride
+//! `ImportMap` unfiltered, or the engine's package-import census counts `Vec` as an external package.
+//! Until a Rust tree is measured to be misread because of the missing edges, the scope stands as
+//! written.
+//!
 //! ## Specifier convention (`rust_import_candidates` depends on this exactly)
 //! `specifier` is the FULL colon-separated path as written, head keyword included verbatim when
 //! present: `crate::a::b`, `super::a`, `self::a`, or a bare external head (`serde::Deserialize`,

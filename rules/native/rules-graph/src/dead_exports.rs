@@ -71,7 +71,30 @@
 //! identifier rather than by import, even in files that aren't otherwise excluded (e.g. Next.js Pages
 //! Router files). The Next.js root-middleware convention exports `middleware`/`config` are exempted only
 //! inside a `middleware.{ts,js}` file (`is_middleware_convention_file`) — those names are too generic to
-//! exempt globally.
+//! exempt globally. The same name+path pairing covers the Pages Router API-route `config` object
+//! (`is_pages_api_route_file`): a `pages/api/**` file's `export const config = { api: { bodyParser:
+//! false } }` is read by Next.js from the PATH at build time, and deleting it re-enables the body
+//! parser — which consumes the request stream a webhook's HMAC signature check needs, so the check can
+//! never verify again. MEASURED (cal.com, 2026-08-26, full 1162-finding enumeration): five payment
+//! webhooks, and nothing else in the tree.
+//!
+//! ## Auto-import tables (`auto_import_referenced_names`)
+//! A build config can inject a whole DIRECTORY's exports as globals (Nuxt `imports.dirs`), so a
+//! consumer writes `useFoo()` with no import line anywhere. Different shape from every gate above:
+//! nothing is reserved about the NAME. The engine RESOLVES those references (`nuxt_auto_import::scan`,
+//! anchored on `nuxt.config.*`) and hands each file the subset of its own export names another file in
+//! the same app writes bare; this rule treats those exactly like an import. Resolution, not directory
+//! exemption — the difference is measured: on nocodb 644 findings sat under one app's auto-import
+//! directories (59% of the tree's total here) and exempting the directories would silence all 644,
+//! including `utils/filterUtils.ts#snapshotFilter`, the one symbol a blind auditor's 14-name sample
+//! found referenced nowhere. Reading the references keeps it.
+//!
+//! **What the exemptions deliberately do NOT cover, and what covers it instead.** Every gate above is a
+//! named path/name pair, so the NEXT framework convention (and the next reserved name) is unreachable by
+//! construction — a gate cannot be widened to a class it has not measured without buying false negatives
+//! it also has not measured. That residue is carried by the message rather than by the matcher: the
+//! finding text names this class BEFORE its imperative (`rule-quality.md` §27), so a reader meets
+//! "a framework may read this by path convention" before meeting "delete it".
 //!
 //! ## Engine wiring
 //! `dead_export_findings` shapes `find_dead_exports`'s results into `Finding`s for the `"unimported-export"`
@@ -82,82 +105,21 @@ mod patterns;
 mod propagate;
 #[cfg(test)]
 mod tests;
+mod types;
 
 pub use findings::dead_export_findings;
+pub use types::{DeadExport, DeadExportCandidate, DeadExportInputFile, DeadExportReason};
 
 use propagate::propagate_re_exports;
 
 use std::collections::{HashMap, HashSet};
 
-use serde::{Deserialize, Serialize};
-
-use zzop_core::{ImportMap, ReExport, SourceSymbolKind};
+use zzop_core::SourceSymbolKind;
 
 use patterns::{
     is_entry_file, is_entry_or_test, is_excluded_file, is_framework_contract_export,
-    is_middleware_convention_file,
+    is_middleware_convention_file, is_pages_api_route_file,
 };
-
-/// One exported symbol a file offers as a dead-export candidate.
-#[derive(Debug, Clone)]
-pub struct DeadExportCandidate {
-    pub name: String,
-    pub kind: SourceSymbolKind,
-    /// `export default function Foo() {}` — also matchable via the file's `#default` import key.
-    pub is_default: bool,
-}
-
-/// One file's contribution to `find_dead_exports`.
-#[derive(Debug, Clone, Default)]
-pub struct DeadExportInputFile {
-    pub file: String,
-    pub exports: Vec<DeadExportCandidate>,
-    pub imports: ImportMap,
-    /// `export { X } from "./a"` / `export * from "./a"`.
-    pub re_exports: Vec<ReExport>,
-    /// `import("./a")` dynamic-import specifiers.
-    pub dynamic_imports: Vec<String>,
-    /// Identifier names referenced anywhere in the file (see module doc's `used_names` paragraph).
-    pub used_names: HashSet<String>,
-    /// Names appearing in the PUBLIC SIGNATURE of some exported declaration in this file — the
-    /// position-aware companion `used_names` cannot be. Drives the public-signature exemption (see
-    /// module doc). Empty for a parser that does not produce it, which simply means no exemptions.
-    pub exported_signature_names: HashSet<String>,
-    /// Local export RENAMES — `(local declaration name, public export name)` for every from-less
-    /// `export { X as Y }` in this file (`zzop_parser_typescript::parse_dead_export_facts`). An
-    /// export candidate is named by its DECLARATION (`X`), but an importer's key is the PUBLIC name
-    /// (`Y`); this is the only place those two meet. NOT a liveness grant on its own — a rename
-    /// nobody imports leaves the export dead, exactly as before (see `find_dead_exports`).
-    /// Empty for a parser that does not produce it, which simply restores the pre-existing behavior.
-    pub export_aliases: Vec<(String, String)>,
-    /// The engine detected an author-declared machine-generated banner in this file's head —
-    /// `@generated`, "auto-generated", "Code generated by … DO NOT EDIT.", and friends. NOT a bare
-    /// "DO NOT EDIT": `crates/engine/src/generated_banner.rs` deliberately refuses that one (a
-    /// hand-written "DO NOT EDIT directly — change it via the admin UI" header carries it) and pins the
-    /// refusal with its own test. This doc used to spell the pair `@generated`/"DO NOT EDIT", which
-    /// advertised an exemption the detector does not grant.
-    /// When set, the file's exports are skipped whole (its imports still count) — see module doc.
-    pub is_generated: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum DeadExportReason {
-    /// Never referenced anywhere — a deletion candidate.
-    Unused,
-    /// Referenced only within its own file — an un-export candidate.
-    InFileOnly,
-}
-
-/// One dead-export finding, with no line number attached — a caller looks one up by `(file, name)`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DeadExport {
-    pub file: String,
-    pub name: String,
-    pub kind: SourceSymbolKind,
-    pub reason: DeadExportReason,
-}
 
 /// Detects exported symbols that are never imported anywhere. `resolve_file` resolves a specifier to its
 /// canonical file path, or `None` for an external module — see the module doc for what counts as a use.
@@ -238,6 +200,12 @@ where
             }) {
                 continue;
             }
+            // Another file in the same app writes THIS name bare, resolved through a build-time
+            // auto-import table — a real reference with no import statement to read. Name-scoped,
+            // never directory-scoped: a neighbour nobody writes has no entry here and still reports.
+            if f.auto_import_referenced_names.contains(&exp.name) {
+                continue;
+            }
             // Framework-contract export names are consumed by the framework via convention, not import.
             if is_framework_contract_export(&exp.name) {
                 continue;
@@ -249,6 +217,14 @@ where
             if matches!(exp.name.as_str(), "middleware" | "config")
                 && is_middleware_convention_file(&f.file)
             {
+                continue;
+            }
+            // Next.js Pages Router API route: `export const config = { api: { bodyParser: false } }`
+            // is read by the framework from the PATH at build time, never imported. Scoped to
+            // `pages/api/**` + the exact name for the same reason as the middleware row above —
+            // `config` is a plausible domain symbol anywhere else. MEASURED: this is the shape that
+            // makes a payment webhook's HMAC check unverifiable if a reader follows the prescription.
+            if exp.name == "config" && is_pages_api_route_file(&f.file) {
                 continue;
             }
             // Public-signature exemption: a TYPE named in an exported declaration's signature is

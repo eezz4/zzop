@@ -86,25 +86,33 @@ if [ "$lib_count" -eq 0 ]; then
 fi
 
 # One `<crate><TAB><framework name>` line per recognizer row.
+#
+# The name set is read from the crate's WHOLE `src/`, not from `lib.rs` alone: on 2026-08-26
+# parser-typescript's table moved to `src/framework_recognizers.rs` (its `lib.rs` had reached the
+# 300-line source cap), and this guard's own vacuity assertion below is what reported it — the const
+# had left the file the extractor read while the prose it judges stayed. Where the const LIVES is
+# incidental; that it is the one literal the engine tests also read is the property this guard needs.
+# The PROSE subject is unchanged: a crate lib.rs's own `//!` doc, plus parser/README.md.
 names=""
 crates_with_names=0
 for lib in $libs; do
-  crate="$(basename "$(dirname "$(dirname "$lib")")")"
+  src="$(dirname "$lib")"
+  crate="$(basename "$(dirname "$src")")"
   set +e
-  raw="$(grep -oE 'framework:[[:space:]]*"[^"]+"' "$lib")"
+  raw="$(grep -rhoE 'framework:[[:space:]]*"[^"]+"' "$src")"
   rc=$?
   set -e
   if [ "$rc" -gt 1 ]; then
-    echo "framework-prose guard: grep failed reading $lib (exit $rc) -- aborting rather than judge that" >&2
-    echo "  file from a scan which never ran." >&2
+    echo "framework-prose guard: grep failed reading $src (exit $rc) -- aborting rather than judge that" >&2
+    echo "  crate from a scan which never ran." >&2
     exit 1
   fi
   # A crate with no recognizers at all is legal; a crate whose const this extractor can no longer read
   # is not, and the const's own presence is what tells the two apart. Without this branch a renamed
   # field spelling would empty one crate's name set and every paragraph in it would pass vacuously.
   if [ "$rc" -ne 0 ]; then
-    if grep -q 'FRAMEWORK_RECOGNIZERS' "$lib"; then
-      echo "framework-prose guard: FAILED -- $lib declares FRAMEWORK_RECOGNIZERS but the" >&2
+    if grep -rq 'FRAMEWORK_RECOGNIZERS' "$src"; then
+      echo "framework-prose guard: FAILED -- $src declares FRAMEWORK_RECOGNIZERS but the" >&2
       echo "  framework-name extractor matched ZERO rows in it, so every paragraph in that crate would" >&2
       echo "  be vacuously compliant. Fix the extraction, not this assertion." >&2
       exit 1

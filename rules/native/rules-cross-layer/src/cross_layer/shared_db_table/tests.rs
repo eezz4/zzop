@@ -164,6 +164,7 @@ fn ambiguous_consume_of_a_db_table_counts_toward_the_signal() {
                     file: "s1.sql".to_string(),
                     line: 1,
                     symbol: None,
+                    ..Default::default()
                 },
             }],
         }],

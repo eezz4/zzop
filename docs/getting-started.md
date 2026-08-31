@@ -61,12 +61,32 @@ zzop cross ./frontend ./backend   # cross-layer join across 2+ trees
 zzop analyze . --severity critical --limit 10   # narrow the findings LIST (counts still cover everything)
 zzop analyze --config ./ci/zzop.config.jsonc    # a config that does not sit at the tree root
 zzop analyze . --profile-rules                  # which rules cost what (cold cache only — the report says why)
+zzop analyze . --fail-on critical               # CI gate: exit 3 if any critical finding exists, 0 if none
 zzop analyze --help     # that one subcommand's line, on stdout, exit 0 — `zzop help` prints them all
 ```
+
+**Gating a pipeline on the findings.** Without `--fail-on`, the exit code answers only "did zzop run",
+so a tree full of criticals exits 0. With it, a run whose findings reach the given severity exits **3** —
+a third code, because `1` already means zzop could not answer and a CI log has to tell a broken config
+apart from a real finding. The gate reads the COUNTS, not the printed list, so `--severity`/`--limit`
+narrow what you read without narrowing what you gate on. It is refused on `cross` rather than quietly
+passing: that reply has no per-tree severity census, so gate each tree with its own `analyze --fail-on`.
 
 **That first run writes one thing into your repo:** a `.zzop/cache/` directory (the default `cacheDir`),
 holding the per-file analysis cache. Set `"cacheDir": null` in your config to turn caching off and write
 nothing at all; see [ARCHITECTURE.md](ARCHITECTURE.md#caching).
+
+**And the tree is the INPUT, so anything else you put in it is input too.** The commonest way to
+learn this is to redirect a run's own output into the directory being analyzed:
+
+```sh
+zzop analyze ./repo > ./repo/out.json 2> ./repo/out.err   # the next run counts out.json and out.err
+```
+
+Nothing errors, because nothing is wrong — those files exist and zzop walks what is there. What you
+get is a `fileCount` that moved for a reason you did not intend, and a warning faithfully reporting
+that `.err` files have no native parser. Write the output somewhere outside the tree (or add the
+paths to `exclude`), and re-run before comparing counts with anyone else's.
 
 ### Two directories, one letter apart
 
@@ -114,6 +134,13 @@ out afterwards — so the rules it holds cost nothing. Two things worth knowing:
 remaining packs report, and, because the disabled list is part of the analysis cache's ruleset
 fingerprint, the first run after you edit it re-runs rules over every file once before the cache is warm
 again.
+
+The next run says so, per pack. A pack you switched off keeps its row in `packsLoaded` — it did load
+— and that row now carries `didNotRun: "disabled"` (or `"notAllowlisted"` under `packs.only`), publishes
+`filesInScopeIfEnabled` in place of `filesInScope`, and drops `zeroAdmissionRules`. That is the
+difference between **“this pack ran and found nothing”** and **“this pack never ran”**, which the reply
+could not express before 2026-08-26: a switched-off `security` pack looked exactly like a clean one.
+`packsLoadedMeaning`, beside the array, defines each key.
 
 If what you want is one subject area rather than "everything except", say it the other way round —
 `packs.only` is the same gate read as an allowlist, so you name what you want instead of enumerating
@@ -243,13 +270,16 @@ to the cross-layer join. Per-rule conditions are spelled out in
 
 | Code | Meaning |
 | --- | --- |
-| `0` | Ran successfully (regardless of what was found), **except** on the two `validate-*` lanes below, where a successful run that judges the document INVALID exits `1`. |
+| `0` | Ran successfully (regardless of what was found), **except** on the two `validate-*` lanes below, where a successful run that judges the document INVALID exits `1`, and under `--fail-on`, where a run whose findings reach the threshold exits `3`. |
 | `1` | Runtime failure — an unreadable path, an invalid or missing config, a refused request. **Every config error lands here**, not on `2`. Also: `validate-envelope`/`validate-rule-pack` judged the document invalid, and `zzop init` refused to overwrite an existing config. |
-| `2` | Argument-shape mistake — an unknown flag, a missing or extra positional, an unknown subcommand. Also `zzop init <dir>` when the directory does not exist (`zzop analyze <missing>` puts that same fact on `1`; `init` treats it as an argument mistake because there is nothing to initialize). |
+| `2` | You called it wrong. Argument-shape mistakes are the common case — an unknown flag, a missing or extra positional, an unknown subcommand, a `--fail-on` value that is not a severity — and so is `zzop init <dir>` when the directory does not exist (`zzop analyze <missing>` puts that same fact on `1`; `init` treats it as an argument mistake because there is nothing to initialize). One member of this code is decided AFTER the run rather than from argv: a `--rule <id>` filter this run can PROVE could not match (its pack did not load, or the pack loaded and carries no such rule) is refused here, ahead of the `--fail-on` gate, so `2` outranks `3`. |
+| `3` | `--fail-on <severity>` was passed and `findings.bySeverity` holds at least one finding at or above it. Nothing else exits `3`, and a run without `--fail-on` never does. The full reply is still on stdout; stderr names the matched counts and the threshold. |
 
-`1` therefore carries three different meanings, and **that is not going to change** — a fourth code
-introduced later would silently alter what `[ $? -eq 1 ]` means in every script written against this
-table. Disambiguate by stdout instead, which is already deterministic:
+`1` therefore carries three different meanings, and **that is not going to change** — moving any of
+them off `1` would silently alter what `[ $? -eq 1 ]` means in every script written against this
+table. That promise is about what `1` CONTAINS, not about how many codes the table has: `3` was added
+for `--fail-on` and took nothing away from `1`, which is exactly why it could be added at all.
+Disambiguate `1` by stdout instead, which is already deterministic:
 
 | You see | It means |
 | --- | --- |
@@ -259,14 +289,19 @@ table. Disambiguate by stdout instead, which is already deterministic:
 So `zzop validate-envelope e.json && deploy` is safe against invalidity but **not** against a
 misspelled path unless you also check that stdout was non-empty.
 
-The binary does **not** gate its exit code on finding severity: it is an analysis + summary surface, not
-a CI linter. To gate CI, read the JSON counts yourself (e.g. fail the job when `bySeverity.critical > 0`).
+The exit code gates on finding severity **only when you ask it to**, with `--fail-on <severity>` —
+what it reads and where it is refused is under *Gating a pipeline on the findings* above. Without that
+flag the exit code answers "did zzop run" and nothing else, so a tree full of criticals exits `0`: the
+default surface is analysis + summary, not a linter. Reading `findings.bySeverity` out of the JSON
+yourself still works and is the only option on a lane that refuses the flag.
 `@zzop/cli` (see [`packages/cli/README.md`](../packages/cli/README.md)) is the identical native binary,
 not a separate presentation layer, so there is no other output surface to switch to.
 
 Three keys that once pointed at surfaces like these — `failOn`, `format` and `report.*` — are **not in
 the recognized key set**. Writing one produces a `configWarnings` entry saying so and what to do
-instead; deleting it from your config changes nothing about a run, it only removes the warning.
+instead; deleting it from your config changes nothing about a run, it only removes the warning. The
+gate `failOn` promised does exist now, as the `--fail-on` FLAG above; the CONFIG key stays retired,
+because a threshold that lives in a committed file cannot be varied per pipeline stage.
 
 ## Suppressing findings
 
@@ -357,8 +392,9 @@ is used as-is (e.g. `dead-candidates` — and note some native ids contain a sla
 }
 ```
 
-(There is no severity-threshold key to reach for here — see "Reading the output" above for why `failOn`
-was removed rather than kept as a knob that did nothing.) Full schema in
+(There is no severity-threshold key to reach for here. The gate is the `--fail-on <severity>` FLAG —
+see "Reading the output" above, which also says why the `failOn` CONFIG key was removed rather than
+kept as a knob that did nothing.) Full schema in
 [`packages/README.md`](../packages/README.md).
 
 **(c) Embedding-level (per call, when embedding the engine directly).** Callers embedding

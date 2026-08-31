@@ -548,3 +548,68 @@ fn call_site_single_arg_shape_regression_still_mounts() {
         other => panic!("expected Mount, got {other:?}"),
     }
 }
+
+/// The handler-struct + `Register` method is the STANDARD layout of a Go web service, and it extracted
+/// nothing: 17 routes, 0 recognized, `ioProvides: 0`. The module doc called receiver methods a
+/// documented v1 gap — the reason was that `method_declaration` is a distinct grammar node this
+/// recognizer never matched, not that the shape is hard. The parameter-receiver logic already handles
+/// everything past the node kind: `method_declaration` carries the same `name` and `parameters` fields.
+#[test]
+fn routes_registered_in_a_receiver_method_are_extracted() {
+    let src = concat!(
+        "package main\n\n",
+        "import \"github.com/gin-gonic/gin\"\n\n",
+        "type Handler struct{}\n\n",
+        "func (h *Handler) Register(r *gin.Engine) {\n",
+        "\tr.GET(\"/users\", h.list)\n",
+        "\tr.POST(\"/users\", h.create)\n",
+        "}\n",
+    );
+    let frags = extract_go_router_fragments("a.go", src);
+    let f = frag(&frags, "Register");
+    assert_eq!(f.entries.len(), 2, "{:?}", f.entries);
+    match &f.entries[0] {
+        RouterMountEntry::Verb { method, path, .. } => {
+            assert_eq!(method, "GET");
+            assert_eq!(path, "/users");
+        }
+        other => panic!("expected Verb, got {other:?}"),
+    }
+}
+
+/// The scoping guarantee has to hold for methods exactly as it does for functions, and this is where
+/// it would be easiest to lose: two types can each have a `Register` taking the same parameter name.
+/// Neither registration may outlive its own method.
+#[test]
+fn the_same_param_name_in_two_receiver_methods_is_scoped_independently() {
+    let src = concat!(
+        "package main\n\n",
+        "import \"github.com/gin-gonic/gin\"\n\n",
+        "type A struct{}\n",
+        "type B struct{}\n\n",
+        "func (a *A) Mount(r *gin.RouterGroup) {\n",
+        "\tr.GET(\"/a\", a.h)\n",
+        "}\n\n",
+        "func (b *B) Attach(r *gin.RouterGroup) {\n",
+        "\tr.GET(\"/b\", b.h)\n",
+        "}\n\n",
+        "func Loose() {\n",
+        "\tr.GET(\"/leaked\", nil)\n",
+        "}\n",
+    );
+    let frags = extract_go_router_fragments("a.go", src);
+    assert!(frags.iter().all(|f| f.name != "r"), "{frags:?}");
+    match &frag(&frags, "Mount").entries[0] {
+        RouterMountEntry::Verb { path, .. } => assert_eq!(path, "/a"),
+        other => panic!("expected Verb, got {other:?}"),
+    }
+    match &frag(&frags, "Attach").entries[0] {
+        RouterMountEntry::Verb { path, .. } => assert_eq!(path, "/b"),
+        other => panic!("expected Verb, got {other:?}"),
+    }
+    // `r` is not a tracked receiver outside the two methods, so the third function contributes nothing.
+    assert!(
+        frags.iter().all(|f| f.name != "Loose"),
+        "a method's parameter must not bleed past its own body: {frags:?}"
+    );
+}

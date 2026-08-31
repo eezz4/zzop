@@ -12,8 +12,16 @@ use super::method_facts::{decorator_name, str_value};
 /// dotted member-expression reference DEFERRED to assemble-time resolution (`controller-prefix-ref-v1`
 /// — see module doc's "Scope (v1)" exception).
 pub(super) enum ControllerCtx {
-    Literal { prefix: String },
-    DeferredRef { prefix_ref: String },
+    Literal {
+        prefix: String,
+        /// The `version` the class declared, as [`version_expr_text`] normalized it — the
+        /// `route-version-v1` discriminator, carried whether or not it also reached `prefix`. `None`
+        /// when no `version` key was present or its value is a shape this cannot spell.
+        route_version: Option<String>,
+    },
+    DeferredRef {
+        prefix_ref: String,
+    },
 }
 
 /// Class-level decorator names that gate a class as a controller — see module doc "Scope (v1)" for
@@ -40,16 +48,19 @@ fn controller_ctx_from_expr(expr: &Expr) -> Option<ControllerCtx> {
     let Expr::Call(call) = expr else {
         return Some(ControllerCtx::Literal {
             prefix: String::new(),
+            route_version: None,
         });
     };
     let Some(arg) = call.args.first() else {
         return Some(ControllerCtx::Literal {
             prefix: String::new(),
+            route_version: None,
         });
     };
     match &*arg.expr {
         Expr::Lit(Lit::Str(s)) => Some(ControllerCtx::Literal {
             prefix: str_value(s),
+            route_version: None,
         }),
         Expr::Object(obj) => object_controller_ctx(obj),
         // A dotted two-segment member expression (`RouteKey.Asset`) is deferred to assemble time
@@ -82,6 +93,7 @@ fn object_controller_ctx(obj: &ObjectLit) -> Option<ControllerCtx> {
     let mut path_seen = false;
     let mut path_dynamic = false;
     let mut version: Option<String> = None;
+    let mut route_version: Option<String> = None;
 
     for prop in &obj.props {
         let PropOrSpread::Prop(p) = prop else {
@@ -105,8 +117,11 @@ fn object_controller_ctx(obj: &ObjectLit) -> Option<ControllerCtx> {
                 if let Expr::Lit(Lit::Str(s)) = &*kv.value {
                     version = Some(str_value(s));
                 }
-                // non-literal version -> best-effort skip of just the version segment, not the
-                // whole controller (see module doc).
+                // A non-literal version still never enters the PATH — that would be a guess, and
+                // under header/media-type versioning it would be a wrong one twice over, since the
+                // version does not reach the URL at all. It is carried beside the key instead, as
+                // the `route-version-v1` discriminator. See `version_expr_text`.
+                route_version = version_expr_text(&kv.value);
             }
             _ => {}
         }
@@ -120,7 +135,86 @@ fn object_controller_ctx(obj: &ObjectLit) -> Option<ControllerCtx> {
         Some(v) => format!("v{v}/{path}"),
         None => path,
     };
-    Some(ControllerCtx::Literal { prefix })
+    Some(ControllerCtx::Literal {
+        prefix,
+        route_version,
+    })
+}
+
+/// The `route-version-v1` discriminator for a `@Controller({ version: ... })` value: the expression
+/// TEXT, normalized so that one version scope has exactly one spelling. `None` for a shape this cannot
+/// spell and for anything that would normalize to the empty string — absence must read as absence.
+///
+/// **It resolves nothing, on purpose.** The corpus shapes are identifiers and arrays of them
+/// (`API_VERSIONS_VALUES`, `[VERSION_2024_04_15, VERSION_2024_06_11]`) whose values sit two hops away
+/// across workspace packages behind `as unknown as` casts. A per-file extractor cannot follow that
+/// honestly, and the project-wide const map that could see the last hop
+/// (`egress::const_map_fragment`) deliberately refuses bare top-level string consts because it is
+/// scope-insensitive. So the consumer is told what the source SAID, and `zzop_core::IoProvide`'s
+/// `route_version` doc states exactly what may and may not be concluded from two texts differing.
+///
+/// **One scope gets exactly one spelling, and that invariant has TWO halves.** Element ORDER is
+/// normalized by sorting (`[B, A]` and `[A, B]` are one set written two ways), and the BRACKET FORM is
+/// normalized by collapsing a one-element array to its scalar — Nest declares `version` as
+/// `string | string[]` and wraps a scalar itself, so `version: [X]` and `version: X` are the same
+/// `VersionValue`. Missing either half reports two version scopes where there is one, and a wrong
+/// difference here buys a wrong severity demotion on the consuming rule.
+fn version_expr_text(expr: &Expr) -> Option<String> {
+    let Expr::Array(ArrayLit { elems, .. }) = expr else {
+        return version_scalar_text(expr);
+    };
+    let mut parts = Vec::with_capacity(elems.len());
+    for elem in elems {
+        // A hole (`[, X]`) or a spread is not an element this can name — the whole set is unspellable
+        // rather than silently short by one.
+        let e = elem.as_ref()?;
+        if e.spread.is_some() {
+            return None;
+        }
+        parts.push(version_scalar_text(&e.expr)?);
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    // Nest's `version` is `string | string[]` and it WRAPS a scalar, so `version: [X]` and
+    // `version: X` are the same `VersionValue`. Spelling the one-element array with brackets would
+    // make one scope read as two texts and buy a demotion on a pair that declares the SAME version —
+    // exactly the case the consuming rule keeps at `warning`. The bracket form is therefore reserved
+    // for a set that actually has more than one member.
+    if parts.len() == 1 {
+        return parts.pop();
+    }
+    parts.sort();
+    Some(format!("[{}]", parts.join(",")))
+}
+
+/// One element of a version value: a string literal's VALUE, or an identifier-rooted dotted chain
+/// (`VERSION_2024_08_13_VALUE`, `ApiVersions.V2`) spelled as written. Whitespace is stripped so the
+/// spelling does not depend on source formatting.
+fn version_scalar_text(expr: &Expr) -> Option<String> {
+    let raw = match expr {
+        Expr::Lit(Lit::Str(s)) => str_value(s),
+        _ => dotted_ident_chain(expr)?,
+    };
+    let stripped: String = raw.split_whitespace().collect();
+    (!stripped.is_empty()).then_some(stripped)
+}
+
+/// An identifier-rooted dotted chain of any depth (`A`, `A.B`, `A.B.C`), spelled back out. `None` for
+/// a computed member (`A[x]`), a call, a template, or anything not rooted in an identifier. Distinct
+/// from [`simple_member_ref`], which is capped at two segments because it must match the const map's
+/// own key shape; a version discriminator matches nothing and is only ever compared to itself.
+fn dotted_ident_chain(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Ident(i) => Some(i.sym.to_string()),
+        Expr::Member(m) => {
+            let MemberProp::Ident(prop) = &m.prop else {
+                return None;
+            };
+            Some(format!("{}.{}", dotted_ident_chain(&m.obj)?, prop.sym))
+        }
+        _ => None,
+    }
 }
 
 /// A `path` attribute's value: a bare string literal, or ("first wins" — see module doc) the first

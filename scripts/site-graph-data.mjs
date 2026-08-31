@@ -1,4 +1,4 @@
-/* Regenerate the data block inside site/graph.html, and every published count that describes it.
+/* Regenerate the data block inside the graph page's SOURCE, and every published count that describes it.
  *
  * WHY THIS EXISTS
  * site/graph.html draws this repository's own import graph. The data is INLINE — it has to be,
@@ -67,7 +67,11 @@ if (!nodesPath || !linksPath) {
 }
 
 const SITE = path.join(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..', 'site');
-const PAGE = path.join(SITE, 'graph.html');
+// The graph page's SOURCE, not the shipped page. site/graph.html and site/ko/graph.html are both
+// generated from this template by scripts/gen-site.mjs (2026-08-18), so writing the data block and
+// the counted prose here is what makes both editions carry the same numbers. Writing the shipped
+// page instead would be overwritten by the next gen-site run, silently and in one language only.
+const PAGE = path.join(SITE, '..', 'site-src', 'graph', 'page.html');
 const BEGIN = '/* zzop:dep-data:begin */';
 const END = '/* zzop:dep-data:end */';
 
@@ -471,10 +475,20 @@ const next0 = page.slice(0, from + BEGIN.length) + eol + 'window.ZZOP_DEP = ' + 
 // anchor was failing on every run, which is the hard error working exactly as designed. It is NOT
 // re-pointed at the replacement tab, because that tab deliberately carries NO hardcoded total: the new
 // graph view counts the data it was handed and writes the census into `#gcensus` at runtime, and the
-// data itself is sliced out of site/graph.html at build time (see gen-site.mjs), so the number and the
-// drawing cannot disagree. Restoring a prose copy would hand this script a fourth owner for a count that
-// now has a live one. graph.html's three anchors below stay: that page is hand-maintained, its numbers
-// ARE typed, and typed numbers are what this block exists for.
+// data itself is sliced out of the graph page's source at build time (see gen-site.mjs), so the number
+// and the drawing cannot disagree. Restoring a prose copy would hand this script a fourth owner for a
+// count that now has a live one.
+//
+// THE THREE ANCHORS BELOW STAY, and on 2026-08-18 the reason changed under them without weakening:
+// they used to be justified by `graph.html is hand-maintained, its numbers ARE typed`. That page is
+// GENERATED now — site/graph.html and site/ko/graph.html both come out of site-src/graph/page.html —
+// so nothing there is typed by a person any more. What did NOT change is that the numbers are typed
+// INTO A SENTENCE rather than counted at render time, and a typed number in a sentence is exactly what
+// this block owns. Two consequences worth naming: this script now writes the SOURCE (writing the
+// shipped page would be overwritten by the next gen-site run, in one language only), and the sentence
+// carrying them is deliberately NOT a {ko, en} pair — a Korean copy would need its own regex here, and
+// a regex that stops matching does not fail, it leaves the number stale (see site-src/content/
+// graph.page.mjs for that ruling).
 //
 // The check above still stands and still runs clean: `grep -rn 'files and .* imports' site/` finds
 // nothing outside this list.
@@ -536,7 +550,7 @@ for (const [file, content] of buffers) fs.writeFileSync(file, content);
 
 const kb = (f) => (buffers.get(f).length / 1024).toFixed(1);
 console.log(
-  `site/graph.html: ${rows.length} nodes, ${links.length} links, ${colKeys.length} columns` +
+  `${path.relative(process.cwd(), PAGE).split(path.sep).join('/')}: ${rows.length} nodes, ${links.length} links, ${colKeys.length} columns` +
     ` (deepest rank ${maxRank}), ${isolated.length} off-axis, wrap cap ${CAP} rows,` +
     ` aspect ${(spanX * squeeze / spanY).toFixed(2)}, ${domains.length} domains` +
     ` / ${domainLinks.length} domain edges, ${kb(PAGE)} KB` +

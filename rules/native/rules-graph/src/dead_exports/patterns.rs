@@ -103,6 +103,34 @@ pub(super) fn is_framework_contract_export(name: &str) -> bool {
     )
 }
 
+/// `pages/api/**` — the Next.js **Pages Router** API-route directory, whose files export a `config`
+/// object the framework reads FROM THE PATH at build time (`{ api: { bodyParser: false } }`,
+/// `{ maxDuration }`, `{ runtime }`). Nothing imports it, so it reads as a deletion candidate — and
+/// the deletion is not cosmetic: turning `bodyParser` back on consumes the request stream, so the
+/// raw body a webhook's HMAC check needs is gone and the signature can never verify.
+///
+/// MEASURED (cal.com, 2026-08-26, full 1162-finding enumeration): `config` fires 7 times in that
+/// tree; 5 are payment webhooks under `apps/web/pages/api/**` (alby, btcpayserver, paypal,
+/// stripepayment, stripe) and this predicate is exactly those 5. The other 2 (`apps/api/v2/
+/// jest-e2e.ts`, `packages/app-store/salesforce/codegen.ts`) are outside it and keep reporting.
+///
+/// **Why `pages/api/` and not `pages/`.** Next.js reads `config` from any Pages Router file, so the
+/// wider scope is arguably more correct — and it harvests NOTHING: the same enumeration finds zero
+/// `config` exports under `pages/` outside `pages/api/`. `rule-quality.md` §26 rejects a widening
+/// direction with zero measured harvest, because it buys only false-negative risk. The `pages/`
+/// case is covered the other way, by the message's framework-convention clause.
+///
+/// Deliberately NOT root-anchored, same reason as `is_middleware_convention_file`: a Next app in a
+/// monorepo sits below the analyzed root (`apps/web/pages/api/...`, `src/pages/api/...`). The
+/// accepted false negative is a genuinely dead symbol literally named `config` inside a Pages
+/// Router API route — rarer than the convention false positive this removes, and harmless to leave
+/// (Next ignores keys it does not know).
+pub(super) fn is_pages_api_route_file(path: &str) -> bool {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"(^|/)pages/api/").unwrap())
+        .is_match(path)
+}
+
 /// `middleware.ts`/`middleware.js` — the Next.js root-middleware convention filename, whose
 /// `middleware`/`config` exports the framework reads by exact name. Deliberately NOT root-anchored: a
 /// Next app inside a monorepo tree lives below the analyzed root (`apps/web/middleware.ts`). The

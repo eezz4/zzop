@@ -393,8 +393,10 @@ fn rule_overrides_applied_lists_only_ids_that_actually_matched() {
 fn rule_overrides_applied_confirms_an_honored_pack_allowlist() {
     // The v0.29.0 release-audit finding, pinned from both sides: `packs.only` suppresses strictly more
     // than `packs.disabled`, so a run that sets it and gets back no acknowledgement is a run whose
-    // missing findings have no wire evidence at all. `packsLoaded` cannot stand in — it is a path-match
-    // census and is byte-identical under either knob.
+    // missing findings have no wire evidence at all. Since 2026-08-26 `packsLoaded` DOES mark the
+    // gated packs (`did_not_run`), but it still cannot stand in for this field: that one reports what
+    // happened to each loaded pack, this one reports which entries of the caller's request took
+    // effect, and a typo'd allowlist id appears in neither the same way.
     let dir = fixture_tree();
     let mut cfg = config(DEFAULT_SIZE_CAP);
     let a_loaded_pack = cfg
@@ -700,6 +702,73 @@ fn packs_loaded_counts_rules_as_loaded_even_when_the_pack_is_disabled() {
     assert_eq!(out.packs_loaded.len(), 1);
     assert_eq!(out.packs_loaded[0].id, "security");
     assert_eq!(out.packs_loaded[0].rules, 3);
+    // ...and says it did not run (2026-08-26). Keeping the row and the count is right — the pack
+    // loaded — but for years that was ALL the row said, so a reader joining it to "zero
+    // `security/*` findings" concluded the pack ran and the tree was clean.
+    assert_eq!(out.packs_loaded[0].did_not_run, Some(PackNotRun::Disabled));
+}
+
+#[test]
+fn packs_loaded_marks_a_pack_an_allowlist_never_named_and_leaves_the_selected_one_alone() {
+    // The other half of the pack-level gate. `only_packs` suppresses strictly MORE than
+    // `disabled_rules` — every pack it fails to name — and an all-typo allowlist silences every DSL
+    // rule at once, which is the case `rule_overrides_applied.only` structurally cannot report (it
+    // lists only entries that matched a loaded pack, so an all-typo allowlist yields `[]`). Read off
+    // the rows instead, that state is unmissable: every pack marked `NotAllowlisted`.
+    let dir = fixture_tree();
+    let mut cfg = config(DEFAULT_SIZE_CAP);
+    let extra: RulePackDef = serde_json::from_str(
+        r#"{"id":"zz-other","framework":"any","rules":[{"id":"r1","severity":"info","message":"m","matcher":{"type":"line-scan","file_pattern":"\\.ts$","line_pattern":"NEVER_MATCHES"}}]}"#,
+    )
+    .unwrap();
+    cfg.packs.push(extra);
+    cfg.rule_config.only_packs = vec!["security".to_string()];
+    let out = analyze_tree(dir.path(), &cfg);
+    let by_id = |id: &str| {
+        out.packs_loaded
+            .iter()
+            .find(|p| p.id == id)
+            .unwrap_or_else(|| panic!("expected {id} in packs_loaded: {:?}", out.packs_loaded))
+    };
+    assert_eq!(by_id("security").did_not_run, None);
+    assert_eq!(
+        by_id("zz-other").did_not_run,
+        Some(PackNotRun::NotAllowlisted)
+    );
+
+    // The all-typo shape: nothing runs, and every row says so.
+    cfg.rule_config.only_packs = vec!["no-such-pack".to_string()];
+    let all_off = analyze_tree(dir.path(), &cfg);
+    assert!(
+        all_off
+            .packs_loaded
+            .iter()
+            .all(|p| p.did_not_run == Some(PackNotRun::NotAllowlisted)),
+        "an allowlist naming no loaded pack admits none of them: {:?}",
+        all_off.packs_loaded
+    );
+    assert!(
+        all_off
+            .rule_overrides_applied
+            .as_ref()
+            .is_none_or(|r| r.only.is_empty()),
+        "and the field that used to be the only signal still says nothing: {:?}",
+        all_off.rule_overrides_applied
+    );
+}
+
+#[test]
+fn packs_loaded_marks_nothing_when_no_pack_is_gated() {
+    // The canary. `did_not_run` is `None` on every row of an ungated run — if this ever goes red the
+    // field is answering something other than the gate, and every disclosure built on it is noise.
+    let dir = fixture_tree();
+    let out = analyze_tree(dir.path(), &config(DEFAULT_SIZE_CAP));
+    assert!(!out.packs_loaded.is_empty(), "fixture must load a pack");
+    assert!(
+        out.packs_loaded.iter().all(|p| p.did_not_run.is_none()),
+        "{:?}",
+        out.packs_loaded
+    );
 }
 
 #[test]

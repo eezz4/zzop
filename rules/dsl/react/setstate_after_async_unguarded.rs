@@ -309,6 +309,49 @@ fn a_class_property_setter_outside_every_function_span_keeps_the_pre_gate_pairin
     assert_eq!(h[0].line, 4);
 }
 
+// --- the LIVE-flag veto: a cancellation flag that is actually SET ---
+//
+// The original guard vocabulary was a list of exact identifier spellings, and it was case-SENSITIVE:
+// `cancelled` never matched `isCancelled`, which is the dominant React spelling, and `isDestroyed` was
+// not in the list at all. Measured on getredash/redash @ ca79fe98, 11 of this rule's 35 findings sat in
+// a file carrying an `isCancelled`/`isDestroyed` spelling. That 11 is a count of CANDIDATE files under
+// those two spellings and is NOT the number the fix removed — the removal count is measured over the
+// whole arm, which also carries abort/unmount/dispose stems and the `.current` form, and it lives in the
+// rule message. The two numbers are stated separately here because a single "11 of 35" restated at both
+// sites would read as one measurement and drift the moment either population changed.
+// The fix is deliberately NOT "make the old arm case-insensitive": that alone cannot tell a LIVE guard
+// from an INERT one, and one of those 11 (`useUserGroups.js:15`) is an inert guard whose finding is
+// CORRECT. So the new arm demands the flag be ASSIGNED `true` somewhere in the symbol — the thing a
+// cleanup function does and an inert guard never does.
+
+#[test]
+fn a_live_is_cancelled_flag_vetoes_while_an_inert_one_still_fires() {
+    // The exclusion and its production CONTROL in ONE assertion. Three components, one file:
+    //   `Live`      — `let isCancelled = false` + a cleanup that sets it `true`  -> vetoed
+    //   `RefGuard`  — a ref flag whose cleanup sets `.current = true`            -> vetoed
+    //   `Inert`     — the same flag NAME, read but never set (no cleanup at all) -> still reported
+    // A green fixture therefore proves the veto discriminates, not that the scan went dark: if the
+    // rule stopped firing entirely, the `Inert` assertion fails.
+    let dir = TempDir::new("zzop-react");
+    dir.write(
+        "src/Guards.tsx",
+        "import { useEffect, useRef, useState } from 'react';\ndeclare function fetchIt(u: string): Promise<any>;\nexport function Live({ url }: { url: string }) {\n  const [data, setData] = useState(null);\n  useEffect(() => {\n    let isCancelled = false;\n    fetchIt(url).then((d) => {\n      if (!isCancelled) {\n        setData(d);\n      }\n    });\n    return () => {\n      isCancelled = true;\n    };\n  }, [url]);\n  return null;\n}\nexport function RefGuard({ url }: { url: string }) {\n  const [data, setData] = useState(null);\n  const destroyedRef = useRef(false);\n  useEffect(() => {\n    fetchIt(url).then((d) => {\n      if (!destroyedRef.current) {\n        setData(d);\n      }\n    });\n    return () => {\n      destroyedRef.current = true;\n    };\n  }, [url]);\n  return null;\n}\nexport function Inert({ url }: { url: string }) {\n  const [data, setData] = useState(null);\n  useEffect(() => {\n    let isCancelled = false;\n    fetchIt(url).then((d) => {\n      if (!isCancelled) {\n        setData(d);\n      }\n    });\n  }, [url]);\n  return null;\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "setstate-after-async-unguarded");
+    assert_eq!(
+        h.len(),
+        1,
+        "only the INERT guard may survive the veto: {:?}",
+        out.findings
+    );
+    assert_eq!(
+        h[0].line, 39,
+        "the survivor must be Inert's setter, not Live's or RefGuard's: {:?}",
+        out.findings
+    );
+}
+
 // Seals the SAME-LINE NESTING RESIDUAL the rule's message discloses: `setData(await fetch(url));`
 // is a genuine unguarded post-await setter that this rule does NOT report, because `order_ok`
 // (`crates/core/src/dsl/method_scan.rs`) compares first-match START OFFSETS and the `await` nested
@@ -326,4 +369,74 @@ fn an_await_nested_inside_the_setter_call_is_the_disclosed_false_negative() {
     let h = hits(&out, "setstate-after-async-unguarded");
     assert_eq!(h.len(), 1, "{:?}", out.findings);
     assert_eq!(h[0].line, 17, "{:?}", out.findings);
+}
+
+// --- the `info` BAND, and the gate it stands in for (2026-08-25) ---
+//
+// The rule's message has always carried a sentence disqualifying its own dominant finding shape: "a
+// plain event handler is mounted by construction whenever it fires, so a `setX(...)` inside one is an
+// accepted false positive here." A rule that ships a paragraph explaining why its finding is probably
+// wrong is describing a gate it has not implemented, and the gate — "the setter sits inside a
+// `useEffect` callback, or a function one calls" — is NOT EXPRESSIBLE by `Matcher::MethodScan`:
+// `SourceFile` projects function bodies as ANONYMOUS `(start, end)` line pairs (`function_spans`) with
+// no record of which CALL receives a function as its argument, `symbols` covers only DECLARED symbols,
+// `call_sites` is a closed set of API families with no hook member and answers "does this body contain
+// such a call" rather than "is this line inside its callback", and `extract_function_spans` deliberately
+// leaves a `useEffect` callback UNMERGED from its call site (its one merge is for
+// `.then`/`.catch`/`.finally`, and widening it would re-create the sibling-closure pairing that merge
+// exists to break). The second half of the gate — "a function CALLED from an effect" — needs an
+// intra-file call graph, which `RuleContext` (per-file, no `CommonIr`) does not carry at all.
+//
+// So the severity carries the disclosure instead: `info` rather than `warning`. Measured over a 9-tree
+// corpus, 34 of 49 findings sat in an event handler rather than an effect.
+//
+// The two tests below are the BIDIRECTIONAL pin of that state, and the second one is written to be
+// INVERTED the day the containment gate lands: today it asserts the false-positive class still fires,
+// which is exactly what the band is compensating for.
+
+#[test]
+fn an_effect_async_loader_is_the_true_positive_and_reports_at_info() {
+    // Direction 1 — RECALL. A genuine mount effect whose async loader sets state after an `await` with
+    // no guard. This is the shape the rule exists for, and the demotion must not silence it.
+    let dir = TempDir::new("zzop-react");
+    dir.write(
+        "src/Loader.tsx",
+        "import { useEffect, useState } from 'react';\nexport function Loader({ url }: { url: string }) {\n  const [data, setData] = useState(null);\n  useEffect(() => {\n    const load = async () => {\n      const d = await fetch(url);\n      setData(d);\n    };\n    load();\n  }, [url]);\n  return null;\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "setstate-after-async-unguarded");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 7);
+    assert_eq!(
+        h[0].severity,
+        zzop_core::Severity::Info,
+        "the band is the un-built gate made machine-readable: {:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn an_event_handler_setter_still_fires_and_that_is_what_the_info_band_pays_for() {
+    // Direction 2 — the FALSE-POSITIVE class, pinned as PRESENT rather than as removed. The component is
+    // mounted by construction whenever `onSubmit` runs, so no teardown can race the resolve; the rule
+    // reports anyway, because it cannot see that the setter is in a handler rather than an effect. This
+    // fixture is the measured cal.com shape (a `setX(false)` in a `finally`/`catch` reached only from a
+    // submit path). INVERT THIS TEST — to `is_empty()`, and the sibling above to `Severity::Warning` —
+    // in the same change that teaches the matcher hook-callback containment. Until then, asserting the
+    // silence this rule's own message promises would be asserting a fiction.
+    let dir = TempDir::new("zzop-react");
+    dir.write(
+        "src/PayForm.tsx",
+        "import { useState } from 'react';\nexport function PayForm({ url }: { url: string }) {\n  const [paying, setPaying] = useState(false);\n  const onSubmit = async () => {\n    try {\n      await fetch(url, { method: 'POST' });\n    } finally {\n      setPaying(false);\n    }\n  };\n  return <button onClick={onSubmit}>pay</button>;\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "setstate-after-async-unguarded");
+    assert_eq!(
+        h.len(),
+        1,
+        "the event-handler class is NOT gated today — see this module's header: {:?}",
+        out.findings
+    );
+    assert_eq!(h[0].line, 8);
+    assert_eq!(h[0].severity, zzop_core::Severity::Info);
 }

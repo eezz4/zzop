@@ -51,6 +51,20 @@ use crate::EngineConfig;
 
 use crate::analyze::record_native_timing;
 
+/// The git window echoed beside the numbers it produced — `Some` only when git collection actually
+/// ran, gated exactly like `scores`/`health`/`critical`/`seams` below, so no consumer ever sees a
+/// window quoted for numbers that stayed empty. Lives here rather than at the `super::assemble` call
+/// site because that gate is this phase's own contract.
+pub(super) fn git_window(config: &EngineConfig, git_active: bool) -> Option<crate::GitWindow> {
+    git_active
+        .then_some(config.git.as_ref())
+        .flatten()
+        .map(|g| crate::GitWindow {
+            recent_days: g.recent_days,
+            since: g.since.clone(),
+        })
+}
+
 pub(super) struct MetricsResult {
     pub(super) scores: Option<Scores>,
     pub(super) health: Option<HealthIndex>,

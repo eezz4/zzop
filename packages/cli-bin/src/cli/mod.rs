@@ -8,15 +8,22 @@
 //!   row at a time by `zzop <sub> --help`.
 //! - [`analysis`] — the four lanes that run an engine ANALYSIS from argv (`analyze`, `analyze-envelope`,
 //!   `cross`, `endpoint`): each carries a source-mode choice and/or the findings-view knobs.
+//! - [`fail_on`] — the CI GATE (`--fail-on <severity>`): its argv lift, its per-lane refusal, and the
+//!   terminal step that prints a reply and then moves the exit code with the findings. Its own file
+//!   because the exit-code contract below gains a THIRD code there, and a code is a wire promise.
 //! - [`run`] — the remaining subcommand RUNNERS whose argv parsing is big enough to deserve a function of
 //!   their own; each diverges (parse, call `zzop_summary`, print, exit).
 //!
 //! This module keeps only the two terminal steps both halves need ([`read_or_exit`], [`print_or_exit`])
 //! and the re-exports `main.rs` imports. The exit-code contract every `run_*` carries: 2 = argument-shape
-//! error, 1 = runtime failure (unreadable file / invalid / refused).
+//! error, 1 = runtime failure (unreadable file / invalid / refused), and — only on a lane asked for it
+//! with `--fail-on` — 3 = the run SUCCEEDED and its findings met the declared threshold
+//! ([`fail_on::FAIL_ON_EXIT`]). The third code exists so a CI log can tell a broken config apart from a
+//! real critical finding; folding it into 1 would have made those two indistinguishable.
 
 pub mod analysis;
 pub mod args;
+pub mod fail_on;
 pub mod help;
 pub mod run;
 

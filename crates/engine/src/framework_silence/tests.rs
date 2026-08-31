@@ -273,6 +273,46 @@ fn no_server_framework_import_never_warns() {
     assert!(warning.is_none(), "got: {warning:?}");
 }
 
+/// S2's vocabulary is a HAND-KEPT list, so its silence is only ever "no LISTED framework was
+/// imported" — never "this tree serves no routes". Measured on gogs (`d460e50`): the tree registers
+/// hundreds of routes through `gopkg.in/macaron.v1`, which no entry covers, so S2 stayed silent, 0
+/// http provides were extracted, and none of the run's 27 warnings mentioned a route — a zero that
+/// was byte-indistinguishable from a clean bill. The list is kept (it names the framework, which the
+/// derivable disclosure cannot), but a run must not let its absence read as an absence of routes, so
+/// the message states its own incompleteness and points at the channel whose population IS the tree:
+/// the coverage query's `ioChannels.zeroExtraction`, which crosses this build's recognizer table with
+/// the tree's structural extension mix and needs no framework name at all.
+#[test]
+fn the_server_framework_vocabulary_states_its_own_incompleteness() {
+    let map = package_import_files(&[("express", &["src/app.ts"])]);
+    let w = server_framework_import_warning(&map, 0).expect("S2 must fire");
+    assert!(
+        w.contains("not a complete list"),
+        "S2 does not disclose that its vocabulary is incomplete: {w}"
+    );
+    assert!(
+        w.contains("ioChannels.zeroExtraction"),
+        "S2 does not name the population-complete channel: {w}"
+    );
+}
+
+/// The SILENCE twin of the disclosure above, and the mechanism it documents: a server framework this
+/// vocabulary does not carry produces no S2 entry at all, whatever the tree actually serves. Uses a
+/// deliberately fictional specifier rather than a real unlisted framework so that ADDING any real
+/// name to the vocabulary never breaks this pin — the defect being pinned is the list's shape, not
+/// which names happen to be missing from it today.
+#[test]
+fn an_unlisted_server_framework_leaves_s2_silent() {
+    let map = package_import_files(&[(
+        "example.com/unlisted/webframework",
+        &["internal/route/web.go"],
+    )]);
+    assert!(
+        server_framework_import_warning(&map, 0).is_none(),
+        "the vocabulary matched a specifier it does not carry"
+    );
+}
+
 #[test]
 fn http_client_libraries_are_not_server_frameworks() {
     // axios/got/etc. say nothing about whether THIS tree serves routes — deliberately excluded from

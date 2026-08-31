@@ -22,6 +22,7 @@ fn nest_global_prefix_provide_is_dropped_and_warned_in_envelope_mode() {
         file: "legacy.jsp".to_string(),
         line: 1,
         symbol: None,
+        ..Default::default()
     });
     // An ordinary sibling route, so `io` is `Some` and we can also pin it comes through untouched —
     // envelope mode never runs `apply_and_strip_global_prefix` at all (module doc), so there is no
@@ -35,6 +36,7 @@ fn nest_global_prefix_provide_is_dropped_and_warned_in_envelope_mode() {
         file: "legacy.jsp".to_string(),
         line: 2,
         symbol: None,
+        ..Default::default()
     });
     let env = envelope(vec![a]);
     let out = analyze_envelope(&env, &config());
@@ -113,6 +115,7 @@ fn ordinary_io_kinds_are_not_dropped_or_warned_in_envelope_mode() {
         file: "a.jsp".to_string(),
         line: 2,
         symbol: None,
+        ..Default::default()
     });
     a.io.consumes.push(IoConsume {
         kind: "http".to_string(),
@@ -153,6 +156,7 @@ fn config_mount_prepends_gateway_prefix_to_an_http_provide_key_in_envelope_mode(
         file: "users.jsp".to_string(),
         line: 1,
         symbol: None,
+        ..Default::default()
     });
     let env = envelope(vec![a]);
     let mut cfg = config();
@@ -183,6 +187,7 @@ fn config_mount_matching_nothing_emits_the_same_had_no_effect_warning_as_the_nat
         file: "users.jsp".to_string(),
         line: 1,
         symbol: None,
+        ..Default::default()
     });
     let env = envelope(vec![a]);
     let mut cfg = config();
@@ -211,6 +216,7 @@ fn config_mount_leaves_non_http_provide_kinds_untouched_in_envelope_mode() {
         file: "router.jsp".to_string(),
         line: 1,
         symbol: None,
+        ..Default::default()
     });
     let env = envelope(vec![a]);
     let mut cfg = config();

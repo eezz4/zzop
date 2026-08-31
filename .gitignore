@@ -28,6 +28,13 @@
 #                       them in that config would answer a question nobody asked. Same "third-party
 #                       source, embedded .git, never committed" rule; re-acquisition commands live
 #                       beside oss/'s in the internal context docs.
+#   corpus/frameworks/ — upstream FRAMEWORK and library checkouts (flask, django, fastapi, nest,
+#                       express, typeorm, gin, cobra, ripgrep, clap, requests, commons-lang,
+#                       prometheus), added 2026-08-19. A third directory for the same reason x/ is
+#                       a second: oss/ is a 17-tree cross-layer JOIN of realworld APPS, and these are
+#                       unrelated upstreams whose value is rule PRECISION on real library code, not
+#                       joins. Kept out of oss/ so its join config keeps answering the question it
+#                       was written for.
 #   corpus/*.json*    — local e2e configs/overlays (machine-specific absolute paths)
 # The line that used to be here ignored `/corpus` wholesale, which also swallowed the labeled
 # detection benchmark. That fixture is 100% our own synthetic code — no third-party source, no
@@ -36,6 +43,8 @@
 # what WE wrote lives under examples/ and ships, what SOMEONE ELSE wrote stays here and does not.
 /corpus/oss/
 /corpus/x/
+/corpus/frameworks/
+/corpus/audit/
 /corpus/*.json
 /corpus/*.jsonc
 

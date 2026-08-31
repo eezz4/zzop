@@ -45,6 +45,7 @@ pub(crate) fn routes_overlay(
             // Provides keep the raw path: a route TEMPLATE's `?` can be a wildcard, never a query string
             // (`zzop_core::io::key`'s contract), so provides use `http_interface_key` verbatim.
             RouteRole::Provide => provides.push(zzop_core::IoProvide {
+                route_version: None,
                 response: None,
                 body: None,
                 kind: "http".to_string(),

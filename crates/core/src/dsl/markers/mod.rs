@@ -22,7 +22,10 @@ mod channel;
 mod path;
 
 pub use channel::{marker_channel, suppress_hint, MarkerChannel};
-pub use path::{leaders_for_path, marker_leaders_for_path, marker_widening_prose};
+pub use path::{
+    leaders_for_path, marker_leaders_for_path, marker_widening_prose, suppress_marker_sites,
+    SuppressMarkerSite,
+};
 
 /// Builds the regex for the derived `RuleDef::suppress_marker()` (`zzop-<id>-ok`) — matches a `//` comment
 /// naming the marker (regex-escaped; derived markers are `zzop-<kebab-id>-ok` with no metacharacters, so the

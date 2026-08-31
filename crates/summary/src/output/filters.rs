@@ -125,7 +125,7 @@ pub(super) fn limit_range_error(v: &serde_json::Value) -> String {
 /// `critical` > `warning` > `info` > anything else (unknown severities rank 0: shown last unfiltered,
 /// excluded by any explicit severity filter — same "never trips a gate it can't name" stance as
 /// severityRank).
-pub(crate) fn severity_rank(severity: &str) -> u8 {
+pub fn severity_rank(severity: &str) -> u8 {
     match severity {
         "critical" => 3,
         "warning" => 2,

@@ -160,28 +160,41 @@ fn disclosure_prose() -> Vec<(String, String)> {
         read(&root, "crates/engine/src/disclosure.rs"),
     )];
     assert!(
-        sources[0].1.contains("BLINDNESS_REGISTRY"),
-        "crates/engine/src/disclosure.rs no longer declares BLINDNESS_REGISTRY — this pin is reading \
+        sources[0].1.contains("blindness_registry"),
+        "crates/engine/src/disclosure.rs no longer declares blindness_registry — this pin is reading \
          the wrong file and would go green on prose nobody ships"
     );
-    // The module was split once already (`disclosure/document.rs`, `disclosure/types.rs`), so the
-    // sibling directory is swept too rather than named file by file.
-    if let Ok(entries) = std::fs::read_dir(engine_src.join("disclosure")) {
-        let mut paths: Vec<std::path::PathBuf> = entries
-            .flatten()
-            .map(|e| e.path())
-            .filter(|p| p.extension().is_some_and(|x| x == "rs"))
-            .collect();
-        paths.sort();
-        for path in paths {
-            let label = format!(
-                "crates/engine/src/disclosure/{}",
-                path.file_name().unwrap_or_default().to_string_lossy()
-            );
-            let text = read(&path, &label);
-            sources.push((label, text));
+    // The module has been split twice (`disclosure/document.rs` + `types.rs`, then the rows again into
+    // `disclosure/registry/<group>.rs`), so the sibling tree is swept RECURSIVELY rather than named
+    // file by file — and rather than one level deep, which is what it was when the second split moved
+    // every subject out of range and left this pin measuring nothing. A depth-limited sweep of a
+    // directory that keeps subdividing is a pin with an expiry date.
+    // An explicit worklist rather than a nested `fn`, only because `read` above is a closure and a
+    // nested item cannot capture it. The final sort makes the result order-independent either way.
+    let mut queue = vec![(
+        engine_src.join("disclosure"),
+        "crates/engine/src/disclosure".to_string(),
+    )];
+    while let Some((dir, rel)) = queue.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for path in entries.flatten().map(|e| e.path()) {
+            let name = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+            let label = format!("{rel}/{name}");
+            if path.is_dir() {
+                queue.push((path, label));
+            } else if path.extension().is_some_and(|x| x == "rs") {
+                let text = read(&path, &label);
+                sources.push((label, text));
+            }
         }
     }
+    sources.sort();
     sources
 }
 

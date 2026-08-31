@@ -54,6 +54,11 @@ pub(super) fn eval_call_scan(
     let Some(line_re) = diag.compile_opt("line_pattern", m.line_pattern.as_ref()) else {
         return;
     };
+    let Some(line_exclude_re) =
+        diag.compile_opt_multiline("line_exclude_pattern", m.line_exclude_pattern.as_ref())
+    else {
+        return;
+    };
     let marker = rule.suppress_marker();
     // `//` OR `#` leaders, matching the io-scan pass rather than line-scan's `//`-only: this channel is
     // multi-language from its first wave (a Python `# zzop-<id>-ok` must suppress exactly like a
@@ -114,6 +119,22 @@ pub(super) fn eval_call_scan(
                 match line_text {
                     Some(text) if re.is_match(text) => {}
                     _ => continue,
+                }
+            }
+            // `line_exclude_pattern` — the lexical VETO, and its degrade runs the OTHER way than
+            // `line_pattern`'s right above: a line the text cannot supply witnesses no declaration, so
+            // the site keeps firing rather than being waived. The field's doc owns why.
+            //
+            // What it READS is the call's WINDOW, not its first line: a declaration a formatter pushed
+            // onto the next line is still the declaration this call makes. `super::veto_window` owns the
+            // window's shape and its cap; a single-line call yields exactly the line, as before.
+            if let Some(re) = &line_exclude_re {
+                let excluded = (site.line as usize)
+                    .checked_sub(1)
+                    .and_then(|i| super::veto_window::call_window(&lines, i, &site.callee))
+                    .is_some_and(|window| re.is_match(&window));
+                if excluded {
+                    continue;
                 }
             }
             if m.in_loop

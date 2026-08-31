@@ -19,3 +19,13 @@ export function callVendor() {
 }
 
 export const marker = 1;
+
+// APPENDED AT THE END ON PURPOSE — every key in EXPECTED.jsonc is `file:line`, so inserting beside the
+// sibling POST above would have silently re-anchored `provides.ts:12` and `:18`.
+//
+// The PROVIDER half of cross-layer/retrying-write-no-idempotency: a write route with no witnessed
+// idempotency guard (nothing here reads an `Idempotency-Key` header, and no overlay injects the
+// `idempotency-guarded` attribute for this route), reached by a retry-wrapped consume in xlayer-fe.
+// Unlike `POST /orders` above it IS consumed, so it is not an unconsumed-mutation-endpoint; it is still
+// a `mutating-route-no-auth`, which is a property of every unguarded write route in this tree.
+apiRoutes.post('/charges', handler);

@@ -161,6 +161,40 @@ fn bare_http_verb_falling_back_to_a_non_literal_route_attr_drops_the_route() {
 }
 
 #[test]
+fn the_anchor_is_the_routing_attribute_not_the_methods_first_attribute() {
+    // Every other fixture in this file puts the routing attribute FIRST, so the `method_declaration`'s own
+    // start row coincided with it — and no fixture here asserted `line` at all, which is the stronger
+    // reason none of them could see the defect. Measured 2026-08-24 on `corpus/frameworks/aspnetcore`:
+    // 13 of 448 attribute routes anchored one line ABOVE their route attribute, on a NON-route attribute,
+    // and 7 of those on a security attribute. A non-routing attribute above the routing one separates
+    // the two nodes.
+    let src = "[ApiController]\n[Route(\"api/[controller]\")]\npublic class PetController {\n    [Authorize(\"pet-store-writer\")]\n    [HttpPost(\"add-pet\")]\n    public string Add() { return \"\"; }\n}\n";
+    let provides = extract_csharp_http_provides("f.cs", src);
+    let p = provides
+        .iter()
+        .find(|p| p.key == "POST /api/pet/add-pet")
+        .expect("the route is still extracted");
+    assert_eq!(
+        p.line, 5,
+        "anchor must be the `[HttpPost]` line, not the `[Authorize]` above it"
+    );
+}
+
+#[test]
+fn the_anchor_is_the_route_attribute_when_that_is_where_the_path_came_from() {
+    // `[Route("x")]` + a bare `[HttpGet]`: the emitted key's PATH was read off the `[Route]` attribute, so
+    // that is the attribute the route was read from and the line the reader must land on. Anchoring on the
+    // verb attribute instead would point at a line carrying no path at all.
+    let src = "[ApiController]\npublic class UsersController {\n    [Produces(\"application/json\")]\n    [Route(\"special\")]\n    [HttpGet]\n    public string Get() { return \"\"; }\n}\n";
+    let provides = extract_csharp_http_provides("f.cs", src);
+    let p = provides
+        .iter()
+        .find(|p| p.key == "GET /special")
+        .expect("the route is still extracted");
+    assert_eq!(p.line, 4, "anchor must be the `[Route(\"special\")]` line");
+}
+
+#[test]
 fn minimal_api_map_get_is_extracted() {
     let src = r#"
         var app = builder.Build();

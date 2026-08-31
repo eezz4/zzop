@@ -27,6 +27,24 @@ fn cross_file_literal_prefix_still_resolves() {
 }
 
 #[test]
+fn the_whole_corpus_pass_anchors_on_the_mapping_annotation() {
+    // The pass that actually reaches the findings (`run_java_provides_project_pass` replaces the per-file
+    // provides wholesale), so the per-file anchor test is not enough on its own. Same mall shape: an
+    // `@Operation` leads the modifier list, and `line_of(method_declaration)` would report 4, not 5.
+    let files = vec![(
+        "UmsAdminController.java".to_string(),
+        "@RestController\n@RequestMapping(\"/admin\")\nclass UmsAdminController {\n  @Operation(summary = \"register a user\")\n  @PostMapping(\"/register\")\n  void register() {}\n}\n"
+            .to_string(),
+    )];
+    let report = extract_http_provides_project(&files);
+    assert_eq!(keys(&report), vec!["POST /admin/register"]);
+    assert_eq!(
+        report.provides[0].line, 5,
+        "the @PostMapping line, not the @Operation above it"
+    );
+}
+
+#[test]
 fn cross_file_constant_reference_prefix_resolves() {
     let files = vec![
         (

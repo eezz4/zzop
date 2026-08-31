@@ -701,3 +701,76 @@ mod decode_boundary_tests {
         assert_eq!(result.commits[0].subject.as_deref(), Some("café résumé"));
     }
 }
+
+/// `.mailmap` is the repo declaring its own identity resolution, and every consumer of the author field
+/// asks a question about PEOPLE (`busFactor`: "a single author… nobody else understands it"). With raw
+/// `%ae`, one human committing from three addresses counts as three, and the failure direction is a false
+/// ALL-CLEAR on the one metric built to find single points of human failure. Pins `%aE` end to end
+/// through a real repo, because the collapse happens inside `git log` rather than in any code here.
+#[test]
+fn a_mailmap_declared_alias_set_counts_as_one_author_not_three() {
+    use std::process::Command;
+
+    let git_available = Command::new("git").arg("--version").output().is_ok();
+    if !git_available {
+        skip_notice!("git not on PATH");
+        return;
+    }
+
+    let dir = std::env::temp_dir().join(format!(
+        "zzop-git-mailmap-{}-{}",
+        std::process::id(),
+        now_ms()
+    ));
+    std::fs::create_dir_all(&dir).expect("create temp repo dir");
+
+    let run = |args: &[&str]| {
+        let out = Command::new("git")
+            .args(args)
+            .current_dir(&dir)
+            .output()
+            .unwrap_or_else(|e| panic!("git {args:?} failed to spawn: {e}"));
+        assert!(
+            out.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+
+    run(&["init", "-q"]);
+    run(&["config", "user.name", "Ann"]);
+    std::fs::write(
+        dir.join(".mailmap"),
+        "Ann <ann@corp.com> <ann@old.com>\nAnn <ann@corp.com> <ann@laptop.local>\n",
+    )
+    .unwrap();
+    run(&["add", ".mailmap"]);
+    run(&["config", "user.email", "ann@corp.com"]);
+    run(&["commit", "-q", "-m", "chore: mailmap"]);
+
+    // The same person, three addresses — a work laptop, an old employer alias, a machine default.
+    for (i, email) in ["ann@corp.com", "ann@old.com", "ann@laptop.local"]
+        .iter()
+        .enumerate()
+    {
+        std::fs::write(dir.join("f.ts"), format!("export const v = {i};\n")).unwrap();
+        run(&["add", "f.ts"]);
+        run(&["config", "user.email", email]);
+        run(&["commit", "-q", "-m", &format!("edit {i}")]);
+    }
+
+    let collection = collect(&dir, &CollectOptions::default())
+        .unwrap_or_else(|e| panic!("collect() failed: {e}"));
+    let f = collection
+        .stats
+        .by_path
+        .get("f.ts")
+        .expect("f.ts should be in the collected history");
+    assert_eq!(
+        f.author_count, 1,
+        "three declared aliases of one person must collapse to one author; got {} ({:?})",
+        f.author_count, f.author_commits
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

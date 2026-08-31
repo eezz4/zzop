@@ -25,6 +25,7 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use zzop_engine::{analyze_trees, AnalyzeOutput, EngineConfig, GitOptions};
 
@@ -32,11 +33,18 @@ struct TempDir(PathBuf);
 
 impl TempDir {
     fn new(prefix: &str) -> Self {
+        // A clock is not a unique name. Windows' `SystemTime` granularity is coarse enough
+        // that two threads entering here together read the SAME nanos, and two tests that then
+        // `git init` one directory collide inside git's own template copy — a red gate with
+        // nothing to do with the change under test. The counter is what makes the name unique;
+        // the clock only keeps runs apart, and this file was one of the last without it.
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!("{prefix}-{}-{nanos}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("{prefix}-{}-{nanos}-{n}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         TempDir(dir)
     }

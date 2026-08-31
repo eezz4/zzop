@@ -58,9 +58,50 @@ pub(super) fn shape_analyze_output(
         "packsLoaded".to_string(),
         output_view["packsLoaded"].clone(),
     );
+    // Its legend — what `filesInScope` counts, what `zeroAdmissionRules` claims, and, only when a pack
+    // really was gated off, what `didNotRun` means. `.get()`-gated like `ruleOverridesApplied` above
+    // and for both of the same reasons: the facade OMITS the key when no pack loaded (a bare index
+    // would turn that into JSON `null` noise), and an older engine/facade build without the field
+    // degrades to "nothing to forward" rather than a null. An array of numbers whose legend reached
+    // only the raw facade lane would leave the MCP reader — the primary reader — with the numbers
+    // alone, which is the state the auditor measured.
+    if let Some(packs_loaded_meaning) = output_view.get("packsLoadedMeaning") {
+        summary.insert(
+            "packsLoadedMeaning".to_string(),
+            packs_loaded_meaning.clone(),
+        );
+    }
+    // The NATIVE half of the same question, and its legend — which of this build's native analyses
+    // could not have keyed the `findings` map above, split by cause. Forwarded HERE and not only in
+    // the raw facade lane because this lane is where the defect was measured: `zzop analyze` over a
+    // single-tree config reported no `cross-layer/*` key on any of nine corpus trees while the very
+    // same config, run through the cross-layer join, produced 975 findings — and a reader of THIS
+    // reply had no channel saying so. A field only the embedder lane carries would leave the CLI and
+    // MCP readers exactly where the auditor found them. `.get()`-gated for the older-build
+    // degradation reason above; both keys move together, since the numbers without the legend are
+    // the half the same auditor already called a pointer rather than a statement.
+    if let Some(native_analyses) = output_view.get("nativeAnalyses") {
+        summary.insert("nativeAnalyses".to_string(), native_analyses.clone());
+    }
+    if let Some(native_analyses_meaning) = output_view.get("nativeAnalysesMeaning") {
+        summary.insert(
+            "nativeAnalysesMeaning".to_string(),
+            native_analyses_meaning.clone(),
+        );
+    }
+    // The tree's own manifest declaration of which files are BUILD surface, read off the engine view and
+    // handed to the shaper as the third ordering input (`output::deployment_role`). Read by NAME and
+    // defensively: an engine build that does not carry the field yet degrades to an empty set — the same
+    // "no build surface declared" state every non-npm tree is genuinely in — rather than panicking.
+    // Deliberately NOT re-inserted into `summary`: this is an ordering INPUT, not a reply field, and
+    // forwarding it would change every reply's bytes on trees where the axis finds nothing to say.
+    let build_script_paths: std::collections::HashSet<&str> = output_view["buildScriptPaths"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|v| v.as_str()).collect())
+        .unwrap_or_default();
     summary.insert(
         "findings".to_string(),
-        output::shape_findings(&findings, filters),
+        output::shape_findings(&findings, filters, &build_script_paths),
     );
     // The engine's own warnings, plus one this LAYER owns: a `rule` filter that can be proven to match
     // no rule this run could report (see `crate::warnings::unknown_rule_filter_warning`). It is
@@ -81,6 +122,16 @@ pub(super) fn shape_analyze_output(
     // `joinContributionZero` blindness ASSERTION; a summary that drops the engine's own "this
     // tree contributed nothing to the join" fact is not a disclosure.
     summary.insert("coverage".to_string(), output_view["coverage"].clone());
+    // The census above is tree-WIDE, and that is exactly what it cannot answer: which of this tree's
+    // principal filetypes the resolved dependency graph does not contain. Those two facts decided
+    // whether 306 `unimported-export` findings on directus were about the code or about a 587-file
+    // frontend no parser claimed — and until now they existed only in `zzop coverage`, a subcommand
+    // this reply never mentions. Compact and always present, next to the census it qualifies; see
+    // `super::coverage_gaps` for what earns a row and what is pointed at instead of restated.
+    summary.insert(
+        "coverageGaps".to_string(),
+        super::coverage_gaps::coverage_gaps(output_view),
+    );
     summary.insert(
         "configWarnings".to_string(),
         serde_json::Value::Array(config_warnings),
@@ -116,7 +167,7 @@ pub(super) fn shape_analyze_output(
     // `architecture_summary`'s own doc); absent, never `null`, otherwise. Envelope mode never runs git
     // signals (no working tree to diff), so this key is naturally omitted for `analyze_envelope_summary`
     // too — the SAME "absent, not null" contract, no envelope-specific branch needed.
-    if let Some(architecture) = architecture_summary(output_view) {
+    if let Some(architecture) = super::architecture::architecture_summary(output_view) {
         summary.insert("architecture".to_string(), architecture);
     }
     // `gitWindow` ({recentDays, since}) — the engine's own always-serialized "which window produced
@@ -136,98 +187,13 @@ pub(super) fn shape_analyze_output(
     if let Some(rule_timings) = output::shape_rule_timings(output_view) {
         summary.insert("ruleTimings".to_string(), rule_timings);
     }
+    // Cache PROVENANCE — how much of this reply was replayed rather than recomputed. Present only when a
+    // cache was in play (absent, never null, like `architecture`/`ruleTimings` above), and carrying its
+    // own `meaning` for the same reason those do. Until 2026-08-17 these counts reached a reader only
+    // through `--profile-rules`, so the default reply could not answer "did this run actually look at my
+    // code?" — see `output::cache_signal` for the manufactured-zero this closes.
+    if let Some(cache) = output::shape_cache_signal(output_view) {
+        summary.insert("cache".to_string(), cache);
+    }
     serde_json::Value::Object(summary)
-}
-
-/// Builds the reply's compact `architecture` object from the facade output's `health`/
-/// `recommendations`/`critical` fields — `None` (never `serde_json::Value::Null`) when `health`
-/// itself is absent or JSON `null` (git signals did not run this tree), so the reply OMITS the key
-/// entirely rather than growing a null `architecture` field on every git-less run. Deliberately
-/// capped to ~10 lines of JSON: `pain` (the health scalar), the top-ROI `recommendations[0]`
-/// (`{id, severity, topItem}`, null-safe when there are no recommendations or the top one has no
-/// items), and up to 3 paths off the engine's own SIZE-WEIGHTED `critical` list (`blast_radius * ln(loc+2)`, NOT blast radius alone — re-sorting by `blastRadius` does not reproduce these three) — named
-/// `criticalTop`, NOT "hotspot": the engine's `hotspotScore` is a DIFFERENT metric (churn
-/// `changeCount x loc`, `nodes[].hotspotScore`), and reusing that word here would invite joining two
-/// non-matching rankings. The full arrays never
-/// ride this summary (see analyze_repo's own description: they are the direct `zzop-facade`
-/// embedding lane's job).
-fn architecture_summary(output_view: &serde_json::Value) -> Option<serde_json::Value> {
-    let health = output_view.get("health")?.as_object()?;
-    let pain = health.get("pain")?.clone();
-    // `pain`'s DENOMINATOR travels with it, always (2026-08-08). This summary is the only place the CLI
-    // and MCP surfaces publish any score at all — the full `scores` object rides the direct
-    // `zzop-facade` embedding lane and never reaches here — so before this, `pain` was a single folded
-    // scalar with no way to tell how much of the structure it actually described. That is precisely the
-    // shape `zzop_facade::query_coverage` forbids ("there is deliberately NO single score field, and one
-    // must never be added"), and `pain` was sitting one crate away from the prohibition.
-    //
-    // `measuredWeight / totalWeight` is the fraction of the weighted metric table that had a population
-    // to score over; `pain: null` with `measuredWeight: 0` is the honest "nothing was measurable" state,
-    // which used to serialize as a confident `pain: 0`. Forwarded by name and `.get()`-defensive, the
-    // same degradation contract every other field in this shaper uses.
-    let measured_weight = health.get("measuredWeight").cloned();
-    let total_weight = health.get("totalWeight").cloned();
-    // `pain`'s AXIS SPLIT travels with it for the same reason its denominator does, and the omission was
-    // worse: measured 2026-08-12, 80.6% of the weight table is structural OPINION and rule findings
-    // contribute NOTHING — adding 20 `$queryRawUnsafe` files to a tree moved `critical` 1 -> 21 and left
-    // `pain` byte-identical. A reader was being handed one number that looks like a verdict on the code
-    // and is mostly a verdict on the code's STYLE. Forwarded whole (`defect`/`opinion`/`history`, each on
-    // `pain`'s own scale and summing to it) rather than as a second scalar, so no consumer has to know
-    // which axes exist to read it.
-    let axis_pain = health.get("axisPain").cloned();
-    let top_recommendation = output_view["recommendations"]
-        .as_array()
-        .and_then(|recs| recs.first())
-        .map(|rec| {
-            let top_item = rec["items"]
-                .as_array()
-                .and_then(|items| items.first())
-                .and_then(|item| item["path"].as_str());
-            serde_json::json!({ "id": rec["id"], "severity": rec["severity"], "topItem": top_item })
-        });
-    let critical_top: Vec<&str> = output_view["critical"]
-        .as_array()
-        .map(|files| {
-            files
-                .iter()
-                .take(3)
-                .filter_map(|f| f["path"].as_str())
-                .collect()
-        })
-        .unwrap_or_default();
-    let mut architecture = serde_json::Map::new();
-    architecture.insert("pain".to_string(), pain);
-    if let Some(measured_weight) = measured_weight {
-        architecture.insert("painMeasuredWeight".to_string(), measured_weight);
-    }
-    if let Some(total_weight) = total_weight {
-        architecture.insert("painTotalWeight".to_string(), total_weight);
-    }
-    if let Some(axis_pain) = axis_pain {
-        architecture.insert("painByAxis".to_string(), axis_pain);
-    }
-    architecture.insert(
-        "painMeaning".to_string(),
-        serde_json::json!(
-            "Composite structural debt over the metrics that HAD something to measure, renormalized \
-             onto the full weight table (0 = clean, higher = worse, ~186 = every weighted metric at \
-             its worst). THIS NUMBER CONTAINS NO RULE FINDINGS: it is computed from structural scores \
-             alone, so a tree full of SQL injection scores exactly what the same tree scores with none \
-             — read `findings` and `findings.bySeverity` for defects, never this. Most of it is not \
-             even a defect claim about structure: `painByAxis` splits it into `defect` (import cycles \
-             only), `opinion` (barrel discipline, FSD layering, Robert Martin's SDP/Main Sequence, \
-             Newman modularity, LOC ceilings — a project that deliberately does the opposite is not \
-             wrong, it scores low) and `history` (rename churn, bus factor), each on this same scale \
-             and summing to `pain`. `painMeasuredWeight` / `painTotalWeight` is how much of the table \
-             was actually measurable on this tree: read a low ratio as \"this number describes a \
-             minority of the structure\", not as a better score. `pain: null` means NO metric had a \
-             population — absence of data, never 0. Renormalizing is what stops an unmeasurable axis (a \
-             metric defined over a convention this tree never adopted) from making the repo look \
-             healthier by silently scoring 100. The per-metric populations behind it ride `scores.*` in \
-             the direct zzop-facade output."
-        ),
-    );
-    architecture.insert("topRecommendation".to_string(), top_recommendation.into());
-    architecture.insert("criticalTop".to_string(), critical_top.into());
-    Some(serde_json::Value::Object(architecture))
 }

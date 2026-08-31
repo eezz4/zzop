@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// | Front end | Key of a name-binding import | Keys that are NOT a local name |
 /// |---|---|---|
-/// | TypeScript | the bound local name: an `as` alias when written, else the imported/default/namespace ident; `const X = require("y")` binds `X`, a destructured one binds each local | `__require{N}__` (a bare or inline `require("y")` that binds nothing) |
+/// | TypeScript | the bound local name: an `as` alias when written, else the imported/default/namespace ident; `const X = require("y")` binds `X`, a destructured one binds each local | `__require{N}__` (a bare or inline `require("y")` that binds nothing), `__side_effect_import_{N}__` (a specifier-less `import "y"`) |
 /// | Python | the name Python itself binds: `import a.b.c` binds `a`, an `as` alias binds the alias, `from x import n` binds `n` | `__star_import_{N}__` |
 /// | Java | the dotted name's rightmost segment (`import a.b.C` binds `C`; `import static a.b.C.m` binds `m`) | `__glob_import_{N}__` |
 /// | C# | **the FULL specifier** for a plain `using A.B;` — see below; the `using X = A.B;` alias form keys the alias | `__static_import_{N}__` |
@@ -49,7 +49,9 @@ use serde::{Deserialize, Serialize};
 pub struct ImportBinding {
     /// Verbatim specifier from the import "..." statement ("@/features/x", "./foo").
     pub specifier: String,
-    /// Original exported name: default import = "default", namespace = "*".
+    /// Original exported name: default import = "default", namespace = "*". An import that consumes no
+    /// named export at all (a side-effect `import "y"`, a Go blank import) uses "_" — deliberately not
+    /// "*", which `rules-graph`'s `find_dead_exports` reads as "every export of the target is used".
     pub original: String,
     /// A CommonJS `require()` nested in a function body — a lazy import (does not affect module load order).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]

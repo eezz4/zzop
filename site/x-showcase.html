@@ -5,6 +5,9 @@
 <title>zzop over X's open source</title>
 <meta name="description" content="zzop v0.33.0 run over the twelve repositories X and xAI have open-sourced: the full 4,457-file dependency graph on one canvas, plus the join, risk, posture and co-change exports, every cap and blind spot disclosed.">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="alternate" hreflang="en" href="https://eezz4.github.io/zzop/x-showcase.html">
+<link rel="alternate" hreflang="ko" href="https://eezz4.github.io/zzop/ko/x-showcase.html">
+<link rel="alternate" hreflang="x-default" href="https://eezz4.github.io/zzop/x-showcase.html">
 <style>
 /* ============================================================================
    zzop site — next-generation rework · shared design system
@@ -325,7 +328,7 @@ figcaption{color:var(--n700);font-size:.9rem}
     <a href="index.html#p-graph" class="nav__link">Graph</a>
     <a href="x-showcase.html" class="nav__extra is-here">In the field</a>
   </div>
-  <a class="langbtn" id="langlink" href="ko/" hreflang="ko" aria-label="Read this in Korean"><b>EN</b> · KO</a>
+  <a class="langbtn" id="langlink" href="ko/x-showcase.html" hreflang="ko" aria-label="Read this in Korean"><b>EN</b> · KO</a>
 </nav>
 <!--/zzop:nav-->
 
@@ -335,7 +338,7 @@ figcaption{color:var(--n700);font-size:.9rem}
     <h1>zzop over everything X open-sourced</h1>
     <p class="lede">Twelve repositories from X (formerly Twitter) and xAI &mdash; the For You feed,
     Grok's build system, the xAI SDK, community notes &mdash; analyzed in one run with
-    <strong>zzop v0.33.0</strong> on 2026-08-15. Below is the full dependency graph on one canvas,
+    <strong>zzop v0.33.0</strong> on 2026-08-16. Below is the full dependency graph on one canvas,
     then the four other domain exports. Every cap and every blind spot is disclosed in the diagram
     itself.</p>
     <div class="xg-strip">
@@ -776,7 +779,7 @@ flowchart LR
     <p>Clone the twelve repositories, then one command per domain:
     <code>zzop graph --config &lt;config&gt; --domain join|dep|risk|posture|cochange</code>. The full
     graph is the <code>cosmograph</code> lane:
-    <code>zzop graph --domain dep --format cosmograph-nodes</code> and
+    <code>zzop graph --config &lt;config&gt; --domain dep --format cosmograph-nodes</code> and
     <code>--format cosmograph-links</code>, which emit the two NDJSON tables this canvas reads. The
     findings census (171 across four repos) comes from <code>zzop cross --config &lt;config&gt;</code>;
     its honest-disclosure framing is on the <a href="index.html">overview</a>.</p>

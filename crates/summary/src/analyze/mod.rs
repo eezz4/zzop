@@ -6,6 +6,10 @@
 use crate::output::{FindingFilters, RunKnobs};
 
 mod adjacent_config;
+mod architecture;
+mod coverage_gaps;
+#[cfg(test)]
+mod coverage_gaps_tests;
 mod shape;
 #[cfg(test)]
 mod tests;
@@ -240,6 +244,9 @@ pub fn analyze_envelope_summary_with(
         .flatten()
     {
         config.insert("vocabulary".to_string(), found.vocabulary);
+        // The pack axis, key by key and only when the config produced it — an absent key must leave the
+        // facade's own defaults (bundled-pack seed, no disabled rules, no allowlist) untouched.
+        config.extend(found.packs);
         // NEVER SILENT: the applied-disclosure first, then the loader's own notes about that same file
         // (unknown keys, retired keys) — the identical channel and ordering the tree lane uses, so a
         // typo'd vocabulary key is reported on both lanes by the same code.

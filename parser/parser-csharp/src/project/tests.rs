@@ -296,3 +296,21 @@ fn literal_routes_match_the_per_file_pass_so_replacement_is_behavior_neutral() {
     assert_eq!(a, b);
     assert_eq!(b, vec!["GET /api/users/{}"]);
 }
+
+#[test]
+fn the_whole_corpus_pass_anchors_on_the_routing_attribute() {
+    // This pass — not the per-file one — is what the engine emits (`run_csharp_provides_project_pass`
+    // REPLACES the per-file C# http provides wholesale), so it is the anchor that reaches findings. A
+    // non-routing attribute above the routing one separates the `method_declaration`'s start row from the
+    // route's own; the per-file sibling pin lives in `adapters::provides::tests`.
+    let files = vec![(
+        "PetController.cs".to_string(),
+        "[ApiController]\n[Route(\"api/[controller]\")]\npublic class PetController {\n  [Authorize(\"pet-store-writer\")]\n  [HttpDelete(\"{id}\")]\n  public string Remove(int id) { return \"\"; }\n}".to_string(),
+    )];
+    let report = extract_csharp_http_provides_project(&files);
+    assert_eq!(keys(&report), vec!["DELETE /api/pet/{}"]);
+    assert_eq!(
+        report.provides[0].line, 5,
+        "anchor must be the `[HttpDelete]` line, not the `[Authorize]` above it"
+    );
+}

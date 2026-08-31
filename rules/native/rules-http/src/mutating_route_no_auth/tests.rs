@@ -28,6 +28,7 @@ fn provide(key: &str, file: &str, line: u32, handler: &str) -> zzop_core::IoProv
         file: file.to_string(),
         line,
         symbol: Some(handler.to_string()),
+        ..Default::default()
     }
 }
 
@@ -53,6 +54,7 @@ fn mutating_handler_never_reaching_a_guard_is_flagged() {
         auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
+        unresolved_callees: &Default::default(),
     });
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].file, "routes/api.ts");
@@ -84,6 +86,7 @@ fn auth_acquisition_route_is_exempt_even_when_never_guarded() {
         auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
+        unresolved_callees: &Default::default(),
     });
     assert!(out.is_empty());
 }
@@ -103,6 +106,7 @@ fn standalone_exempt_segment_is_exempt_alone_with_no_auth_family_segment_present
         auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
+        unresolved_callees: &Default::default(),
     });
     assert!(out.is_empty());
 }
@@ -129,6 +133,7 @@ fn conditional_segment_paired_with_an_auth_family_segment_is_exempt() {
         auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
+        unresolved_callees: &Default::default(),
     });
     assert!(out.is_empty());
 }
@@ -156,6 +161,7 @@ fn conditional_segment_alone_with_no_auth_family_segment_is_not_exempt() {
         auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
+        unresolved_callees: &Default::default(),
     });
     assert_eq!(out.len(), 1, "{:?}", out);
     let data = out[0].data.as_ref().unwrap();
@@ -186,6 +192,7 @@ fn conditional_segment_token_refresh_with_no_auth_family_segment_is_not_exempt()
         auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
+        unresolved_callees: &Default::default(),
     });
     assert_eq!(out.len(), 1, "{:?}", out);
 }
@@ -213,6 +220,7 @@ fn a_path_segment_that_only_contains_auth_as_a_substring_is_not_exempt() {
         auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
+        unresolved_callees: &Default::default(),
     });
     assert_eq!(out.len(), 1, "{:?}", out);
 }
@@ -239,6 +247,7 @@ fn handler_reaching_a_guard_call_across_an_edge_is_not_flagged() {
         auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
+        unresolved_callees: &Default::default(),
     });
     assert!(out.is_empty());
 }
@@ -263,6 +272,7 @@ fn handler_named_like_a_guard_itself_clears_at_depth_zero() {
         auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
+        unresolved_callees: &Default::default(),
     });
     assert!(out.is_empty());
 }
@@ -282,6 +292,7 @@ fn safe_methods_are_never_checked() {
         auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
+        unresolved_callees: &Default::default(),
     });
     assert!(out.is_empty());
 }
@@ -301,6 +312,7 @@ fn ambiguous_handler_name_defined_in_two_files_is_skipped() {
         auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
+        unresolved_callees: &Default::default(),
     });
     assert!(out.is_empty());
 }
@@ -315,6 +327,7 @@ fn provide_with_no_symbol_captured_is_skipped() {
         file: "routes/api.ts".to_string(),
         line: 3,
         symbol: None,
+        ..Default::default()
     }];
     let out = scan_mutating_route_no_auth(&ScanMutatingRouteNoAuthInput {
         io_provides: &provides,
@@ -327,6 +340,7 @@ fn provide_with_no_symbol_captured_is_skipped() {
         auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
+        unresolved_callees: &Default::default(),
     });
     assert!(out.is_empty());
 }
@@ -351,6 +365,7 @@ fn route_registered_in_a_test_fixture_file_is_skipped() {
         auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
+        unresolved_callees: &Default::default(),
     });
     assert!(out.is_empty(), "{:?}", out);
 }
@@ -384,6 +399,7 @@ fn ambiguous_handler_name_resolves_to_the_route_file_and_is_flagged() {
         auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
+        unresolved_callees: &Default::default(),
     });
     assert_eq!(out.len(), 1, "{:?}", out);
     assert_eq!(out[0].file, "src/user/user.controller.ts");
@@ -415,6 +431,7 @@ fn handler_ambiguous_even_within_the_route_file_stays_unresolved() {
         auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
+        unresolved_callees: &Default::default(),
     });
     assert!(out.is_empty(), "{:?}", out);
 }
@@ -446,6 +463,7 @@ fn handler_reaching_a_require_prefixed_ownership_guard_is_not_flagged() {
         auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
+        unresolved_callees: &Default::default(),
     });
     assert!(out.is_empty(), "{:?}", out);
 }
@@ -482,6 +500,7 @@ fn handler_reaching_only_input_validation_require_helpers_is_still_flagged() {
         auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
+        unresolved_callees: &Default::default(),
     });
     assert_eq!(out.len(), 1, "{:?}", out);
     assert_eq!(out[0].file, "routes/api.ts");
@@ -517,6 +536,7 @@ fn handler_reaching_only_an_env_gate_is_flagged() {
         auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
+        unresolved_callees: &Default::default(),
     });
     assert_eq!(
         out.len(),
@@ -552,6 +572,7 @@ fn require_lowercase_substring_in_an_unrelated_word_does_not_false_clear() {
         auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
+        unresolved_callees: &Default::default(),
     });
     assert_eq!(out.len(), 1, "{:?}", out);
 }
@@ -581,6 +602,7 @@ fn decorator_guarded_line_is_exempt_before_entering_the_bfs() {
         auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &decorator_guarded,
         route_attr_store: &zzop_core::AttributeStore::default(),
+        unresolved_callees: &Default::default(),
     });
     assert!(out.is_empty(), "{:?}", out);
 }
@@ -609,6 +631,7 @@ fn a_provide_whose_line_is_not_in_decorator_guarded_is_still_flagged_normally() 
         auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &decorator_guarded,
         route_attr_store: &zzop_core::AttributeStore::default(),
+        unresolved_callees: &Default::default(),
     });
     assert_eq!(out.len(), 1, "{:?}", out);
 }
@@ -639,6 +662,7 @@ fn decorator_guarded_exemption_is_precise_per_route_in_a_shared_controller() {
         auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &decorator_guarded,
         route_attr_store: &zzop_core::AttributeStore::default(),
+        unresolved_callees: &Default::default(),
     });
     assert_eq!(out.len(), 1, "{:?}", out);
     assert_eq!(out[0].line, 7);
@@ -654,6 +678,7 @@ fn non_http_provides_are_ignored() {
         file: "routes/api.ts".to_string(),
         line: 3,
         symbol: Some("publish".to_string()),
+        ..Default::default()
     }];
     let out = scan_mutating_route_no_auth(&ScanMutatingRouteNoAuthInput {
         io_provides: &provides,
@@ -666,6 +691,7 @@ fn non_http_provides_are_ignored() {
         auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
+        unresolved_callees: &Default::default(),
     });
     assert!(out.is_empty());
 }
@@ -696,6 +722,7 @@ fn injected_auth_guarded_attribute_on_the_route_iokey_exempts_it() {
         auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &store,
+        unresolved_callees: &Default::default(),
     });
     assert!(out.is_empty(), "{:?}", out);
 }
@@ -748,6 +775,7 @@ fn java_route_reaching_an_authorization_service_static_guard_is_not_flagged() {
         auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
+        unresolved_callees: &Default::default(),
     });
     assert!(out.is_empty(), "{:?}", out);
 }
@@ -793,6 +821,7 @@ fn java_route_reaching_only_a_domain_noun_class_stays_flagged() {
         auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
+        unresolved_callees: &Default::default(),
     });
     assert_eq!(out.len(), 1, "{:?}", out);
 }
@@ -825,6 +854,7 @@ fn java_route_with_no_reachable_guard_is_flagged_now_that_java_is_covered() {
         auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
+        unresolved_callees: &Default::default(),
     });
     assert_eq!(out.len(), 1, "{:?}", out);
     assert_eq!(
@@ -868,6 +898,7 @@ fn java_handler_unique_in_the_route_file_resolves_past_an_unrelated_collision() 
         auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
+        unresolved_callees: &Default::default(),
     });
     assert_eq!(out.len(), 1, "{:?}", out);
     assert_eq!(out[0].file, "src/main/java/io/spring/api/ArticleApi.java");
@@ -922,6 +953,7 @@ fn fastapi_di_alias_receiver_is_not_guard_evidence_and_the_route_still_fires() {
         auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
+        unresolved_callees: &Default::default(),
     });
     assert_eq!(
         out.len(),
@@ -966,6 +998,7 @@ fn a_python_module_receiver_is_not_qualifier_evidence_on_its_own() {
         auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
+        unresolved_callees: &Default::default(),
     });
     assert_eq!(out.len(), 1, "a module receiver is not a class: {:?}", out);
 }
@@ -1012,6 +1045,7 @@ fn a_petclinic_domain_controller_no_longer_clears_its_own_unauthenticated_route(
         auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
+        unresolved_callees: &Default::default(),
     });
     assert_eq!(out.len(), 1, "{:?}", out);
     assert_eq!(out[0].data.as_ref().unwrap()["path"], "/owners/new");
@@ -1051,6 +1085,7 @@ fn a_declared_python_class_receiver_still_carries_qualifier_evidence() {
         auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
+        unresolved_callees: &Default::default(),
     });
     assert!(out.is_empty(), "{:?}", out);
 }
@@ -1087,6 +1122,7 @@ fn a_typescript_class_receiver_guard_is_unaffected_by_the_existence_gate() {
         auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &zzop_core::AttributeStore::default(),
+        unresolved_callees: &Default::default(),
     });
     assert!(out.is_empty(), "{:?}", out);
 }
@@ -1121,6 +1157,7 @@ fn injected_pathscope_auth_guarded_exempts_every_route_under_the_prefix() {
         auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
         decorator_guarded: &std::collections::HashSet::new(),
         route_attr_store: &store,
+        unresolved_callees: &Default::default(),
     });
     assert_eq!(out.len(), 1, "{:?}", out);
     assert_eq!(out[0].data.as_ref().unwrap()["path"], "/public/signup-lite");
@@ -1137,7 +1174,8 @@ fn injected_pathscope_auth_guarded_exempts_every_route_under_the_prefix() {
 /// otherwise careful about, and a future edit that trims the qualification must fail here.
 #[test]
 fn the_message_never_claims_an_unbounded_walk_without_naming_the_hop_bound() {
-    let msg = super::message::missing_auth_hint("POST", "/api/x", "handler", Some("requireAuth"));
+    let msg =
+        super::message::missing_auth_hint("POST", "/api/x", "handler", Some("requireAuth"), &[]);
     assert!(
         msg.contains("anywhere in its call graph"),
         "the phrase this test qualifies must still be there, or the pin is checking nothing: {msg}"
@@ -1155,6 +1193,297 @@ fn the_message_never_claims_an_unbounded_walk_without_naming_the_hop_bound() {
         assert!(
             msg.contains(token),
             "an unbounded-sounding claim must ship WITH its hop bound, missing {token:?}: {msg}"
+        );
+    }
+}
+
+// --- Unresolved callees: a call the resolver could not place is still a name this rule can read ---
+
+/// The measured false positive, in miniature. A guard declared inside a factory is not a top-level
+/// symbol, so the resolver draws no edge for a handler that calls it — and this rule, walking edges
+/// alone, used to report the route as reaching no guard. Its own message says it looks for a call whose
+/// NAME looks like a guard, so asserting the absence from a missing edge was the rule contradicting its
+/// own stated criterion. Measured at 8 false positives against 1 true one on a real monorepo.
+#[test]
+fn an_unresolved_call_whose_name_matches_the_guard_pattern_clears_the_route() {
+    let provides = vec![provide(
+        "POST /api/spaces/{}",
+        "routes/api.ts",
+        3,
+        "updateSpace",
+    )];
+    let symbols = vec![sym("routes/api.ts", "updateSpace", 1)];
+    let mut unresolved = std::collections::BTreeMap::new();
+    unresolved.insert(
+        "routes/api.ts#updateSpace".to_string(),
+        vec!["requireSpaceOwner".to_string()],
+    );
+    let out = scan_mutating_route_no_auth(&ScanMutatingRouteNoAuthInput {
+        io_provides: &provides,
+        symbols: &symbols,
+        symbol_graph: &Vec::new(),
+        auth_guard_pattern: Some(DEFAULT_AUTH_GUARD_PATTERN),
+        qualifier_guard_tokens: crate::QUALIFIER_GUARD_TOKENS,
+        auth_acquisition_standalone_pattern: Some(AUTH_ACQUISITION_STANDALONE_PATTERN),
+        auth_acquisition_conditional_pattern: Some(AUTH_ACQUISITION_CONDITIONAL_PATTERN),
+        auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
+        decorator_guarded: &std::collections::HashSet::new(),
+        route_attr_store: &zzop_core::AttributeStore::default(),
+        unresolved_callees: &unresolved,
+    });
+    assert!(
+        out.is_empty(),
+        "`requireSpaceOwner` matches the declared guard pattern — an edge the resolver could not draw \
+         is not evidence that the call is absent: {out:?}"
+    );
+}
+
+/// INVALIDATION, on the axis that matters: same unresolvable call, a name the pattern does NOT match,
+/// and the route must still fire. Without this, "treat unresolved callees as guards" would pass the
+/// test above while silencing the rule everywhere.
+#[test]
+fn an_unresolved_call_whose_name_is_not_guard_shaped_still_fires_and_names_it() {
+    let provides = vec![provide(
+        "POST /api/things/{}",
+        "routes/api.ts",
+        3,
+        "updateThing",
+    )];
+    let symbols = vec![sym("routes/api.ts", "updateThing", 1)];
+    let mut unresolved = std::collections::BTreeMap::new();
+    unresolved.insert(
+        "routes/api.ts#updateThing".to_string(),
+        vec!["doTheThing".to_string(), "formatRow".to_string()],
+    );
+    let out = scan_mutating_route_no_auth(&ScanMutatingRouteNoAuthInput {
+        io_provides: &provides,
+        symbols: &symbols,
+        symbol_graph: &Vec::new(),
+        auth_guard_pattern: Some(DEFAULT_AUTH_GUARD_PATTERN),
+        qualifier_guard_tokens: crate::QUALIFIER_GUARD_TOKENS,
+        auth_acquisition_standalone_pattern: Some(AUTH_ACQUISITION_STANDALONE_PATTERN),
+        auth_acquisition_conditional_pattern: Some(AUTH_ACQUISITION_CONDITIONAL_PATTERN),
+        auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
+        decorator_guarded: &std::collections::HashSet::new(),
+        route_attr_store: &zzop_core::AttributeStore::default(),
+        unresolved_callees: &unresolved,
+    });
+    assert_eq!(out.len(), 1, "neither name is guard-shaped: {out:?}");
+    // And the residue rides the finding: this is what lets a reader dismiss the remaining case in
+    // seconds when the project's guard is spelled outside its own declared pattern.
+    let data = out[0].data.as_ref().unwrap();
+    assert_eq!(
+        data["unresolvedCallees"],
+        serde_json::json!(["doTheThing", "formatRow"]),
+        "the names that drew no edge must be visible on the finding: {data}"
+    );
+}
+
+/// The disclosure is additive-only: a handler whose every call resolved carries no `unresolvedCallees`
+/// key at all. An always-present empty array would claim "the resolver placed every call in this run",
+/// which is a wider statement than "this handler had none it could not place".
+#[test]
+fn a_handler_with_no_unresolved_calls_carries_no_residue_key() {
+    let provides = vec![provide("POST /users", "routes/api.ts", 3, "createUser")];
+    let symbols = vec![sym("routes/api.ts", "createUser", 1)];
+    let out = scan_mutating_route_no_auth(&ScanMutatingRouteNoAuthInput {
+        io_provides: &provides,
+        symbols: &symbols,
+        symbol_graph: &Vec::new(),
+        auth_guard_pattern: Some(DEFAULT_AUTH_GUARD_PATTERN),
+        qualifier_guard_tokens: crate::QUALIFIER_GUARD_TOKENS,
+        auth_acquisition_standalone_pattern: Some(AUTH_ACQUISITION_STANDALONE_PATTERN),
+        auth_acquisition_conditional_pattern: Some(AUTH_ACQUISITION_CONDITIONAL_PATTERN),
+        auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
+        decorator_guarded: &std::collections::HashSet::new(),
+        route_attr_store: &zzop_core::AttributeStore::default(),
+        unresolved_callees: &Default::default(),
+    });
+    assert_eq!(out.len(), 1);
+    assert!(
+        out[0].data.as_ref().unwrap()["unresolvedCallees"].is_null(),
+        "nothing to say, so nothing is said: {:?}",
+        out[0].data
+    );
+}
+
+/// An unresolved guard-shaped name reached through ANOTHER symbol clears the route too — the check
+/// rides the same BFS traversal, so every reachable node's dropped calls count, not just the handler's.
+#[test]
+fn an_unresolved_guard_one_hop_from_the_handler_also_clears() {
+    let provides = vec![provide(
+        "POST /api/spaces/{}",
+        "routes/api.ts",
+        3,
+        "updateSpace",
+    )];
+    let symbols = vec![
+        sym("routes/api.ts", "updateSpace", 1),
+        sym("routes/api.ts", "applyUpdate", 8),
+    ];
+    let graph = vec![edge(
+        "routes/api.ts#updateSpace",
+        "routes/api.ts#applyUpdate",
+    )];
+    let mut unresolved = std::collections::BTreeMap::new();
+    unresolved.insert(
+        "routes/api.ts#applyUpdate".to_string(),
+        vec!["requireSpaceOwner".to_string()],
+    );
+    let out = scan_mutating_route_no_auth(&ScanMutatingRouteNoAuthInput {
+        io_provides: &provides,
+        symbols: &symbols,
+        symbol_graph: &graph,
+        auth_guard_pattern: Some(DEFAULT_AUTH_GUARD_PATTERN),
+        qualifier_guard_tokens: crate::QUALIFIER_GUARD_TOKENS,
+        auth_acquisition_standalone_pattern: Some(AUTH_ACQUISITION_STANDALONE_PATTERN),
+        auth_acquisition_conditional_pattern: Some(AUTH_ACQUISITION_CONDITIONAL_PATTERN),
+        auth_family_path_pattern: Some(AUTH_FAMILY_PATH_PATTERN),
+        decorator_guarded: &std::collections::HashSet::new(),
+        route_attr_store: &zzop_core::AttributeStore::default(),
+        unresolved_callees: &unresolved,
+    });
+    assert!(
+        out.is_empty(),
+        "the guard is one hop away and unresolvable there — same evidence, one edge further: {out:?}"
+    );
+}
+
+/// The residue is disclosed in PROSE as well as in `data`. A reader who only sees the message must
+/// still learn that the walk was short some calls — the `data` key alone reaches a machine, not a
+/// person reading a terminal.
+#[test]
+fn the_message_names_the_unresolved_calls_when_there_are_any() {
+    let with = super::message::missing_auth_hint(
+        "POST",
+        "/api/x",
+        "handler",
+        Some("requireAuth"),
+        &["doTheThing", "formatRow"],
+    );
+    assert!(
+        with.contains("doTheThing, formatRow") && with.contains("could NOT place"),
+        "{with}"
+    );
+    let without =
+        super::message::missing_auth_hint("POST", "/api/x", "handler", Some("requireAuth"), &[]);
+    assert!(
+        !without.contains("could NOT place"),
+        "nothing to say, so nothing is said: {without}"
+    );
+}
+
+// --- Third-party callback receivers: the one place this rule's own remedy breaks the code ---
+
+/// The remedy sentence ("add a named guard call") is a PRESCRIPTION, and there is a route shape where
+/// following it breaks a working system: an inbound callback receiver that a third party's SERVER calls
+/// — a payment notification or a webhook delivery. That caller holds no session and carries none of this
+/// project's credentials, so an authentication guard on that route answers it 401, the delivery is
+/// dropped, and the state it was meant to settle never lands. The message therefore has to talk the
+/// reader out of the edit BEFORE it asks for it, and name the control that does belong there (payload
+/// signature/HMAC verification).
+///
+/// TWO assertions, and the second is the one that matters. An external auditor's surviving complaint
+/// about the sibling rule that closed this same class of veto was NOT that the caveat was missing — it
+/// was that the imperative is the first code token and the caveat sits thousands of characters later,
+/// where a reader acting on the first instruction never reaches it. So existence is not enough: the
+/// counter-indication must PRECEDE the imperative in the delivered bytes.
+///
+/// Deliberately target-independent: the shape is named by role ("callback receiver", "webhook",
+/// "notification"), never by any vendor, path or corpus tree — the finding that motivated this is one
+/// route in one measured repo, and a pin that quotes it would pass for the wrong reason.
+#[test]
+fn the_remedy_warns_off_third_party_callback_receivers_before_it_asks_for_a_guard() {
+    let msg =
+        super::message::missing_auth_hint("POST", "/api/x", "handler", Some("requireAuth"), &[]);
+
+    // The imperative this rule leads with, verbatim from the message builder.
+    let imperative = msg
+        .find("Add an explicit, named guard call")
+        .expect("the imperative remedy must still be in the message, or this pin checks nothing");
+
+    // Each token must carry one leg of the counter-indication: the shape, the mechanism that breaks,
+    // and the control that belongs there instead. A token that is merely topical would let a future
+    // edit keep the word and drop the warning.
+    for token in [
+        "callback",
+        "webhook",
+        "no session",
+        "401",
+        "signature",
+        "HMAC",
+    ] {
+        let at = msg.find(token).unwrap_or_else(|| {
+            panic!("the third-party-callback counter-indication must name {token:?}: {msg}")
+        });
+        assert!(
+            at < imperative,
+            "the counter-indication ({token:?} at {at}) must PRECEDE the imperative remedy (at \
+             {imperative}) — a reader who acts on the first instruction never reaches a caveat that \
+             comes after it: {msg}"
+        );
+    }
+}
+
+/// The second and third counter-indications, and the reason the closing sentence had to change.
+///
+/// An uncontaminated auditor read a real finding on a route whose caller is a person with NO ACCOUNT
+/// arriving by a high-entropy link from a confirmation email. The message's exception list named one
+/// shape (a third-party callback receiver) and then closed with "Everywhere else, the remedy is the
+/// direct one" — and that closer is the defect, not the short list: it turns an INCOMPLETE enumeration
+/// into a PUSH, promoting every unlisted legitimate shape to "confirmed". A session guard on that route
+/// 401s every attendee cancelling from their email link; the edit succeeds, the code is correct, and a
+/// live product flow goes down.
+///
+/// Separately, the rule's central claim can be outright FALSE on a shape it never sees into: the walk
+/// begins at the exported route symbol, and a handler passed as an ARGUMENT to a wrapper draws no call
+/// edge, so the body is never entered. That is not a footnote about reach — it is a reason the finding
+/// is wrong — so it too must land before the imperative.
+///
+/// Same discipline as the sibling pin above: POSITION, not presence, and every shape named by ROLE.
+#[test]
+fn the_remedy_warns_off_account_less_callers_and_wrapped_handlers_before_it_asks_for_a_guard() {
+    let msg =
+        super::message::missing_auth_hint("POST", "/api/x", "handler", Some("requireAuth"), &[]);
+
+    let imperative = msg
+        .find("Add an explicit, named guard call")
+        .expect("the imperative remedy must still be in the message, or this pin checks nothing");
+
+    // The unconditional closer is the defect itself. Its absence is asserted directly, because a
+    // future edit could satisfy every token below and still re-add the sentence that undoes them.
+    assert!(
+        !msg.contains("Everywhere else, the remedy is the direct one"),
+        "the unconditional closer promotes every UNLISTED legitimate shape to a confirmed finding; \
+         the enumeration must close by saying it is examples and handing over the discriminator: {msg}"
+    );
+
+    for token in [
+        // (1) the walk may never have entered the handler body at all
+        "WRAPPED HANDLER",
+        "as an ARGUMENT",
+        "no call edge",
+        "never enters the handler body",
+        // (3) a legitimate caller who cannot hold a session and never had an account
+        "NO ACCOUNT",
+        "high-entropy",
+        "magic-link",
+        "locks out",
+        "CSRF",
+        "rate-limit",
+        // the enumeration must admit it is an enumeration, and hand over the discriminator
+        "NOT THE WHOLE LIST",
+        "BY-DESIGN",
+        "intended caller",
+    ] {
+        let at = msg
+            .find(token)
+            .unwrap_or_else(|| panic!("the counter-indication block must name {token:?}: {msg}"));
+        assert!(
+            at < imperative,
+            "the counter-indication ({token:?} at {at}) must PRECEDE the imperative remedy (at \
+             {imperative}) — a reader who acts on the first instruction never reaches a caveat that \
+             comes after it: {msg}"
         );
     }
 }

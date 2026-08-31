@@ -85,6 +85,24 @@ const CENSUSED_FRAGMENTS: &[&str] = &[
     // standing as the two `test-paths-*` rows above, and a strict superset of `test-paths` for the same
     // reason they are.
     "rules/dsl/reliability/reliability.json:test-paths-stories-scripts",
+    // 2026-08-25. T1, extension tier: the shared stories vocabulary plus three NEXT.JS SERVER-SHAPE
+    // arms, referenced by `security/secret-env-in-fe` alone. The rule fired 6/6 false on cal.com for
+    // one reason — the monorepo names its app directory `web`, which is the Next/Turborepo default —
+    // so a path arm that reads the FRAMEWORK's own routing convention is the declaration that erases
+    // them (§24: an erasing rule stands on a declaration in the scanned source, never an inference).
+    // The three arms are `app/**/route.<js-ts>` (App Router route handler — the FILENAME is Next's
+    // declaration, which is why the arm does not key on an `api/` segment Next does not require),
+    // `pages/api/**` restricted to non-SFC extensions (the DIRECTORY is the declaration there, and the
+    // restriction is what keeps a Nuxt/SvelteKit `pages/` tree of `.vue` PAGES out), and
+    // `next.config.<js-ts>`. Under the `superset` pin like every other `test-paths-*` row.
+    // RESIDUAL, the `sync-fs-in-handler` one, second instance: a PACK-LOCAL body is not the shared
+    // vocabulary by VALUE, so `is_shared_test_path_vocabulary` says no and this rule alone stops
+    // picking up a project's `vocabulary.extraTestPathPatterns` tail. Direction is OVER-report on a
+    // path the project declared as test surface — never a silent skip — and for a credential-shaped
+    // rule that is the side to err on (the pack's `scan_test_regions` family judges test code on
+    // purpose). Shared-bundle placement would keep the tail; it was declined because the bundle's
+    // contract is idioms shared ACROSS packs and this one has a single referent.
+    "rules/dsl/security/security.json:test-paths-stories-next-server",
     // 2026-08-12, and it left and came back the same day. `sql-bootstrap-drop-create`'s only referent is
     // `sql/destructive-migration`, which was exported to `examples/packs/sql-preferences.json` and
     // re-bundled hours later; the fragment travelled with it both ways, so this row was deleted and

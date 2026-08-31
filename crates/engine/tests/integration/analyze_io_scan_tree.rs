@@ -380,6 +380,7 @@ fn envelope_projection(path: &str, provide_key: &str, attrs: Vec<Attribute>) -> 
                 line: 1,
                 symbol: None,
                 body: None,
+                ..Default::default()
             }],
             consumes: Vec::<IoConsume>::new(),
         },

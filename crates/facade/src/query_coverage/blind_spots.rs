@@ -24,7 +24,10 @@
 //! are crossed — native analyses; DSL pack rules carry their own `file_pattern` gate and are not
 //! represented — and lexical-only files are not crossed: the `lexicalOnly` legend already says
 //! everything structural was never evaluated for them, and repeating that per rule would drown the
-//! per-rule signal in a restatement.
+//! per-rule signal in a restatement. That second qualifier stands, but it was never an argument for
+//! reporting the fact NOWHERE: the tree-level half of it — the PRINCIPAL filetypes no structural
+//! parser read — is [`super::unread`], and [`basis`] names the exclusion so an empty array
+//! here cannot be read as "no blind spots".
 
 use std::collections::BTreeSet;
 
@@ -87,16 +90,50 @@ pub(super) fn blind_spots(
 /// computed FROM, the `joinVisibility` idiom: an empty array must be readable as either "crossed
 /// and clean" or "nothing to cross" without guessing, and null/omission would be exactly that
 /// guess. Counts are derived at emit time (a derived sentence, not a stored fact).
-pub(super) fn basis(sightline_count: usize, structural_ext_count: usize) -> Value {
-    if structural_ext_count == 0 {
-        return json!(
-            "no structural extension in this tree, so no sightline could be crossed — this empty \
-             list is absence of input, not a coverage verdict"
-        );
+///
+/// It also states what the cross EXCLUDED, which is the half that was missing (measured 2026-08-20 on
+/// directus @ `06027c83`): "4 structural extension(s) crossed" reads as completeness to a reader who
+/// does not know a fifth existed, and there the fifth was 587 `.vue` files no structural parser
+/// opened. The exclusion is named here rather than as another array element because this sentence is
+/// already `blindSpots`' companion — it exists precisely so an empty array cannot be misread — and
+/// because a differently-shaped element would repurpose that array's type (see
+/// [`super::unread`] for the wire-contract reasoning). `unread` is the emitted cell itself,
+/// not a second count of it, so the sentence and the list can never disagree.
+pub(super) fn basis(
+    sightline_count: usize,
+    structural_ext_count: usize,
+    unread: &[Value],
+) -> Value {
+    let unread_count = unread.len();
+    let crossed = if structural_ext_count == 0 {
+        "no structural extension in this tree, so no sightline could be crossed — this empty list is \
+         absence of input, not a coverage verdict"
+            .to_string()
+    } else {
+        format!(
+            "{structural_ext_count} structural extension(s) crossed against {sightline_count} \
+             declared rule sightline(s)"
+        )
+    };
+    if unread_count == 0 {
+        // The all-clear is a MEASURED statement about a population that has to exist. On a tree with no
+        // structural extension at all it would be vacuously true and read as a completeness claim,
+        // directly beside the clause that exists to refuse exactly that reading — so the two never ride
+        // together. (Reproduced 2026-08-20 on a tree of 5 `.md` + 2 `.json`: the sentence asserted every
+        // principal source filetype WAS read structurally on a run that read nothing.) An unparsed
+        // extension under the principal floor lands here too, so the clause says what it covers.
+        if structural_ext_count == 0 {
+            return json!(crossed);
+        }
+        return json!(format!(
+            "{crossed}; every PRINCIPAL source filetype in this tree WAS read structurally, so \
+             nothing above that share was held back from the cross"
+        ));
     }
     json!(format!(
-        "{structural_ext_count} structural extension(s) crossed against {sightline_count} declared \
-         rule sightline(s)"
+        "{crossed}. {unread_count} principal filetype(s) of this tree were EXCLUDED from that cross \
+         because no structural parser read them — they are named in `unreadExtensions`, and this \
+         list, empty or not, says nothing about their files"
     ))
 }
 
@@ -113,7 +150,9 @@ pub(super) fn legend() -> Value {
          excluded — they cannot host code evidence), an assert-when-blind rule only when NO \
          structural file feeds its evidence channel at all. Only DECLARED sightline rules are \
          crossed (native analyses — DSL pack rules carry their own file_pattern gate), and \
-         lexical-only files are not crossed. witnessedIn is an upper bound, never a completeness \
-         claim — inside it, coverage can still be partial."
+         lexical-only files are not crossed — the tree-level half of THAT gap, the principal \
+         filetypes no structural parser read at all, is `unreadExtensions`, which every \
+         `blindSpotBasis` points at. witnessedIn is an upper bound, never a completeness claim — \
+         inside it, coverage can still be partial."
     )
 }

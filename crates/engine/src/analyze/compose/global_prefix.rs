@@ -98,6 +98,7 @@ mod global_prefix_tests {
             file: file.to_string(),
             line: 1,
             symbol: None,
+            ..Default::default()
         }
     }
 
@@ -110,6 +111,7 @@ mod global_prefix_tests {
             file: "main.ts".to_string(),
             line: 1,
             symbol: None,
+            ..Default::default()
         }
     }
 
@@ -188,6 +190,7 @@ mod global_prefix_tests {
                 file: "t.ts".to_string(),
                 line: 1,
                 symbol: None,
+                ..Default::default()
             },
             prefix_marker("api"),
         ];

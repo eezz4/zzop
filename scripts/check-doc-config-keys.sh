@@ -95,6 +95,13 @@
 # that had just fallen out of the census): a planted `packsDir` there reports EMBEDDER-ONLY, a planted
 # typo reports unknown. Recount the clean tree with:
 #   bash scripts/check-doc-config-keys.sh     # prints "OK (N config snippet(s) judged across M docs)"
+#
+# Re-checked 2026-08-18, after the LEAD arm narrowed from proximity to the introducing clause. The
+# arm still reaches what it was built for: a <div class="tab">zzop.config.jsonc</div> sitting
+# directly above a <pre> anchors it, and a planted packDefz there reports unknown while a planted
+# packsDir reports EMBEDDER-ONLY. What it no longer reaches is a rule-pack example two paragraphs
+# downstream of an unrelated zzop.config mention -- which is the whole point, since whether that
+# mention landed inside 400 characters depended on the language the paragraph was written in.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -146,6 +153,22 @@ const decode = (s) =>
   s.replace(/&quot;/g, "\"").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 
 const stripTags = (s) => s.replace(/<[^>]*>/g, "");
+
+// The clause that INTRODUCES a block: the sentence or code-panel tab immediately before it, not
+// every mention within the preceding 400 characters. The LEAD arm of anchor A always described
+// this way; it was implemented as proximity, and on 2026-08-18 the difference shipped a verdict.
+// site/rules.html and site/ko/rules.html are the SAME page in two languages, and they carry the
+// same rule-pack example (schema_version, matcher, line_pattern — a rule pack, not a config file)
+// introduced by the same code-panel tab, debug-headers.json. Two paragraphs earlier both mention
+// zzop.config.jsonc while naming where packs live. English put that mention at ~410 characters
+// back and Korean, saying the same thing more compactly, at ~380 — so the Korean edition was
+// judged against the config vocabulary and reported twelve offenders the English edition did not.
+// A guard whose verdict turns on how long a sentence is in the language it happens to be written
+// in is not measuring what it claims. Sentence and label breaks are the boundary because that is
+// what "introduces" means; a tab sitting directly against the <pre> is still the whole tail, which
+// is the case this arm exists for.
+const introducing = (lead) =>
+  stripTags(lead).replace(/[^\S]+/g, " ").trim().split(/[.:!?] +/).pop();
 
 // Every fenced (Markdown) / <pre> (HTML) block, with the prose that introduces it.
 //
@@ -203,7 +226,9 @@ for (const file of files) {
   for (const b of blocksIn(file, text)) {
     // Anchor A, two arms, both read the body BEFORE comments are stripped — the
     // `// zzop.config.jsonc` marker is itself a comment line.
-    //   · LEAD: the prose or the code-panel tab that introduces the block.
+    //   · LEAD: the prose or the code-panel tab that introduces the block — the CLAUSE immediately
+    //     before it, not any mention nearby. See introducing() above for the verdict the older
+    //     proximity reading cost, and why sentence breaks are the boundary.
     //   · BODY: that marker — and it is restricted to a COMMENT line, which is what this arm was
     //     always described as being for. Unrestricted it also matched a JSON string VALUE, and the
     //     rewritten site shipped one: the analyze-OUTPUT sample carries
@@ -212,7 +237,7 @@ for (const file of files) {
     //     `bySeverity`, …) against the config vocabulary — the exact "different vocabularies sharing
     //     a file surface" confusion the skip list below exists to prevent. Widening the <pre> needle
     //     above is what made it reachable, so the two changes land together.
-    const named = /^[ \t]*\/\/.*zzop\.config/im.test(b.body) || /zzop\.config/i.test(b.lead);
+    const named = /^[ \t]*\/\/.*zzop\.config/im.test(b.body) || /zzop\.config/i.test(introducing(b.lead));
     const body = stripComments(b.body);
     if (!/[{[]/.test(body)) continue;
     keyRe.lastIndex = 0;

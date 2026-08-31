@@ -18,3 +18,24 @@ export function externalDrift() {
   fetch('https://gw.example.com/v1/pay'); // external-version-inconsistent (v1 + versionless below)
   fetch('https://gw.example.com/charge');
 }
+
+// APPENDED AT THE END ON PURPOSE — EXPECTED.jsonc keys are `file:line`, so an insertion above would
+// re-anchor every existing expectation in this file.
+//
+// cross-layer/retrying-write-no-idempotency, as a PAIR that differs in exactly one factor. `pRetry` is a
+// distinctive retry-wrapper identifier the egress recognizer knows by name alone (no import needed), so
+// the call it encloses carries `IoConsume::retry_configured`; POST /charges is really provided by
+// xlayer-be and carries no witnessed `idempotency-guarded` attribute, so both sides of the rule's
+// two-sided check are real rather than assumed-absent.
+declare function pRetry<T>(fn: () => Promise<T>): Promise<T>;
+
+export function retriedWrite() {
+  pRetry(() => fetch('/charges', { method: 'post' })); // retrying-write-no-idempotency
+}
+
+// SILENCE CONTROL for the line above, one factor different: the SAME joined write, not wrapped in a
+// retry. The rule's trigger is the retry tag, not the write, so this line must stay silent for it — and
+// unlike a decoy file this control is in scope beyond doubt, because its twin four lines up fires.
+export function plainWrite() {
+  fetch('/charges', { method: 'post' });
+}

@@ -366,3 +366,49 @@ fn one_call_site_producing_byte_identical_findings_still_dedupes_to_one() {
         1
     );
 }
+
+/// §27 pin — POSITION, not existence, for the rollout landing (2026-08-30). The act this rule
+/// prescribes is "make the handler idempotent", and the mechanism its own message names for that is a
+/// client-supplied `Idempotency-Key` — which a handler can only enforce by REJECTING keyless requests.
+/// Before this pin the message stated its caller-side blindness twice (the `LANGUAGE SIGHTLINE`
+/// sentence, and the `{}` disable hint) and both sat BEHIND the imperative, where neither is read by
+/// someone who already started editing; and neither said the blindness was about who the edit breaks
+/// rather than about when the rule stays silent.
+///
+/// INVALIDATION PROBE: move `IDEMPOTENCY_ROLLOUT_LANDING` behind `Make the handler idempotent` in the
+/// `format!` and every token of it is still present in the message — only this assertion goes red,
+/// which is the whole reason it asserts an ordering rather than a `contains`.
+#[test]
+fn the_rollout_landing_precedes_the_imperative() {
+    let edges = vec![edge(
+        "POST /api/orders",
+        ("fe", "src/checkout.ts", 42),
+        ("be", "src/orders.controller.ts", 10),
+        true,
+    )];
+    let retry: BTreeSet<RetrySite> = [site("fe", "src/checkout.ts", 42)].into();
+    let f = retrying_write_no_idempotency_findings(&edges, &retry, &no_attrs());
+    assert_eq!(f.len(), 1);
+    let msg = &f[0].message;
+    let landing = msg
+        .find("COUNT THIS ROUTE'S OTHER CALLERS")
+        .expect("the rollout landing is missing from the message");
+    let verb = msg
+        .find("Make the handler idempotent")
+        .expect("the imperative is missing from the message");
+    assert!(
+        landing < verb,
+        "the landing at {landing} must precede the imperative at {verb}: {msg}"
+    );
+    // The landing must be spelled ONCE, or an index comparison means nothing.
+    assert_eq!(
+        msg.matches("COUNT THIS ROUTE'S OTHER CALLERS").count(),
+        1,
+        "the landing must appear exactly once: {msg}"
+    );
+    assert_eq!(
+        msg.matches("Make the handler idempotent").count(),
+        1,
+        "the imperative must appear exactly once: {msg}"
+    );
+}

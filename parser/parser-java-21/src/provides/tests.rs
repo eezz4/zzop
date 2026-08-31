@@ -22,6 +22,35 @@ fn bare_get_mapping_on_a_rest_controller_yields_an_empty_path_route() {
 }
 
 #[test]
+fn the_anchor_is_the_mapping_annotation_not_the_declarations_first_modifier() {
+    // A `method_declaration`'s start row is its FIRST MODIFIER, so any annotation above the mapping
+    // pushes that row off the registration. The mall corpus is 246/246 Swagger `@Operation`; the
+    // multi-line `@Parameter` below is its +3 tail. Both provides must report the `@*Mapping` line.
+    let src = "\
+@RestController
+class C {
+  @Operation(summary = \"register a user\")
+  @PostMapping(\"/register\")
+  void register() {}
+
+  @Operation(
+      summary = \"delete a user\")
+  @Parameter(name = \"id\",
+      description = \"user id\")
+  @DeleteMapping(\"/{id}\")
+  void remove() {}
+}
+";
+    let out = extract_http_provides("C.java", src);
+    assert_eq!(keys(&out), vec!["POST /register", "DELETE /{}"]);
+    assert_eq!(
+        out.iter().map(|p| p.line).collect::<Vec<_>>(),
+        vec![4, 11],
+        "the @PostMapping / @DeleteMapping lines, not 3 / 7"
+    );
+}
+
+#[test]
 fn positional_string_arg_is_the_path() {
     let src = "@RestController\nclass C {\n  @GetMapping(\"/x\")\n  void x() {}\n}\n";
     let out = extract_http_provides("C.java", src);

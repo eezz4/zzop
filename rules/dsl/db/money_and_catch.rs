@@ -143,3 +143,26 @@ fn minified_bundle_with_a_giant_single_line_is_not_flagged() {
         out.findings
     );
 }
+
+/// §27 ordering pin (2026-08-26). Same co-occurrence shape as `external-call-and-tx`: the counterexample
+/// this rule measured — a `try { JSON.parse(raw) } catch {}` guarding something else entirely, with an
+/// unrelated write later in the same function — sat ~400 bytes behind "Log or rethrow the error". The
+/// remedy now asks first whether the catch is around THIS write. Detection unchanged.
+#[test]
+fn empty_catch_and_write_message_puts_the_wrapping_condition_before_the_log_imperative() {
+    let dir = TempDir::new("zzop-db");
+    dir.write(
+        "src/service.ts",
+        "declare const prisma: any;\nexport async function saveProfile(name: string) {\n  try {\n    await prisma.profile.create({ data: { name } });\n  } catch {}\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "empty-catch-and-write");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_disqualifier_summary_precedes_imperative(
+        "empty-catch-and-write",
+        &h[0].message,
+        "IF THAT `catch {}` IS ACTUALLY AROUND THIS WRITE",
+        "log or rethrow the error",
+        "the write's failure is not swallowed at all",
+    );
+}

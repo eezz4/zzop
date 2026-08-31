@@ -254,3 +254,54 @@ fn relative_new_url_worker_is_not_dead() {
         "the new-URL worker must NOT be a false unreachable island, got unreachable: {unreach:?}"
     );
 }
+
+/// The service-worker registration, which is the koel shape and the one sink whose argument the browser
+/// resolves against the PAGE rather than the module. `resources/assets/js/app.ts` calls
+/// `navigator.serviceWorker?.register('./sw.js')`, and the file that loads is `public/sw.js` — never
+/// `resources/assets/js/sw.js`. Both halves are under test here: the parser must REBASE the path to
+/// served-root, and the engine's served-absolute resolver must then place it, or `public/sw.js` stays a
+/// `dead-candidates` finding telling you to delete the app's only service worker.
+///
+/// The controls are the same two this module uses everywhere: a same-named file sitting where a
+/// MODULE-relative resolution would have looked must stay flagged (proving the rebase happened rather
+/// than both resolutions firing), and an unreferenced public sibling must stay flagged too.
+#[test]
+fn a_service_worker_registration_revives_the_served_root_file_and_not_the_module_relative_one() {
+    let dir = TempDir::new("zzop-engine-assetref-sw");
+    dir.write(
+        "resources/assets/js/app.ts",
+        "navigator.serviceWorker?.register(\"./sw.js\").then(() => {});\nexport const app = 1;\n",
+    );
+    // What actually loads: the served-root file.
+    dir.write(
+        "public/sw.js",
+        "self.addEventListener(\"install\", () => {});\n",
+    );
+    // What a MODULE-relative resolution would have found instead — nothing registers it, so it must
+    // stay a candidate. If both resolutions fired, this assertion is what catches it.
+    dir.write(
+        "resources/assets/js/sw.js",
+        "// not the one the browser loads\nexport const z = 1;\n",
+    );
+    // An unreferenced public sibling — the ordinary never-over-suppress control.
+    dir.write(
+        "public/other.js",
+        "// nobody registers this\nexport const y = 2;\n",
+    );
+
+    let out = analyze_tree(dir.path(), &config());
+    let dead = dead_candidates(&out);
+
+    assert!(
+        !dead.contains(&"public/sw.js".to_string()),
+        "the registered service worker must NOT be a dead-candidate, got dead: {dead:?}"
+    );
+    assert!(
+        dead.contains(&"resources/assets/js/sw.js".to_string()),
+        "a module-relative same-named file is NOT what a registration loads and must stay flagged, got dead: {dead:?}"
+    );
+    assert!(
+        dead.contains(&"public/other.js".to_string()),
+        "an unreferenced public sibling must STAY a dead-candidate, got dead: {dead:?}"
+    );
+}

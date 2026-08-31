@@ -33,9 +33,13 @@
 //!   fragment per the rules above. The registration is SCOPED to this one function: a same-named
 //!   parameter in a different function (`func A(r *gin.RouterGroup)` / `func B(r *gin.RouterGroup)`)
 //!   registers and restores independently, never bleeding into a sibling function or into unrelated code
-//!   after either returns. Receiver METHODS (`func (s *Server) Register(r *gin.RouterGroup)`) are out of
-//!   v1 scope: `method_declaration` is a distinct grammar node this recognizer never matches against —
-//!   documented gap, not attempted.
+//!   after either returns. **Receiver METHODS** (`func (s *Server) Register(r *gin.RouterGroup)`) work
+//!   the same way and through the same code — tree-sitter gives a method the same `name`/`parameters`
+//!   fields a function has, so only the node KIND ever excluded them. Until 2026-08-17 they were a
+//!   documented v1 gap on exactly that grounds; a real gin service then extracted **0 of 17** routes,
+//!   because a handler struct with a `Register` method is the standard Go web layout rather than a
+//!   marginal one. The scoping guarantee above holds for methods too, and matters more there: two
+//!   types can each declare a `Register` taking the same parameter name.
 //! - **Cross-file mount calls** (the call side of the parameter idiom above): a call `pkg.Fn(...)` or
 //!   bare `Fn(...)` of ANY arity where EXACTLY ONE argument is a mountable receiver — a bare
 //!   tracked-receiver identifier (an engine or a group) or `<tracked>.Group("<literal>")` -> appends
@@ -77,7 +81,7 @@ use std::collections::{HashMap, HashSet};
 use tree_sitter::Node;
 use zzop_core::{ImportMap, RouterMountEntry, RouterMountFragment, HTTP_KEY_VERBS};
 
-use crate::util::{node_text, string_literal_text, valid_named_children};
+use crate::util::{string_literal_text, valid_named_children};
 
 use super::{append_entries, bare_identifier, nth_arg, single_rhs_call, single_target_name};
 
@@ -90,6 +94,9 @@ pub const GIN_VERB_METHODS: &[&str] = HTTP_KEY_VERBS;
 // The cross-file half (call-site mounts, function-parameter receivers, `GIN_RECEIVER_TYPES`) lives
 // in `cross_file` — split for the 300-line cap, same module-doc contract.
 mod cross_file;
+mod shapes;
+
+use shapes::{local_names, selector_call};
 
 /// Extract this file's `gin` router-mount fragments — see module doc. Empty when the file does not
 /// import `github.com/gin-gonic/gin` (never panics).
@@ -117,14 +124,6 @@ pub(crate) fn extract(
             let es = collector.entries.remove(&name)?;
             (!es.is_empty()).then_some(RouterMountFragment { name, entries: es })
         })
-        .collect()
-}
-
-fn local_names(imports: &ImportMap) -> HashSet<String> {
-    imports
-        .iter()
-        .filter(|(_, b)| b.specifier == "github.com/gin-gonic/gin")
-        .map(|(local, _)| local.clone())
         .collect()
 }
 
@@ -156,7 +155,9 @@ impl<'a> Collector<'a> {
                 self.try_verb_call(node, src);
                 self.try_call_site(node, src);
             }
-            "function_declaration" => {
+            // Methods ride this same arm and need no separate handling — module doc, "Receiver
+            // METHODS", for why the node kind was the only thing ever excluding them.
+            "function_declaration" | "method_declaration" => {
                 // Scoped registration: register this function's gin-receiver parameter(s), walk its
                 // body (and everything else under it) with those registrations active, then restore —
                 // module doc's "never bleeds into a sibling function" guarantee.
@@ -277,20 +278,6 @@ impl<'a> Collector<'a> {
             .collect();
         append_entries(&mut self.order, &mut self.entries, fragment, entries);
     }
-}
-
-/// `<receiver>.<Method>(...)` -> `(receiver name, method name)`, `None` for any other call shape.
-fn selector_call<'s>(call: Node, src: &'s str) -> Option<(&'s str, &'s str)> {
-    let func = call.child_by_field_name("function")?;
-    if func.kind() != "selector_expression" {
-        return None;
-    }
-    let operand = func.child_by_field_name("operand")?;
-    let field = func.child_by_field_name("field")?;
-    if operand.kind() != "identifier" {
-        return None;
-    }
-    Some((node_text(operand, src), node_text(field, src)))
 }
 
 #[cfg(test)]

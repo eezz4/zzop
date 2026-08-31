@@ -1,4 +1,4 @@
-/* Generate site/rules.html's rule ROWS from docs/rules/catalog.md, the machine-pinned SSOT, and its
+/* Generate site-src/rules/page.html's rule ROWS from docs/rules/catalog.md, the machine-pinned SSOT, and its
  * TABLE OF CONTENTS from the page's own sections.
  *
  * WHY THIS EXISTS
@@ -25,7 +25,7 @@
  * its TOC entry, which the scaffold now gets for free once the section exists.
  *
  * USAGE
- *   node scripts/gen-site-rules.mjs            # rewrite site/rules.html in place
+ *   node scripts/gen-site-rules.mjs            # rewrite site-src/rules/page.html in place
  *   node scripts/gen-site-rules.mjs --check    # exit 1 if the file is not what this would write
  * `--check` is what scripts/check-rules-catalog-sync.sh runs; the bare form is what a human runs
  * after editing the catalog.
@@ -57,7 +57,11 @@ import process from "node:process";
 const here = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
 const repoRoot = path.resolve(here, "..");
 const CATALOG = path.join(repoRoot, "docs/rules/catalog.md");
-const SITE = path.join(repoRoot, "site/rules.html");
+// The rules page SOURCE, not the shipped page. site/rules.html and site/ko/rules.html are both
+// generated from this template by scripts/gen-site.mjs (2026-08-18), so the rows this script fills
+// belong in the template — filling the shipped page instead would be overwritten by the next
+// gen-site run, and in one language only.
+const SITE = path.join(repoRoot, "site-src/rules/page.html");
 const INDENT = " ".repeat(12);
 
 function die(msg) {
@@ -263,13 +267,13 @@ function spliceSite(html, { packs, native }) {
       const packId = id.slice("pack-".length);
       const pack = packs.find((p) => p.id === packId);
       if (!pack) {
-        die(`site/rules.html has <section id="${id}"> but docs/rules/catalog.md ships no '${packId}' pack.\n` +
+        die(`site-src/rules/page.html has <section id="${id}"> but docs/rules/catalog.md ships no '${packId}' pack.\n` +
             `  Delete the section -- the catalog is the SSOT. Its table-of-contents entry goes with it\n` +
             `  automatically; the TOC is derived from the sections that exist.`);
       }
       rows = pack.rules.map(dslRow);
     }
-    if (!tbodyRe.test(body)) die(`site/rules.html: <section id="${id}"> has no own-line <tbody>...</tbody> pair to fill`);
+    if (!tbodyRe.test(body)) die(`site-src/rules/page.html: <section id="${id}"> has no own-line <tbody>...</tbody> pair to fill`);
     // Function replacers on BOTH calls, deliberately. A string in the replacement position makes JS
     // expand `$&`, `$$`, `` $` `` and `$'` — and the replacement here is catalog prose, which writes
     // about regexes and sed constantly. A cell containing `$&` would splice this whole <tbody> into
@@ -280,7 +284,7 @@ function spliceSite(html, { packs, native }) {
 
   for (const p of packs) {
     if (seen.has(`pack-${p.id}`)) continue;
-    die(`docs/rules/catalog.md ships pack '${p.id}' and site/rules.html has no <section id="pack-${p.id}">.\n` +
+    die(`docs/rules/catalog.md ships pack '${p.id}' and site-src/rules/page.html has no <section id="pack-${p.id}">.\n` +
         `  Sections are hand-written (heading + prose), so add this shell and re-run:\n\n` +
         [`    <section id="pack-${p.id}">`,
          `      <h2><code>${p.id}</code></h2>`,
@@ -298,7 +302,7 @@ function spliceSite(html, { packs, native }) {
          `  The table-of-contents entry is NOT yours to add: it is derived from this section's own`,
          `  <h2> once the section exists, so paste the shell and re-run.`].join("\n"));
   }
-  if (!seen.has("native-analyses")) die("site/rules.html has no <section id=\"native-analyses\"> to fill");
+  if (!seen.has("native-analyses")) die("site-src/rules/page.html has no <section id=\"native-analyses\"> to fill");
   return spliceToc(out, eol);
 }
 
@@ -331,7 +335,7 @@ function spliceToc(html, eol) {
   const tocRe = /(<aside class="docs-toc">[\s\S]*?<div class="docs-toc__label">[^<]*<\/div>\r?\n)([\s\S]*?)(\r?\n[ \t]*<\/aside>)/;
   const m = tocRe.exec(html);
   if (!m) {
-    die("site/rules.html has no <aside class=\"docs-toc\"> with a docs-toc__label to fill -- the page's\n" +
+    die("site-src/rules/page.html has no <aside class=\"docs-toc\"> with a docs-toc__label to fill -- the page's\n" +
         "  navigation is derived from its sections, so this anchor is load-bearing. Re-point it rather\n" +
         "  than dropping the TOC.");
   }
@@ -341,23 +345,28 @@ function spliceToc(html, eol) {
   for (const s of main.matchAll(/<section id="([a-z0-9-]+)">([\s\S]*?)<\/section>/g)) {
     const h2 = /<h2>([\s\S]*?)<\/h2>/.exec(s[2]);
     if (!h2) {
-      die(`site/rules.html: <section id="${s[1]}"> has no <h2> to take a table-of-contents label from.\n` +
+      die(`site-src/rules/page.html: <section id="${s[1]}"> has no <h2> to take a table-of-contents label from.\n` +
           `  Give it one -- a section with no heading would silently vanish from the page's navigation.`);
     }
     // The label is the heading's text: `<code>db</code>` -> `db`. Only <code> wrapping is modeled,
     // because that is the only markup the headings use; anything else is a hard error rather than a
     // silently stripped tag, on the same "say so instead of shipping something odd" rule the cell
     // transform above follows.
-    const label = h2[1].trim().replace(/^<code>([^<]*)<\/code>$/, "$1");
+    // When the heading is a translated slot the wrapper cannot be stripped here -- {{h26}} has no value
+    // yet, in either language -- so the TOC entry asks gen-site.mjs to strip it at fill time, off the
+    // same pair the heading itself is filled from.
+    const raw = h2[1].trim();
+    const slot = /^[{][{]([A-Za-z0-9]+)[}][}]$/.exec(raw);
+    const label = slot ? `{{${slot[1]}|text}}` : raw.replace(/^<code>([^<]*)<\/code>$/, "$1");
     if (/[<>]/.test(label)) {
-      die(`site/rules.html: <section id="${s[1]}">'s <h2> carries markup this generator does not model ` +
+      die(`site-src/rules/page.html: <section id="${s[1]}">'s <h2> carries markup this generator does not model ` +
           `(${h2[1].trim().slice(0, 80)}).\n  Model it here or simplify the heading -- do not let the TOC ` +
           `label ship as raw markup.`);
     }
     entries.push(`    <a href="#${s[1]}" class="docs-toc__link">${label}</a>`);
   }
   if (entries.length < 5) {
-    die(`site/rules.html: derived only ${entries.length} table-of-contents entr(ies) from the page's ` +
+    die(`site-src/rules/page.html: derived only ${entries.length} table-of-contents entr(ies) from the page's ` +
         `sections.\n  The section scan lost its anchor; writing that TOC would delete the page's navigation.`);
   }
   return html.replace(tocRe, (_w, head, _body, tail) => head + entries.join(eol) + tail);
@@ -381,12 +390,12 @@ const census = `${catalog.packs.length} packs, ${dslCount} DSL rows, ${catalog.n
 
 if (!check) {
   if (before !== after) fs.writeFileSync(SITE, after);
-  console.log(`gen-site-rules: ${before === after ? "already current" : "rewrote"} site/rules.html (${census})`);
+  console.log(`gen-site-rules: ${before === after ? "already current" : "rewrote"} ${path.relative(repoRoot, SITE).split(path.sep).join("/")} (${census})`);
   process.exit(0);
 }
 
 if (before === after) {
-  console.log(`gen-site-rules: OK -- site/rules.html rule rows and table of contents are exactly what the catalog and its own sections generate (${census})`);
+  console.log(`gen-site-rules: OK -- site-src/rules/page.html rule rows and table of contents are exactly what the catalog and its own sections generate (${census})`);
   process.exit(0);
 }
 
@@ -400,7 +409,7 @@ const newToc = tocOf(after);
 if (oldToc.join("\n") !== newToc.join("\n")) {
   const stale = oldToc.filter((l) => !newToc.includes(l));
   const missing = newToc.filter((l) => !oldToc.includes(l));
-  console.error("gen-site-rules: FAILED -- site/rules.html's table of contents is not what its own sections generate.");
+  console.error("gen-site-rules: FAILED -- site-src/rules/page.html's table of contents is not what its own sections generate.");
   for (const l of stale) console.error(`  STALE (points at no section, i.e. a dead anchor on the public page): ${l}`);
   for (const l of missing) console.error(`  MISSING (a section unreachable from the page's navigation):        ${l}`);
   if (!stale.length && !missing.length) console.error("  same entries, different ORDER — the TOC follows document order.");
@@ -424,7 +433,7 @@ const newRows = rowsOf(after);
 const changed = [];
 for (const [id, line] of newRows) {
   const old = oldRows.get(id);
-  if (old === undefined) { changed.push([id, "row is MISSING from site/rules.html"]); continue; }
+  if (old === undefined) { changed.push([id, "row is MISSING from site-src/rules/page.html"]); continue; }
   if (old === line) continue;
   let i = 0;
   while (i < old.length && i < line.length && old[i] === line[i]) i++;
@@ -432,9 +441,9 @@ for (const [id, line] of newRows) {
 }
 for (const id of oldRows.keys()) if (!newRows.has(id)) changed.push([id, "row on the site has no catalog row (stale or invented)"]);
 
-console.error(`gen-site-rules: FAILED -- ${changed.length} of ${total} rule rows in site/rules.html are not what docs/rules/catalog.md generates.`);
+console.error(`gen-site-rules: FAILED -- ${changed.length} of ${total} rule rows in site-src/rules/page.html are not what docs/rules/catalog.md generates.`);
 for (const [id, why] of changed) console.error(`  ${id}: ${why}`);
 console.error("");
-console.error("  site/rules.html's rule rows are GENERATED. Fix docs/rules/catalog.md (the SSOT, machine-pinned");
+console.error("  site-src/rules/page.html's rule rows are GENERATED. Fix docs/rules/catalog.md (the SSOT, machine-pinned");
 console.error("  to the engine by crates/engine/tests/rule_contracts/), then run: node scripts/gen-site-rules.mjs");
 process.exit(1);

@@ -107,3 +107,149 @@ fn test_classified_paths_are_silent() {
 fn empty_on_parse_failure() {
     assert!(extract_ef_core_db_table_provides("X.cs", "\u{0}\u{1}not csharp{{{{").is_empty());
 }
+
+#[test]
+fn a_global_using_context_with_no_import_of_its_own_still_extracts() {
+    // C# 10's `global using` moves a project's framework imports into one `GlobalUsings.cs`, so the
+    // context file itself declares none — dotnet/eShop's `CatalogContext.cs` opens with
+    // `namespace …;` and goes straight to the class. Under an import-only gate its 3 `DbSet<T>`
+    // properties, and 9 across the repo's 3 contexts, extracted zero. The file's own base list is the
+    // evidence that replaces the import, and EF Core REQUIRES it.
+    let src = concat!(
+        "namespace eShop.Catalog.API.Infrastructure;\n",
+        "public class CatalogContext : DbContext\n",
+        "{\n",
+        "  public required DbSet<CatalogItem> CatalogItems { get; set; }\n",
+        "  public required DbSet<CatalogBrand> CatalogBrands { get; set; }\n",
+        "}\n",
+    );
+    let out =
+        extract_ef_core_db_table_provides("src/Catalog.API/Infrastructure/CatalogContext.cs", src);
+    let mut keys: Vec<&str> = out.iter().map(|p| p.key.as_str()).collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        vec!["table:catalogBrands", "table:catalogItems"],
+        "{out:?}"
+    );
+}
+
+#[test]
+fn a_derived_context_gates_but_an_unrelated_base_does_not() {
+    // `ends_with` rather than an exact match: deriving from an intermediate context is the norm and
+    // every link in that chain still ends in the framework's type name.
+    let src = concat!(
+        "namespace App;\n",
+        "public class AppIdentityDbContext : IdentityDbContext<AppUser>\n",
+        "{ public DbSet<Tenant> Tenants { get; set; } }\n",
+    );
+    let out = extract_ef_core_db_table_provides("App/Ctx.cs", src);
+    assert_eq!(out.len(), 1, "{out:?}");
+    assert_eq!(out[0].key, "table:tenants");
+
+    // The bound in the other direction: a `DbSet<T>`-shaped property on a class that is NOT a context
+    // and in a file with no EF import is not evidence of anything, and stays silent.
+    let unrelated = concat!(
+        "namespace App;\n",
+        "public class ViewModel : PageModel\n",
+        "{ public DbSet<Tenant> Tenants { get; set; } }\n",
+    );
+    assert!(
+        extract_ef_core_db_table_provides("App/Vm.cs", unrelated).is_empty(),
+        "a non-context class with no EF import must not extract"
+    );
+}
+
+#[test]
+fn a_global_using_file_still_honours_a_same_file_table_rename() {
+    // The regression the structural gate created and this pin seals. `global using` moves BOTH
+    // namespaces into one collector, so widening only the EF gate left pass 1 — the pass that collects
+    // the `[Table]` override set — switched off while pass 2 kept emitting. The result was not a
+    // missing fact but a WRONG one: `table:users` for an entity the database calls `app_users`, which
+    // then keys a phantom provide nothing joins while the real table reads as unprovided.
+    let src = concat!(
+        "namespace App;\n",
+        "[Table(\"app_users\")]\n",
+        "public class User { public int Id { get; set; } }\n",
+        "public class AppDbContext : DbContext { public DbSet<User> Users { get; set; } }\n",
+    );
+    let out = extract_ef_core_db_table_provides("App/AppDbContext.cs", src);
+    let mut keys: Vec<&str> = out.iter().map(|p| p.key.as_str()).collect();
+    keys.sort_unstable();
+    assert_eq!(keys, vec!["table:app_users"], "{out:?}");
+}
+
+#[test]
+fn the_structural_gate_belongs_to_one_class_and_not_to_the_file() {
+    // Under the IMPORT gate every class in the file contributes, and that stays true. Under the
+    // STRUCTURAL gate only the class that actually derives from a context does — otherwise a file
+    // holding a context alongside an unrelated type emits that type's `DbSet`-shaped property as if
+    // the context declared it.
+    let src = concat!(
+        "namespace App;\n",
+        "public class AppDbContext : DbContext { public DbSet<User> Users { get; set; } }\n",
+        "public class Snapshot { public DbSet<Audit> Rows { get; set; } }\n",
+    );
+    let out = extract_ef_core_db_table_provides("App/Ctx.cs", src);
+    let keys: Vec<&str> = out.iter().map(|p| p.key.as_str()).collect();
+    assert_eq!(keys, vec!["table:users"], "{out:?}");
+
+    // With the using present, the file-wide behaviour is byte-for-byte what it always was.
+    let with_using = format!("{EF_USING}{src}");
+    let out = extract_ef_core_db_table_provides("App/Ctx.cs", &with_using);
+    let mut keys: Vec<&str> = out.iter().map(|p| p.key.as_str()).collect();
+    keys.sort_unstable();
+    assert_eq!(keys, vec!["table:rows", "table:users"], "{out:?}");
+}
+
+#[test]
+fn an_interface_named_like_a_context_is_not_one() {
+    // C# cannot tell a base class from an implemented interface syntactically, and .NET's own naming
+    // guidelines fix the `I` + PascalCase spelling — so a hand-rolled `IDbContext` wrapper holding
+    // `DbSet` properties would otherwise emit the real context's tables a second time, from a file
+    // that owns none of them.
+    let src = concat!(
+        "namespace App;\n",
+        "public class UnitOfWork : IDbContext { public DbSet<User> Users { get; set; } }\n",
+    );
+    assert!(
+        extract_ef_core_db_table_provides("App/Uow.cs", src).is_empty(),
+        "an interface-shaped base is not evidence of an EF context"
+    );
+}
+
+/// The per-class narrowing must not reach the import path. Keying it on `class_declaration` alone
+/// dropped every `DbSet<T>` declared in an interface — the .NET Clean-Architecture template's own
+/// `IApplicationDbContext` shape — because such a property passes through no class on the way down.
+#[test]
+fn a_dbset_on_an_interface_still_extracts_when_the_using_is_present() {
+    let src = format!(
+        "{EF_USING}\npublic interface IApplicationDbContext {{ DbSet<TodoList> TodoLists {{ get; }} }}\n"
+    );
+    let out = extract_ef_core_db_table_provides("src/IApplicationDbContext.cs", &src);
+    let keys: Vec<&str> = out.iter().map(|p| p.key.as_str()).collect();
+    assert_eq!(keys, vec!["table:todoLists"], "{out:?}");
+}
+
+/// The same for a `record` container, so the fix is pinned as "the import licenses the FILE" rather than
+/// as a one-off carve-out for interfaces.
+#[test]
+fn a_dbset_on_a_record_still_extracts_when_the_using_is_present() {
+    let src = format!(
+        "{EF_USING}\npublic record Ctx {{ public DbSet<Widget> Widgets {{ get; set; }} }}\n"
+    );
+    let out = extract_ef_core_db_table_provides("src/Ctx.cs", &src);
+    let keys: Vec<&str> = out.iter().map(|p| p.key.as_str()).collect();
+    assert_eq!(keys, vec!["table:widgets"], "{out:?}");
+}
+
+/// And the narrowing itself still holds where it is the structural signal doing the work: with no
+/// `using`, an unrelated sibling class must not ride the context's gate.
+#[test]
+fn without_the_using_an_interface_dbset_does_not_ride_a_sibling_context() {
+    let src = "public class AppDbContext : DbContext { public DbSet<User> Users { get; set; } }\n\
+               public interface ISnapshot { DbSet<Audit> Audits { get; } }\n";
+    let out = extract_ef_core_db_table_provides("src/Ctx.cs", src);
+    let keys: Vec<&str> = out.iter().map(|p| p.key.as_str()).collect();
+    assert_eq!(keys, vec!["table:users"], "{out:?}");
+}

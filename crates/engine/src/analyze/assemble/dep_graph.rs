@@ -15,7 +15,7 @@ use crate::EngineConfig;
 mod fan_in;
 mod merge;
 
-use fan_in::{merge_asset_ref_fan_in, merge_sfc_fan_in};
+use fan_in::{merge_asset_ref_fan_in, merge_auto_import_fan_in, merge_prescan_fan_in};
 use merge::{
     merge_csharp_dep_edges, merge_go_dep_edges, merge_java_dep_edges, merge_python_dep_edges,
     merge_rust_dep_edges,
@@ -28,12 +28,16 @@ pub(super) struct DepGraphResult {
     pub(super) folders: Option<FolderAggregates>,
     pub(super) commits: Vec<zzop_core::CommitFileSet>,
     pub(super) git_active: bool,
-    /// `.ts` targets imported by a `.vue`/`.svelte` SFC — seeded into `unreachable`'s `extra_entries`.
-    /// See `merge_sfc_fan_in`'s doc.
-    pub(super) sfc_targets: HashSet<String>,
+    /// `.ts` targets imported by a PRE-SCANNED file (`.vue`/`.svelte`/`.md`/`.mdx`/`.astro`) — seeded
+    /// into `unreachable`'s `extra_entries`.
+    /// See `merge_prescan_fan_in`'s doc.
+    pub(super) prescan_targets: HashSet<String>,
     /// Files targeted by a runtime asset-URL reference (worklet/worker/importScripts/`new URL`) — seeded
-    /// into `unreachable`'s `extra_entries` alongside `sfc_targets`. See `merge_asset_ref_fan_in`'s doc.
+    /// into `unreachable`'s `extra_entries` alongside `prescan_targets`. See `merge_asset_ref_fan_in`'s doc.
     pub(super) asset_targets: HashSet<String>,
+    /// Files a Nuxt AUTO-IMPORT reaches by bare symbol name — seeded into `unreachable`'s
+    /// `extra_entries` alongside the other two. See `merge_auto_import_fan_in`'s doc.
+    pub(super) auto_import_targets: HashSet<String>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -48,12 +52,17 @@ pub(super) fn build(
     ts_paths: &HashSet<String>,
     pkg_scan: &PackageJsonScan,
     tsconfigs: &std::collections::BTreeMap<String, zzop_parser_typescript::TsconfigPaths>,
+    // The whole-tree symbol table — the export-side evidence the noncycle fold below needs, assembled
+    // before this phase runs (`super::assemble`'s own ordering), which is what makes ONE fold possible
+    // instead of a per-file guess.
+    all_symbols: &[zzop_core::ir::SourceSymbol],
     rust_workspace: &RustWorkspaceMap,
     go_modules: &GoModuleMap,
     java_index: &JavaIndex,
     csharp_index: &CSharpIndex,
-    sfc_import_pairs: &[(String, ImportMap)],
+    prescan_import_pairs: &[(String, ImportMap)],
     asset_ref_pairs: &[(String, Vec<String>)],
+    auto_import: &super::nuxt_auto_import::NuxtAutoImportRefs,
     git_cache: &crate::analyze::GitCache,
 ) -> DepGraphResult {
     // `type_only_edges` is the ephemeral noncycle-exclusion set (never cached/serialized — see
@@ -61,8 +70,15 @@ pub(super) fn build(
     // from cycle detection — type-only bindings/re-exports, or a dynamic `import()` (Defect 2) — so
     // `circular_findings` in `super::rules` must not count it as a cycle edge even though `dep` itself
     // (fan-in/unimported-export/every other metric) still includes it.
-    let (mut dep, type_only_edges): (DepGraph, HashSet<(String, String)>) =
-        zzop_parser_typescript::build_dep_with_workspace(
+    //
+    // The builder hands back the UNFOLDED candidates rather than the set, because the second arm of
+    // "excludable" is a question about the TARGET file's declarations (`export type X` /
+    // `export interface X` is erased by `tsc` exactly as `import type` is), and no per-file loop can
+    // answer it — the target's symbols may not have been read yet. `all_symbols` is whole-tree and
+    // already assembled at this point, so the fold happens ONCE, here. See
+    // `zzop_core::noncycle`'s module doc for the two arms and the guards on the second.
+    let (mut dep, noncycle_candidates) =
+        zzop_parser_typescript::build_dep_with_workspace_candidates(
             ts_import_pairs,
             ts_re_export_pairs,
             ts_dynamic_import_pairs,
@@ -70,6 +86,14 @@ pub(super) fn build(
             &pkg_scan.workspace_pkgs,
             tsconfigs,
         );
+    // Guard: a tree whose TypeScript configuration EMITS type-only imports (`verbatimModuleSyntax` and
+    // its two predecessors) really does load the module, so the export-side arm is off there — read
+    // here rather than in `provides` because this is the only phase that consumes it, and `root` +
+    // `loc_by_path` are already in hand. See `pipeline::tsconfig::emission`.
+    let export_side_gate =
+        !crate::pipeline::tsconfig_preserves_type_imports(root, loc_by_path.keys().cloned());
+    let type_only_edges: HashSet<(String, String)> =
+        noncycle_candidates.refine(all_symbols, export_side_gate);
     // Python dep-graph edges — a separate, engine-side pass (NOT routed through
     // `build_dep_with_workspace`'s own resolver) — see `merge_python_dep_edges`'s doc for the resolver
     // wiring shape and why. Every Python file already has an entry in `dep` (possibly empty) from the
@@ -138,19 +162,19 @@ pub(super) fn build(
         .collect();
 
     let mut dep_stats = dep_stats_from_dep(&dep);
-    // `.vue`/`.svelte` SFC fan-in bump — see `merge_sfc_fan_in`'s own doc for why this must mutate
-    // `dep_stats.fan_in` alone rather than adding the `.vue`/`.svelte` file to `ts_import_pairs`/`dep`
-    // itself (the F3 pin: a `.vue`/`.svelte` `dep`-graph node with zero in-edges would become a NEW
+    // Pre-scan fan-in bump — see `merge_prescan_fan_in`'s own doc for why this must mutate
+    // `dep_stats.fan_in` alone rather than adding the pre-scanned file to `ts_import_pairs`/`dep`
+    // itself (the F3 pin: a pre-scanned `dep`-graph node with zero in-edges would become a NEW
     // `dead-candidates` false positive).
-    let sfc_targets = merge_sfc_fan_in(
+    let prescan_targets = merge_prescan_fan_in(
         &mut dep_stats,
-        sfc_import_pairs,
+        prescan_import_pairs,
         ts_paths,
         &pkg_scan.workspace_pkgs,
         tsconfigs,
     );
     // Runtime asset-URL references (worklet/worker/importScripts/`new URL`) — same fan-in-bump-without-a-
-    // node shape as the SFC pass, resolving each captured string against `public/`/`static/` (or a
+    // node shape as the pre-scan, resolving each captured string against `public/`/`static/` (or a
     // relative module path); its returned targets seed `unreachable`'s `extra_entries`.
     let asset_targets = merge_asset_ref_fan_in(
         &mut dep_stats,
@@ -159,6 +183,12 @@ pub(super) fn build(
         &pkg_scan.workspace_pkgs,
         tsconfigs,
     );
+    // Nuxt auto-import — the third instance of the same fan-in-bump-without-a-node shape. `auto_import`
+    // arrives already resolved (`super::nuxt_auto_import::scan`, which owns the app-dir scope wall and
+    // the reference rosters); this arm only turns a resolution into fan-in without minting a node, and
+    // returns the reached set for `unreachable`'s `extra_entries`. Empty on every tree with no
+    // `nuxt.config.*`, so nothing moves there.
+    let auto_import_targets = merge_auto_import_fan_in(&mut dep_stats, auto_import, ts_paths);
 
     // Git-history-dependent analyses. `None`/failed-collection both fall through to a default
     // (all-zero) `GitStats` and no commits — `nodes` still builds (dep-graph + LOC signal only) and
@@ -199,7 +229,8 @@ pub(super) fn build(
         folders,
         commits,
         git_active,
-        sfc_targets,
+        prescan_targets,
         asset_targets,
+        auto_import_targets,
     }
 }

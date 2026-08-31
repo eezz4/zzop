@@ -34,6 +34,38 @@ docs/adapters/*.fixture.json text eol=lf
 # endings when it slices the dep-graph block out of it.
 site/index.html text eol=lf
 site/ko/index.html text eol=lf
+# The X showcase joined the generated set on 2026-08-18 and needs the pin for the same reason, plus
+# one this page makes sharper: its editions are built by substituting Korean prose into a template
+# sliced from the page itself, and the check that the substitution is LOSSLESS is a byte comparison
+# against the English page. Run that on a CRLF working copy of an LF blob and it fails by exactly the
+# number of line breaks in the prose — 34 the first time, which reads as data loss and is not.
+site/x-showcase.html text eol=lf
+site/ko/x-showcase.html text eol=lf
+# Privacy joined the same lane on 2026-08-18. Pinned at the moment it did, not after.
+site/privacy.html text eol=lf
+site/ko/privacy.html text eol=lf
+site-src/privacy/page.html text eol=lf
+# Graph joined on 2026-08-18 too. Its template is ALSO what site-graph-data.mjs rewrites and
+# what gen-site slices the dep-data block out of, so an unpinned CRLF copy would reach three lanes.
+site/graph.html text eol=lf
+site/ko/graph.html text eol=lf
+site-src/graph/page.html text eol=lf
+# Rules and reference, same day and same shape. rules is the second page whose template another
+# generator writes into (gen-site-rules.mjs fills its rows from docs/rules/catalog.md).
+site/rules.html text eol=lf
+site/ko/rules.html text eol=lf
+site-src/rules/page.html text eol=lf
+site/reference.html text eol=lf
+site/ko/reference.html text eol=lf
+site-src/reference/page.html text eol=lf
+# The two redirect stubs, pinned on 2026-08-18 when they gained Korean editions and therefore a
+# shared template. They had shipped CRLF until then, which is exactly how the carve found them:
+# the extraction that had to reproduce them byte for byte could not match a single line.
+site/usage.html text eol=lf
+site/architecture.html text eol=lf
+site/ko/usage.html text eol=lf
+site/ko/architecture.html text eol=lf
+site-src/redirect/page.html text eol=lf
 
 # The generator's INPUTS need the same pin, and this half is easier to miss than the half above.
 # Sentences in site-src/content/*.mjs are multi-line template literals: a CRLF working copy puts a
@@ -45,6 +77,11 @@ site/ko/index.html text eol=lf
 # never reach the output.)
 site-src/content/*.mjs text eol=lf
 site-src/site-v2.css text eol=lf
+# The showcase template is the same case one step more literal: it is not read into a string and
+# re-emitted, it IS the page, with {{slot}} holes. An unpinned CRLF working copy would hand the
+# generator a CRLF page and it would write one, against an LF blob — the whole file as drift, on a
+# clone that changed nothing. Pinned on the day it was created rather than on the day that happened.
+site-src/showcase/page.html text eol=lf
 
 # Shell scripts, and this one is not a false-red story like the four above -- it is a deploy that
 # already failed (2026-08-14). ONE guard was committed with CRLF and CI died on `$'\r': command not

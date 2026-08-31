@@ -196,16 +196,27 @@ fn cross_check_dead_field_excludes_id_created_updated_at() {
     assert_eq!(dead_fields, vec!["name"]);
 }
 
+/// The INVERSE of the assertion that stood here until 2026-08-29
+/// (`cross_check_dead_field_excludes_short_names`), kept rather than deleted so the removed
+/// `MIN_FIELD_NAME_LEN = 3` floor is not re-added on intuition. It skipped one- and two-character names
+/// on the theory that they "appear everywhere in BE source" — but whether a name appears is what
+/// `identifier_counts` measures DIRECTLY, three lines further down, so the floor was a proxy for
+/// evidence the rule already holds. It also never fired: on the corpus's only Prisma schema there are
+/// zero candidate names shorter than three characters, and two builds one constant apart report the same
+/// 27 findings. A short name that genuinely occurs nowhere is as strong a signal as a long one.
 #[test]
-fn cross_check_dead_field_excludes_short_names() {
+fn cross_check_dead_field_has_no_name_length_floor() {
     let issues = cross_check_default(
         &[model("Y", &["id", "ab", "name"])],
         &usage(&[]),
         &bound_attrs(&["Y"]),
     );
-    assert!(!issues
-        .iter()
-        .any(|i| i.rule == "unreferenced-field-name" && i.field.as_deref() == Some("ab")));
+    assert!(
+        issues
+            .iter()
+            .any(|i| i.rule == "unreferenced-field-name" && i.field.as_deref() == Some("ab")),
+        "a two-character name absent from all source must report: the length floor was removed"
+    );
 }
 
 #[test]
@@ -266,18 +277,26 @@ fn churn_rule_empty_churn_map_no_issues() {
 // --- analyzeSchema (usage branch) ---
 
 fn risk_field(name: &str, optional: bool) -> SchemaField {
+    // `createdAt`/`updatedAt` are spelled as a real schema spells them — `DateTime`, with `@updatedAt` on
+    // the second — so that a fixture asking for a model with NO issues can actually have none. Since
+    // `missing-timestamps` lost its field-count floor (2026-08-29) every model without timestamps
+    // reports, and a `String` "createdAt" would trade that finding for a `temporal-as-string` one.
+    let temporal = matches!(name, "createdAt" | "updatedAt");
     SchemaField {
         name: name.to_string(),
-        r#type: "String".to_string(),
+        r#type: if temporal { "DateTime" } else { "String" }.to_string(),
         optional,
         list: false,
-        attrs: if name == "id" {
-            vec![FieldAttr {
+        attrs: match name {
+            "id" => vec![FieldAttr {
                 name: "id".to_string(),
                 args: None,
-            }]
-        } else {
-            vec![]
+            }],
+            "updatedAt" => vec![FieldAttr {
+                name: "updatedAt".to_string(),
+                args: None,
+            }],
+            _ => vec![],
         },
     }
 }
@@ -310,9 +329,17 @@ fn analyze_with_usage_structural_only_model_risk_matches_summed_points() {
 #[test]
 fn analyze_with_usage_every_model_gets_model_risk_entry_even_zero_issues() {
     let analysis = analyze_schema_with_usage(
-        vec![risk_model("Lookup", &["id", "code"])],
+        vec![risk_model(
+            "Lookup",
+            &["id", "code", "createdAt", "updatedAt"],
+        )],
         None,
         &AttributeStore::default(),
+    );
+    assert!(
+        analysis.issues.iter().all(|i| i.model != "Lookup"),
+        "fixture must genuinely raise no issue, or this test stops being about model_risk: {:?}",
+        analysis.issues
     );
     assert_eq!(analysis.model_risk["Lookup"], 0);
 }
@@ -346,4 +373,116 @@ fn analyze_with_usage_no_usage_runs_only_structural_rules() {
         .issues
         .iter()
         .any(|i| i.rule == "unreferenced-model-name"));
+}
+
+/// **The generated client never spells the model name.** Prisma lowercases the first character to build
+/// its delegate, so `model UserPassword` is reached as `prisma.userPassword` and the PascalCase name
+/// appears nowhere in correct, heavily-used code. Measured on calcom/cal.com `176037d`: 7 of 7
+/// `unreferenced-model-name` findings examined were this, every one a model in daily use.
+///
+/// Both spellings and a genuinely-unused model ride in one call — "camelCase counts" and "nothing is
+/// reported any more" are the same assertion without the control.
+#[test]
+fn a_model_reached_through_its_camel_case_delegate_is_referenced() {
+    let models = [
+        model("UserPassword", &["hashedValue"]),
+        model("Team", &["displayName"]),
+        model("NobodyUsesMe", &["someLabel"]),
+    ];
+    // `userPassword` is the delegate spelling; `Team` is named directly; nothing names NobodyUsesMe.
+    let u = usage(&[
+        ("userPassword", 3),
+        ("hashedValue", 1),
+        ("Team", 2),
+        ("displayName", 1),
+    ]);
+    let issues = cross_check_default(&models, &u, &AttributeStore::default());
+    let unreferenced: Vec<&str> = issues
+        .iter()
+        .filter(|i| i.rule == "unreferenced-model-name")
+        .map(|i| i.model.as_str())
+        .collect();
+    assert_eq!(
+        unreferenced,
+        vec!["NobodyUsesMe"],
+        "only the model nothing names may report: {issues:?}"
+    );
+}
+
+/// **A relation navigator is not a deletable field.** It is the required opposite side of a `@relation`
+/// declared on the other model; removing it makes `prisma validate` fail, so you cannot generate a
+/// client, let alone migrate. Prisma also never requires code to name the back side — you traverse it
+/// through `include` — so "no identifier hit" is the EXPECTED reading for a correct schema.
+/// Measured on calcom/cal.com `176037d`, where the advice was literally "remove the field" for
+/// `Team.orgUsers`, `Team.inviteTokens`, `Team.accessCodes` and more, out of 65 findings.
+///
+/// The test is structural — a field whose declared TYPE names another model in this schema — so a
+/// genuinely dead scalar column in the SAME model still reports. That control is the point.
+#[test]
+fn a_relation_navigator_is_never_an_unreferenced_field_but_a_dead_scalar_still_is() {
+    let mut team = model("Team", &["displayName", "hideBookATeamMember"]);
+    team.fields.push(SchemaField {
+        name: "orgUsers".to_string(),
+        r#type: "User".to_string(), // the other model -> a navigator
+        optional: false,
+        list: true,
+        attrs: vec![],
+    });
+    let models = [team, model("User", &["emailAddress"])];
+    let u = usage(&[
+        ("Team", 1),
+        ("User", 1),
+        ("displayName", 2),
+        ("emailAddress", 2),
+    ]);
+    let issues = cross_check_default(&models, &u, &AttributeStore::default());
+    let dead: Vec<&str> = issues
+        .iter()
+        .filter(|i| i.rule == "unreferenced-field-name")
+        .filter_map(|i| i.field.as_deref())
+        .collect();
+    assert_eq!(
+        dead,
+        vec!["hideBookATeamMember"],
+        "the navigator must be silent and the dead scalar must not be: {issues:?}"
+    );
+}
+
+/// **The delegate spelling is only accepted for a MULTI-WORD model**, because `identifier_counts` is an
+/// unqualified whole-tree token bag: it records that the token `user` appeared, never that `prisma.user`
+/// did. Accepting a single-word delegate made the rule vacuous rather than merely loose — and worse than
+/// silent, because the model-level short-circuit stopped firing and the FIELD loop ran, so two correct
+/// findings were replaced by two asserting the opposite.
+///
+/// The canary is the review's own: two single-word models and a file whose only content is two ordinary
+/// local bindings. A multi-word model rides along, since "single-word is rejected" and "the delegate is
+/// never accepted" are the same assertion without it.
+#[test]
+fn a_single_word_delegate_is_too_common_a_token_to_count_as_a_reference() {
+    let models = [
+        model("User", &["fullName"]),
+        model("Team", &["labelText"]),
+        model("UserPassword", &["hashedValue"]),
+    ];
+    // No Prisma call anywhere — just two ordinary locals, plus the multi-word delegate.
+    let u = usage(&[("user", 1), ("team", 1), ("userPassword", 2)]);
+    let issues = cross_check_default(&models, &u, &AttributeStore::default());
+    let unreferenced: Vec<&str> = issues
+        .iter()
+        .filter(|i| i.rule == "unreferenced-model-name")
+        .map(|i| i.model.as_str())
+        .collect();
+    assert_eq!(
+        unreferenced,
+        vec!["User", "Team"],
+        "single-word delegates must not count; the multi-word one must: {issues:?}"
+    );
+    // The other half of the same defect: a model wrongly judged "used" then emits FIELD findings that
+    // assert the opposite. Neither single-word model may reach the field loop at all.
+    assert!(
+        !issues.iter().any(
+            |i| i.rule == "unreferenced-field-name" && (i.model == "User" || i.model == "Team")
+        ),
+        "a model reported unreferenced must not also report its fields: {issues:?}"
+    );
 }

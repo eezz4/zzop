@@ -113,12 +113,21 @@ fn analyze_json_emits_the_disclosure_registry_at_the_root() {
         let status = entry["status"].as_str().expect("status string");
         assert!(matches!(status, "asserted" | "partial" | "notYetDetected"));
     }
-    // The Stage-1 signal is registered as an asserted class.
+    // The Stage-1 signal reaches the wire with the status the registry gives it. DERIVED from the
+    // registry rather than spelled here (2026-08-29): this line used to hardcode `"asserted"`, which
+    // made it a SECOND owner of a fact whose owner is `disclosure/tests.rs`'s pinned (id, status) map
+    // — and when that map demoted this class to `partial` on its own measured evidence, the honest
+    // edit failed here for a reason that had nothing to do with what this test is about. What this
+    // test is about is the FORWARD: the id survives the flatten and carries the engine's own token.
     let consume_side = reg
         .iter()
         .find(|e| e["id"] == "consume-side-unextracted")
         .expect("consume-side-unextracted registered");
-    assert_eq!(consume_side["status"], "asserted");
+    let registered = zzop_engine::blindness_registry()
+        .iter()
+        .find(|c| c.id == "consume-side-unextracted")
+        .expect("consume-side-unextracted in the engine registry");
+    assert_eq!(consume_side["status"], registered.status.as_str());
     // The single-tree flatten kept the prior root fields intact alongside `disclosure`.
     assert_eq!(value["fileCount"], 2);
     assert!(value["coverage"].is_object());
@@ -145,6 +154,7 @@ fn analyze_json_top_level_key_set_is_pinned_exactly() {
     assert_eq!(
         keys,
         [
+            "buildScriptPaths",
             "cache",
             "coChange",
             "configWarnings",
@@ -159,6 +169,8 @@ fn analyze_json_top_level_key_set_is_pinned_exactly() {
             "health",
             "ir",
             "layerCoChurn",
+            "nativeAnalyses",
+            "nativeAnalysesMeaning",
             "nodes",
             "packsLoaded",
             "recommendations",
@@ -168,6 +180,49 @@ fn analyze_json_top_level_key_set_is_pinned_exactly() {
             "warnings",
         ],
         "single-tree output root keys drifted — pin the new/renamed field here AND in its own test"
+    );
+}
+
+/// `buildScriptPaths` — the tree's own manifest saying which files are BUILD surface rather than shipped
+/// code. Both directions in one test, because the empty case is the one that carries the contract: most
+/// trees declare nothing, and an ALWAYS-SERIALIZED `[]` there is what tells a consumer the walk ran and
+/// found nothing, as opposed to an engine build that does not report the field at all.
+///
+/// The entry-field half is asserted too: a `main` target is SHIPPED, and it must not leak into this list —
+/// that separation is the whole reason `PackageJsonScan` carries two sets instead of one.
+#[test]
+fn build_script_paths_carries_only_manifest_script_targets_and_is_always_serialized() {
+    let dir = TempDir::new("zzop-facade-build-script-paths");
+    dir.write(
+        "package.json",
+        r#"{"main": "./src/index.ts", "scripts": {"build": "node scripts/release.ts", "test": "jest"}}"#,
+    );
+    dir.write("src/index.ts", "export const a = 1;\n");
+    dir.write("scripts/release.ts", "export const b = 2;\n");
+    let config = format!(r#"{{"root": {:?}, "sourceId": "t"}}"#, dir.path().display());
+    let value: serde_json::Value =
+        serde_json::from_str(&analyze_json(&config).expect("analyze_json should succeed"))
+            .expect("valid JSON");
+    assert_eq!(
+        value["buildScriptPaths"],
+        serde_json::json!(["scripts/release.ts"]),
+        "the `main` target ships and must not appear here: {value}"
+    );
+
+    // And the empty case, which is not `null` and not an absent key.
+    let bare = cycle_fixture();
+    let bare_config = format!(
+        r#"{{"root": {:?}, "sourceId": "t"}}"#,
+        bare.path().display()
+    );
+    let bare_value: serde_json::Value =
+        serde_json::from_str(&analyze_json(&bare_config).expect("analyze_json should succeed"))
+            .expect("valid JSON");
+    assert_eq!(
+        bare_value["buildScriptPaths"],
+        serde_json::json!([]),
+        "a tree that declared no build script must say so with an empty array, never a missing key or \
+         null: {bare_value}"
     );
 }
 
@@ -206,6 +261,7 @@ fn analyze_json_top_level_key_set_with_git_signals_is_pinned_exactly() {
     assert_eq!(
         keys,
         [
+            "buildScriptPaths",
             "cache",
             "coChange",
             "configWarnings",
@@ -220,6 +276,8 @@ fn analyze_json_top_level_key_set_with_git_signals_is_pinned_exactly() {
             "health",
             "ir",
             "layerCoChurn",
+            "nativeAnalyses",
+            "nativeAnalysesMeaning",
             "nodes",
             "packsLoaded",
             "recommendations",
@@ -313,6 +371,7 @@ fn analyze_json_top_level_key_set_with_rule_overrides_is_pinned_exactly() {
     assert_eq!(
         keys,
         [
+            "buildScriptPaths",
             "cache",
             "coChange",
             "configWarnings",
@@ -327,6 +386,8 @@ fn analyze_json_top_level_key_set_with_rule_overrides_is_pinned_exactly() {
             "health",
             "ir",
             "layerCoChurn",
+            "nativeAnalyses",
+            "nativeAnalysesMeaning",
             "nodes",
             "packsLoaded",
             "recommendations",
@@ -338,6 +399,87 @@ fn analyze_json_top_level_key_set_with_rule_overrides_is_pinned_exactly() {
         ],
         "single-tree (overrides requested) output root keys drifted — pin the new/renamed field here, \
          in analyze_json_top_level_key_set_is_pinned_exactly, AND in its own test"
+    );
+}
+
+/// The THIRD single-tree pin, for the second conditionally-present top-level field:
+/// `packsLoadedMeaning` (2026-08-26), the legend for `packsLoaded`. Both pins above run on
+/// `cycle_fixture` with no `packDefs`/`packsDir`, so both see `packsLoaded: []` — and an empty pack
+/// roster has no entries to explain, so the facade omits the legend there. Exactly the
+/// `ruleOverridesApplied` situation of 2026-07-26: a field structurally invisible to every pin is a
+/// field with NO surface-parity row and no drift coupling at all, because
+/// `crates/engine/tests/rule_contracts/surface_parity.rs` builds its "every key this output can
+/// produce" set by parsing these pins. This one loads a pack, so the key is visible; the union that
+/// test derives (by NAME shape, `analyze_json_top_level_key_set*_is_pinned_exactly`) picks it up with
+/// no edit on that side.
+#[test]
+fn analyze_json_top_level_key_set_with_packs_loaded_is_pinned_exactly() {
+    let dir = cycle_fixture();
+    let config = format!(
+        r#"{{"root": {:?}, "sourceId": "t", "packDefs": [{}]}}"#,
+        dir.path().display(),
+        crate::test_support::dsl_pack_json("zz-pin", "r1", "NEVER_MATCHES")
+    );
+    let out = analyze_json(&config).expect("analyze_json should succeed");
+    let value: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
+    assert!(
+        !value["packsLoaded"].as_array().expect("array").is_empty(),
+        "the fixture must actually load a pack or this pin proves nothing: {value}"
+    );
+    let keys: Vec<&str> = value
+        .as_object()
+        .expect("root object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            "buildScriptPaths",
+            "cache",
+            "coChange",
+            "configWarnings",
+            "coverage",
+            "critical",
+            "degraded",
+            "disclosure",
+            "fileCount",
+            "findings",
+            "folders",
+            "gitWindow",
+            "health",
+            "ir",
+            "layerCoChurn",
+            "nativeAnalyses",
+            "nativeAnalysesMeaning",
+            "nodes",
+            "packsLoaded",
+            "packsLoadedMeaning",
+            "recommendations",
+            "ruleTimings",
+            "scores",
+            "seams",
+            "warnings",
+        ],
+        "single-tree (pack loaded) output root keys drifted — pin the new/renamed field here, in the \
+         two sibling pins, AND in its own test"
+    );
+}
+
+/// The legend is a legend, not a header: with no pack loaded there is nothing to explain, so the key
+/// is ABSENT rather than an empty object beside an empty array. Same shape as `scoreMeanings`, whose
+/// own pin says it in the same words: a legend for numbers that did not run must not ship.
+#[test]
+fn analyze_json_omits_packs_loaded_meaning_when_no_pack_loaded() {
+    let dir = cycle_fixture();
+    let config = format!(r#"{{"root": {:?}, "sourceId": "t"}}"#, dir.path().display());
+    let value: serde_json::Value =
+        serde_json::from_str(&analyze_json(&config).expect("analyze_json should succeed"))
+            .expect("valid JSON");
+    assert_eq!(value["packsLoaded"], serde_json::json!([]), "{value}");
+    assert!(
+        value.get("packsLoadedMeaning").is_none(),
+        "an empty roster gets no legend, and never a null: {value}"
     );
 }
 
@@ -868,5 +1010,105 @@ fn analyze_json_git_window_is_absent_when_git_did_not_run() {
     assert!(
         value["gitWindow"].is_null(),
         "gitWindow must be null when EngineConfig::git was None, got: {value}"
+    );
+}
+
+/// End-to-end at the boundary the reported defect actually crossed: `analyze_json` with one malformed
+/// overlay used to return `Err`, so the caller got exit 1 and ZERO findings from an otherwise healthy
+/// tree — the opposite of the documented contract ("an invalid overlay is skipped with a warning").
+/// The unit tests beside `typed_overlays` pin the conversion; this pins that the run SURVIVES it, which
+/// is the part that was broken.
+#[test]
+fn analyze_json_survives_a_malformed_adapter_overlay_and_warns_instead() {
+    let dir = TempDir::new("zzop-facade-bad-overlay");
+    dir.write("a.ts", "export const x = 1;\n");
+    let config = serde_json::json!({
+        "root": dir.path().to_string_lossy(),
+        "sourceId": "t",
+        // Missing `files[0].path` — the exact shape of the reported case.
+        "adapterOverlays": [{
+            "format": zzop_core::NORMALIZED_AST_FORMAT,
+            "version": zzop_core::NORMALIZED_AST_CONTRACT_VERSION,
+            "parser": "acme-adapter/1",
+            "source": "t",
+            "files": [{"loc": 40, "io": {"provides": [], "consumes": []}}]
+        }]
+    });
+    let out = analyze_json(&config.to_string()).expect("a bad overlay must not fail the analysis");
+    let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let warnings = parsed["warnings"].as_array().unwrap();
+    assert!(
+        warnings.iter().any(|w| w
+            .as_str()
+            .is_some_and(|s| s.contains("acme-adapter/1") && s.contains("SKIPPED"))),
+        "the skip must be disclosed, naming the overlay's parser: {warnings:?}"
+    );
+    assert!(
+        parsed["fileCount"].as_u64().unwrap() >= 1,
+        "the tree itself was still analyzed: {parsed}"
+    );
+}
+
+/// `nativeAnalyses` + `nativeAnalysesMeaning` — the field's OWN pin, which the key-set pins above
+/// point at. Two things are asserted that a key-set list structurally cannot: that the object is
+/// present with BOTH lists serialized even when one of them is empty, and that the cross-layer list
+/// is populated on an ordinary run.
+///
+/// The empty-list half is the load-bearing one. `zeroAdmissionRules` one field over is skip-if-empty,
+/// and copying that convention here would have reintroduced the very defect: a channel whose
+/// population is "what I happened to find" reports nothing on a clean run in bytes indistinguishable
+/// from a channel that never ran. `disabled: []` beside a 27-entry sibling is a row a reader can
+/// compare against; an absent key is not.
+#[test]
+fn analyze_json_native_analyses_ships_both_lists_even_when_one_is_empty() {
+    let dir = cycle_fixture();
+    let config = format!(r#"{{"root": {:?}, "sourceId": "t"}}"#, dir.path().display());
+    let out = analyze_json(&config).expect("analyze_json should succeed");
+    let value: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
+
+    let native = &value["nativeAnalyses"];
+    assert!(
+        native["registered"].as_u64().unwrap_or(0) >= 40,
+        "the denominator must be published and plausible: {value}"
+    );
+    assert_eq!(
+        native["disabled"],
+        serde_json::json!([]),
+        "nothing was disabled, and the EMPTY list must still be on the wire — its absence is what \
+         made `not analyzed` and `analyzed and clean` the same bytes: {value}"
+    );
+    let cross = native["reportedInCrossLayerFindings"]
+        .as_array()
+        .expect("reportedInCrossLayerFindings array");
+    assert!(
+        cross.len() >= 20,
+        "an ordinary single-tree run cannot key `findings` with any cross-layer analysis, and this \
+         is the list that says so: {value}"
+    );
+
+    // The legend is unconditional, unlike `packsLoadedMeaning` — its subject is. Every key of the
+    // object above is explained, plus the residual class (`everythingElse`) that has no field of its
+    // own precisely because it is the case where absence IS the verdict.
+    let meaning = value["nativeAnalysesMeaning"]
+        .as_object()
+        .expect("nativeAnalysesMeaning object");
+    for key in [
+        "registered",
+        "disabled",
+        "reportedInCrossLayerFindings",
+        "everythingElse",
+    ] {
+        assert!(
+            meaning.contains_key(key),
+            "legend is missing {key}: {value}"
+        );
+    }
+    assert!(
+        meaning["reportedInCrossLayerFindings"]
+            .as_str()
+            .expect("string")
+            .contains("crossLayerFindings"),
+        "the sentence must name the channel the reader has to go to, not merely restate the field \
+         name: {value}"
     );
 }

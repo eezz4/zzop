@@ -11,6 +11,7 @@ use crate::EngineConfig;
 
 mod cache_lane;
 mod decorator_gate;
+mod java_guard;
 mod python_guard;
 mod rust_guard;
 
@@ -24,19 +25,14 @@ use decorator_gate::{assemble_decorator_guarded, packs_read_io_scan_attrs};
 /// ## Engine-wiring route taken
 /// `FileArtifact` carries no `RawCall`s — the fused pass's contract is "parse once, project, drop the
 /// AST", and `SourceSymbol`/`ImportMap` alone do not encode call sites. Rather than widen that contract,
-/// this function runs a **second, uncached pass** over three languages: every already-dispatched
-/// TypeScript file (`ts_paths`, `zzop_parser_typescript::parse_calls`), every Java file (`java_rels`,
-/// `zzop_parser_java_21::parse_calls`/`parse_imports`), and every Python file (`python_guard::
-/// parse_calls_and_guards`, which owns that loop and its own resolution/guard docs). The two non-TS loops
-/// are the "lift the exemption" wiring `rules-http`'s `mutating_route_no_auth` module doc names as the
+/// this function runs a **second, uncached pass** over four languages: every already-dispatched
+/// TypeScript file (`ts_paths`, `zzop_parser_typescript::parse_calls`) inline below, and Java, Python and
+/// Rust each in a sibling module that owns its own loop and its own resolution/guard docs
+/// (`java_guard`/`python_guard`/`rust_guard`, all `parse_calls_and_guards`). The three non-TS loops are
+/// the "lift the exemption" wiring `rules-http`'s `mutating_route_no_auth` module doc names as the
 /// completion of its own "Call-graph language coverage" gap. No re-parse ever consults
 /// `zzop_cache::AnalysisCache` — a full per-file cache hit still re-reads and re-parses every one of
 /// those files whenever any call-graph-BFS rule is enabled and at least one HTTP endpoint exists.
-///
-/// Java's imports are ALSO re-parsed fresh here (unlike TS's and Python's, which arrive pre-computed via
-/// `ts_import_pairs` from the fused per-file pass) — no `java_import_pairs` equivalent is threaded into
-/// this function, so re-parsing both calls and imports together keeps the Java side self-contained
-/// rather than growing the caller's parameter list for a fact only this function needs.
 ///
 /// `api_endpoints` is reconstructed from the per-file `IoProvide` facts already collected (`kind ==
 /// "http"`) rather than a third route-extraction pass — `IoProvide::key` is the normalized
@@ -145,32 +141,15 @@ pub(in crate::analyze) fn run_callgraph_rules(
         }
     }
     let mut imports_by_file: HashMap<String, ImportMap> = ts_import_pairs.iter().cloned().collect();
-    // Java's own re-parse — module doc "Engine-wiring route taken". Java text is NOT folded into
-    // `file_texts` (the TS-shaped `is_whitelisted` lookback and `extract_controller_guarded_lines` find
-    // nothing Java in it); its ONE `mutating-route-no-auth` signal — Spring method-security annotations —
-    // is read HERE into `java_decorator_guarded`, the Java half of the framework-neutral decorator-guard
-    // exemption set (the NestJS `@UseGuards` half is built from `file_texts` below).
-    let mut java_decorator_guarded: std::collections::HashSet<(String, u32)> =
-        std::collections::HashSet::new();
-    // Spring Security global authorization postures (secure-by-default `authorizeRequests` chains). One
-    // per config file; collected across the tree — applied below ONLY if exactly one exists (multiple =
-    // ambiguous scoping, unsafe to reason about, so left unapplied).
-    let mut spring_postures: Vec<(String, zzop_parser_java_21::SpringSecurityPosture)> = Vec::new();
-    for rel in java_rels {
-        if let Ok(bytes) = std::fs::read(root.join(rel)) {
-            let text = String::from_utf8_lossy(&bytes).into_owned();
-            raw_calls.extend(zzop_parser_java_21::parse_calls(rel, &text));
-            imports_by_file.insert(rel.clone(), zzop_parser_java_21::parse_imports(&text));
-            if need_decorator_guarded {
-                for line in zzop_parser_java_21::extract_spring_guarded_lines(rel, &text) {
-                    java_decorator_guarded.insert((rel.clone(), line));
-                }
-                if let Some(p) = zzop_parser_java_21::extract_spring_security_posture(rel, &text) {
-                    spring_postures.push((rel.clone(), p));
-                }
-            }
-        }
-    }
+    // Java's own re-parse — module doc "Engine-wiring route taken"; `java_guard`'s own doc for why its
+    // imports are parsed fresh here and its text stays out of `file_texts`.
+    let java = java_guard::parse_calls_and_guards(
+        root,
+        java_rels,
+        need_decorator_guarded,
+        &mut raw_calls,
+        &mut imports_by_file,
+    );
     // Python's own re-parse + its two decorator-guard producers — module doc "Engine-wiring route taken",
     // and `python_guard`'s own doc for the two guard shapes and why they are gathered in two phases.
     let python_guards = python_guard::parse_calls_and_guards(
@@ -205,12 +184,16 @@ pub(in crate::analyze) fn run_callgraph_rules(
             zzop_parser_typescript::resolve_file(specifier, from_file, ts_paths)
         }
     };
-    let symbol_graph = zzop_core::callgraph::build_symbol_graph(
-        &raw_calls,
-        &imports_by_file,
-        &local_symbols_by_file,
-        &resolve_file_fn,
-    );
+    // Both halves: the resolved edges, and the calls the resolver DROPPED indexed by caller. A dropped
+    // name is still guard evidence for `mutating-route-no-auth` (see its `unresolved_callees` field) —
+    // a guard the resolver cannot place is a call whose written name the rule can read.
+    let (symbol_graph, unresolved_callees) =
+        zzop_core::callgraph::build_symbol_graph_with_unresolved(
+            &raw_calls,
+            &imports_by_file,
+            &local_symbols_by_file,
+            &resolve_file_fn,
+        );
     if run_cache_lane {
         let t0 = profile.then(Instant::now);
         let found = cache_lane::run(
@@ -260,9 +243,9 @@ pub(in crate::analyze) fn run_callgraph_rules(
         // This whole block runs whenever EITHER consumer needs it — see `need_decorator_guarded`'s doc —
         // not only when `run_mutating_no_auth` itself is on.
         let decorator_guarded = assemble_decorator_guarded(
-            java_decorator_guarded,
+            java.decorator_guarded,
             &python_guards,
-            &spring_postures,
+            &java.postures,
             &file_texts,
             io_provides,
             all_symbols,
@@ -278,6 +261,7 @@ pub(in crate::analyze) fn run_callgraph_rules(
             let t0 = profile.then(Instant::now);
             let found = zzop_rules_http::scan_mutating_route_no_auth(
                 &zzop_rules_http::ScanMutatingRouteNoAuthInput {
+                    unresolved_callees: &unresolved_callees,
                     io_provides,
                     symbols: all_symbols,
                     symbol_graph: &symbol_graph,

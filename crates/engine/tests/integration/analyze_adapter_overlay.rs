@@ -302,6 +302,7 @@ fn projection_for_an_unknown_rel_still_contributes_its_provide() {
         file: "external/legacy.jsp".to_string(),
         line: 2,
         symbol: None,
+        ..Default::default()
     });
 
     let mut cfg = config();
@@ -428,7 +429,7 @@ fn overlay_import_onto_a_degraded_on_disk_file_gives_a_target_fan_in() {
     //
     // The `.svelte`'s own on-disk `<script>` body deliberately uses a DYNAMIC `import()` rather than a
     // static one: the native SFC `<script>`-block pre-scan (`zzop_parser_typescript::
-    // extract_sfc_script_imports`, wired at `analyze::assemble::sfc`) now gives a STATIC import real
+    // extract_sfc_script_imports`, wired at `analyze::assemble::prescan`) now gives a STATIC import real
     // fan-in without any overlay at all, so a static-import baseline would no longer reproduce the gap
     // this test exists to cover. A dynamic `import()` is outside that pre-scan's scope (it calls
     // `parse_imports` only, which never collects dynamic imports — see that function's own doc), so the
@@ -507,6 +508,7 @@ fn overlay_nest_global_prefix_provide_is_dropped_and_warned_not_reapplied_tree_w
         file: "external/legacy.jsp".to_string(),
         line: 1,
         symbol: None,
+        ..Default::default()
     });
 
     let mut cfg = config();
@@ -600,6 +602,7 @@ fn overlay_with_only_ordinary_io_kinds_merges_with_no_drop_warning() {
         file: "external/legacy.jsp".to_string(),
         line: 2,
         symbol: None,
+        ..Default::default()
     });
 
     let mut cfg = config();
@@ -641,6 +644,7 @@ fn mismatched_overlay_source_warns_about_the_intra_source_join() {
         file: "external/legacy.jsp".to_string(),
         line: 1,
         symbol: None,
+        ..Default::default()
     });
     cfg.adapter_overlays = vec![NormalizedEnvelope {
         format: NORMALIZED_AST_FORMAT.to_string(),
@@ -686,6 +690,7 @@ fn overlay_source_equal_to_the_tree_source_id_warns_nothing() {
         file: "external/legacy.jsp".to_string(),
         line: 1,
         symbol: None,
+        ..Default::default()
     });
     cfg.adapter_overlays = vec![NormalizedEnvelope {
         format: NORMALIZED_AST_FORMAT.to_string(),
@@ -723,6 +728,7 @@ fn overlay_with_empty_source_warns_nothing() {
         file: "external/legacy.jsp".to_string(),
         line: 1,
         symbol: None,
+        ..Default::default()
     });
     cfg.adapter_overlays = vec![NormalizedEnvelope {
         format: NORMALIZED_AST_FORMAT.to_string(),
@@ -853,6 +859,7 @@ fn overlay_warnings_are_byte_for_byte_identical_across_two_runs() {
         file: "external/mismatched.jsp".to_string(),
         line: 1,
         symbol: None,
+        ..Default::default()
     });
     let mut cfg = EngineConfig {
         source_id: "spring".to_string(),
@@ -992,6 +999,7 @@ fn reserved_io_only_overlay_is_zero_fact_not_coverage() {
         file: "a.rb".to_string(),
         line: 1,
         symbol: None,
+        ..Default::default()
     });
     let mut cfg = config();
     cfg.adapter_overlays = vec![overlay("rb-adapter/1", vec![proj])];
@@ -1043,5 +1051,106 @@ fn overlay_calls_ignored_warning_names_both_host_spellings_for_mode_a() {
     assert!(
         !w.contains("analyzeEnvelope"),
         "must not name the removed napi spelling: {w}"
+    );
+}
+
+/// The measured gap this closes: `validate-envelope` COMPUTES the normalized key a producer should
+/// have emitted (`"get /api/users/:id/"` -> `GET /api/users/{}`) and names it — but the analyze path
+/// called only the accept/reject half of the same verdict and threw the advice away. So the identical
+/// overlay ran silently: the join quietly lost an edge and the unnormalized key sat in
+/// `unconsumedProvides` reading like a real defect. The product knew the answer at the one moment it
+/// mattered and did not say it.
+#[test]
+fn an_applied_overlays_hints_reach_the_run_that_applies_it() {
+    let dir = TempDir::new("zzop-adapter-overlay");
+    dir.write("src/app.ts", "export function noop() { return 1; }\n");
+
+    let mut proj = projection("external/api.rb", 5);
+    proj.io.provides.push(IoProvide {
+        response: None,
+        body: None,
+        kind: "http".to_string(),
+        // Legal envelope, accepted, applied — and keyed in a form nothing will ever join to.
+        key: "get /api/users/:id/".to_string(),
+        file: "external/api.rb".to_string(),
+        line: 3,
+        symbol: None,
+        ..Default::default()
+    });
+
+    let mut cfg = config();
+    cfg.adapter_overlays = vec![NormalizedEnvelope {
+        format: zzop_core::NORMALIZED_AST_FORMAT.to_string(),
+        version: zzop_core::NORMALIZED_AST_CONTRACT_VERSION.to_string(),
+        parser: "hinted-adapter/1".to_string(),
+        source: String::new(),
+        files: vec![proj],
+    }];
+    let out = analyze_tree(dir.path(), &cfg);
+
+    let hint = out
+        .warnings
+        .iter()
+        .find(|w| w.contains("hinted-adapter/1") && w.contains("was applied, but"))
+        .unwrap_or_else(|| panic!("no hint reached the run: {:?}", out.warnings));
+    assert!(
+        hint.contains("GET /api/users/{}"),
+        "the hint must carry the key the producer should have emitted, which is the whole reason it is \
+         worth surfacing here: {hint}"
+    );
+    // The overlay was ACCEPTED, not skipped — that distinction is the difference between advice and a
+    // rejection, and this lane must not blur them.
+    assert!(
+        !out.warnings
+            .iter()
+            .any(|w| w.contains("hinted-adapter/1") && w.contains("skipped")),
+        "{:?}",
+        out.warnings
+    );
+}
+
+/// The invalidation: a REJECTED overlay must not carry hints. Its facts never applied, so a hint's
+/// sentence ("this key will not join") would name a consequence that did not happen — `hints.rs`'s own
+/// doc calls an overstated consequence the thing that teaches a producer to distrust the pass. Without
+/// this test, "surface hints" and "surface hints unconditionally" pass identically.
+#[test]
+fn a_rejected_overlay_carries_no_hints_only_its_rejection() {
+    let dir = TempDir::new("zzop-adapter-overlay");
+    dir.write("src/app.ts", "export function noop() { return 1; }\n");
+
+    let mut proj = projection("external/api.rb", 5);
+    proj.io.provides.push(IoProvide {
+        response: None,
+        body: None,
+        kind: "http".to_string(),
+        key: "get /api/users/:id/".to_string(),
+        file: "external/api.rb".to_string(),
+        line: 3,
+        symbol: None,
+        ..Default::default()
+    });
+
+    let mut cfg = config();
+    cfg.adapter_overlays = vec![NormalizedEnvelope {
+        // Same hint-worthy key as above, but the envelope itself is rejected.
+        format: "not-the-right-format".to_string(),
+        version: zzop_core::NORMALIZED_AST_CONTRACT_VERSION.to_string(),
+        parser: "rejected-adapter/1".to_string(),
+        source: String::new(),
+        files: vec![proj],
+    }];
+    let out = analyze_tree(dir.path(), &cfg);
+
+    assert!(
+        out.warnings
+            .iter()
+            .any(|w| w.contains("rejected-adapter/1") && w.contains("skipped")),
+        "{:?}",
+        out.warnings
+    );
+    assert!(
+        !out.warnings.iter().any(|w| w.contains("was applied, but")),
+        "a skipped overlay applied nothing, so it can have caused no consequence to advise about: {:?}",
+        out.warnings
     );
 }

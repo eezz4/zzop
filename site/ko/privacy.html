@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>zzop — 개인정보 처리방침</title>
+<meta name="description" content="zzop 개인정보 처리방침 — 분석은 전부 로컬에서 돌고, 바이너리는 네트워크 요청을 하지 않으며, 텔레메트리도 개인정보 수집도 없다.">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="alternate" hreflang="en" href="https://eezz4.github.io/zzop/privacy.html">
+<link rel="alternate" hreflang="ko" href="https://eezz4.github.io/zzop/ko/privacy.html">
+<link rel="alternate" hreflang="x-default" href="https://eezz4.github.io/zzop/privacy.html">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+
+<!--zzop:nav-->
+<nav class="nav">
+  <span class="nav__brand">zzop</span>
+  <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:.1rem">
+    <a href="index.html" class="nav__link">개요</a>
+    <a href="index.html#p-arch" class="nav__link">구조</a>
+    <a href="index.html#p-usage" class="nav__link">사용법</a>
+    <a href="index.html#p-contract" class="nav__link">계약</a>
+    <a href="index.html#p-rules" class="nav__link">룰</a>
+    <a href="index.html#p-graph" class="nav__link">그래프</a>
+    <a href="x-showcase.html" class="nav__extra">실전</a>
+  </div>
+  <a class="langbtn" id="langlink" href="../privacy.html" hreflang="en" aria-label="영어판으로 보기">EN · <b>KO</b></a>
+</nav>
+<!--/zzop:nav-->
+
+<!-- One column, on purpose: this page is reached from the footer, appears in neither nav, and is four
+     headings long, so the docs sidebar would be scaffolding around nothing. What it does need is the
+     shell's gutters — without `.docs-layout` the only padding in play is `.docs-content`'s
+     `min-width: 0`, i.e. none, and the prose ran into the 2px side rule. -->
+<div class="docs-layout docs-layout--solo">
+
+  <main class="docs-content">
+    <div class="docs-content-header">
+      <h1>개인정보 처리방침</h1>
+      <p><strong>zzop 은 아무것도 수집하지 않는다.</strong> 짧게 말하면: 당신의 코드는 당신의 기기를 떠나지 않고, 당신이나 당신의 사용에 관한 어떤 데이터도 zzop 이 모으거나 전송하거나 저장하지 않는다.</p>
+    </div>
+
+    <section id="what-zzop-does">
+      <h2>zzop 이 당신의 데이터로 하는 일</h2>
+      <ul>
+        <li><strong>분석은 전부 로컬이다.</strong> <code>zzop</code> CLI, <code>zzop-mcp</code> MCP 서버, npm 패키지 전부 당신의 기기에서만 돌고, 당신이 가리킨 레포지토리 경로만 읽는다.</li>
+        <li><strong>네트워크 접근이 없다.</strong> 분석 바이너리는 어떤 종류의 네트워크 요청도 하지 않는다 — 설계가 그렇고, HTTP 의존성이 0개다. 소스와 의존성 트리에서 확인할 수 있다.</li>
+        <li><strong>텔레메트리가 없다.</strong> 사용 추적도, 크래시 리포팅도, 애널리틱스도 없고, 당신이나 당신의 코드에 관한 것은 어디로도 안 나간다 — 바이너리도, MCP 서버도, Claude Code 플러그인도. <em>플러그인 자신의</em> 네트워크 활동은 그 문장에 안 덮이며, 묻어 두는 대신 여기서 센다: <code>SessionStart</code> 훅이 <code>api.github.com</code> 에 최신 릴리스 태그를 묻는다 — 세션마다 한 번 — 새 버전이 있다는 것을 <em>보고</em>하기 위해서다(보고만 하고 절대 적용하지 않는다). 설치 첫 회에는 같은 훅이 GitHub Releases 에서 서버 바이너리와 <code>SHA256SUMS</code> 를 받는다 — 요청 두 번 더, 설치 시점에만, 아래 설치 절이 다루는 것과 같은 접촉이다. 그리고 플러그인의 <code>/zzop:update</code> 슬래시 커맨드는 당신이 실행할 때마다 최신 릴리스 요청을 한 번 반복한다. 세션마다 반복되는 그 요청은 당신의 IP 를 실어 나르고 세션이 시작됐다는 사실을 드러낸다. 그 외에는 아무것도 싣지 않는다. 분석 바이너리 자체는 네트워크 요청을 전혀 하지 않는다.</li>
+        <li><strong>계정도 키도 없다.</strong> zzop 은 가입도, API 키도, 자격증명도 요구하지 않는다.</li>
+        <li><strong>MCP 통신은 로컬에 머문다.</strong> MCP 서버는 당신의 기기에서 당신의 MCP 클라이언트(예: Claude Code / Claude Desktop)와 stdio 로 JSON-RPC 를 주고받는다. 그 클라이언트가 분석 결과를 가지고 무엇을 하는지는 <strong>이 방침이 아니라 그 클라이언트의 방침</strong>이 정한다.</li>
+      </ul>
+    </section>
+
+    <section id="third-party">
+      <h2>설치하면서 닿을 수 있는 외부 서비스</h2>
+      <p>릴리스 바이너리나 npm 패키지를 받는 일에는 GitHub 과 npm 의 인프라가 관여하고, 그것은 각자의 방침이 정한다:</p>
+      <ul>
+        <li>GitHub (릴리스, 레포지토리): <a href="https://docs.github.com/en/site-policy/privacy-policies" target="_blank" rel="noreferrer">GitHub privacy policies</a></li>
+        <li>npm (패키지 레지스트리): <a href="https://docs.npmjs.com/policies/privacy" target="_blank" rel="noreferrer">npm privacy policy</a></li>
+      </ul>
+    </section>
+
+    <section id="changes">
+      <h2>변경</h2>
+      <p>zzop 의 동작이 이 방침에 영향을 주는 방식으로 바뀌면, 이 페이지는 <strong>같은 커밋에서</strong> 함께 바뀐다 — 공개 레포지토리 이력에 남는다.</p>
+    </section>
+
+    <section id="contact">
+      <h2>문의</h2>
+      <p>질문은 <a href="https://github.com/eezz4/zzop/issues" target="_blank" rel="noreferrer">github.com/eezz4/zzop/issues</a> 에 이슈로 남기면 된다.</p>
+    </section>
+  </main>
+
+</div>
+
+<!--zzop:foot-->
+<footer class="foot">
+  <span class="foot__brand">zzop</span>
+  <span>Zero Zone Of Pain · MIT</span>
+  
+  <a href="privacy.html">개인정보</a>
+  <a href="https://github.com/eezz4/zzop" target="_blank" rel="noreferrer">GitHub</a>
+</footer>
+<!--/zzop:foot-->
+
+</body>
+</html>

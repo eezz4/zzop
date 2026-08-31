@@ -73,6 +73,27 @@ pub struct CallScan {
     /// the site still can. A rule setting this must disclose the trade in its message.
     #[serde(default)]
     pub line_pattern: Option<String>,
+    /// LEXICAL VETO on the site's own source line — the negated mirror of [`Self::line_pattern`]: a site
+    /// whose line ALSO matches this is dropped. It exists because the `regex` crate has no lookaround, so
+    /// "the line must not say X" cannot be spelled as a `line_pattern`, and the one thing it is for is a
+    /// DECLARATION the source makes about the call (`security/weak-crypto` reads CPython's own
+    /// `usedforsecurity=False`, the argument bandit honours as B324).
+    ///
+    /// Degrade direction is the OPPOSITE of `line_pattern`'s, and deliberately so: this field only ever
+    /// SUPPRESSES, so a line the file text cannot supply (envelope mode carries no source lines) leaves
+    /// the site FIRING. No line, no declaration witnessed, no suppression — absence of evidence is never
+    /// evidence of a waiver, which is the same never-guess stance `algorithm_pattern` takes from the
+    /// other side.
+    ///
+    /// What a rule setting this may CLAIM is bounded by what it enforces, and since 2026-08-21 what it
+    /// enforces is the call's WINDOW rather than its first line: the site's line plus the continuation
+    /// lines its unclosed parentheses open, capped, matched in multi-line mode
+    /// (`crate::dsl::veto_window::call_window`). A single-line call yields exactly the line, so nothing
+    /// that matched before stops matching. What it still does NOT see is a declaration outside the
+    /// call's own parentheses — a keyword set on a preceding statement, or a wrapper that decides for
+    /// it. A rule using this must say THAT rather than imply whole-call coverage.
+    #[serde(default)]
+    pub line_exclude_pattern: Option<String>,
     /// STRUCTURAL gate: the site only counts when its line sits inside one of `SourceFile::loop_spans`'
     /// entries — i.e. the parser PROVED the call runs once per iteration. `false` (default) leaves the
     /// gate off entirely.
@@ -127,6 +148,7 @@ impl Default for CallScan {
             callee_pattern: None,
             algorithm_pattern: None,
             line_pattern: None,
+            line_exclude_pattern: None,
             in_loop: false,
             attr_present: None,
             attr_absent: None,

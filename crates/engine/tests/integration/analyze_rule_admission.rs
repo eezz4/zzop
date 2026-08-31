@@ -209,6 +209,14 @@ fn an_empty_tree_lists_no_rule_ids() {
 
 /// Ids are sorted (not pack-definition order), matching the id-sorting convention every other
 /// pack-census surface uses — the same tree must always produce the same bytes.
+///
+/// BOTH id lists in the entry, since 2026-08-20. `rule_ids` shipped in pack-declaration order for one
+/// review cycle, which put two arrays of rule ids inside one `packsLoaded` object under two different
+/// orders with nothing on the wire saying so — and the smaller one is a SUBSET of the larger, so the
+/// obvious consumer question ("which of this pack's rules DID admit files") is a set difference that
+/// two orders make harder for no gain. The fixture below declares `zz-blind, ts-live, aa-blind` in
+/// that order on purpose: under declaration order this test's `rule_ids` leg reads
+/// `["zz-blind", "ts-live", "aa-blind"]` and fails.
 #[test]
 fn listed_rule_ids_are_sorted() {
     let dir = ts_tree("zzop-engine-rule-admission-sorted");
@@ -231,6 +239,30 @@ fn listed_rule_ids_are_sorted() {
         entry.zero_admission_rules,
         vec!["aa-blind".to_string(), "zz-blind".to_string()],
         "{:?}",
+        out.packs_loaded
+    );
+    assert_eq!(
+        entry.rule_ids,
+        vec![
+            "aa-blind".to_string(),
+            "ts-live".to_string(),
+            "zz-blind".to_string()
+        ],
+        "the LIST behind the count must carry the same order its own subset does, not the pack file's: \
+         {:?}",
+        out.packs_loaded
+    );
+    // The set difference the shared order exists for, done the cheap way it now permits: everything
+    // the pack loaded, minus everything that admitted nothing, is what actually read this tree.
+    let admitted: Vec<&String> = entry
+        .rule_ids
+        .iter()
+        .filter(|id| entry.zero_admission_rules.binary_search(id).is_err())
+        .collect();
+    assert_eq!(
+        admitted,
+        vec!["ts-live"],
+        "a sorted subtraction over two sorted lists must name the one rule with a .ts path gate: {:?}",
         out.packs_loaded
     );
 }

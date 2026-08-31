@@ -21,6 +21,8 @@
 
 use zzop_core::FrameworkRecognizer;
 
+pub mod zero_extraction;
+
 /// Every framework recognizer compiled into this build, parser crate by parser crate.
 ///
 /// Order is the parser crates' own declaration order within a stable crate sequence, so the output is
@@ -86,7 +88,8 @@ mod tests {
         let allowed: BTreeSet<&str> = [
             channel::PROVIDES,
             channel::CONSUMES,
-            channel::DB,
+            channel::DB_PROVIDES,
+            channel::DB_CONSUMES,
             channel::AUTH_EVIDENCE,
         ]
         .into_iter()
@@ -114,6 +117,86 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The EXTENSION axis, bound to the dispatcher rather than trusted.
+    ///
+    /// `emits` has been machine-checked against each recognizer's own code since 2026-08-02, and the
+    /// field beside it was checked by nothing at all: `zzop_core::recognizer`'s doc says extensions are
+    /// "quoted from the owning crate's own dispatch constant where it has one", and no crate has one —
+    /// every row spells its extensions as literals. A row could therefore claim `sql` from
+    /// `parser-typescript` and every consumer that crosses (channel, extension) with a tree's file mix
+    /// would credit this build with a capability no file of that extension can ever reach, because the
+    /// dispatcher would hand it to a different frontend entirely.
+    ///
+    /// What is bound here is exactly that: every extension a crate's row names must ROUTE to that
+    /// crate's frontend. The check is derived from [`crate::dispatch::dispatch`] itself, so a new
+    /// dispatch arm moves it automatically.
+    ///
+    /// ⚠ What this does NOT bind, stated because a guard's silence gets read as coverage: a row may
+    /// name a SUBSET of its language's extensions and this passes (`py` without `pyi` is exactly that
+    /// today), and it cannot see whether an adapter's own gate narrows it further. It closes the
+    /// cross-language claim, not the intra-language one — the same residual shape the client-vocabulary
+    /// note in `recognizer_drift` names.
+    #[test]
+    fn every_declared_extension_routes_to_the_declaring_parser() {
+        use crate::dispatch::{dispatch, DispatchConfig, Language};
+        // Exhaustive by construction: adding a `Language` variant without a crate here does not
+        // compile, which is the property that keeps this table from going stale.
+        let language_of = |name: &str| -> Language {
+            match name {
+                "typescript" => Language::TypeScript,
+                "python-3" => Language::Python,
+                "java-21" => Language::Java21,
+                "csharp" => Language::CSharp,
+                "go" => Language::Go,
+                "rust" => Language::Rust,
+                "prisma" => Language::Prisma,
+                "sql" => Language::Sql,
+                other => panic!("no Language mapped for parser-{other}"),
+            }
+        };
+        let _exhaustive = |l: Language| match l {
+            Language::TypeScript => "typescript",
+            Language::Python => "python-3",
+            Language::Java21 => "java-21",
+            Language::CSharp => "csharp",
+            Language::Go => "go",
+            Language::Rust => "rust",
+            Language::Prisma => "prisma",
+            Language::Sql => "sql",
+        };
+        let lists = [
+            ("typescript", zzop_parser_typescript::FRAMEWORK_RECOGNIZERS),
+            ("python-3", zzop_parser_python_3::FRAMEWORK_RECOGNIZERS),
+            ("java-21", zzop_parser_java_21::FRAMEWORK_RECOGNIZERS),
+            ("csharp", zzop_parser_csharp::FRAMEWORK_RECOGNIZERS),
+            ("go", zzop_parser_go::FRAMEWORK_RECOGNIZERS),
+            ("rust", zzop_parser_rust::FRAMEWORK_RECOGNIZERS),
+            ("prisma", zzop_parser_prisma::FRAMEWORK_RECOGNIZERS),
+            ("sql", zzop_parser_sql::FRAMEWORK_RECOGNIZERS),
+        ];
+        let cfg = DispatchConfig::default();
+        let mut wrong: Vec<String> = Vec::new();
+        for (crate_name, list) in lists {
+            let want = language_of(crate_name);
+            for r in list {
+                for ext in r.extensions {
+                    let got = dispatch(&format!("probe.{ext}"), &cfg);
+                    if got != Some(want) {
+                        wrong.push(format!(
+                            "parser-{crate_name} row {:?} claims .{ext}, which dispatches to {got:?}",
+                            r.framework
+                        ));
+                    }
+                }
+            }
+        }
+        assert!(
+            wrong.is_empty(),
+            "FrameworkRecognizer::extensions names extensions the declaring parser never receives:\n{}",
+            wrong.join("\n")
+        );
     }
 
     // `java_has_no_consume_side_recognizer_and_says_so` lived here until 2026-08-02, pinning the

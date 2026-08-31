@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="{{lang}}">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="0; url={{refresh}}">
+<title>{{title}}</title>
+<meta name="description" content="{{description}}">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="canonical" href="{{canonical}}">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+
+{{stubNote}}
+
+     The file stays instead of being deleted because links to it do not: other pages in site/ point
+     here, and so do bookmarks and anything already published. Absorbing those links is the entire
+     job of this file — the referring links are deliberately NOT rewritten.
+
+     Three ways out, because each one covers a case the others do not:
+       - meta refresh   sends a browser on immediately
+       - rel=canonical  tells a crawler which URL owns the content (a canonical URL carries no
+                        fragment by definition, so it names index.html; the fragment lives in the
+                        refresh and in the link below, which are the two places it is honoured)
+       - the link       works with JavaScript off, with refresh blocked, and in a text browser -->
+
+<div class="docs-layout docs-layout--solo">
+
+  <main class="docs-content">
+    <div class="docs-content-header">
+      <h1>{{h1}}</h1>
+      <p>{{moved}}</p>
+    </div>
+  </main>
+
+</div>
+
+</body>
+</html>

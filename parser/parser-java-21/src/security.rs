@@ -12,11 +12,19 @@
 //! NestJS `@UseGuards` and route-level middleware.
 //!
 //! ## Line contract (why this matches the route provide)
-//! For each guarded route method this emits `line_of(method_declaration)` — the SAME node
-//! `provides::extract::walk_member` anchors its `IoProvide` on (a Spring route's line is its method's
-//! first-modifier/annotation line). So a line this returns is exactly the `(file, line)` the rule tests
-//! each provide against, and the exemption fires. A guarded method that is NOT a route (no mapping
-//! annotation) is skipped — only real registered routes matter to the rule.
+//! For each guarded route method this emits `line_of(RouteMatch::anchor)` — the line of the MAPPING
+//! ANNOTATION (`@PostMapping`/`@RequestMapping(...)`) the route was read from. Both provide producers
+//! (`provides::extract::walk_member` and `project::collect::walk_member`) anchor their route on that same
+//! node, obtained from the same `provides::annotations::method_route_match` call, so the two sides agree
+//! BY CONSTRUCTION — there is one place that decides which annotation a route belongs to, and all three
+//! read its `anchor`. A line this returns is therefore exactly the `(file, line)` the rule tests each
+//! provide against, and the exemption fires. A guarded method that is NOT a route (no mapping annotation)
+//! is skipped — only real registered routes matter to the rule.
+//!
+//! Until 2026-08-23 all three instead took `line_of(method_declaration)`, whose start row is the
+//! declaration's FIRST MODIFIER. That kept the contract (both sides moved together) but pointed every
+//! Java route finding at whatever decoration led the method — on the mall corpus, a Swagger `@Operation`
+//! for 246 of 246 provides, one to three lines above the registration it claimed to report.
 //!
 //! ## Precision
 //! Recognition is by annotation NAME only (`@PreAuthorize`'s SpEL argument is never interpreted — a
@@ -31,7 +39,7 @@
 use tree_sitter::Node;
 
 use crate::lang::symbols::is_type_decl_kind;
-use crate::provides::annotations::{class_annotation_facts, method_route_states};
+use crate::provides::annotations::{class_annotation_facts, method_route_match};
 use crate::util::{annotation_name, annotations_of, line_of, modifiers_of, valid_named_children};
 
 /// Spring method-security annotation simple names — a present one (class- or method-level) marks the
@@ -92,12 +100,13 @@ fn walk_member(
     }
     // Route MEMBERSHIP gate: emit a guarded-line for any method the WHOLE-CORPUS provides pass could key as
     // a route, so the exemption lines up with `run_java_provides_project_pass`'s output (the set
-    // `mutating-route-no-auth` filters on). Uses `method_route_states` (non-empty for ANY recognized mapping
-    // annotation) rather than the per-file `method_route` (which DROPS a NonLiteral path): the whole-corpus
-    // pass now RESOLVES a method-path constant (`@PostMapping(ApiPaths.CREATE)`), so a NonLiteral-path method
-    // IS a route there and must stay exempted when guarded. Over-emitting a line for a method whose path
-    // turns out to be out-of-corpus (dropped whole-corpus too) is a harmless no-op exemption — there is no
-    // provide at that line to falsely clear; UNDER-emitting would false-positive a guarded route.
+    // `mutating-route-no-auth` filters on). Uses the raw `method_route_match` (`Some` for ANY recognized
+    // mapping annotation) rather than its per-file `literal_routes` view (which DROPS a NonLiteral path):
+    // the whole-corpus pass now RESOLVES a method-path constant (`@PostMapping(ApiPaths.CREATE)`), so a
+    // NonLiteral-path method IS a route there and must stay exempted when guarded. Over-emitting a line for
+    // a method whose path turns out to be out-of-corpus (dropped whole-corpus too) is a harmless no-op
+    // exemption — there is no provide at that line to falsely clear; UNDER-emitting would false-positive a
+    // guarded route.
     if !is_controller
         || !matches!(
             node.kind(),
@@ -107,11 +116,13 @@ fn walk_member(
         return;
     }
     let mods = modifiers_of(node);
-    if method_route_states(mods, src).is_empty() {
+    let Some(route) = method_route_match(mods, src) else {
         return;
-    }
+    };
     if class_guarded || has_security_annotation(mods, src) {
-        out.push(line_of(node)); // the method_declaration line = the route provide's own anchor line
+        // The mapping annotation node — the same `RouteMatch::anchor` both provide producers key on, so
+        // this line IS the provide's line (module doc, "Line contract").
+        out.push(line_of(route.anchor));
     }
 }
 

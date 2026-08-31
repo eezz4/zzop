@@ -108,6 +108,42 @@ fn all_source_files() -> Vec<String> {
     out
 }
 
+/// Every `parse_trees_args(<argv>, "<sub>", <floor>)` call site under `src/`, as `(subcommand, arity
+/// floor)`. That call is where a trailing-tree-paths subcommand's paths-mode arity is actually DECIDED,
+/// so it is the authority TEST 4 measures the prose against — not a list in this file, which would be
+/// the third mirror the module doc above refuses.
+///
+/// The parse is deliberately dumb, like its siblings: it reads the two arguments after the opening
+/// paren and skips anything it cannot read as `"<literal>", <integer>`. A dumb parse can only fail by
+/// finding too little, which the caller's own non-empty floor turns red.
+fn tree_path_arity_floors() -> Vec<(String, usize)> {
+    const CALL: &str = "parse_trees_args(";
+    let mut out: Vec<(String, usize)> = Vec::new();
+    for file in all_source_files() {
+        let text = read(&file);
+        let mut rest = text.as_str();
+        while let Some(i) = rest.find(CALL) {
+            rest = &rest[i + CALL.len()..];
+            let Some(end) = rest.find(')') else { break };
+            let mut parts = rest[..end].split(',').map(str::trim);
+            // arg 0 is the argv slice; arg 1 is the subcommand name; arg 2 is the floor.
+            let (_, Some(sub), Some(floor)) = (parts.next(), parts.next(), parts.next()) else {
+                continue;
+            };
+            let Some(sub) = sub.strip_prefix('"').and_then(|s| s.strip_suffix('"')) else {
+                continue;
+            };
+            let Ok(floor) = floor.parse::<usize>() else {
+                continue;
+            };
+            out.push((sub.to_string(), floor));
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
 /// Every long flag literal a subcommand's argv parser compares against, keyed by the `run_*` function
 /// it appears in. Flags shared by the findings-view knobs live in their own helper and are excluded —
 /// the help text prints those from one `FILTER_KNOBS` block rather than per subcommand.
@@ -244,5 +280,66 @@ fn every_flag_a_subcommand_parses_appears_in_its_help_line() {
          invisible; worse, a help line written for one mode of a multi-mode subcommand states that \
          mode's defaults as if they were the subcommand's.",
         missing.join("\n  ")
+    );
+}
+
+/// TEST 4 — a subcommand's paths-mode ARITY must be spelled the way its parser enforces it, in both
+/// help lanes.
+///
+/// This is the one `manifest` broke, and it is the same failure class as TEST 3 one level down: not an
+/// omission but a WRONG answer. `zzop help` and `zzop manifest --help` both offered
+/// `manifest <path>...` — the universal CLI grammar for "one or more" — while `zzop manifest ./gogs`
+/// exits 2 with `usage: zzop manifest <path> <path>... (2+ paths)`. The binary offered a form it
+/// refuses, and the refusal is the correct side: `manifest_json` goes through the JOIN-shaped
+/// `zzop_config::trees::load_trees_request`, which refuses a single-tree CONFIG too, so a one-tree
+/// manifest is unproducible by any route rather than merely unspelled by this one. `cross` had the
+/// identical drift, and its own `run_cross` usage const already spelled the floor correctly — so the
+/// binary was printing two different arities for one subcommand depending on which lane you hit.
+///
+/// The floor is read from the `parse_trees_args` call sites, never listed here, so a lane that changes
+/// its arity (or a new lane that adds one) cannot ship with prose describing the old one.
+#[test]
+fn every_tree_path_subcommand_spells_its_arity_floor_in_the_help_and_usage_lines() {
+    let floors = tree_path_arity_floors();
+    assert!(
+        floors.len() > 3,
+        "the arity parse found {} `parse_trees_args` call site(s) — it has stopped matching this \
+         crate's parsers, so this test would vouch for nothing",
+        floors.len()
+    );
+    let usage = crate::usage();
+    let described = elaborations();
+    let mut wrong: Vec<String> = Vec::new();
+
+    for (sub, floor) in &floors {
+        // ONE owner of the spelling (`cli::args::paths_form`), read here and by the parser's own
+        // refusal, so "what the help promises" and "what the error demands" are the same bytes.
+        let offered = format!("{sub} {}", crate::cli::args::paths_form(*floor));
+        if !usage.contains(&offered) {
+            wrong.push(format!(
+                "the USAGE line `zzop help` prints first does not offer `{offered}` — `zzop {sub}` \
+                 needs {floor} path(s)"
+            ));
+        }
+        let Some((_, text)) = described.iter().find(|(n, _)| n == sub) else {
+            wrong.push(format!(
+                "`{sub}` takes tree paths but has no elaboration row"
+            ));
+            continue;
+        };
+        if !text.contains(&offered) {
+            wrong.push(format!(
+                "`zzop {sub} --help` does not offer `{offered}` — it says: {text}"
+            ));
+        }
+    }
+
+    assert!(
+        wrong.is_empty(),
+        "the help text promises an arity the argv parser refuses:\n  {}\n`<path>...` reads as \"one \
+         or more\" in every CLI grammar a first-time caller has met, so offering it for a lane that \
+         needs two is not a wording nit: the reader takes the offer and the same binary refuses it \
+         one line later.",
+        wrong.join("\n  ")
     );
 }

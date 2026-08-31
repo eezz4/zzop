@@ -201,6 +201,7 @@ pub(super) fn compute_fresh_artifact(
         ));
     }
     FileArtifact {
+        suppress_markers: Vec::new(),
         rel: rel.to_string(),
         symbols,
         imports,

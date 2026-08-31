@@ -400,3 +400,22 @@ through before it ships:
    SAY co-occurrence, in the `db/multi-write-no-tx` house style ("This is a co-occurrence heuristic,
    not proof ..."), and cap severity at `warning` — `critical` is reserved for matchers that PROVE their
    claim (a closed literal, an unambiguous token). Never ship a structural claim on a textual matcher.
+
+1. **Does a finding of this rule GATE, and can the rule check what the gate assumes?** Severity is not
+   only a confidence label — `warning` and above fail a CI run under the default threshold, so choosing
+   it is choosing to stop someone's build. Two directions, and they take opposite evidence:
+   - **Erasing needs a declaration.** A rule that suppresses, exempts or deletes a finding must be able
+     to point at something the user WROTE (a config path, a marker, an entry field). Silence with no
+     declaration behind it is a finding the reader never learns was removed.
+   - **Gating needs evidence.** If a finding's harm depends on a premise the rule cannot check, do not
+     spend the gate on it: report at `info`, say the premise in the message, and let `--fail-on info`
+     be the user's opt-in.
+
+   **The scope of that second rule is narrow and stating it matters**, because read loosely it would
+   demote every co-occurrence rule on this page — all of which already say in their own messages that
+   they cannot prove their claim, and all of which are correctly `warning`. Unprovenness is NOT the
+   trigger. The trigger is a **measured positive signal that the premise fails for THIS finding**:
+   `duplicate-route` stays `warning` in general and drops to `info` only for a pair whose two sites are
+   found to straddle a deployment manifest, i.e. only where the rule has evidence that its
+   same-process assumption is false here. A rule that merely cannot confirm its premise keeps its
+   severity; a rule holding proof the premise is broken gives the gate up.

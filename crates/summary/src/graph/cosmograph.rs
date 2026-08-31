@@ -55,81 +55,17 @@
 //! `resolvedImportEdges` was (2026-07-31); the missing fact was that this graph holds resolved in-tree
 //! edges only. That sentence has one owner (`zzop_core::DEP_GRAPH_RESOLVED_ONLY`, re-exported through
 //! `zzop-facade`) and rides the census here rather than being copied into every column's description.
+//! Its 2026-08-31 companion is the same shape: `CYCLE_GRAPH_EXCLUDES_ERASED_IMPORTS` says the cycle
+//! columns were computed over a SMALLER edge set than the one these tables emit, and it rides the
+//! census only when a counted disagreement makes it checkable.
 
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::dep::{node_in_scope, DepUniverse, GitWindows};
+use super::dep::{node_in_scope, DepUniverse};
 
-/// What the CLI prints on stderr. Computed, never asserted — the same rule the mermaid census follows.
-pub(super) struct CosmographCensus {
-    pub(super) nodes_emitted: usize,
-    pub(super) total_nodes: usize,
-    pub(super) links_emitted: usize,
-    pub(super) total_edges: usize,
-    pub(super) cycles: usize,
-    pub(super) scoped: bool,
-    /// How many emitted rows actually carried each measured axis — `None` for the LINKS table, which
-    /// has no node axes and would be describing a table its reader is not looking at.
-    pub(super) measured: Option<MeasuredAxes>,
-    /// Which git window the history COLUMNS were measured over — `None` for the LINKS table for the
-    /// same reason `measured` is: it carries no git column, so it has no window to caveat. See
-    /// [`super::dep::GitWindows`].
-    pub(super) window: Option<GitWindows>,
-}
-
-/// Emitted-row counts for the axes that can be absent. Omitting an unmeasured axis is honest but
-/// SILENT — the viewer just has one fewer column to offer — so the count rides the census, which is
-/// this lane's honesty channel. `0 of N` is the answer to "where did colour-by-churn go?".
-pub(super) struct MeasuredAxes {
-    pub(super) loc: usize,
-    pub(super) git: usize,
-}
-
-impl CosmographCensus {
-    /// One line, shaped for a terminal rather than for a parser — its reader is the person who just ran
-    /// the command and is about to drag the file into a viewer.
-    pub(super) fn render(&self) -> String {
-        let scope_note = if self.scoped {
-            format!(
-                " (--scope dropped {} node(s) and every edge with an endpoint outside it)",
-                self.total_nodes.saturating_sub(self.nodes_emitted)
-            )
-        } else {
-            String::new()
-        };
-        let axes_note = match &self.measured {
-            None => String::new(),
-            Some(m) => format!(
-                " Measured axes: loc on {} of {} row(s), git history on {} of {} — an axis this run \
-                 did not measure is an ABSENT column, never a zero.",
-                m.loc, self.nodes_emitted, m.git, self.nodes_emitted
-            ),
-        };
-        // COVERAGE (`axes_note`) and WINDOW are two different questions about the same columns: how
-        // many rows got them, and what the numbers on those rows are sums over. A row can have all
-        // four git columns and still mean 90 days rather than a lifetime.
-        let window_note = match &self.window {
-            None => String::new(),
-            Some(w) => format!(" {}", w.note()),
-        };
-        format!(
-            "zzop graph --domain dep --format cosmograph: {} of {} files, {} of {} import edges, \
-             {} circular finding(s){scope_note}. UNCAPPED — --top does not apply to this format.\
-             {axes_note}{window_note} {}",
-            self.nodes_emitted,
-            self.total_nodes,
-            self.links_emitted,
-            self.total_edges,
-            self.cycles,
-            // The `fanIn`/`fanOut`/`degree` columns this lane emits are graph-theoretic terms and are
-            // correct ABOUT the graph they describe — so they are NOT renamed. What needed saying is
-            // WHICH graph that is, and it is said once, from one owner (2026-07-31). See
-            // `zzop_core::DEP_GRAPH_RESOLVED_ONLY`.
-            zzop_facade::DEP_GRAPH_RESOLVED_ONLY
-        )
-    }
-}
+mod census;
+use census::{CosmographCensus, MeasuredAxes};
 
 /// The in-scope node ids, computed once so the nodes table and the links table cannot disagree about
 /// what `--scope` kept.
@@ -218,6 +154,8 @@ pub(super) fn nodes_ndjson(u: &DepUniverse, scope: Option<&str>) -> (String, Cos
         links_emitted: links,
         total_edges: u.edges.len(),
         cycles: u.cycles,
+        // UNSCOPED, like `cycles` beside it: a disagreement `--scope` hid is still one this run has.
+        mutual_outside_cycles: u.mutual_outside_cycles,
         scoped: scope.is_some(),
         measured: Some(measured),
         window: Some(u.git_windows.clone()),
@@ -256,7 +194,12 @@ pub(super) fn links_ndjson(u: &DepUniverse, scope: Option<&str>) -> (String, Cos
             // flattened at `dep::collect` time, so "both ends are cycle members" is true for a chord
             // between two members of one cycle and for an edge BRIDGING two different cycles — neither of
             // which lies on a cycle. The new name states the membership rule the code actually applies.
-            // The NODE-level `inCycle` is untouched: there the claim and the computation agree.
+            //
+            // That note used to end "the NODE-level `inCycle` is untouched: there the claim and the
+            // computation agree", and `07ecff4` made it FALSE without touching this file: `cycle_files`
+            // is now computed over an edge set this table does not emit (`zzop_core::noncycle`), so the
+            // two agree about the CYCLE SET and not about the graph beside it. The gap is COUNTED
+            // (`dep::mutual_pairs_outside_cycles`) and disclosed in the census.
             "endpointsInCycle": u.cycle_files.contains(a) && u.cycle_files.contains(b),
         });
         out.push_str(&row.to_string());
@@ -269,6 +212,7 @@ pub(super) fn links_ndjson(u: &DepUniverse, scope: Option<&str>) -> (String, Cos
         links_emitted: emitted,
         total_edges: u.edges.len(),
         cycles: u.cycles,
+        mutual_outside_cycles: u.mutual_outside_cycles,
         scoped: scope.is_some(),
         // The links table carries no node axes, so it has no coverage to report — see `measured`'s doc.
         measured: None,

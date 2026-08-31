@@ -50,6 +50,7 @@ fn hammer(rel: &str, text: &str) {
     let _ = ts::extract_call_sites(rel, text);
     let _ = ts::extract_string_literals(rel, text);
     let _ = ts::extract_sfc_script_imports(rel, text);
+    let _ = ts::extract_prescan_imports(rel, text);
 
     // Adapters — the extractors that only fire once a framework marker has been recognized.
     let _ = ts::extract_class_shape_fragments(rel, text);
@@ -122,8 +123,11 @@ proptest! {
     #![proptest_config(input_strategy::config(CASES))]
 
     #[test]
-    fn no_public_entry_point_panics(text in input_strategy::source_text()) {
-        hammer("src/app.ts", &text);
+    fn no_public_entry_point_panics(
+        rel in input_strategy::rel_path(),
+        text in input_strategy::source_text(),
+    ) {
+        hammer(&rel, &text);
     }
 
     /// `vocabulary.ormReceiverPattern` / `vocabulary.ormWriteMethods` are declared in the user's config
@@ -151,6 +155,8 @@ proptest! {
 #[test]
 fn no_public_entry_point_panics_on_fixed_edge_cases() {
     for text in input_strategy::FIXED_EDGE_CASES {
-        hammer("src/app.ts", text);
+        for rel in input_strategy::FIXED_RELS {
+            hammer(rel, text);
+        }
     }
 }

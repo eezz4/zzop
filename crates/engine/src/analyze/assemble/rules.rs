@@ -18,35 +18,18 @@ use crate::EngineConfig;
 
 use crate::analyze::record_native_timing;
 
+mod config_entries;
+mod entries;
+mod framework_entries;
+mod graph_inputs;
 mod io_scan;
+mod manifest_boundaries;
+
+pub(super) use graph_inputs::GraphInputs;
 
 // Re-exported (through `assemble` -> `crate::analyze`) for `envelope::ingest`'s profiled whole-tree
 // io-scan pass — Mode A shares the one pack-splitting profiled evaluator instead of growing a twin.
 pub(crate) use io_scan::eval_pack_timed as eval_io_scan_pack_timed;
-
-/// The whole-graph inputs the three graph analyses (`circular`, `unreachable`, `dead-candidates`) read,
-/// grouped so [`run`] stays readable — it took 21 positional parameters before this, and threading the
-/// overlay entry set as a 22nd would have made the signature itself the defect. Every field here is
-/// consumed only inside those three gates.
-pub(super) struct GraphInputs<'a> {
-    pub(super) cycles: &'a [Vec<String>],
-    pub(super) nodes: &'a [zzop_core::FileNode],
-    pub(super) dep: &'a zzop_core::ir::DepGraph,
-    /// `.ts` targets imported ONLY by a `.vue`/`.svelte` SFC — seeded as `unreachable` entries.
-    pub(super) sfc_targets: &'a std::collections::HashSet<String>,
-    /// Runtime asset-URL targets (worklet/worker/`importScripts`/`new URL`) — same `unreachable` seed.
-    pub(super) asset_targets: &'a std::collections::HashSet<String>,
-    /// Paths an APPLIED Mode B adapter overlay declared `is_entry: true`
-    /// (`envelope::OverlayApplication::entry_paths`), unioned into `dead-candidates`' `extra_entries`.
-    ///
-    /// It comes from the apply loop's verdict and NOT from `EngineConfig::adapter_overlays`, which is
-    /// what this field exists to fix: reading the config directly honored the `is_entry` of an overlay
-    /// `apply_adapter_overlays` had REJECTED (failed `validate_envelope`, or failed to serialize), so a
-    /// file behind a rejected overlay stayed exempt from `dead-candidates` — a dead file going unnamed.
-    /// Under-detection, so it survived a long time; still wrong. Same "applied, not declared" rule
-    /// `covered_paths` already enforces for the "no native parser" disclosure.
-    pub(super) overlay_entry_paths: &'a std::collections::HashSet<String>,
-}
 
 /// Runs every whole-graph/call-graph-BFS native analysis in the same order (and under the same
 /// `is_enabled` gates) the pre-split monolithic `assemble` did, then the two whole-tree DSL sub-phases —
@@ -80,7 +63,7 @@ pub(super) fn run(
     io_provides: &[zzop_core::IoProvide],
     io_consumes: &[zzop_core::IoConsume],
     rule_time: &mut std::collections::HashMap<String, (u128, usize)>,
-    sfc_import_pairs: &[(String, ImportMap)],
+    prescan_import_pairs: &[(String, ImportMap)],
     per_file_findings: &mut Vec<Finding>,
     warnings: &mut Vec<String>,
 ) -> Vec<Finding> {
@@ -109,34 +92,34 @@ pub(super) fn run(
         let t0 = profile.then(Instant::now);
         let mut unreachable_entries: std::collections::HashSet<String> =
             rust_workspace.target_roots().iter().cloned().collect();
-        // A `.ts` imported ONLY by a `.vue`/`.svelte` SFC has real fan-in (via `merge_sfc_fan_in`) but no
-        // `dep` edge points at it (the SFC is not a graph node), so it would read as a false `unreachable`
+        // A `.ts` imported ONLY by a pre-scanned file has real fan-in (via `merge_prescan_fan_in`)
+        // but no `dep` edge points at it (it is not a graph node), so it reads as a false `unreachable`
         // island. A framework-mounted component is effectively an entrypoint, so seed what it imports as
         // reachable — the same "loaded by a mechanism this graph can't see" contract as the cargo targets.
-        unreachable_entries.extend(graph.sfc_targets.iter().cloned());
+        unreachable_entries.extend(graph.prescan_targets.iter().cloned());
         // Same contract for runtime asset-URL targets (worklet/worker/importScripts/`new URL`): a
         // `public/*.js` worklet has real fan-in (via `merge_asset_ref_fan_in`) but no incoming `dep`
         // edge, so it too would read as a false `unreachable` island without being seeded as an entry —
         // it IS an entrypoint, loaded by the browser's asset loader this graph can't see.
         unreachable_entries.extend(graph.asset_targets.iter().cloned());
+        // Same contract for Nuxt auto-import targets: a bare symbol name is not an import statement, so
+        // the composable it reaches has real fan-in and no incoming `dep` edge at all. Without this seed
+        // the repair trades hundreds of `dead-candidates` FPs for the same defect under `unreachable`.
+        unreachable_entries.extend(graph.auto_import_targets.iter().cloned());
         let found = unreachable_findings(graph.nodes, graph.dep, &unreachable_entries);
         record_native_timing(rule_time, t0, "unreachable", found.len());
         global_findings.extend(found);
     }
     if is_enabled(&config.rule_config, "dead-candidates") {
-        // `extra_entries`: package.json-referenced files (manifest entry fields + lexically-scanned
-        // `scripts` path tokens) — real entry points loaded by Node/bundlers/npm directly, never via
-        // `import`, so `fan_in == 0` on them is expected, not dead-code signal — UNIONED with every
-        // APPLIED Mode B adapter-overlay `FileProjection` marked `is_entry: true`, the overlay
-        // counterpart of a manifest entry: a framework-loaded file (SvelteKit `hooks.*`/`+page`, a
-        // `.vue` route, ...) an adapter declares reachable by convention rather than import. Overlays
-        // are applied post-cache (`envelope::apply_adapter_overlays`, called from `analyze_tree` before
-        // this function runs) and never merged into `pkg_scan` itself (a filesystem-only scan), so the
-        // apply loop hands its OWN entry set down through `GraphInputs::overlay_entry_paths` — see that
-        // field's doc for why re-reading `config.adapter_overlays` here was wrong.
         let t0 = profile.then(Instant::now);
-        let mut extra_entries = pkg_scan.extra_entries.clone();
-        extra_entries.extend(graph.overlay_entry_paths.iter().cloned());
+        // Every mechanism that reaches a file without an import edge — manifest fields (BOTH deployment
+        // roles), overlays, tool-config text, framework directory conventions. `entries` owns the set.
+        let extra_entries = entries::collect(
+            root,
+            ts_paths,
+            &pkg_scan.all_entry_paths(),
+            graph.overlay_entry_paths,
+        );
         // Drop candidates on author-declared generated files, mirroring `unimported-export`' exemption: a
         // generated file is regenerated, not hand-edited, so "delete this unused file" is non-actionable
         // there. Reads only the (few) candidate files' heads. Same `has_generated_banner` detector.
@@ -163,7 +146,8 @@ pub(super) fn run(
             dead_export_names_by_file,
             &pkg_scan.workspace_pkgs,
             tsconfigs,
-            sfc_import_pairs,
+            prescan_import_pairs,
+            graph.auto_import_names,
             &vocab.generated_file_markers,
         );
         record_native_timing(rule_time, t0, "unimported-export", found.len());
@@ -199,7 +183,13 @@ pub(super) fn run(
     // whole-tree pass over `io_provides` already collected above.
     if is_enabled(&config.rule_config, "duplicate-route") {
         let t0 = profile.then(Instant::now);
-        let found = zzop_rules_http::duplicate_route_findings(io_provides);
+        // Manifest directories = the nearest-ancestor deployment HINT the tree carries, for DISCLOSURE
+        // only — the rule adds the fact to a finding whose two sites straddle a boundary and never drops
+        // one. Both halves of that (which files are manifests, and why the answer may not be acted on)
+        // belong to `manifest_boundaries`, which also carries why they are no longer derived from the
+        // npm/Go import indexes.
+        let manifest_dirs = manifest_boundaries::scan(root, io_provides);
+        let found = zzop_rules_http::duplicate_route_findings(io_provides, &manifest_dirs);
         record_native_timing(rule_time, t0, "duplicate-route", found.len());
         global_findings.extend(found);
     }

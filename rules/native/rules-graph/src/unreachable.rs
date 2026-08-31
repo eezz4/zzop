@@ -10,11 +10,15 @@
 //! entrypoint — a closed island, not an orphan. A given file can never be flagged by both.
 
 use std::collections::{HashSet, VecDeque};
-use std::sync::OnceLock;
-
-use regex::Regex;
 
 use zzop_core::{disable_hint, DepGraph, FileNode, Finding, Severity};
+
+mod patterns;
+
+use patterns::entry_patterns;
+pub use patterns::is_tool_config_file;
+pub(crate) use patterns::{framework_route_patterns, is_tool_entry_file};
+use zzop_core::is_test_file;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct UnreachableFile {
@@ -119,119 +123,6 @@ fn forward_closure(entries: &HashSet<String>, dep: &DepGraph) -> HashSet<String>
 
 fn is_entry_file(path: &str) -> bool {
     entry_patterns().iter().any(|re| re.is_match(path))
-}
-
-/// Shared test-path predicate — also used by `zzop_rules_http::mutating_route_no_auth` and several
-/// `zzop_rules_cross_layer` rules to skip route/consume registrations in a test/fixture file. Lives in
-/// `zzop_core` (also needed by the TS parser's DB-table extractors); those other crates import it
-/// directly as `zzop_core::is_test_file` rather than through this module.
-use zzop_core::is_test_file;
-
-/// Files loaded directly by a dev tool or `tsc` rather than imported by app code — so `fan_in == 0` on them
-/// is "not the kind of file the import graph would ever point at", not a "no importers" signal (e.g.
-/// `.eslintrc.cjs`, `vite.config.ts`, `vite-env.d.ts`; see `dead_candidates.rs`). Shared here so
-/// `dead_candidates`/`dead_exports` don't each duplicate the pattern list.
-pub(crate) fn is_tool_entry_file(path: &str) -> bool {
-    tool_entry_patterns().iter().any(|re| re.is_match(path))
-}
-
-/// Next.js App Router convention files — `app/**/{page,layout,route,error,not-found,…}.tsx` plus the
-/// metadata routes (`sitemap`/`robots`/`manifest`/`opengraph-image`/…). The framework loads these by
-/// filename, never through an import, so zero in-repo importers is expected — not a dead signal. Shared
-/// here so `dead_candidates` and `dead_exports` reference ONE convention set and cannot drift (they did:
-/// `dead_exports` carried this set while `dead_candidates` was missing it entirely).
-pub(crate) fn framework_route_patterns() -> &'static [Regex] {
-    static R: OnceLock<Vec<Regex>> = OnceLock::new();
-    R.get_or_init(|| {
-        [
-            r"(^|/)(page|layout|loading|error|global-error|not-found|template|default|route)\.(ts|tsx)$",
-            r"(^|/)(sitemap|robots|manifest|opengraph-image|twitter-image|icon|apple-icon)\.(ts|tsx)$",
-            // SvelteKit route/hook convention files — `load`/`actions` (in `+page(.server)`/
-            // `+layout(.server)`), `handle`/`handleError`/`handleFetch` (in `hooks.{server,client}`), and
-            // `GET`/`POST`/… (in `+server`) are invoked by SvelteKit by EXACT name via its file-based
-            // routing + hooks contract, never through an in-repo import — so the import graph shows zero
-            // importers and they read as dead/unreachable. Whole-file exemption, same as the Next.js App
-            // Router files above (dogfood fe-svelte: these were 20/26 dead-export + ~13 dead-candidate FPs).
-            // `.js` and `.ts` both, since SvelteKit projects use either.
-            r"(^|/)\+(page|layout)(\.server)?\.(js|ts)$",
-            r"(^|/)\+server\.(js|ts)$",
-            // `.server`/`.client` REQUIRED — a bare `hooks.ts`/`hooks.js` is an extremely common React
-            // hooks-barrel filename that is NOT a framework entry, so exempting it would hide real dead
-            // exports. SvelteKit's universal `src/hooks.ts` (rare vs `hooks.server`/`hooks.client`) is the
-            // accepted miss.
-            r"(^|/)hooks\.(server|client)\.(js|ts)$",
-        ]
-        .iter()
-        .map(|p| Regex::new(p).unwrap())
-        .collect()
-    })
-}
-
-fn tool_entry_patterns() -> &'static [Regex] {
-    static R: OnceLock<Vec<Regex>> = OnceLock::new();
-    R.get_or_init(|| {
-        [
-            // `<name>.config.*` — matches vite/jest/eslint/etc. config files by shape (requires a name
-            // before `.config`, so bare `config.ts` does NOT match) rather than an enumerated tool list.
-            r"(^|/)[^/]+\.config\.(js|ts|mjs|cjs|mts|cts)$",
-            // Dotfile configs consumed directly by their tool's own resolver, never imported.
-            r"(^|/)\.(eslintrc|prettierrc|babelrc|stylelintrc)(\.[^/]+)?$",
-            // Ambient TypeScript declarations — type-only, consumed by tsc without an import edge.
-            r"\.d\.ts$",
-            // Test-runner setup entries loaded via a config field (`setupFiles`/`globalSetup` in
-            // vitest/jest/playwright config), not imported by app code — so `fan_in == 0` is expected.
-            // Matched by conventional filename since they can live anywhere (`src/setup-tests.ts`,
-            // `src/test-setup.ts`, `vitest.setup.ts`, `jest.setup.ts`, a Playwright `global.setup.ts`).
-            r"(^|/)(vitest|jest)\.setup\.(js|ts|mjs|cjs|mts|cts)$",
-            r"(^|/)setup-tests?\.(js|ts|mjs|cjs|mts|cts)$",
-            r"(^|/)setupTests\.(js|ts|mjs|cjs|mts|cts)$",
-            r"(^|/)test-setup\.(js|ts|mjs|cjs|mts|cts)$",
-            r"(^|/)global\.(setup|teardown)\.(js|ts|mjs|cjs|mts|cts)$",
-            // Jest preset config (`jest.preset.js`, an Nx/monorepo convention) — consumed by jest's own
-            // config resolver via the `preset` field, never imported.
-            r"(^|/)jest\.preset\.(js|ts|mjs|cjs)$",
-            // Prisma seed script at its conventional location — run by the Prisma CLI (`prisma db seed`,
-            // wired via the package.json `prisma.seed` field), never imported by app code.
-            r"(^|/)prisma/seed\.(js|ts|mjs|cjs|mts|cts)$",
-        ]
-        .iter()
-        .map(|p| Regex::new(p).unwrap())
-        .collect()
-    })
-}
-
-fn entry_patterns() -> &'static [Regex] {
-    static R: OnceLock<Vec<Regex>> = OnceLock::new();
-    R.get_or_init(|| {
-        [
-            r"(^|/)index\.(t|j)sx?$",
-            r"(^|/)main\.(t|j)sx?$",
-            r"(^|/)main\.go$",
-            r"(^|/)mod\.ts$",
-            r"(^|/)App\.(t|j)sx?$",
-            r"Page\.(t|j)sx?$",
-            r"Route\.(t|j)sx?$",
-            r"(^|/)routes?\.(t|j)sx?$",
-            r"apiRoutes\.(t|j)sx?$",
-            r"\.config\.(t|j)sx?$",
-            r"(^|/)(server|app|bootstrap|worker|cli)\.(t|j)sx?$",
-            r"(^|/)(cmd)/",
-            r"Application\.java$",
-            r"(^|/)Main\.java$",
-            r"(^|/)(__main__|manage|wsgi|asgi|main|settings|conftest)\.py$",
-            // Rust entry conventions: crate/binary roots (`main.rs`/`lib.rs`/`build.rs`) plus any file
-            // under a `tests/`/`examples/`/`benches/`/`src/bin/` path component — cargo's own conventional
-            // test-harness/example-binary/benchmark-binary/multi-binary directories, each compiled and run
-            // as its own separate target rather than `use`d from elsewhere in the crate, so zero in-repo
-            // importers is expected for files under them, not a dead/unreachable signal.
-            r"(^|/)(main|lib|build)\.rs$",
-            r"(^|/)(tests|examples|benches)/",
-            r"(^|/)src/bin/",
-        ]
-        .iter()
-        .map(|p| Regex::new(p).unwrap())
-        .collect()
-    })
 }
 
 #[cfg(test)]

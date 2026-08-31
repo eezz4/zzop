@@ -16,10 +16,24 @@ use zzop_metrics::{
 };
 
 mod mirrors;
+mod native_analyses_legend;
+mod packs_legend;
+
+/// The two LANE-INVARIANT sentences of `nativeAnalysesMeaning`, re-exported so the cross-layer join
+/// lane (`zzop_summary::cross`) can COMPOSE its own legend from them instead of restating what
+/// `registered` counts and what `disabled` means. Two copies of one build-fact sentence is the drift
+/// class this repo keeps paying for: the join reply and the per-tree reply must agree about their own
+/// denominator, and one owner is the only thing that guarantees it. See [`native_analyses_legend`]
+/// for which sentences deliberately do NOT travel, and why a key can keep its name across two lanes
+/// while the action it licenses inverts.
+pub use native_analyses_legend::{
+    NATIVE_ANALYSES_DISABLED_MEANING, NATIVE_ANALYSES_REGISTERED_MEANING,
+};
 
 pub(crate) use mirrors::{disclosure_views, BlindnessClassView};
 use mirrors::{
-    CacheStatsView, CoverageCensusView, GitWindowView, PackLoadedView, RuleOverridesAppliedView,
+    CacheStatsView, CoverageCensusView, GitWindowView, NativeAnalysesView, PackLoadedView,
+    RuleOverridesAppliedView,
 };
 
 /// Single-tree output root (`analyze`/`analyzeEnvelope`): the `AnalyzeOutputView` fields, flattened, plus
@@ -68,6 +82,17 @@ pub(crate) struct AnalyzeOutputView<'a> {
     ir: &'a CommonIr,
     findings: &'a [Finding],
     degraded: &'a [String],
+    /// `buildScriptPaths` — the files this tree's own `package.json` `scripts` commands name, sorted
+    /// (`zzop_engine::AnalyzeOutput::build_script_paths`). ALWAYS serialized (no skip-if-empty), the same
+    /// "an empty array is the honest signal" convention `packsLoaded`/`warnings`/`configWarnings` use: an
+    /// empty array means the manifest walk ran and no manifest declared a resolvable script path — the
+    /// state every tree outside the npm ecosystem is in by construction — and hiding it would make "no
+    /// build surface" indistinguishable from "an engine build that does not report one".
+    ///
+    /// Consumed by `zzop-summary`'s finding ordering (the build-surface tier), which is why it rides the
+    /// wire at all rather than staying an engine internal — the shaping layer receives this JSON view and
+    /// nothing else, so a fact it must judge on has to be ON the view.
+    build_script_paths: &'a [String],
     file_count: usize,
     /// Per-file graph/git metrics. Its `fanIn`/`fanOut`/`totalConnections` are graph-theoretic terms and
     /// are correct ABOUT the graph they describe, so they are deliberately NOT renamed the way the
@@ -108,6 +133,22 @@ pub(crate) struct AnalyzeOutputView<'a> {
     /// Positive pack-load confirmation, sorted by pack id — ALWAYS serialized (no skip-if-empty): an
     /// empty array is the honest "zero DSL packs loaded" signal, not a field to hide.
     packs_loaded: Vec<PackLoadedView<'a>>,
+    /// The legend for the array above — what `filesInScope` counts, what a rule's presence in
+    /// `zeroAdmissionRules` does and does not claim, and (only when a pack really was gated off) what
+    /// `didNotRun` means. Omitted when no pack loaded. See [`packs_legend`] for why this is a sibling
+    /// key rather than a `meaning` inside the object, and for the two measured misreadings it closes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    packs_loaded_meaning: Option<std::collections::BTreeMap<&'static str, &'static str>>,
+    /// The NATIVE half of the same question `packsLoaded` answers for DSL packs: which of this build's
+    /// native analyses could not have keyed `findings`, and why. ALWAYS serialized — it is a statement
+    /// about the build, not about a request, so there is no state in which silence is honest. See
+    /// `zzop_engine::NativeAnalyses` for the corpus measurement that forced it (975 `cross-layer/*`
+    /// findings, reachable from the very same config, sitting behind nine blank replies).
+    native_analyses: NativeAnalysesView<'a>,
+    /// The legend for the object above — what `registered` counts, and what each of the two
+    /// not-evaluated lists licenses the reader to do next. Same sibling-key shape and same reason as
+    /// [`Self::packs_loaded_meaning`]; unconditional, because its subject is.
+    native_analyses_meaning: std::collections::BTreeMap<&'static str, &'static str>,
     warnings: &'a [String],
     /// Config-channel diagnostics — currently the unknown-`disabledRules`/`severityOverrides`-id
     /// self-reports (`zzop_engine::AnalyzeOutput::config_warnings`'s own doc has the full rationale for
@@ -144,6 +185,7 @@ impl<'a> AnalyzeOutputView<'a> {
             ir: &output.ir,
             findings: &output.findings,
             degraded: &output.degraded,
+            build_script_paths: &output.build_script_paths,
             file_count: output.file_count,
             nodes: &output.nodes,
             scores: &output.scores,
@@ -165,6 +207,9 @@ impl<'a> AnalyzeOutputView<'a> {
                 .iter()
                 .map(PackLoadedView::from)
                 .collect(),
+            packs_loaded_meaning: packs_legend::packs_loaded_meaning(&output.packs_loaded),
+            native_analyses: NativeAnalysesView::from(&output.native_analyses),
+            native_analyses_meaning: native_analyses_legend::native_analyses_meaning(),
             warnings: &output.warnings,
             config_warnings: &output.config_warnings,
             cache: output.cache.map(CacheStatsView::from),

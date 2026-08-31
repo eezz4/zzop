@@ -59,6 +59,7 @@ impl Visit for GlobalPrefixCollector<'_> {
         if self.out.is_none() {
             if let Some(key) = match_set_global_prefix(call) {
                 self.out = Some(IoProvide {
+                    route_version: None,
                     response: None,
                     body: None,
                     kind: NEST_GLOBAL_PREFIX_KIND.to_string(),

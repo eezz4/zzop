@@ -97,10 +97,14 @@ export default {
           "note",
           {
             ko: `CLI 는 그 마지막 항목이 다르다. 실패하면 stderr 로 <code>zzop: &lt;메시지&gt;</code> 한 줄이 나가고 종료 코드는
-      <code>1</code> 이다 — <strong>JSON 이 아니다</strong>. stdout 은 성공했을 때만 쓰이니, 파이프라인은 stdout 만 파싱하면 된다.`,
+      <code>1</code> 이다 — <strong>JSON 이 아니다</strong>. stdout 은 성공했을 때만 쓰이니, 파이프라인은 stdout 만 파싱하면 된다.
+      <code>--fail-on</code> 은 여기서 유일한 예외다: 문턱에 걸리면 <code>3</code> 으로 끝나지만 답장 전체는 그대로 stdout 에 있고,
+      stderr 에는 걸린 개수와 문턱을 적은 한 줄만 나간다 — 즉 <em>0 이 아닌 종료 코드</em>가 곧 <em>stdout 없음</em>은 아니다.`,
             en: `The CLI differs on that last one: a failure prints one <code>zzop: &lt;message&gt;</code> line to stderr and
       exits <code>1</code> — <strong>not JSON</strong>. stdout is written on success only, so a pipeline can parse
-      stdout and nothing else.`,
+      stdout and nothing else. <code>--fail-on</code> is the one exception: a run that meets the threshold exits
+      <code>3</code> with the whole reply still on stdout and a single counts-and-threshold line on stderr, so a
+      non-zero exit does not imply an empty stdout.`,
           },
           { inner: true },
         ],
@@ -146,7 +150,13 @@ export default {
                 },
               },
               `  <span class="hit">"packsLoaded"</span>: [`,
-              `    { "id": "security", "rules": 49, "source": "inline", "filesInScope": 912 }`,
+              {
+                code: `    { "id": "security", "rules": 49, "ruleIds": [ … ], "source": "inline", "filesInScope": 912 }`,
+                comment: {
+                  ko: "// ruleIds = rules 개수 뒤의 목록",
+                  en: "// ruleIds = the list behind the count",
+                },
+              },
               `  ],`,
               `  <span class="hit">"findings"</span>: {`,
               {
@@ -159,7 +169,8 @@ export default {
                 code: `    "shown": [ ],                    `,
                 comment: { ko: "// 필터·상한이 걸린 목록", en: "// the filtered, capped list" },
               },
-              `    "truncated": { "shown": 50, "totalMatching": 137, "hint": "..." }`,
+              `    "truncated": { "shown": 50, "totalMatching": 137,`,
+              `                   "severitiesNotShown": { "counts": { "critical": 3 } }, "hint": "..." }`,
               `  },`,
               `  <span class="hit">"warnings"</span>: [ ],`,
               `  <span class="hit">"coverage"</span>: {`,
@@ -255,15 +266,22 @@ export default {
             {
               k: "<code>findings.truncated</code>",
               v: {
-                ko: `잘렸을 때만 나오고, <code>{shown, totalMatching, hint}</code> 셋을 같이 준다. <code>hint</code> 에는 <strong>이 목록에 실제로 먹는 방법</strong>만 적힌다 — 고정 상한인 목록에는 “limit 을 올려라”라고 쓰지 않는다.`,
-                en: `Present only when the cut bit, carrying <code>{shown, totalMatching, hint}</code>. The <code>hint</code> names <strong>a remedy that actually works on that list</strong> — a fixed-cap list is never told to "raise the limit".`,
+                ko: `잘렸을 때만 나오고, <code>{shown, totalMatching, severitiesNotShown, hint}</code> 넷을 같이 준다. <code>severitiesNotShown</code> 은 <strong>잘림이 통째로 삼킨 심각도</strong>를 건수와 함께 댄다 — 배포 역할이 심각도보다 위라 <code>critical</code> 한 무리가 상한 밖으로 밀려나도 <code>bySeverity</code> 는 계속 세고 있기 때문이다. 세는 모집단은 <strong>상한이 걸린 집합</strong>(필터 적용 후)이라, 사용자가 직접 뺀 심각도를 “안 보인다”고 하지 않는다. <code>hint</code> 에는 <strong>이 목록에 실제로 먹는 방법</strong>만 적힌다 — 고정 상한인 목록에는 “limit 을 올려라”라고 쓰지 않고, <code>limit</code> 이 이미 1000 이면 그 말도 빠진다.`,
+                en: `Present only when the cut bit, carrying <code>{shown, totalMatching, severitiesNotShown, hint}</code>. <code>severitiesNotShown</code> names <strong>the severities the cut removed outright</strong>, with counts — deployment role outranks severity, so a whole <code>critical</code> band can sit past the cap while <code>bySeverity</code> still counts it. It counts the set <strong>the cap was applied to</strong> (after your filter), so a severity you filtered out yourself is never reported as missing. The <code>hint</code> names <strong>a remedy that actually works on that list</strong> — a fixed-cap list is never told to "raise the limit", and neither is a caller whose <code>limit</code> is already 1000.`,
               },
             },
             {
               k: "<code>packsLoaded[].filesInScope</code>",
               v: {
-                ko: `<code>0</code> 이면 그 팩은 로드됐지만 이번 트리에 대상 파일이 하나도 없었다. 발견 0 이 <strong>“깨끗하다”가 아니라 “범위 밖”</strong>이라는 뜻이다.`,
-                en: `A <code>0</code> means the pack loaded but no analyzed file was in any of its rules' scope: zero findings is <strong>"out of scope", not "clean"</strong>.`,
+                ko: `<code>0</code> 이면 그 팩은 로드됐지만 이번 트리에 대상 파일이 하나도 없었다. 발견 0 이 <strong>“깨끗하다”가 아니라 “범위 밖”</strong>이라는 뜻이다. 이 <strong>키가 있다는 것 자체가 그 팩이 돌았다는 주장</strong>이다 — 설정으로 끈 팩은 이 키 대신 <code>filesInScopeIfEnabled</code> 를 이고 <code>didNotRun</code> 이 붙는다.`,
+                en: `A <code>0</code> means the pack loaded but no analyzed file was in any of its rules' scope: zero findings is <strong>"out of scope", not "clean"</strong>. The <strong>presence of this key is itself the claim that the pack ran</strong> — a pack your config switched off carries <code>filesInScopeIfEnabled</code> and a <code>didNotRun</code> marker instead.`,
+              },
+            },
+            {
+              k: "<code>packsLoaded[].didNotRun</code>",
+              v: {
+                ko: `그 팩이 <strong>로드는 됐지만 한 번도 안 돌았다</strong>는 표시 — <code>"disabled"</code>(<code>packs.disabled</code>) 또는 <code>"notAllowlisted"</code>(<code>packs.only</code> 가 이 팩을 안 불렀다). 안 꺼진 팩에는 <strong>이 키가 아예 없다</strong>. 이게 없던 동안 꺼진 <code>security</code> 팩은 룰 51개와 양수 파일 수를 그대로 달고 있어서 <strong>“돌았는데 깨끗하다”로 읽혔다</strong>. 옆의 <code>packsLoadedMeaning</code> 이 각 키를 정의한다.`,
+                en: `The pack <strong>loaded but was never evaluated</strong> — <code>"disabled"</code> (<code>packs.disabled</code>) or <code>"notAllowlisted"</code> (a <code>packs.only</code> allowlist that never named it). A pack that ran carries <strong>no such key at all</strong>. Until this existed a switched-off <code>security</code> pack kept its 51 rules and a positive file count, and <strong>read as "ran, and clean"</strong>. <code>packsLoadedMeaning</code>, beside the array, defines every key.`,
               },
             },
             {
@@ -355,11 +373,11 @@ export default {
               },
               {
                 code: `    "unconsumedProvides": 9,         `,
-                comment: { ko: "// 부르는 데가 없는 라우트", en: "// routes nobody calls" },
+                comment: { ko: "// 어느 트리도 부르지 않는 라우트", en: "// routes no analyzed tree calls" },
               },
               {
                 code: `    "unprovidedConsumes": 23,        `,
-                comment: { ko: "// 받는 데가 없는 호출", en: "// calls nothing serves" },
+                comment: { ko: "// 어느 트리도 제공하지 않는 호출", en: "// calls no analyzed tree serves" },
               },
               `    "unresolvedConsumes": 7, "externalConsumes": 4, "ambiguousConsumes": 0`,
               `  },`,

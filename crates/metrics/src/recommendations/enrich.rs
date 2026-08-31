@@ -72,7 +72,6 @@ fn derive_action_hint_key(rule_id: RecId, node: Option<&FileNode>) -> ActionHint
         }
         RecId::Circular => ActionHintKey::Circular,
         RecId::HiddenCoupling => ActionHintKey::HiddenCoupling,
-        RecId::KnowledgeSilo => ActionHintKey::KnowledgeSilo,
         RecId::VersioningCandidate => ActionHintKey::VersioningCandidate,
         RecId::UrgentBugRisk => {
             unreachable!("UrgentBugRisk is a post-escalation synthetic group id — derive_action_hint_key is only ever called with an item's original rule id, before escalation (see RecId's doc)")

@@ -223,7 +223,10 @@ assert_workspace_members_scanned() {
   # OUTPUT AT ALL, which is the failure shape check-max-file-lines.sh warns about in its own
   # zero-census comment (right reason, no message, whole diagnosis paid for by the next reader).
   members="$(workspace_member_dirs || true)"
-  member_count="$(printf '%s\n' "$members" | grep -c . || true)"
+  # Counted with the shell. `printf | grep -c` forks twice for a number this loop already has to
+  # walk for, and on this machine a fork is the unit of cost -- see the scanned-set comment below.
+  local _m
+  while IFS= read -r _m; do [ -n "$_m" ] && member_count=$((member_count + 1)); done <<< "$members"
   # The seal's OWN subject set. Without this, a Cargo.toml reshape that makes the awk match nothing
   # turns this whole assertion into a loop over zero members — green, having proved nothing, which is
   # precisely the defect it exists to remove, reproduced one level up.
@@ -234,14 +237,39 @@ assert_workspace_members_scanned() {
     exit 1
   fi
   scanned="$(git ls-files -- "$@" || true)"
+
+  # ONE pass over the scan, then a lookup per member -- no process per member.
+  #
+  # This used to be `grep -q "^$m/" <<< "$scanned"` inside the member loop. The test was right and
+  # stays right; what was wrong is that it cost a PROCESS. Six guards call this function and the
+  # workspace declares ~25 members, so every one of them paid ~25 forks here, and under MSYS2 --
+  # which emulates fork by copying the process -- a fork from bash costs the better part of a
+  # second on this machine. Traced 2026-08-18 with `PS4='+ $EPOCHREALTIME|' bash -x`:
+  # check-swc-isolation spent 22.6s of its 44.8s in 33 grep spawns, and 0.9s in the 1,304 shell
+  # builtins around them. The cost was set by the LENGTH OF THE MEMBER LIST, not by the tree.
+  #
+  # The replacement is the same predicate read the other way round: "some scanned path starts with
+  # `$m/`" is exactly "`$m` is an ancestor directory of some scanned path", so one walk up each
+  # path collects every member that could match, and the member loop becomes a lookup. Both
+  # spellings are prefix tests on the same strings -- this is not a narrowed check, and the
+  # invalidation drill in the callers (rename the members array, expect a named failure) still
+  # reports the same members. The SIGPIPE hazard the old comment named is gone with the pipeline
+  # it described; check-shell-pipe-sigpipe.sh has nothing to catch here any more.
+  local -A _ancestors=()
+  local _path _dir
+  while IFS= read -r _path; do
+    [ -n "$_path" ] || continue
+    _dir="$_path"
+    while [[ $_dir == */* ]]; do
+      _dir="${_dir%/*}"
+      _ancestors["$_dir"]=1
+    done
+  done <<< "$scanned"
+
   local m
   while IFS= read -r m; do
     [ -n "$m" ] || continue
-    # Herestring, not `| grep -q`: check-shell-pipe-sigpipe.sh caught the pipeline form here on
-    # 2026-07-31 — grep -q exits at its first match and SIGPIPEs the producer, which under pipefail
-    # can flip the pipeline's verdict on a large scan. The tier-1 guard layer catching a tier-1
-    # change is the layering working; the fix is the one that guard's own message prescribes.
-    grep -q "^$m/" <<< "$scanned" || missing+=("$m")
+    [ -n "${_ancestors[$m]:-}" ] || missing+=("$m")
   done <<< "$members"
   if [ ${#missing[@]} -gt 0 ]; then
     echo "$label: FAILED -- ${#missing[@]} of $member_count declared workspace member(s) contributed NO" >&2

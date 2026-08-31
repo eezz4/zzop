@@ -22,6 +22,41 @@ pub(super) fn looks_like_script_path_token(tok: &str) -> bool {
         .is_match(tok)
 }
 
+/// True when a `scripts` KEY is one of npm's own RUN-lifecycle keys — the ones `npm start` / `npm restart`
+/// execute. A path token named by one of these is the package's RUN ENTRY (what this package IS when you
+/// run it), not a tool that operates on the package, so `package_json_entries` routes it to
+/// `PackageJsonScan::entry_paths` beside `main`/`bin`/`exports` rather than to `script_paths`.
+///
+/// ## Why this set, and why EXACT keys only (measured 2026-08-24, 820 manifests across both corpora)
+/// The set is npm's documented lifecycle, not a taste list: `npm start` runs `prestart`, `start`,
+/// `poststart`; `npm restart` runs the `restart` triple. Taking all six rather than `start` alone is the
+/// same derivation — which of the three an author writes is not evidence about the file. The corpus
+/// contains `start` only (10 sites); the other five are included because the ecosystem defines them as
+/// the same invocation, not because a tree showed them.
+///
+/// EXACT match is the measured part. Prefix-matching `start*` would also admit grafana's `start:swagger`
+/// (-> `scripts/webpack/webpack.swagger.ts`) and `start:rspack` (-> `scripts/rspack/rspack.dev.ts`), which
+/// are genuinely build scripts; those colon-suffixed names are project convention that npm never runs as
+/// `npm start`, so they stay demoted.
+///
+/// `serve` and `preview` were considered and REJECTED: zero sites in either corpus name a path token from
+/// them, so admitting them would be speculation. Re-run the census before adding one — the key list is
+/// only as good as the last measurement.
+///
+/// ## The residual, stated
+/// This is a RESCUE, so it fails toward not demoting, which is the safe direction. It is still imperfect
+/// in both directions and both were observed: grafana's `start` names `scripts/webpack/webpack.dev.ts`, a
+/// real build script that is now rescued (over-rescue, harmless — it merely sorts where it always did);
+/// and `corpus/x/xai-cookbook/.../webrtc/server` names its source only from `dev` while its `start` points
+/// at an uncompiled `dist/index.js`, so that server stays demoted (under-rescue — the one shape this
+/// mechanism cannot see, because the manifest's own run key names a file that does not exist).
+pub(super) fn is_run_lifecycle_script_key(key: &str) -> bool {
+    matches!(
+        key,
+        "prestart" | "start" | "poststart" | "prerestart" | "restart" | "postrestart"
+    )
+}
+
 /// POSIX dirname of a rel path, `package_json_entries`-flavored: `""` (not `resolve::dirname`'s `"."`) for
 /// a root-level `package.json`, so it can feed `join_and_normalize` below as the join-identity element
 /// without an accidental `"./"` hop.
@@ -95,7 +130,11 @@ pub(super) fn collect_exports_dot_entry(v: &serde_json::Value, out: &mut Vec<Str
 }
 
 /// Filename pattern matching a `tsconfig.json` at any depth — only this literal name is auto-discovered
-/// (mirrors real `tsc` project discovery); an `extends` target is read only when referenced.
+/// (mirrors real `tsc` project discovery). A config reached by a LINK is read without being discovered,
+/// and there are TWO such links, each followed one level: `extends` and `references` — so a
+/// `tsconfig.app.json` never matches this pattern yet its `paths` still reach the map (`tsconfig_scan`
+/// owns both links, and the heuristic the `references` one carries). `jsconfig.json` matches neither
+/// this pattern nor any link, so a JS project's path mapping is unreachable — a gap, not a decision.
 pub(super) fn is_tsconfig_json_path(rel: &str) -> bool {
     static R: OnceLock<Regex> = OnceLock::new();
     R.get_or_init(|| Regex::new(r"(^|/)tsconfig\.json$").unwrap())

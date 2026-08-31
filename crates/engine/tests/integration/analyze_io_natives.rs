@@ -1036,6 +1036,67 @@ fn python_fastapi_depends_guards_exempt_both_the_signature_and_the_decorator_sha
     );
 }
 
+/// The `require_*` admin-gate shape, which the shipped guard vocabulary did not name until 2026-08-16.
+/// Two routes guarded ONLY by `Depends(require_admin)` — the FastAPI house idiom for an admin gate —
+/// beside one genuinely unguarded route, so a regression is visible as a COUNT rather than as silence.
+fn python_fastapi_require_admin_fixture(dir: &TempDir) {
+    dir.write(
+        "app/deps.py",
+        concat!(
+            "from fastapi import Header, HTTPException\n\n",
+            "def require_admin(x_token: str = Header(...)):\n",
+            "    if x_token != \"admin\": raise HTTPException(403)\n",
+            "    return x_token\n"
+        ),
+    );
+    dir.write(
+        "app/routes.py",
+        concat!(
+            "from fastapi import APIRouter, Depends\n",
+            "from app.deps import require_admin\n\n",
+            "router = APIRouter()\n\n",
+            "@router.post(\"/api/users\", dependencies=[Depends(require_admin)])\n",
+            "def create_user():\n",
+            "    return {}\n\n",
+            "@router.delete(\"/api/users/{uid}\", dependencies=[Depends(require_admin)])\n",
+            "def delete_user(uid: str):\n",
+            "    return {}\n\n",
+            "@router.delete(\"/api/orders/{oid}\")\n",
+            "def cancel_order(oid: str):\n",
+            "    return {}\n"
+        ),
+    );
+}
+
+#[test]
+fn python_require_admin_guards_are_named_by_the_shipped_vocabulary() {
+    // The vocabulary is what decides this rule, and it carried `requirelogin`/`requireauth` while
+    // omitting `requireadmin` — so every `Depends(require_admin)` route read as unguarded. Measured on
+    // a 17-route FastAPI tree the day this landed: 8 false alarms against 1 true one, all 8 cleared by
+    // that one string. This fixture is the shape behind that number, and it asserts the COUNT and the
+    // survivor's identity together: if the vocabulary regresses, the two guarded routes come back and
+    // the assert names them rather than reporting a bare count mismatch.
+    let dir = TempDir::new("zzop-mutating-no-auth-python-require-admin");
+    python_fastapi_require_admin_fixture(&dir);
+    let out = scan(&dir);
+    let found = hits(&out, "mutating-route-no-auth");
+    let where_: Vec<String> = found
+        .iter()
+        .map(|f| format!("{}:{}", f.file, f.line))
+        .collect();
+    assert_eq!(
+        found.len(),
+        1,
+        "only the unguarded cancel_order route may fire; got {where_:?}"
+    );
+    assert_eq!(found[0].data.as_ref().unwrap()["method"], "DELETE");
+    assert!(
+        found[0].message.contains("/api/orders/"),
+        "the survivor must be the unguarded route, not a require_admin one: {}",
+        found[0].message
+    );
+}
+
 /// The `deps.py` half of `corpus/oss/be-fastapi-fs/backend/app/api/deps.py`, written at `path` — the
 /// tree-wide `Annotated` guard alias that shape 4 of the FastAPI guard producer resolves across files.
 fn python_fastapi_deps_alias(dir: &TempDir, path: &str, guarded: bool) {

@@ -243,3 +243,116 @@ fn rust_only_tree_keeps_the_tree_wide_report_and_gets_no_second_line() {
         out.warnings
     );
 }
+
+const THIN_HEAD: &str = "THIN DSL rule reach on";
+
+/// A pack whose `rules` are `ts_rules` rules targeting `.ts` plus `rs_rules` targeting `.rs` — the
+/// single knob these tests turn. Built by hand for the same reason `ts_only_pack` is: the shipped set's
+/// per-language reach is a real measurement that moves whenever a rule ships, and a test pinned to it
+/// would go red for reasons that have nothing to do with the report.
+fn mixed_reach_pack(ts_rules: usize, rs_rules: usize) -> RulePackDef {
+    let rule = |id: String, ext: &str| {
+        format!(
+            r#"{{"id": "{id}", "severity": "warning", "message": "A TODO comment.",
+                "matcher": {{ "type": "line-scan", "file_pattern": "(?i)\\.{ext}$", "line_pattern": "TODO" }}}}"#
+        )
+    };
+    let rules: Vec<String> = (0..ts_rules)
+        .map(|i| rule(format!("ts-{i}"), "tsx?"))
+        .chain((0..rs_rules).map(|i| rule(format!("rs-{i}"), "rs")))
+        .collect();
+    serde_json::from_str(&format!(
+        r#"{{"id": "mixed-reach-probe", "schema_version": 1, "rules": [{}]}}"#,
+        rules.join(",")
+    ))
+    .expect("the fixture pack must parse")
+}
+
+fn config_with(pack: RulePackDef) -> EngineConfig {
+    EngineConfig {
+        source_id: "thin-reach-fixture".to_string(),
+        packs: vec![pack],
+        ..EngineConfig::default()
+    }
+}
+
+fn rust_dominant_tree(prefix: &str) -> TempDir {
+    let dir = TempDir::new(prefix);
+    for i in 0..9 {
+        dir.write(&format!("src/m{i}.rs"), "pub fn run() -> i32 {\n    1\n}\n");
+    }
+    dir.write("web/index.ts", "export function run() { return 1; }\n");
+    dir
+}
+
+/// The gap the zero-reach report above cannot see: `.rs` IS targeted, so that report is silent by
+/// construction — but by 1 rule out of 11, which is what a reader would have to derive for themselves
+/// from `packsLoaded[].zeroAdmissionRules` to know that 10 rules were structurally unable to say
+/// anything about 90% of their tree.
+#[test]
+fn a_barely_targeted_dominant_filetype_reports_thin_reach() {
+    let dir = rust_dominant_tree("zzop-engine-thin-rs");
+    let out = analyze_tree(dir.path(), &config_with(mixed_reach_pack(10, 1)));
+
+    let hit = out
+        .warnings
+        .iter()
+        .find(|w| w.starts_with(THIN_HEAD))
+        .unwrap_or_else(|| panic!("expected the thin-reach report, got: {:?}", out.warnings));
+    assert!(
+        hit.contains(".rs (9 file(s), 90% of this tree): 1 rule(s) in range"),
+        "the report must name the extension, its share and its REACH — the reach is the news: {hit}"
+    );
+    assert!(
+        hit.contains("out of 11 rule(s)"),
+        "reach is only readable against the size of the loaded rule set: {hit}"
+    );
+    // Same overclaim guard as its sibling: a path-reach fact, never "this language is unanalyzed".
+    assert!(
+        hit.contains("native structural/whole-graph analyses are not `file_pattern`-gated"),
+        "the report must disclaim the wider (false) reading: {hit}"
+    );
+    // The two degrees must never both speak about one extension.
+    assert!(
+        !out.warnings.iter().any(|w| w.starts_with(UNCOVERED_HEAD)),
+        "`.rs` is targeted, so the zero-reach report has nothing to say: {:?}",
+        out.warnings
+    );
+}
+
+/// INVALIDATION, on the axis the report is about: the tree, the shares and the file count are
+/// unchanged, and only the REACH moves — 4 of 14 rules (28%) is past the threshold and the line goes
+/// away. Without this a report that fired on every polyglot tree would pass the test above.
+#[test]
+fn broadening_the_reach_alone_silences_the_thin_report() {
+    let dir = rust_dominant_tree("zzop-engine-thin-rs-covered");
+    let out = analyze_tree(dir.path(), &config_with(mixed_reach_pack(10, 4)));
+
+    assert!(
+        !out.warnings.iter().any(|w| w.starts_with(THIN_HEAD)),
+        "4 of 14 rules reach `.rs` — above the threshold, so the report must not fire: {:?}",
+        out.warnings
+    );
+}
+
+/// A filetype under the share threshold is not principal and is not named, whatever its reach — one
+/// answer to "is this a language this tree is made of", shared with the zero-reach report.
+#[test]
+fn a_minor_thinly_reached_filetype_is_below_the_share_threshold() {
+    let dir = TempDir::new("zzop-engine-thin-minor");
+    for i in 0..11 {
+        dir.write(
+            &format!("web/m{i}.ts"),
+            "export function run() { return 1; }\n",
+        );
+    }
+    dir.write("src/one.rs", "pub fn run() -> i32 {\n    1\n}\n");
+
+    let out = analyze_tree(dir.path(), &config_with(mixed_reach_pack(10, 1)));
+
+    assert!(
+        !out.warnings.iter().any(|w| w.starts_with(THIN_HEAD)),
+        ".rs is 8% of this tree — below the share threshold: {:?}",
+        out.warnings
+    );
+}

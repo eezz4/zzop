@@ -47,5 +47,5 @@ use zzop_core::recognizer::{channel, FrameworkRecognizer};
 pub const FRAMEWORK_RECOGNIZERS: &[FrameworkRecognizer] = &[FrameworkRecognizer {
     framework: "sql ddl",
     extensions: &["sql"],
-    emits: &[channel::DB],
+    emits: &[channel::DB_PROVIDES],
 }];

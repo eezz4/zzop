@@ -798,6 +798,38 @@ fn analyze_repo_carries_a_compact_architecture_summary_when_git_signals_ran() {
         "got: {architecture}"
     );
 
+    // The two LEGENDS, pinned on the wire for the same reason `painByAxis` is below: the shaper is
+    // what decides whether they reach a host, and each exists because a word in this object is read as
+    // a word from a DIFFERENT part of the same reply.
+    //
+    // `topRecommendationMeaning` (2026-08-20) is the newer of the two, and its measurement is
+    // dotnet/eShop: `findings.bySeverity` `{"info":8,"warning":16}` — no critical anywhere in the run
+    // — beside `topRecommendation.severity: "critical"` naming a test file with zero findings of its
+    // own. Two independent auditors filed it as the reply contradicting itself. The ranking was
+    // correct; the vocabulary was undefined, and `severity` cannot be renamed without a major bump
+    // (`VERSIONING.md`: CLI JSON field names and types are the compatibility surface). On regression —
+    // either legend dropped — a reader is handed the collision with nothing to resolve it.
+    for (legend, must_say) in [
+        ("criticalTopMeaning", "blast_radius"),
+        ("topRecommendationMeaning", "not a finding severity"),
+    ] {
+        let text = architecture[legend].as_str().unwrap_or_else(|| {
+            panic!("{legend} must ride the object it describes, got: {architecture}")
+        });
+        assert!(
+            text.contains(must_say),
+            "{legend} must state what it is a legend FOR: {text:?}"
+        );
+    }
+    assert!(
+        architecture["topRecommendationMeaning"]
+            .as_str()
+            .unwrap()
+            .contains("findings.bySeverity"),
+        "the legend must point the reader at the channel that DOES carry finding severities, or it \
+         only says what the field is not: {architecture}"
+    );
+
     // The AXIS SPLIT, pinned on the wire rather than only in `zzop-metrics` (2026-08-12). `pain` is the
     // one score number this reply publishes, it contains no rule findings at all, and 80.6% of its
     // weight is structural OPINION — so the split is not a nicety, it is the difference between a
@@ -942,5 +974,98 @@ fn check_file_carries_the_same_warnings_and_config_diagnostics_analyze_does() {
         "the engine-side config diagnostics ride EACH TREE's output, not the multi-tree document's top \
          level — a merge that reads the top level publishes `[]`, i.e. a false all-clear: \
          {file_config_warnings:?}"
+    );
+}
+
+/// CACHE PROVENANCE in the default reply — the answer to "was this recomputed, or handed back?".
+///
+/// It has to be an end-to-end pin over two real runs, because the interesting value only exists on the
+/// SECOND one: a unit test over a synthetic output view could assert the shape while the field reported
+/// a cold zero forever. The two runs here are the real thing — the same tree, the same config, a real
+/// cache directory between them.
+///
+/// The gap this closes was measured on 2026-08-16: a hand-edited cache entry (findings rewritten to
+/// `[]`, fingerprints untouched) permanently deleted two secret findings from a file whose credential
+/// was still in the source, and NOTHING in the reply said any of the answer had come off disk. The
+/// counts existed but reached a reader only through `--profile-rules`, a knob asked for another reason.
+#[test]
+fn the_reply_says_how_much_of_itself_was_replayed_from_cache() {
+    let dir = TempDir::new("zzop-summary-cache-signal");
+    dir.write(
+        "src/a.ts",
+        "export const API_KEY = \"sk-not-a-real-key-1234\";\n",
+    );
+    dir.write("src/b.ts", "export function run() { return 1; }\n");
+
+    let config = dir.path().join(zzop_config::DEFAULT_CONFIG_FILENAME);
+    let config = config.to_str().unwrap();
+
+    let cold: serde_json::Value =
+        serde_json::from_str(&analyze_with_config(config).expect("the cold run must analyze"))
+            .expect("valid JSON");
+    let cold_cache = cold["cache"]
+        .as_object()
+        .unwrap_or_else(|| panic!("the default reply must carry cache provenance: {cold}"));
+    assert_eq!(
+        cold_cache["hitFiles"], 0,
+        "nothing can be replayed on the first run over a fresh tree: {cold}"
+    );
+    assert!(
+        cold_cache["missFiles"].as_u64().is_some_and(|m| m > 0),
+        "the cold run computed every file, and must say so: {cold}"
+    );
+
+    let warm: serde_json::Value =
+        serde_json::from_str(&analyze_with_config(config).expect("the warm run must analyze"))
+            .expect("valid JSON");
+    assert!(
+        warm["cache"]["hitFiles"].as_u64().is_some_and(|h| h > 0),
+        "the second run over an unchanged tree must report files served from the cache — a signal that \
+         is always zero is not a signal: {warm}"
+    );
+    // The findings are IDENTICAL across the two runs; that is exactly why the provenance line is the
+    // only thing separating "recomputed" from "handed back".
+    assert_eq!(
+        cold["findings"]["byRule"], warm["findings"]["byRule"],
+        "the warm run must return the same verdict — the point is that the reply looks the same and the \
+         provenance is what differs"
+    );
+    // The disclosure rides INSIDE the object, so a consumer holding the numbers has read what they do
+    // not prove — the same contract `ruleTimings` keeps.
+    let meaning = warm["cache"]["meaning"]
+        .as_str()
+        .expect("the counts must ship with their own meaning");
+    assert!(
+        meaning.contains("REPLAYED") && meaning.contains("integrity check"),
+        "the meaning must say what a hit means for the findings AND where the guarantee stops: {meaning}"
+    );
+}
+
+/// The other half: caching OFF grows no key at all. Absent, never null — the same contract
+/// `architecture`/`ruleTimings` keep in this reply, and the reason the key's PRESENCE can be read as
+/// "a cache was in play" without inspecting its numbers.
+#[test]
+fn a_run_with_no_cache_carries_no_cache_key() {
+    let dir = TempDir::new("zzop-summary-cache-off");
+    dir.write("src/a.ts", "export function run() { return 1; }\n");
+    dir.write(
+        zzop_config::DEFAULT_CONFIG_FILENAME,
+        "{ \"cacheDir\": null }",
+    );
+
+    let out: serde_json::Value = serde_json::from_str(
+        &analyze_with_config(
+            dir.path()
+                .join(zzop_config::DEFAULT_CONFIG_FILENAME)
+                .to_str()
+                .unwrap(),
+        )
+        .expect("the run must analyze"),
+    )
+    .expect("valid JSON");
+    assert!(
+        out.get("cache").is_none(),
+        "with caching off there is no provenance question to answer, so there is no key — a null one \
+         would read as \"a cache ran and served nothing\": {out}"
     );
 }

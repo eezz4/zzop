@@ -61,8 +61,12 @@ fn verdict_meaning(verdict: &str) -> &'static str {
     match verdict {
         "analyzed" => {
             "zzop built a structural projection for this file (symbols and/or dependency-graph \
-             membership), so every rule that needs structure was able to run on it. An empty findings \
-             list here means clean."
+             membership), so every rule that needs structure had the evidence it needs. That is a \
+             statement about the PROJECTION and not about how much of the rule set targets this path: a \
+             DSL rule runs only on files its `file_pattern` matches, and per-language reach is uneven \
+             (a tree's principal filetype reached by few of the loaded rules, or none, is named in this \
+             run's `warnings`). So an empty findings list here means clean for the rules that reached \
+             this file — check those warnings for its extension before reading it as clean outright."
         }
         "lexical-only" => {
             "zzop walked this file and ran text-based (line-scan) rules over it, but built no \

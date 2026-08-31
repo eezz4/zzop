@@ -16,6 +16,7 @@ pub mod graph;
 pub mod io;
 pub mod ir;
 pub mod node;
+pub mod noncycle;
 pub mod normalized;
 pub mod pack_loader;
 pub mod paths;
@@ -71,6 +72,7 @@ pub use node::{
     calc_risk_score, classify_lifecycle, compute_median_churn, FileNode, Lifecycle, RiskInput,
     RiskWeights, DEFAULT_RECENT_THRESHOLD_DAYS, DEFAULT_WEIGHTS,
 };
+pub use noncycle::{NoncycleCandidates, CYCLE_GRAPH_EXCLUDES_ERASED_IMPORTS};
 pub use normalized::{
     envelope_hints, parse_contract_version, validate_envelope, validate_envelope_verdict,
     EnvelopeVerdict, FileProjection, NormalizedEnvelope, ProjectionOverrides,
@@ -82,7 +84,7 @@ pub use pack_loader::{
     pack_retired_field_issues, parse_dsl_pack, suppress_marker_collisions, LoadResult,
     PackLoadError,
 };
-pub use paths::is_test_file;
+pub use paths::{build_path_re, is_build_path, is_test_file};
 pub use recognizer::FrameworkRecognizer;
 pub use registry::{
     apply_severity_override, global_exclude_matches_path, is_enabled, is_pack_enabled,

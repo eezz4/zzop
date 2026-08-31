@@ -31,7 +31,7 @@
 //!    a route on the `security` token and no longer does; same for `SecurityContextHolder`. NOT measured
 //!    on this corpus (no tree here uses Shiro, and a Spring app that does this normally also ships a
 //!    `SecurityFilterChain`, whose posture producer exempts the route earlier — so the residual is
-//!    multi-posture trees, a bailed-out lambda DSL, and non-Spring Java security libraries).
+//!    multi-posture trees, a config whose posture bailed, and non-Spring Java security libraries).
 //!
 //! Both are RECALL costs — the finding fires where it previously stayed quiet — which is the side this
 //! rule errs on by construction (Info severity, middleware-blind by its own admission). The alternative

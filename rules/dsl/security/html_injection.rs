@@ -1,4 +1,4 @@
-use crate::{hits, label_of, scan, TempDir};
+use crate::{assert_disqualifier_summary_precedes_imperative, hits, label_of, scan, TempDir};
 
 // --- html-response-from-request ---
 
@@ -117,6 +117,41 @@ fn opening_tag_literal_concatenated_with_a_variable_is_flagged() {
     assert_eq!(h.len(), 1, "{:?}", out.findings);
     assert_eq!(h[0].line, 4);
     assert_eq!(label_of(h[0]), Some("open-tag-concat"));
+}
+
+/// §27 pin (2026-08-29). The disqualifier names three concrete constructs a regex reads exactly as it
+/// reads a true sink -- logging strings, test fixtures, non-response string building -- and until this
+/// commit it sat behind "Use a template engine with auto-escaping". A reader who starts swapping a log
+/// line's concatenation for a template engine is precisely the reader that sentence exists for.
+///
+/// WHAT MOVED: two adjacent sentences swapped. 1052 characters before and after, character multiset
+/// identical. Both are self-contained -- "Kept `warning` ... because this is shape-only" takes "this"
+/// from the opening description, and the remedy carries no antecedent at all -- so nothing had to be
+/// repaired to make room, which is why the CLAUSE moved here and the verb moved in the two rules whose
+/// downstream sentences point back at the clause.
+///
+/// INVALIDATION PROBE: swap the two sentences back. Both stay spelled exactly once, a `contains` pin
+/// stays green, and this assertion alone goes red.
+#[test]
+fn dangerous_html_concat_fp_prone_clause_precedes_the_template_engine_imperative() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/render.ts",
+        "declare const res: any;\ndeclare const name: string;\nexport function render() {\n  res.send('<div>' + name);\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "dangerous-html-concat");
+    // Sentence order only -- the finding itself is unchanged.
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 4);
+    assert_eq!(label_of(h[0]), Some("open-tag-concat"));
+    assert_disqualifier_summary_precedes_imperative(
+        "dangerous-html-concat",
+        &h[0].message,
+        "Kept `warning` and deployed-surface-excluded",
+        "Use a template engine with auto-escaping",
+        "all read the same way to a regex",
+    );
 }
 
 #[test]

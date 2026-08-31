@@ -23,7 +23,7 @@ use zzop_core::{NativeRuleChannels, RuleConfig, RuleIoChannel};
 /// Every native analysis in this build with its declared io channels, in the crate order
 /// [`crate::register_all_native`] composes registration, so output derived from it is deterministic.
 ///
-/// `zzop_metrics` is absent and that is not an omission: its five ids gate SCORE computations
+/// `zzop_metrics` is absent and that is not an omission: the ids it registers gate SCORE computations
 /// (`seams`/`criticality`/`scores`/`health`/`recommendations`), not findings-producing rules — they ride
 /// the `RuleConfig` id space without reading any rule input at all. The gap is pinned rather than
 /// assumed: `rule_contracts::rule_channels` subtracts this list from the real registry and requires the

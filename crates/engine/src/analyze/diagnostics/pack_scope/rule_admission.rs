@@ -73,20 +73,27 @@ pub(super) fn ensure_mask<'a>(masks: &mut MaskMemo<'a>, pattern: &'a str, analyz
     });
 }
 
-/// ORs this rule's admitted files into `union` and returns how many it admitted (see the module doc
-/// for the definition of admitted). Both patterns must already be in `masks` (the caller's
-/// [`ensure_mask`] calls); `union` must be `analyzed_rels.len()` long.
+/// ORs this rule's admitted files into `union`, marks the FILETYPES it reached in `reach`, and returns
+/// how many files it admitted (see the module doc for the definition of admitted). Both patterns must
+/// already be in `masks` (the caller's [`ensure_mask`] calls); `union` must be `analyzed_rels.len()`
+/// long.
 ///
-/// The count and the union come out of ONE traversal on purpose: they are the two granularities of the
-/// same admission fact — the count feeds [`super::DslScope::zero_admission_rules_by_pack`] (which rules
-/// read nothing) and the union feeds [`super::DslScope::rule_vetoed_rels`] (which FILES nothing read).
-/// Computing them from two encodings of "admitted" is how the pair would come to disagree, and a
-/// disagreement here means one of the two reports lies about the same tree.
+/// The count, the union and the filetype marks come out of ONE traversal on purpose: they are three
+/// granularities of the same admission fact — the count feeds
+/// [`super::DslScope::zero_admission_rules_by_pack`] (which rules read nothing), the union feeds
+/// [`super::DslScope::rule_vetoed_rels`] (which FILES nothing read), and the marks feed
+/// [`super::DslScope::ext_rule_reach`] (how many rules could reach each LANGUAGE). Computing them from
+/// two encodings of "admitted" is how they would come to disagree, and a disagreement here means one of
+/// these reports lies about the same tree.
+///
+/// The caller decides whether the marks count, via [`ExtReach::commit`] / [`ExtReach::discard`] — the
+/// mode filter is the caller's (see [`super::compute_dsl_scope_filtered`]).
 pub(super) fn fold_admitted(
     masks: &MaskMemo<'_>,
     pattern: &str,
     exclude: Option<&str>,
     union: &mut [bool],
+    reach: &mut ExtReach,
 ) -> usize {
     let Some(Some(pat_mask)) = masks.get(pattern) else {
         return 0; // uncompilable file_pattern: matches nothing, admits nothing
@@ -94,9 +101,12 @@ pub(super) fn fold_admitted(
     let mut count = 0;
     match exclude {
         None => {
-            for (slot, matched) in union.iter_mut().zip(pat_mask.iter()) {
+            for (idx, (slot, matched)) in union.iter_mut().zip(pat_mask.iter()).enumerate() {
                 *slot |= matched;
                 count += usize::from(*matched);
+                if *matched {
+                    reach.mark(idx);
+                }
             }
         }
         // Uncompilable exclude: evaluation skips the whole rule, so it admits nothing.
@@ -104,14 +114,116 @@ pub(super) fn fold_admitted(
             let Some(Some(ex_mask)) = masks.get(ex) else {
                 return 0;
             };
-            for ((slot, matched), vetoed) in
-                union.iter_mut().zip(pat_mask.iter()).zip(ex_mask.iter())
+            for (idx, ((slot, matched), vetoed)) in union
+                .iter_mut()
+                .zip(pat_mask.iter())
+                .zip(ex_mask.iter())
+                .enumerate()
             {
                 let admitted = *matched && !*vetoed;
                 *slot |= admitted;
                 count += usize::from(admitted);
+                if admitted {
+                    reach.mark(idx);
+                }
             }
         }
     }
     count
+}
+
+/// Per-filetype rule reach, accumulated one rule at a time: how many LOADED rules admitted at least one
+/// file carrying each extension. The rule-axis complement of [`super::DslScope::ext_census`]'s file-axis
+/// count — that one asks "did anything at all target this filetype", this one asks "how much of the rule
+/// set could reach it", and the measured answer differs by an order of magnitude between languages
+/// (`uncovered_extension`'s `thin_rule_reach_warning` carries the numbers).
+///
+/// Counts each rule ONCE per extension however many of its files matched: the subject is the rule set's
+/// reach, not a file tally, and a rule that admitted 400 `.ts` files is one rule.
+pub(super) struct ExtReach {
+    /// Per analyzed file, its extension's index into `names` — `None` for a file no native frontend
+    /// claims, which is dropped for the same reason [`super::DslScope::ext_census`] drops it.
+    ids: Vec<Option<usize>>,
+    names: Vec<String>,
+    /// Which extensions THIS rule has reached so far; cleared by `commit`/`discard`.
+    hit: Vec<bool>,
+    counts: Vec<usize>,
+}
+
+impl ExtReach {
+    /// Builds the per-file extension index from the same whole-`dispatch` claim test `ext_census` uses
+    /// (`glob_overrides` included), so the two halves of the language axis see one set of files.
+    pub(super) fn new(analyzed_rels: &[&str], dispatch: &crate::DispatchConfig) -> Self {
+        let mut names: Vec<String> = Vec::new();
+        let ids = analyzed_rels
+            .iter()
+            .map(|rel| {
+                crate::dispatch::dispatch(rel, dispatch)?;
+                let ext = std::path::Path::new(rel)
+                    .extension()
+                    .and_then(|e| e.to_str())?
+                    .to_ascii_lowercase();
+                Some(match names.iter().position(|n| *n == ext) {
+                    Some(idx) => idx,
+                    None => {
+                        names.push(ext);
+                        names.len() - 1
+                    }
+                })
+            })
+            .collect();
+        let hit = vec![false; names.len()];
+        let counts = vec![0; names.len()];
+        ExtReach {
+            ids,
+            names,
+            hit,
+            counts,
+        }
+    }
+
+    fn mark(&mut self, file_idx: usize) {
+        if let Some(Some(ext_idx)) = self.ids.get(file_idx) {
+            self.hit[*ext_idx] = true;
+        }
+    }
+
+    /// Counts the current rule against every extension it reached, then resets for the next rule.
+    pub(super) fn commit(&mut self) {
+        for (count, hit) in self.counts.iter_mut().zip(self.hit.iter_mut()) {
+            *count += usize::from(*hit);
+            *hit = false;
+        }
+    }
+
+    /// Drops the current rule's marks — the caller's mode filter says this rule never runs, so its
+    /// reach is zero however its path gates read (`compute_dsl_scope_filtered`'s doc owns why).
+    pub(super) fn discard(&mut self) {
+        self.hit.iter_mut().for_each(|hit| *hit = false);
+    }
+
+    /// Both halves of the language axis, from the ONE per-file extension classification this struct
+    /// already holds: [`super::DslScope::ext_census`] (`ext -> (analyzed, of which in scope)`, read off
+    /// `in_scope_mask`) and [`super::DslScope::ext_rule_reach`] (`ext -> rules that reached it`).
+    ///
+    /// They are returned together because they must be built from one classification. Each was
+    /// previously free to decide for itself which files count as which language, and the census's own
+    /// doc already records what that costs: keyed on the extension MAP rather than the whole `dispatch`,
+    /// a `parsers.globOverrides` path fell between two reports and was named by neither.
+    pub(super) fn into_census(
+        self,
+        in_scope_mask: &[bool],
+    ) -> (
+        std::collections::BTreeMap<String, (usize, usize)>,
+        std::collections::BTreeMap<String, usize>,
+    ) {
+        let mut census: std::collections::BTreeMap<String, (usize, usize)> = Default::default();
+        for (id, matched) in self.ids.iter().zip(in_scope_mask.iter()) {
+            let Some(idx) = id else { continue };
+            let entry = census.entry(self.names[*idx].clone()).or_insert((0, 0));
+            entry.0 += 1;
+            entry.1 += usize::from(*matched);
+        }
+        (census, self.names.into_iter().zip(self.counts).collect())
+    }
 }

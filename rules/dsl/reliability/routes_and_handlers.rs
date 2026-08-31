@@ -1,3 +1,4 @@
+use crate::assert_disqualifier_clause_precedes_imperative;
 use crate::{hits, scan, TempDir};
 
 // --- async-route-no-catch ---
@@ -13,6 +14,40 @@ fn async_route_without_try_catch_or_next_is_flagged() {
     let h = hits(&out, "async-route-no-catch");
     assert_eq!(h.len(), 1, "{:?}", out.findings);
     assert_eq!(h[0].line, 3);
+}
+
+/// §27 pin (2026-08-29). This rule names its own worst false positive IN THOSE WORDS — a route wrapped
+/// by `express-async-handler`/`express-async-errors` is safe, that wrapping is invisible to the handler
+/// body this rule scans, and the message calls it "the rule's biggest real-world false-positive
+/// source". Until this commit that sentence sat BEHIND "Wrap in try/catch and call `next(err)`", so the
+/// one reader it exists for — the one about to wrap an already-wrapped route — reached the instruction
+/// and stopped.
+///
+/// The repair is a pure sentence swap: the message is byte-for-byte the same characters in a different
+/// order (625 chars before and after, multiset identical), which settles "does §27 grow messages?" for
+/// this rule by construction rather than by measurement. The clause now sits behind the Express-5 hedge,
+/// and that is deliberate — "is ALSO safe" takes its antecedent from "Express 5 ... a style/consistency
+/// concern rather than a crash bug", so the swap put the two safe shapes next to each other instead of
+/// splitting them around the remedy.
+#[test]
+fn async_route_message_puts_the_wrapper_blind_spot_before_the_try_catch_imperative() {
+    let dir = TempDir::new("zzop-be-rel");
+    dir.write(
+        "src/routes.ts",
+        "declare function getItems(): Promise<unknown>;\nexport function registerRoutes(app: any) {\n  app.get(\"/items\", async (req: any, res: any) => {\n    const items = await getItems();\n    res.json(items);\n  });\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "async-route-no-catch");
+    // Sentence repair only — the finding itself is unchanged.
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 3);
+
+    assert_disqualifier_clause_precedes_imperative(
+        "async-route-no-catch",
+        &h[0].message,
+        "A route wrapped by error-handling middleware",
+        "Wrap in try/catch and call",
+    );
 }
 
 #[test]

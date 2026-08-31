@@ -32,6 +32,7 @@ pub(crate) fn compose_pages_api_provides(
     verbs
         .into_iter()
         .map(|verb| IoProvide {
+            route_version: None,
             response: None,
             body: None,
             kind: "http".into(),

@@ -106,24 +106,49 @@ fn label_of(f: &zzop_core::Finding) -> Option<&str> {
         .and_then(|v| v.as_str())
 }
 
+/// POSITION pins for this pack's rule messages — the shared module every pack root includes.
+/// One home, four named claims; see `rules/dsl/message_order_pins.rs` for which claim is which and
+/// why the summary form and the clause form are not interchangeable.
+#[path = "../message_order_pins.rs"]
+mod message_order_pins;
+
+/// The §27 COVERAGE guard — every DSL rule carries a position pin or a declared verdict about its own
+/// message, and a rule carrying neither turns this red. Included by every pack root that includes the
+/// pins above, deliberately: the guard reads the whole pack set off disk, so one copy would do the
+/// work, and being wired eight times is what keeps it from being dropped by a single edit.
+#[path = "../message_order_verdicts.rs"]
+mod message_order_verdicts;
+use message_order_pins::{
+    assert_disqualifier_clause_precedes_imperative,
+    assert_disqualifier_summary_precedes_imperative, assert_landing_precedes_imperative,
+};
+
+mod algorithm_cutover_landing;
+mod bound_parameter_landing;
 mod conn_string_credentials;
 mod cors_csp;
 mod crypto;
 mod frontend_exposure;
 mod html_injection;
 mod http_exposure;
+mod interpolated_statements;
 mod java_moved_rules;
 mod java_security;
 mod jwt;
 mod jwt_sign_secret;
 mod mass_assignment;
+mod open_redirect_authority;
+mod open_redirect_veto;
 mod private_key_committed;
 mod request_targets;
+mod rotation_landing;
 mod rust_rules;
 mod scan_scope;
 mod secrets;
+mod secrets_annotated;
 mod secrets_vetoes;
 mod shell_exec;
+mod shell_routing_landing;
 mod sql_injection;
 mod taint_and_eval;
 mod template_output;

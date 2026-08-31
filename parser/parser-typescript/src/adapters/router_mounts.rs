@@ -57,6 +57,10 @@ mod idempotency_tests;
 #[cfg(test)]
 mod tests_express;
 #[cfg(test)]
+mod tests_express_receivers;
+#[cfg(test)]
+mod tests_express_require_mounts;
+#[cfg(test)]
 mod tests_hono;
 mod use_classify;
 
@@ -75,7 +79,10 @@ use chain::ReceiverCollector;
 ///   bare-name-matched) — all tracked as EXPRESS vocabulary, which matters for the `.use` mount
 ///   rules below; any identifier in `router_names` (config allowlist, vocabulary-agnostic); or
 ///   `export default new Hono()...` / `export default express()...` / `export default Router()...`
-///   chains with no binding → fragment name `"default"`.
+///   chains with no binding → fragment name `"default"`. A binding whose initializer is a plain
+///   ASSIGNMENT chain takes the value from the right (`var app = module.exports = express()`, the
+///   CommonJS "build and export in one statement" spelling express's own examples use); a COMPOUND
+///   assignment (`app ||= express()`) does not, since it does not say the binding holds that value.
 /// - **Entries** collected from both chained calls and separate statements (`recv.get('/a', h);`)
 ///   where `recv` is a receiver.
 /// - `.get|post|put|patch|delete(pathLit, ...)` → `Verb` (method uppercased), requiring ≥2

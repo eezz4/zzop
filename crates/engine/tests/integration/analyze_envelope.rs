@@ -112,6 +112,7 @@ fn envelope_produces_ir_dep_and_native_analyses_deterministically() {
         file: "legacy/UserController.jsp".to_string(),
         line: 5,
         symbol: Some("getUser".to_string()),
+        ..Default::default()
     });
     controller.imports.insert(
         "util".to_string(),
@@ -188,6 +189,7 @@ fn envelope_be_joins_cross_layer_with_a_ts_parsed_fe() {
         file: "legacy/UserController.jsp".to_string(),
         line: 5,
         symbol: Some("getUser".to_string()),
+        ..Default::default()
     });
     let be_envelope = NormalizedEnvelope {
         format: NORMALIZED_AST_FORMAT.to_string(),
@@ -543,6 +545,7 @@ fn callgraph_envelope(with_calls: bool, callee: &str) -> NormalizedEnvelope {
         file: controller_path.to_string(),
         line: 5,
         symbol: Some("createOrder".to_string()),
+        ..Default::default()
     });
     controller.imports.insert(
         "verifyToken".to_string(),
@@ -693,6 +696,7 @@ fn envelope_fully_unresolved_calls_are_disclosed_as_a_total_drop() {
         file: path.to_string(),
         line: 3,
         symbol: Some("create_user".to_string()),
+        ..Default::default()
     });
     file.calls.push(zzop_core::callgraph::RawCall {
         from_symbol: format!("{path}#create_user"),
@@ -796,6 +800,7 @@ fn envelope_response_and_body_dto_refs_resolve_against_class_shape_fragments() {
         file: controller_path.to_string(),
         line: 5,
         symbol: Some("createUser".to_string()),
+        ..Default::default()
     });
     let mut dto = projection(dto_path, 12);
     dto.class_shape_fragments = vec![
@@ -858,6 +863,7 @@ fn envelope_no_return_type_sentinel_is_stripped_and_disclosed() {
         file: path.to_string(),
         line: 5,
         symbol: Some("listUsers".to_string()),
+        ..Default::default()
     });
     let envelope = NormalizedEnvelope {
         format: NORMALIZED_AST_FORMAT.to_string(),
@@ -902,6 +908,7 @@ fn envelope_adapter_resolved_response_fields_pass_through_untouched() {
         file: path.to_string(),
         line: 5,
         symbol: Some("listUsers".to_string()),
+        ..Default::default()
     });
     let envelope = NormalizedEnvelope {
         format: NORMALIZED_AST_FORMAT.to_string(),
@@ -964,6 +971,7 @@ fn envelope_calls_and_write_sites_light_unsafe_read_endpoint_for_an_uncovered_la
         file: path.to_string(),
         line: 3,
         symbol: Some("index".to_string()),
+        ..Default::default()
     });
     file.calls.push(zzop_core::callgraph::RawCall {
         from_symbol: format!("{path}#index"),

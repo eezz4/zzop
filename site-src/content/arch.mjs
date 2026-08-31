@@ -305,8 +305,8 @@ export default {
             {
               k: { ko: "한쪽만 있다", en: "One side only" },
               v: {
-                ko: "부르는 데가 없는 라우트와, 받는 데가 없는 호출로 나뉜다. 저장소 사이의 드리프트가 여기서 보인다.",
-                en: "Split into routes nobody calls and calls nothing serves. This is where drift between repositories surfaces.",
+                ko: "이 실행의 어느 트리도 부르지 않는 라우트와, 어느 트리도 제공하지 않는 호출로 나뉜다. 저장소 사이의 드리프트가 여기서 보인다. 분석 밖의 소비자(다른 레포·모바일 클라이언트·동적 URL)는 이 판정의 사정권 밖이다.",
+                en: "Split into routes no analyzed tree calls and calls no analyzed tree serves. This is where drift between repositories surfaces — consumers outside the run (another repo, a mobile client, a dynamic URL) are out of its reach.",
               },
             },
             {

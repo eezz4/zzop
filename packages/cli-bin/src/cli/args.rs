@@ -29,7 +29,7 @@ pub fn extract_finding_filters(
             };
             match flag {
                 "--severity" => severity = Some(value.clone()),
-                "--rule" => rule = Some(value.clone()),
+                "--rule" => rule = Some(resolve_rule_filter(value, usage)),
                 _ => match value.parse::<usize>() {
                     Ok(n) => limit = Some(n),
                     Err(_) => {
@@ -51,6 +51,97 @@ pub fn extract_finding_filters(
             std::process::exit(2);
         }
     }
+}
+
+/// Resolves a `--rule` value to the spelling a finding's `ruleId` actually carries, and refuses the one
+/// class of id that can be PROVEN wrong without running anything.
+///
+/// # Why this is not a second lookup
+/// `zzop explain <rule-id>` already accepts both forms a reader has — the full `<pack>/<rule>` id every
+/// finding carries, and a bare `<rule>` id when it is unambiguous across the bundled packs — so this
+/// calls THAT (`zzop_summary::explain`, the re-exported facade entry point) and reads the canonical id
+/// off the first line of its render. A second resolver here would be a second answer to "what is this
+/// id", and the two would drift the day a pack ships a colliding bare name.
+///
+/// # What changes for the caller
+/// A bare DSL id used to filter NOTHING: every DSL finding's `ruleId` is `<pack>/<rule>` and the shared
+/// filter compares for exact equality, so `--rule weak-crypto` returned `shown: 0` on a tree that had
+/// the finding — the same empty result a typo produces. It is expanded to `security/weak-crypto` here.
+///
+/// # The one refusal, and why only this one
+/// A bare id that names neither a bundled DSL rule nor a native analysis can never equal any finding's
+/// `ruleId`, and that is provable from argv alone — so it exits 2, the code this file uses for every
+/// other argument that cannot mean anything. BOTH id spaces are consulted before that refusal is
+/// printed, and the second one twice: exactly (`duplicate-route`), and as the TAIL of a namespaced
+/// native id (`god-model` for `schema/god-model`). The tail stays refused — a finding carries the full
+/// id, so the filter really would match nothing — but it is refused by NAMING that full id rather than
+/// by claiming the caller's string is not a native analysis — a denial that `zzop explain`, recommended
+/// one clause later in the same sentence, contradicts. A QUALIFIED id is deliberately NOT refused here: its pack
+/// may be one this build does not bundle but a tree loads (`zzop/rules/`, `packs.extraDirs`), which
+/// this side cannot see. That case is judged after the run instead, against the reply's own
+/// `packsLoaded` — see `super::fail_on::gate_or_exit`.
+fn resolve_rule_filter(value: &str, usage: &str) -> String {
+    if let Ok(rendered) = zzop_summary::explain(value) {
+        // `explain`'s render opens with `id: <pack>/<rule>` (crates/facade `explain::render`). Reading
+        // it back is what makes the bare form work without this file owning a pack corpus of its own.
+        if let Some(id) = rendered
+            .lines()
+            .next()
+            .and_then(|l| l.strip_prefix("id: "))
+            .map(str::trim)
+        {
+            return id.to_string();
+        }
+    }
+    if value.contains('/') {
+        return value.to_string();
+    }
+    let native_ids = zzop_summary::native_analysis_ids();
+    if native_ids.iter().any(|id| id == value) {
+        return value.to_string();
+    }
+    // The bare TAIL of a namespaced native id (`god-model` for `schema/god-model`,
+    // `route-near-miss` for `cross-layer/route-near-miss`) — still unusable as a filter, because a
+    // finding carries the FULL id and this filter compares exactly, so the exit code below does not
+    // move. What moves is the sentence: the refusal used to open with "it is not a native analysis
+    // id" and close by recommending `zzop explain <id>`, which answers that exact query by naming
+    // `schema/god-model`. One binary, two verdicts on whether the thing the caller typed exists, and
+    // the wrong one was the half attached to the exit code. Consulting the second id space is what
+    // turns a denial into the fix. Resolved only when EXACTLY one registered id ends in it — the same
+    // terms the bare DSL lane above is accepted on, and the same terms `zzop explain` uses.
+    let tails: Vec<&String> = native_ids
+        .iter()
+        .filter(|id| id.rsplit_once('/').is_some_and(|(_, tail)| tail == value))
+        .collect();
+    match tails.as_slice() {
+        [full] => {
+            eprintln!(
+                "{usage} (--rule {value:?} is the bare form of the native analysis id {full:?}, and a \
+                 finding carries the FULL id — so this filter would match nothing. Pass \
+                 `--rule {full}`.)"
+            );
+            std::process::exit(2);
+        }
+        [] => {}
+        several => {
+            let mut ids: Vec<&str> = several.iter().map(|id| id.as_str()).collect();
+            ids.sort();
+            eprintln!(
+                "{usage} (--rule {value:?} is the bare form of {} native analysis ids and a finding \
+                 carries the FULL one — pass one of: {})",
+                ids.len(),
+                ids.join(", ")
+            );
+            std::process::exit(2);
+        }
+    }
+    eprintln!(
+        "{usage} (--rule {value:?} names no rule: it is neither a native analysis id nor the bare form \
+         of one, and a DSL rule's id is always `<pack>/<rule>`, so no finding could ever match it. \
+         `zzop explain <id>` resolves a bare id; the `rule-catalog` contract document lists every id \
+         this build ships.)"
+    );
+    std::process::exit(2);
 }
 
 /// Lifts the boolean `--profile-rules` out of argv, the same "pull the flag, hand the rest to the
@@ -90,6 +181,31 @@ pub fn reject_flag_like_args<'a>(args: impl IntoIterator<Item = &'a str>, usage:
     }
 }
 
+/// How a trailing-tree-paths subcommand's ARITY FLOOR is spelled — the one owner of those words for
+/// [`parse_trees_args`]'s own refusal below, and the value the help lanes are CHECKED AGAINST.
+///
+/// The distinction is load-bearing, and an earlier version of this comment got it wrong by claiming the
+/// help sites read this function: they do not. `main::usage` and `super::help::elaborations` are literal
+/// strings, and `every_tree_path_subcommand_spells_its_arity_floor_in_the_help_and_usage_lines` is what
+/// binds them to this spelling — it parses the `parse_trees_args` call sites for each floor and requires
+/// the help text to contain `<subcommand> {paths_form(floor)}`. So changing these words does NOT change
+/// the help; it turns that test red until someone changes the help too. That is a weaker guarantee than
+/// derivation and is written down as such, because a doc claiming the strong one is how the next author
+/// edits this and believes the job is done.
+///
+/// `<path>...` is the universal CLI grammar for "one or more", so a lane whose floor is 2 must never be
+/// offered with it. It was, until 2026-08-20: `zzop help` said `manifest <path>...` while
+/// `zzop manifest ./tree` exited 2 demanding two — the binary offering a form it refuses. The floor
+/// itself stays at each call site (it is that subcommand's contract, not a shared constant); only its
+/// SPELLING lives here.
+pub const fn paths_form(min_paths: usize) -> &'static str {
+    if min_paths >= 2 {
+        "<path> <path>... (2+ paths)"
+    } else {
+        "<path>..."
+    }
+}
+
 /// The two-source argv shape shared by every multi-tree subcommand (`cross`, `manifest`, `facts`):
 /// either trailing paths, or `--config <file>` with NOTHING after it. Shared rather than copied because
 /// the silent-narrowing traps it closes are the same on all three — a trailing path after `--config`
@@ -106,12 +222,10 @@ pub fn parse_trees_args<'a>(
     sub: &str,
     min_paths: usize,
 ) -> (Vec<String>, Option<&'a str>) {
-    let paths_form = if min_paths >= 2 {
-        "<path> <path>... (2+ paths)"
-    } else {
-        "<path>..."
-    };
-    let usage = format!("usage: zzop {sub} {paths_form} | {sub} --config <zzop.config.jsonc>");
+    let usage = format!(
+        "usage: zzop {sub} {} | {sub} --config <zzop.config.jsonc>",
+        paths_form(min_paths)
+    );
     let (paths, config_path) = match args.get(2).map(String::as_str) {
         Some("--config") => match args.get(3) {
             Some(cp) => {

@@ -152,7 +152,12 @@ pub const FRAMEWORK_RECOGNIZERS: &[FrameworkRecognizer] = &[
     FrameworkRecognizer {
         framework: "django",
         extensions: &["py"],
-        emits: &[channel::DB],
+        emits: &[channel::DB_PROVIDES],
+    },
+    FrameworkRecognizer {
+        framework: "django",
+        extensions: &["py"],
+        emits: &[channel::DB_CONSUMES],
     },
     FrameworkRecognizer {
         framework: "django",
@@ -177,7 +182,12 @@ pub const FRAMEWORK_RECOGNIZERS: &[FrameworkRecognizer] = &[
     FrameworkRecognizer {
         framework: "sqlalchemy",
         extensions: &["py"],
-        emits: &[channel::DB],
+        emits: &[channel::DB_PROVIDES],
+    },
+    FrameworkRecognizer {
+        framework: "sqlalchemy",
+        extensions: &["py"],
+        emits: &[channel::DB_CONSUMES],
     },
     FrameworkRecognizer {
         framework: "httpx",

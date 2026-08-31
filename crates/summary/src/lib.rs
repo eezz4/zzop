@@ -91,7 +91,10 @@ pub use graph::{
     graph_cosmograph, graph_mermaid, CosmographOutput, GraphDomain, GraphFormat, DEFAULT_GRAPH_TOP,
 };
 pub use manifest::{diff_manifests_json, manifest_json};
-pub use output::{FindingFilters, RunKnobs};
+// `severity_rank` is public so a HOST gate (`zzop --fail-on`) orders severities by the same function
+// the findings view filters with. A second ordering in the CLI would be a second answer to "is warning
+// above info", and the two would drift the day a severity is added.
+pub use output::{severity_rank, FindingFilters, RunKnobs};
 // Verbatim `zzop-facade` entry points, re-exported (never wrapped) so a host product needs only this
 // crate: the two `explain` forms, `version` and `version_string` are pure reads over engine/rule data the
 // facade owns (`explain_with_config` reads the config file too — it widens which PACKS are read, not what
@@ -101,7 +104,13 @@ pub use output::{FindingFilters, RunKnobs};
 // fingerprint) earned its place back on 2026-07-27, when `zzop version --verbose` and
 // `zzop-mcp version --verbose` became its first host callers — this crate had been reaching it directly
 // for the `tool` field of `manifest`/`facts`/`graph` while both binaries could only report the bare form.
+// `native_analysis_ids` joined the list on 2026-08-20 for its second host caller: the `zzop` CLI's
+// `--rule` resolution has to tell a native analysis id (a legal bare filter — a native finding's
+// `ruleId` really is bare) from a bare id that names nothing, and the registry read that answers it
+// already lives in the facade for `explain`'s own use. Re-exported rather than re-derived, on the same
+// terms as everything else here: a second enumeration of the native ids in a host binary would be a
+// second answer to the same question.
 pub use zzop_facade::{
-    explain, explain_with_config, validate_envelope_only_json, validate_rule_pack_json, version,
-    version_string,
+    explain, explain_with_config, native_analysis_ids, validate_envelope_only_json,
+    validate_rule_pack_json, version, version_string,
 };

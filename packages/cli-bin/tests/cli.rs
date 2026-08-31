@@ -5,8 +5,10 @@
 //! shell sees them. The sibling `zzop-mcp` server binary's own non-serving surfaces (`version`,
 //! unknown-arg) are smoke-tested separately in the `zzop-mcp` package (packages/mcp/tests/server_bin.rs).
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 fn run(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_zzop"))
@@ -118,6 +120,117 @@ fn subcommands_named_by_the_usage_line() -> Vec<String> {
     subs
 }
 
+/// `zzop help` must not print the same line twice, and folding a shared block away must not cost a
+/// reader a FLAG NAME.
+///
+/// # The defect
+/// The shared findings/run/gate knob block was printed once per subcommand that takes it, so `zzop help`
+/// carried three BYTE-IDENTICAL copies of a 2,239-character block: 4,484 of 17,854 bytes — a quarter of
+/// the document — spent saying the same thing twice more. The primary reader here is an agent on a token
+/// budget, so redundancy is not a cosmetic complaint.
+///
+/// # Why these two assertions and not a byte count
+/// A size threshold would be a number to relitigate every time a subcommand ships. These two are the
+/// actual contract, and they pull in opposite directions, which is the point: assertion 1 alone is
+/// satisfied by DELETING the knobs, and assertion 2 alone is satisfied by pasting the block back three
+/// times. Only together do they say "name every knob everywhere, spell it out once".
+///
+/// # Why assertion 2 is derived and not a list
+/// The knob names are read out of the per-subcommand lane (`zzop analyze --help`), which prints the
+/// block in full, and required to appear in the whole-list lane's entry for that same subcommand. So a
+/// SIXTH knob added to the block joins this test's subject set on its own — a hand-typed list here would
+/// be a third mirror, and this file has already paid for one (see
+/// `every_subcommand_answers_its_own_help_request_on_stdout_exit_zero`).
+#[test]
+fn zzop_help_repeats_no_line_and_still_names_every_knob_under_each_subcommand() {
+    let help = stdout(&run(&["help"]));
+    let lines: Vec<&str> = help.lines().filter(|l| !l.trim().is_empty()).collect();
+    assert!(
+        lines.len() > 10,
+        "`zzop help` printed {} non-blank line(s) — too few to be the real document, so this test \
+         would vouch for nothing",
+        lines.len()
+    );
+
+    // ── 1. no line printed twice ────────────────────────────────────────────────────────────────
+    let mut seen: BTreeSet<&str> = BTreeSet::new();
+    let mut repeated: Vec<&str> = Vec::new();
+    for line in &lines {
+        if !seen.insert(line) {
+            repeated.push(line);
+        }
+    }
+    assert!(
+        repeated.is_empty(),
+        "`zzop help` prints {} line(s) more than once. A block that applies to several subcommands \
+         belongs in ONE printing they all point at, not a copy under each:\n  {}",
+        repeated.len(),
+        repeated
+            .iter()
+            .map(|l| format!("({} chars) {}", l.len(), &l[..l.len().min(110)]))
+            .collect::<Vec<_>>()
+            .join("\n  ")
+    );
+
+    // ── 2. every flag the per-subcommand lane names is still named in the whole-list entry ───────
+    let flags = |text: &str| -> BTreeSet<String> {
+        let mut out = BTreeSet::new();
+        let mut rest = text;
+        while let Some(i) = rest.find("--") {
+            rest = &rest[i..];
+            let end = rest
+                .find(|c: char| !(c.is_ascii_lowercase() || c == '-'))
+                .unwrap_or(rest.len());
+            let (flag, tail) = rest.split_at(end);
+            // `--` alone, or a trailing dash from an em-dash-adjacent word, is not a flag.
+            if flag.len() > 3 && !flag.ends_with('-') {
+                out.insert(flag.to_string());
+            }
+            rest = if tail.is_empty() { "" } else { tail };
+        }
+        out
+    };
+
+    let mut checked = 0usize;
+    for sub in subcommands_named_by_the_usage_line() {
+        let own = stdout(&run(&[sub.as_str(), "--help"]));
+        let own_flags = flags(&own);
+        // The whole-list entry for this subcommand: its elaboration line plus any continuation lines
+        // before the next entry. `"{sub} "` with the trailing space is what keeps `analyze` from
+        // matching the `analyze-envelope` row.
+        let start = match lines
+            .iter()
+            .position(|l| l.trim().starts_with(&format!("{sub} ")))
+        {
+            Some(i) => i,
+            None => continue,
+        };
+        let end = lines[start + 1..]
+            .iter()
+            .position(|l| {
+                subcommands_named_by_the_usage_line()
+                    .iter()
+                    .any(|s| l.trim().starts_with(&format!("{s} ")))
+            })
+            .map_or(lines.len(), |off| start + 1 + off);
+        let entry = lines[start..end].join("\n");
+        let missing: Vec<&String> = own_flags.iter().filter(|f| !entry.contains(*f)).collect();
+        checked += own_flags.len();
+        assert!(
+            missing.is_empty(),
+            "`zzop {sub} --help` names {missing:?}, but the entry `zzop help` prints for {sub} does \
+             not. Whatever shared block was folded out of the whole-list lane has to leave the flag \
+             NAMES behind: a reader who stops at this entry must not leave thinking the knob does \
+             not exist.\nentry was:\n{entry}"
+        );
+    }
+    assert!(
+        checked > 20,
+        "only {checked} flag(s) were checked across all subcommands — the flag parse has stopped \
+         matching, so this test would vouch for nothing"
+    );
+}
+
 /// Seals item ⑤ of the CLI restoration: a help REQUEST is answered, not rejected. Every subcommand's
 /// own `-h`/`--help` prints THAT subcommand's line to stdout and exits 0 — before this, the request fell
 /// into the dash-shaped-argument guard and left with exit 2 on stderr, handing an error to the one
@@ -200,6 +313,165 @@ fn findings_filter_knobs_are_wired_and_reject_bad_values_as_usage_errors() {
             stderr(&out)
         );
     }
+}
+
+/// A `--rule` id that can be PROVEN to name nothing this run could report must never read as a clean
+/// run. Reproduced before the fix: `zzop analyze <tree> --rule totally/bogus-rule` exited 0 with an
+/// EMPTY stderr and `shown: 0`, which in CI is byte-indistinguishable from "nothing to report" — the
+/// cardinal failure this product refuses. The reply's `warnings` array did carry the explanation, as
+/// the fifteenth of fifteen entries in a JSON document nobody reads on a red build.
+///
+/// Exit 2, not a new code: `1` means "zzop could not answer", `3` means "the findings met the declared
+/// threshold", and this is neither — the caller named a filter that cannot match, which is exactly what
+/// `2` already means everywhere else in this binary.
+#[test]
+fn a_rule_filter_that_can_never_match_is_loud_on_stderr_and_exits_two() {
+    let dir = TempDir::new("zzop-cli-rule-filter");
+    dir.write("a.ts", "export const a = 1;\n");
+    init_config(dir.path());
+    let path = dir.path().display().to_string();
+
+    // A QUALIFIED id whose pack no run loaded. Only provable once the run reports `packsLoaded`, so
+    // this refusal happens after the reply is printed — the reply still reaches stdout in full, the
+    // same composition `--fail-on` uses.
+    let out = run(&[
+        "analyze",
+        &path,
+        "--rule",
+        "totally/bogus-rule",
+        "--limit",
+        "5",
+    ]);
+    assert_eq!(out.status.code(), Some(2), "stdout: {}", stdout(&out));
+    assert!(
+        stderr(&out).contains("totally/bogus-rule"),
+        "the refusal must name the id: {}",
+        stderr(&out)
+    );
+    assert!(
+        serde_json::from_str::<serde_json::Value>(&stdout(&out)).is_ok(),
+        "the reply still goes to stdout in full: {}",
+        stdout(&out)
+    );
+
+    // A BARE id that names neither a bundled DSL rule nor a native analysis is provable WITHOUT a run
+    // (a DSL finding's ruleId always carries a `<pack>/`), so it is refused at argv time.
+    let out = run(&["analyze", &path, "--rule", "weak-cryptoo"]);
+    assert_eq!(out.status.code(), Some(2), "stdout: {}", stdout(&out));
+    assert!(
+        stderr(&out).contains("weak-cryptoo"),
+        "the refusal must name the id: {}",
+        stderr(&out)
+    );
+
+    // Precedence over the CI gate: a filter that cannot match makes the printed VIEW a lie, so the
+    // argument refusal wins over the threshold's own exit 3.
+    let out = run(&[
+        "analyze",
+        &path,
+        "--rule",
+        "totally/bogus-rule",
+        "--fail-on",
+        "info",
+    ]);
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "the unusable-filter refusal outranks --fail-on's exit 3: {}",
+        stderr(&out)
+    );
+}
+
+/// `--rule` accepts a bare unambiguous rule id, the same form `zzop explain` accepts — and through the
+/// same lookup, not a second one. Before the fix a bare DSL id filtered NOTHING: every DSL finding's
+/// `ruleId` is `<pack>/<rule>` and the filter compared for exact equality, so `--rule weak-crypto`
+/// returned `shown: 0` on a tree that had the finding.
+#[test]
+fn a_bare_unambiguous_rule_id_resolves_to_its_full_pack_qualified_form() {
+    let dir = TempDir::new("zzop-cli-bare-rule");
+    dir.write(
+        "app/hash.ts",
+        "import { createHash } from 'crypto';\nexport function sum(buf: Uint8Array) {\n  return createHash('md5').update(buf).digest('hex');\n}\n",
+    );
+    init_config(dir.path());
+    let path = dir.path().display().to_string();
+
+    let out = run(&["analyze", &path, "--rule", "weak-crypto", "--limit", "5"]);
+    assert_eq!(out.status.code(), Some(0), "stderr: {}", stderr(&out));
+    let v: serde_json::Value = serde_json::from_str(&stdout(&out)).expect("analyze prints JSON");
+    let shown = v["findings"]["shown"].as_array().expect("shown array");
+    assert_eq!(
+        shown.len(),
+        1,
+        "a bare id must filter exactly like its full form: {}",
+        stdout(&out)
+    );
+    assert_eq!(
+        shown[0]["ruleId"].as_str(),
+        Some("security/weak-crypto"),
+        "{}",
+        stdout(&out)
+    );
+}
+
+/// A `--rule` value that is the BARE TAIL of a NAMESPACED native analysis id (`god-model` for
+/// `schema/god-model`) stays a refusal — no finding's `ruleId` is ever the bare tail, so the filter
+/// could not have matched and exit 2 is the right code — but the refusal must not DENY the id.
+///
+/// It said "it is not a native analysis id" and, one clause later, pointed the reader at
+/// `zzop explain <id>`, which answers that very id by naming `schema/god-model`. Two surfaces of one
+/// binary disagreeing about whether the thing the user typed exists — and the sentence that was wrong
+/// is the one attached to the exit code. The fix a reader needs is the full id, so the message names it.
+#[test]
+fn a_bare_native_tail_rule_filter_is_refused_by_naming_the_full_id_not_by_denying_it() {
+    let out = run(&["analyze", "./any-tree", "--rule", "god-model"]);
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "no finding's ruleId is a bare namespace tail, so the filter is still unusable: {}",
+        stderr(&out)
+    );
+    let err = stderr(&out);
+    assert!(
+        err.contains("schema/god-model"),
+        "the refusal must name the full id that WOULD work: {err}"
+    );
+    assert!(
+        !err.contains("is not a native analysis id"),
+        "`god-model` IS the bare form of a registered native analysis — denying it contradicts \
+         `zzop explain god-model`, which the same message recommends: {err}"
+    );
+
+    // Beside it, both other verdicts, so the message change cannot be mistaken for a loosened gate:
+    // an id in NEITHER space is still refused, and the full id is accepted and runs.
+    let bogus = run(&["analyze", "./any-tree", "--rule", "no-such-id-anywhere-xyz"]);
+    assert_eq!(
+        bogus.status.code(),
+        Some(2),
+        "an id in neither registry is still a usage error: {}",
+        stderr(&bogus)
+    );
+    assert!(
+        stderr(&bogus).contains("names no rule"),
+        "{}",
+        stderr(&bogus)
+    );
+
+    let dir = TempDir::new("zzop-cli-native-rule-filter");
+    dir.write("app/a.ts", "export const a = 1;\n");
+    init_config(dir.path());
+    let ok = run(&[
+        "analyze",
+        &dir.path().display().to_string(),
+        "--rule",
+        "schema/god-model",
+    ]);
+    assert_eq!(
+        ok.status.code(),
+        Some(0),
+        "the full native id is a usable filter and must run, stderr: {}",
+        stderr(&ok)
+    );
 }
 
 /// Item ③a: `analyze --config <file>` analyzes the ONE tree a config at any location names — the mode
@@ -373,11 +645,18 @@ struct TempDir(PathBuf);
 
 impl TempDir {
     fn new(prefix: &str) -> Self {
+        // A clock is not a unique name. Windows' `SystemTime` granularity is coarse enough
+        // that two threads entering here together read the SAME nanos, and two tests that then
+        // `git init` one directory collide inside git's own template copy — a red gate with
+        // nothing to do with the change under test. The counter is what makes the name unique;
+        // the clock only keeps runs apart, and this file was one of the last without it.
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!("{prefix}-{}-{nanos}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("{prefix}-{}-{nanos}-{n}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         TempDir(dir)
     }
@@ -934,6 +1213,161 @@ fn explain_output_ids_exit_one_and_name_what_they_actually_are() {
     }
 }
 
+/// THE WHOLE `explain` EXIT-CODE CONTRACT, in one place, refusals and answers side by side.
+///
+/// The sibling tests above each pin one lane; this one pins that the lanes are DISCRIMINATED — a suite
+/// where every refusal is green is also satisfied by a binary that refuses everything, and a suite where
+/// every answer is green is satisfied by one that answers everything. The contract, using only the
+/// codes this binary already publishes (`cli/mod.rs`): **0** = the lookup rendered a rule; **1** = zzop
+/// could not answer (the id is well-formed and often REAL, just not DSL pack data this lookup renders);
+/// **2** = you called it wrong (argv shape). 1 rather than 0 is the reading that matters to a script:
+/// an error-shaped answer with a success code tells CI everything is fine about a question zzop
+/// declined to answer. 1 rather than 2 is the other half: the id was a legal argument, so the caller's
+/// grammar was not the problem.
+///
+/// The reported-but-unreproduced claim that `zzop explain mutating-route-no-auth` exits 0 is pinned
+/// here by that exact invocation, so it cannot quietly become true.
+#[test]
+fn explain_exit_codes_discriminate_a_refusal_from_an_answer() {
+    // 1 — refusals. The `<a>/<b>` pair is deliberate: a NAMESPACED native analysis id has the same
+    // shape as a pack-qualified DSL rule id but lives in a different registry
+    // (`zzop_facade::native_analysis_ids`) and never appears in `packsLoaded`, so a lookup that splits
+    // on the shape before consulting both id spaces calls a real analysis missing.
+    for (query, why) in [
+        ("mutating-route-no-auth", "a bare native analysis id"),
+        (
+            "duplicate-route",
+            "a bare native id that is ALSO a namespace tail",
+        ),
+        ("cross-layer/route-near-miss", "a namespaced native id"),
+        (
+            "schema/god-model",
+            "a namespaced native id from the other family",
+        ),
+        ("god-model", "the bare tail of a namespaced native id"),
+        ("security", "a whole rule PACK, not a rule"),
+        ("no-such-rule-anywhere-xyz", "unknown outright"),
+    ] {
+        let out = run(&["explain", query]);
+        assert_eq!(
+            out.status.code(),
+            Some(1),
+            "`zzop explain {query}` ({why}) is a refusal — an error-shaped answer must never carry a \
+             success code, stderr: {}",
+            stderr(&out)
+        );
+        assert!(
+            stdout(&out).is_empty(),
+            "{query}: nothing on stdout for a refusal, got: {}",
+            stdout(&out)
+        );
+    }
+    // A native id, bare or namespaced, must never be DENIED — it exists, it just is not DSL data.
+    for query in [
+        "mutating-route-no-auth",
+        "cross-layer/route-near-miss",
+        "schema/god-model",
+        "god-model",
+    ] {
+        let err = stderr(&run(&["explain", query]));
+        assert!(
+            !err.contains("unknown rule id"),
+            "{query} is a registered native analysis — calling it unknown denies zzop's own output: \
+             {err}"
+        );
+    }
+
+    // 0 — the answer, in BOTH accepted id forms. This is the discrimination proof.
+    for query in ["security/weak-crypto", "weak-crypto"] {
+        let out = run(&["explain", query]);
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "`zzop explain {query}` renders a real bundled rule, stderr: {}",
+            stderr(&out)
+        );
+        assert!(
+            stdout(&out).starts_with("id: security/weak-crypto"),
+            "{query}: got: {}",
+            stdout(&out)
+        );
+    }
+
+    // 2 — the usage lane, one representative (its own siblings are in `explain_usage_errors_exit_two`),
+    // present so all three codes this subcommand can produce are discriminated in one place.
+    assert_eq!(run(&["explain"]).status.code(), Some(2), "no id is usage");
+}
+
+/// The fourth lane of the contract above — an AMBIGUOUS bare id — which the bundled corpus alone cannot
+/// trigger: every shipped rule id is globally unique, machine-enforced by
+/// `crates/engine/tests/rule_contracts/markers.rs`. So the collision is MANUFACTURED, from a real
+/// bundled pack re-published under a second pack id into `zzop/rules/` where `explain --config` reads
+/// it. Derived from `BUNDLED_PACK_SOURCES` rather than written by hand, so it cannot drift from a pack
+/// shape the loader accepts.
+#[test]
+fn explain_an_ambiguous_bare_id_is_a_refusal_and_the_full_id_beside_it_still_answers() {
+    let (_, source) = zzop_config::BUNDLED_PACK_SOURCES
+        .first()
+        .expect("this build bundles at least one DSL pack");
+    let pack = zzop_core::parse_dsl_pack(source).expect("a bundled pack must parse");
+    let rule_id = pack
+        .rules
+        .first()
+        .expect("a bundled pack carries rules")
+        .id
+        .clone();
+    let clone_pack_id = format!("{}-collision-probe", pack.id);
+    let cloned = source.replacen(
+        &format!("\"id\": \"{}\"", pack.id),
+        &format!("\"id\": \"{clone_pack_id}\""),
+        1,
+    );
+    assert!(
+        cloned != *source,
+        "the pack id literal was not found in {} — this fixture rewrote nothing",
+        pack.id
+    );
+
+    let dir = TempDir::new("zzop-explain-ambiguous");
+    dir.write("zzop.config.jsonc", "{}");
+    dir.write("zzop/rules/collision-probe.json", &cloned);
+    let config = dir.path().join("zzop.config.jsonc");
+    let config = config.to_str().expect("temp path is UTF-8");
+
+    let bare = run(&["explain", &rule_id, "--config", config]);
+    assert_eq!(
+        bare.status.code(),
+        Some(1),
+        "an ambiguous bare id is a refusal, not a coin flip printed with a success code, stderr: {}",
+        stderr(&bare)
+    );
+    assert!(
+        stderr(&bare).contains("ambiguous"),
+        "the refusal must say WHY, and name both full ids: {}",
+        stderr(&bare)
+    );
+    assert!(
+        stdout(&bare).is_empty(),
+        "nothing on stdout for a refusal: {}",
+        stdout(&bare)
+    );
+
+    // The success beside it: the full id disambiguates and still exits 0, so the refusal above is about
+    // the AMBIGUITY and not about this fixture being unreadable.
+    let full = run(&[
+        "explain",
+        &format!("{}/{rule_id}", pack.id),
+        "--config",
+        config,
+    ]);
+    assert_eq!(
+        full.status.code(),
+        Some(0),
+        "the full id resolves even when the bare one is ambiguous, stderr: {}",
+        stderr(&full)
+    );
+}
+
 #[test]
 fn explain_usage_errors_exit_two() {
     let missing = run(&["explain"]);
@@ -1205,6 +1639,109 @@ fn manifest_argument_shapes_are_usage_errors_exactly_like_cross() {
     assert!(stderr(&out).contains("no extra paths"), "{}", stderr(&out));
     let out = run(&["manifest", "--nope"]);
     assert_eq!(out.status.code(), Some(2), "a flag is never a path");
+}
+
+/// The ARITY a help lane OFFERS must be the arity the parser ENFORCES — checked through the real
+/// binary, on both help lanes at once.
+///
+/// The defect: `zzop help` and `zzop manifest --help` both offered `manifest <path>...` (the universal
+/// CLI grammar for "one or more") while `zzop manifest ./gogs` exited 2 demanding two paths. A reader
+/// takes the offer and the same binary refuses it one line later. `cross` had the identical drift while
+/// its own parser-side usage const already said `(2+ paths)`, so the binary printed two arities for one
+/// subcommand depending on which lane you hit — which is why the offer and the refusal are asserted to
+/// be the same string here rather than merely both "correct".
+#[test]
+fn the_help_lanes_offer_the_same_paths_arity_the_parser_enforces() {
+    let top = run(&["help"]);
+    assert!(top.status.success(), "stderr: {}", stderr(&top));
+    let top = stdout(&top);
+
+    // The JOIN lanes. A one-tree manifest is unproducible by ANY route (`load_trees_request` refuses a
+    // single-tree config too), so the refusal is the correct side and the prose is what had to move.
+    for sub in ["cross", "manifest"] {
+        let offered = format!("{sub} <path> <path>... (2+ paths)");
+        assert!(
+            top.contains(&offered),
+            "`zzop help` must offer `{offered}`: {top}"
+        );
+        assert!(
+            !top.contains(&format!("{sub} <path>...")),
+            "`zzop help` still offers `{sub} <path>...`, which reads as \"one or more\": {top}"
+        );
+        let own = run(&[sub, "--help"]);
+        assert!(own.status.success(), "stderr: {}", stderr(&own));
+        assert!(
+            stdout(&own).contains(&offered),
+            "`zzop {sub} --help` must offer `{offered}`: {}",
+            stdout(&own)
+        );
+        let refused = run(&[sub, "./only-one"]);
+        assert_eq!(refused.status.code(), Some(2), "one path is not a join");
+        assert!(
+            stderr(&refused).contains(&offered),
+            "the refusal and the offer must be the same sentence: {}",
+            stderr(&refused)
+        );
+    }
+
+    // The single-tree lanes keep `<path>...`, which for them is TRUE — asserted so the fix cannot be
+    // applied with a broad brush that teaches every lane to demand two trees.
+    for sub in ["facts", "coverage", "graph"] {
+        assert!(
+            top.contains(&format!("{sub} <path>...")),
+            "`zzop {sub}` takes ONE path — `zzop help` must keep offering it: {top}"
+        );
+        assert!(
+            !top.contains(&format!("{sub} <path> <path>")),
+            "`zzop {sub}` accepts one path; claiming 2+ is the same lie in the other direction: {top}"
+        );
+    }
+}
+
+/// The behaviour behind the prose above, both sides of it: one tree is REFUSED by the join lanes and
+/// ACCEPTED by the single-tree lanes, and the join lanes still run when given two. Without the success
+/// legs a green run would be satisfied by a binary that refuses everything.
+#[test]
+fn one_tree_is_refused_by_the_join_lanes_and_accepted_by_the_single_tree_lanes() {
+    let one = TempDir::new("zzop-arity-one-tree");
+    one.write(
+        "src/api.ts",
+        "export function load() { return fetch(\"/api/users\"); }\n",
+    );
+    init_config(one.path());
+    let root = one.path().to_str().expect("temp path is UTF-8");
+
+    for sub in ["cross", "manifest"] {
+        let out = run(&[sub, root]);
+        assert_eq!(
+            out.status.code(),
+            Some(2),
+            "`zzop {sub} <one tree>` is an argument-shape error, stderr: {}",
+            stderr(&out)
+        );
+    }
+    for sub in ["facts", "coverage", "graph"] {
+        let out = run(&[sub, root]);
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "`zzop {sub} <one tree>` is a legal invocation, stderr: {}",
+            stderr(&out)
+        );
+    }
+
+    let two = TempDir::new("zzop-arity-two-trees");
+    let config = manifest_fixture(&two, None);
+    let config = config.to_str().expect("temp path is UTF-8");
+    for sub in ["cross", "manifest"] {
+        let out = run(&[sub, "--config", config]);
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "`zzop {sub}` over two trees must still run, stderr: {}",
+            stderr(&out)
+        );
+    }
 }
 
 #[test]
@@ -2021,6 +2558,148 @@ fn validate_rule_pack_exits_one_with_a_report_when_the_pack_is_invalid() {
     assert!(
         !stdout(&out).is_empty(),
         "the pack's issues ride stdout: {}",
+        stderr(&out)
+    );
+}
+
+/// `--fail-on <severity>` — the CI GATE, pinned where a shell sees it: the exit CODE, and the
+/// stdout/stderr split.
+///
+/// Until 2026-08-17 the exit code answered only "did zzop run", so a tree full of criticals exited 0
+/// and every CI integration wrote its own gate. Three properties make this flag worth having, and all
+/// three are asserted here: the code moves with the findings, it is a THIRD code (never 1, which would
+/// make a broken config and a real finding indistinguishable in a CI log), and it reads the COUNTS —
+/// so the view knobs cannot narrow the gate, which is the trap a `shown`-list diff falls into.
+#[test]
+fn fail_on_moves_the_exit_code_with_the_findings_and_ignores_the_view_knobs() {
+    let dir = TempDir::new("zzop-cli-fail-on");
+    // A `warning`-severity finding and nothing above it — so one threshold fires and the one above
+    // does not, from a single fixture.
+    dir.write(
+        "a.ts",
+        "export const API_KEY = \"sk-not-a-real-key-abcdefgh\";\n",
+    );
+    init_config(dir.path());
+    let path = dir.path().display().to_string();
+
+    let baseline = run(&["analyze", &path]);
+    let v: serde_json::Value =
+        serde_json::from_str(&stdout(&baseline)).expect("analyze prints JSON");
+    let by_severity = v["findings"]["bySeverity"]
+        .as_object()
+        .expect("the reply carries a severity census");
+    assert!(
+        by_severity.contains_key("warning"),
+        "the fixture must produce a warning for this test to mean anything: {v}"
+    );
+    assert!(
+        !by_severity.contains_key("critical"),
+        "and nothing above it, or the `critical` threshold below proves nothing: {v}"
+    );
+    assert_eq!(
+        baseline.status.code(),
+        Some(0),
+        "without the flag the exit code says only that zzop ran"
+    );
+
+    let hit = run(&["analyze", &path, "--fail-on", "warning"]);
+    assert_eq!(
+        hit.status.code(),
+        Some(3),
+        "a met threshold is its OWN code, never 1: {}",
+        stderr(&hit)
+    );
+    assert!(
+        serde_json::from_str::<serde_json::Value>(&stdout(&hit)).is_ok(),
+        "the whole reply still goes to stdout, so the gate composes with a pipeline instead of \
+         replacing it: {}",
+        stdout(&hit)
+    );
+    assert!(
+        stderr(&hit).contains("--fail-on warning matched") && stderr(&hit).contains("1 warning"),
+        "and stderr names the counts, because a CI log is usually all a reader has: {}",
+        stderr(&hit)
+    );
+
+    let clear = run(&["analyze", &path, "--fail-on", "critical"]);
+    assert_eq!(
+        clear.status.code(),
+        Some(0),
+        "nothing at or above `critical` exists, so the gate passes: {}",
+        stderr(&clear)
+    );
+
+    // The gate reads the COUNTS. `--limit 0` prints no findings at all and `--severity critical`
+    // filters the list to nothing — neither may change the verdict, or a CI gate would silently weaken
+    // itself the moment someone tidied the output.
+    for narrowing in [
+        vec!["analyze", &path, "--limit", "0", "--fail-on", "warning"],
+        vec![
+            "analyze",
+            &path,
+            "--severity",
+            "critical",
+            "--fail-on",
+            "warning",
+        ],
+    ] {
+        let out = run(&narrowing);
+        assert_eq!(
+            out.status.code(),
+            Some(3),
+            "{narrowing:?} narrows the VIEW, never the gate: {}",
+            stderr(&out)
+        );
+    }
+}
+
+/// The shape errors, and the one lane that refuses the flag outright. A gate that accepts its flag and
+/// can never fire is worse than no gate: the build goes green and looks like it proved something.
+#[test]
+fn fail_on_rejects_bad_values_and_is_refused_on_cross() {
+    let dir = TempDir::new("zzop-cli-fail-on-shape");
+    dir.write("a.ts", "export const a = 1;\n");
+    init_config(dir.path());
+    let path = dir.path().display().to_string();
+
+    for bad in [
+        vec!["analyze", &path, "--fail-on", "nope"],
+        vec!["analyze", &path, "--fail-on"],
+    ] {
+        let out = run(&bad);
+        assert_eq!(
+            out.status.code(),
+            Some(2),
+            "{bad:?} must be a usage error rather than an ignored gate: {}",
+            stdout(&out)
+        );
+        assert!(
+            stderr(&out).contains("usage: zzop analyze"),
+            "{bad:?}: {}",
+            stderr(&out)
+        );
+    }
+
+    let second = TempDir::new("zzop-cli-fail-on-cross");
+    second.write("b.ts", "export const b = 1;\n");
+    init_config(second.path());
+    let out = run(&[
+        "cross",
+        &path,
+        &second.path().display().to_string(),
+        "--fail-on",
+        "critical",
+    ]);
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "cross has no per-tree severity census to gate on: {}",
+        stdout(&out)
+    );
+    assert!(
+        stderr(&out).contains("refused rather than ignored")
+            && stderr(&out).contains("analyze --fail-on"),
+        "the refusal must say WHY and name the lane that does work: {}",
         stderr(&out)
     );
 }

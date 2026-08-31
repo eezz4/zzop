@@ -71,22 +71,24 @@ pub(super) fn eval_method_scan(
     let Some(absent) = diag.compile_labeled("absent[].pattern", &m.absent) else {
         return;
     };
-    // Whether a trigger match on the line being scanned satisfies `after`. No `after` -> always true
-    // (byte-identical to the pre-`after` behaviour). Otherwise: true when the ordering label matched on an
-    // earlier line, else only when it matches EARLIER ON THIS LINE by start offset — which is what makes a
-    // one-liner continuation (`p.then(r => setX(r))`) count while `setX(v); await f();` does not.
+    // The NARROW veto beside that wide one — see `MethodScan::trigger_call_exclude_pattern`. MULTILINE
+    // for `CallScan::line_exclude_pattern`'s reason: what it reads is a WINDOW, not one line.
+    let Some(call_exclude_re) = diag.compile_opt_multiline(
+        "trigger_call_exclude_pattern",
+        m.trigger_call_exclude_pattern.as_ref(),
+    ) else {
+        return;
+    };
+    // Whether the trigger call anchored on this line has a declared mitigator inside its OWN
+    // parentheses. Unset field -> always false, i.e. byte-identical to the pre-field behaviour.
+    let call_vetoed = |lines: &[&str], at: usize, scan: &str| -> bool {
+        let veto = call_exclude_re.as_ref();
+        super::veto_window::trigger_call_excluded(veto, &patterns[trigger_idx].0, lines, at, scan)
+    };
+    // The lexical-ORDER decision — `gates::order_ok` owns it and its argument.
     let order_ok = |after_seen_earlier: bool, scan: &str| -> bool {
-        let Some(ai) = after_idx else { return true };
-        if after_seen_earlier {
-            return true;
-        }
-        match (
-            patterns[ai].0.find(scan),
-            patterns[trigger_idx].0.find(scan),
-        ) {
-            (Some(a), Some(t)) => a.start() < t.start(),
-            _ => false,
-        }
+        let after_re = after_idx.map(|ai| &patterns[ai].0);
+        gates::order_ok(after_re, &patterns[trigger_idx].0, after_seen_earlier, scan)
     };
     let marker = rule.suppress_marker();
     // Derived from the rule id (escaped) — a failure here is structural, see `line_scan`'s twin note.
@@ -238,6 +240,11 @@ pub(super) fn eval_method_scan(
                             {
                                 continue;
                             }
+                        }
+                        // The DOWNWARD call-window veto — see `MethodScan::trigger_call_exclude_pattern`.
+                        // Same "not a hit at all" semantics as the two gates above it.
+                        if pi == trigger_idx && call_vetoed(&lines, start_idx + i, &scan) {
+                            continue;
                         }
                         satisfied[pi] = true;
                         if pi == trigger_idx {

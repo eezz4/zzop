@@ -45,7 +45,7 @@ pub const FRAMEWORK_RECOGNIZERS: &[FrameworkRecognizer] = &[
     FrameworkRecognizer {
         framework: "ef core",
         extensions: &["cs"],
-        emits: &[channel::DB],
+        emits: &[channel::DB_PROVIDES],
     },
 ];
 

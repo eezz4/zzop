@@ -8,11 +8,6 @@
 //! entity-attribute channel (`zzop_core::AttributeStore`, Symbol-keyed [`BOUND_MODEL_ATTR`]/[`MODEL_CHURN_ATTR`]) rather than typed `SchemaUsage` slots. `unreferenced-model-name` therefore keys on the generic
 //! vocab-free signal (is the model name referenced anywhere?) plus whatever a producer injects into `BOUND_MODEL_ATTR`.
 
-use std::collections::HashSet;
-use std::sync::OnceLock;
-
-use regex::Regex;
-
 use zzop_core::{AttributeStore, SchemaModel, SchemaUsage, Severity};
 
 use crate::structural::{analyze_schema, SchemaAnalysis, SchemaIssue};
@@ -25,81 +20,13 @@ pub const BOUND_MODEL_ATTR: &str = "bound-model";
 /// churn count (a number). Drives model-churn. Replaces the removed `SchemaUsage.model_churn` slot.
 pub const MODEL_CHURN_ATTR: &str = "model-churn";
 
-macro_rules! lazy_re {
-    ($f:ident, $p:expr) => {
-        fn $f() -> &'static Regex {
-            static R: OnceLock<Regex> = OnceLock::new();
-            R.get_or_init(|| Regex::new($p).unwrap())
-        }
-    };
-}
-
 // --- fieldUsageTokens (replaces the removed scanFieldUsage filesystem walk) ---
 
-/// Comment/string-stripped identifier tokens referenced anywhere in one file's raw text — the direct
-/// per-file substrate `zzop_engine`'s fused per-file pass now feeds into `SchemaUsage.identifier_counts`
-/// (each file's set unioned tree-wide, then re-counted to presence — see that crate's `assemble`).
-/// Replaces the removed `scan_field_usage`'s own `<root>/src` filesystem walk: same recognizer (plain
-/// identifier tokens on comment/string-stripped text — common names like id/name appear everywhere, so
-/// they're effectively never flagged dead, keeping false positives low at the cost of recall), just
-/// invoked once per file instead of via a second full-tree walk. `rel` gates which files are worth
-/// scanning at all (see [`is_field_usage_scan_file`]); an excluded file yields an empty set regardless of
-/// `text`.
-pub fn field_usage_tokens(rel: &str, text: &str) -> HashSet<String> {
-    if !is_field_usage_scan_file(rel) {
-        return HashSet::new();
-    }
-    let stripped = strip_comments_and_strings(text);
-    ident_re()
-        .find_iter(&stripped)
-        .map(|m| m.as_str().to_string())
-        .collect()
-}
+mod tokens;
 
-/// The ONE list of extensions [`field_usage_tokens`] will scan at all — the whole evidence channel behind
-/// `unreferenced-model-name`/`unreferenced-field-name`. `pub` and quoted (never re-spelled) by
-/// [`crate::message::field_usage_sightline`], so the sightline the findings publish cannot drift from the
-/// scan itself; the published pages are pinned against that same rendering.
-///
-/// POLICY VALUE, T2: also spelled by hand, in English prose, in `docs/rules/catalog.md` and
-/// `site/rules.html` (a Markdown/HTML page cannot reference a Rust constant) — pinned by
-/// `crate::message::tests::the_field_usage_sightline_is_identical_in_the_finding_and_the_published_docs`.
-pub const FIELD_USAGE_SCAN_EXTENSIONS: &[&str] = &["ts", "tsx"];
+pub use tokens::{field_usage_tokens, FIELD_USAGE_SCAN_EXTENSIONS};
 
-/// `.ts`/`.tsx` only, excluding `.d.ts` declaration files — mirrors the removed `walk_ts_files`'s own
-/// per-file filename filter. The old walk also hard-excluded `node_modules`/`dist`/`data` directories;
-/// that exclusion isn't reproduced here since the fused per-file pass this now runs inside already skips
-/// `node_modules`/`dist` under the DEFAULT `skip_dirs` (`EngineConfig`) — a subset of the old exclusions,
-/// so under default config the fused pass covers every file the old `<root>/src` walk did plus more,
-/// which only ADDS identifier evidence (the accepted tree-wide-widening deviation, see module doc) and
-/// never adds a false unreferenced-field-name positive. Caveat: a MORE-aggressive custom `skip_dirs` could exclude a
-/// source dir the old walk scanned, dropping "used" tokens and potentially surfacing a false unreferenced-field-name —
-/// acceptable, since a user who scopes analysis away from a directory is opting out of its evidence.
-fn is_field_usage_scan_file(rel: &str) -> bool {
-    if rel.ends_with(".d.ts") {
-        return false;
-    }
-    FIELD_USAGE_SCAN_EXTENSIONS
-        .iter()
-        .any(|ext| rel.ends_with(&format!(".{ext}")))
-}
-
-fn strip_comments_and_strings(src: &str) -> String {
-    let no_block = block_comment_re().replace_all(src, " ");
-    let no_line = line_comment_re().replace_all(&no_block, "$1");
-    let no_dq = double_quote_re().replace_all(&no_line, "\"\"");
-    let no_sq = single_quote_re().replace_all(&no_dq, "''");
-    template_re().replace_all(&no_sq, "``").into_owned()
-}
-
-lazy_re!(block_comment_re, r"(?s)/\*.*?\*/");
-lazy_re!(line_comment_re, r"(?m)(^|[^:])//.*$");
-lazy_re!(double_quote_re, r#""(?:\\.|[^"\\])*""#);
-lazy_re!(single_quote_re, r"'(?:\\.|[^'\\])*'");
-lazy_re!(template_re, r"`(?:\\.|[^`\\])*`");
 // ASCII-only identifier token, mirroring JS `\b[a-zA-Z_$][\w$]*\b` (JS `\w` is ASCII-only).
-lazy_re!(ident_re, r"[A-Za-z_$][A-Za-z0-9_$]*");
-
 // Migration churn (`MODEL_CHURN_ATTR`) is an environment fact — accumulated schema-change history that
 // lives in migration files the parse pass never dispatches, under a deployment-specific directory layout.
 // Per the "native = common environments only; everything else is injected" design line, a native
@@ -108,12 +35,43 @@ lazy_re!(ident_re, r"[A-Za-z_$][A-Za-z0-9_$]*");
 // rule-side re-parse leak AND a one-project layout) has no place here. `MODEL_CHURN_ATTR` is the injection
 // slot instead — a producer that knows a project's migration layout injects it on the model `Symbol`, and
 // `apply_churn_rule` (below) reads it off the generic entity-attribute channel.
-
 // --- crossCheckSchema + applyChurnRule + analyzeSchema (usage branch) ---
-
 pub const SKIP_FIELD_NAMES: &[&str] = &["id", "createdAt", "updatedAt"];
-/// Very short field names appear everywhere in BE source; unreferenced-field-name detection is meaningless -> exclude.
-const MIN_FIELD_NAME_LEN: usize = 3;
+
+/// True when `name` appears at least once as an identifier in the scanned BE source.
+fn identifier_seen(usage: &SchemaUsage, name: &str) -> bool {
+    usage.identifier_counts.get(name).copied().unwrap_or(0) > 0
+}
+
+/// The Prisma client's delegate spelling for a model — the declared name with its first character
+/// lowercased (`UserPassword` -> `userPassword`, matching `prisma.userPassword`) — but ONLY for a
+/// multi-word name, and the restriction is the whole point.
+///
+/// `identifier_counts` is an unqualified whole-tree token bag: it records that the token `user` appeared,
+/// not that `prisma.user` did. For a single-word model the delegate is therefore one of the most common
+/// local-variable names in any TypeScript tree, and accepting it makes the rule VACUOUS rather than
+/// merely loose — a review canary with `model User`/`model Team` and a source file containing nothing but
+/// `const user = {n:1}; const team = {n:2};` turned two correct findings into two findings asserting the
+/// opposite ("this model is used, this column is not"), because the model-level short-circuit stopped
+/// firing and the field loop ran.
+///
+/// An internal uppercase is what makes the derived spelling distinctive, and it costs nothing measured:
+/// all seven calcom/cal.com models this fix was built from are multi-word (`userPassword`, `hostGroup`,
+/// `reminderMail`, three credit-ledger models, `videoCallGuest`), so the narrowing keeps 7/7 of the
+/// benefit. **The single-word case stays unfixed and that is a stated miss**: a `model Booking` used only
+/// as `prisma.booking` still reports. Closing it needs a RECEIVER-qualified token (`prisma.booking`),
+/// which this substrate does not carry — a vacuous rule is a worse answer than a narrow one.
+///
+/// ASCII-only on purpose: Prisma model names are `[A-Za-z][A-Za-z0-9_]*`, so there is no locale question.
+fn delegate_accessor(model_name: &str) -> Option<String> {
+    let mut chars = model_name.chars();
+    let first = chars.next()?;
+    let rest = chars.as_str();
+    if !rest.chars().any(|c| c.is_ascii_uppercase()) {
+        return None;
+    }
+    Some(first.to_ascii_lowercase().to_string() + rest)
+}
 
 /// Schema cross-check — compares the schema-IR against actual BE code usage. Surfaces unreferenced-model-name (a model not bound to any store) and unreferenced-field-name (a field never appearing as an identifier in BE source)
 /// issues. id/createdAt/updatedAt are excluded by default since infrastructure fields are rarely referenced directly.
@@ -131,12 +89,20 @@ pub fn cross_check_schema(
         // entity-attribute channel. That channel is empty under native analysis now that the app-specific
         // store-binding recognizer is gone. This makes unreferenced-model-name a general "the model name is never
         // referenced" check instead of "the model isn't wired through one project's store convention."
-        let referenced = usage
-            .identifier_counts
-            .get(&model.name)
-            .copied()
-            .unwrap_or(0)
-            > 0;
+        let referenced = identifier_seen(usage, &model.name)
+            // The GENERATED CLIENT never spells the model name. Prisma lowercases the first letter to
+            // build its delegate — a `model UserPassword` is reached as `prisma.userPassword.findUnique`
+            // — so correct, heavily-used code contains the PascalCase name nowhere at all, and this rule
+            // reported it as unreferenced. Measured on calcom/cal.com `176037d`: 7 of 7 findings examined
+            // were this, every one of them a model in daily use (`prisma.userPassword`, `prisma.hostGroup`,
+            // `prisma.reminderMail`, three credit-ledger models, `prisma.videoCallGuest`).
+            //
+            // The camelCase form is DERIVED from the model name, not a spelling anyone maintains, so a
+            // model named tomorrow is covered without a row being added — which is what keeps this from
+            // becoming the kind of hand list that leaves everything outside it invisible forever.
+            // `delegate_accessor` returns None for a SINGLE-word name; its doc has the canary that
+            // forced that restriction.
+            || delegate_accessor(&model.name).is_some_and(|d| identifier_seen(usage, &d));
         let bound = attrs
             .symbol_attr(&model.name, None, BOUND_MODEL_ATTR)
             .is_some_and(zzop_core::attr_is_truthy);
@@ -150,11 +116,42 @@ pub fn cross_check_schema(
             });
             continue;
         }
+        // Every model name in this schema, for the relation-navigator test below.
+        let model_names: std::collections::HashSet<&str> =
+            models.iter().map(|m| m.name.as_str()).collect();
         for field in &model.fields {
             if skip_field_names.contains(&field.name.as_str()) {
                 continue;
             }
-            if field.name.len() < MIN_FIELD_NAME_LEN {
+            // NO MINIMUM NAME LENGTH — a `MIN_FIELD_NAME_LEN = 3` floor skipped names of one or two
+            // characters until 2026-08-29, on the rationale that "very short field names appear
+            // everywhere in BE source, so the detection is meaningless". Two things were wrong with it.
+            //
+            // It was a PROXY FOR A FACT THIS RULE ALREADY MEASURES. "Does this name appear in source"
+            // is not something to approximate from the name's length — `identifier_counts` counts it
+            // directly, three lines below. A short name that appears is dropped by that count; a short
+            // name that genuinely never appears anywhere in the tree is exactly as strong a signal as a
+            // long one, and the floor threw it away before the evidence was consulted.
+            //
+            // And it never fired. Measured 2026-08-29 over the corpus's only Prisma schema
+            // (calcom/cal.com, 100 models): after `SKIP_FIELD_NAMES` and the navigator test below, the
+            // candidate field-name length distribution starts at 3 — **zero** candidates of length 1 or
+            // 2 exist. Two clean release builds one constant apart confirm it end to end: at 3 and at 2
+            // the rule reports 27 findings, the same 27, and every other rule in all nine trees is
+            // unmoved. A gate whose harvest is zero buys only risk (`.claude` rule-quality §26 (3)).
+            // A RELATION NAVIGATOR is not a deletable field, so reporting it is never actionable — it is
+            // the required opposite side of a `@relation` declared on the other model, and removing it
+            // makes `prisma validate` fail outright: you cannot generate a client, let alone migrate.
+            // Prisma also never requires code to name the back side (you traverse it through `include`),
+            // so "no identifier hit" is the EXPECTED reading for a correct schema, not a signal.
+            // Measured on calcom/cal.com `176037d`, where the advice was "remove the field": `Team.orgUsers`
+            // (the back side of `User.organization @relation("scope")`), `Team.inviteTokens`,
+            // `Team.accessCodes`, `Credential.CalendarCache` and more, out of 65 findings.
+            //
+            // The test is structural rather than attribute-based: a field whose declared TYPE is the name
+            // of another model in this schema is a navigator. An enum-typed or scalar field is not, so a
+            // genuinely dead column (`Team.hideBookATeamMember`, a real one in that same run) still reports.
+            if model_names.contains(field.r#type.as_str()) {
                 continue;
             }
             if usage
@@ -178,6 +175,21 @@ pub fn cross_check_schema(
     issues
 }
 
+/// The churn ladder: report at or above `CHURN_WARNING_THRESHOLD`, escalate to critical at or above
+/// `CHURN_CRITICAL_THRESHOLD`. **BOTH ARE CONVENTIONS, AND NEITHER CAN BE MEASURED FROM HERE** — that
+/// second half is the whole reason this comment exists rather than a number with a story.
+///
+/// `apply_churn_rule` reads its count off an INJECTED attribute (`MODEL_CHURN_ATTR`), and no native
+/// analysis in this repo produces one (see this module's header for why that recognizer was removed).
+/// So the rule is silent by construction in every native run: measured 2026-08-29 across all nine
+/// corpus trees, `schema/model-churn` reports **0** findings, and moving either constant by one in
+/// either direction moves nothing — 0 at 4/9, 0 at 5/10, 0 at 6/11. There is no population to
+/// calibrate against, which means 5 and 10 cannot be justified by measurement and cannot be tuned by
+/// it either. They are round numbers, and the rule's message now says so to whoever does have data.
+///
+/// The trigger for replacing them with a measurement is a Mode-B producer injecting real churn counts:
+/// at that point the distribution exists, and the first person holding one should set this ladder from
+/// it rather than inherit these two.
 const CHURN_WARNING_THRESHOLD: u32 = 5;
 const CHURN_CRITICAL_THRESHOLD: u32 = 10;
 

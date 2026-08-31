@@ -257,6 +257,13 @@ pub fn all_consumes_unjoined_findings(
                 "ambiguousCount": tally.ambiguous,
                 "distinctKeyCount": tally.keys.len(),
                 "sampleKeys": sample,
+                // The replacement, MACHINE-READABLE (2026-08-31). The `message` above has said it in
+                // prose since this rule shipped, and prose is not a channel a reply can join on: the
+                // `cross` reply's `nativeAnalyses.zeroInCrossLayerFindings` listed both of these ids as
+                // findings-free while their 76 + 17 findings had been dropped right here, and its legend
+                // called that a MEASURED zero. Declared from `subsume::REPLACED` — the same list the
+                // dropping actually uses — so the claim and the act cannot drift.
+                "replaces": REPLACED,
             })),
         });
     }
@@ -282,7 +289,7 @@ fn run_has_http_provides(cross_layer: &CrossLayerResult) -> bool {
 }
 
 mod subsume;
-pub use subsume::retain_non_subsumed_sources;
+pub use subsume::{retain_non_subsumed_sources, REPLACED};
 
 #[cfg(test)]
 mod tests;

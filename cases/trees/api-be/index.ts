@@ -18,6 +18,7 @@ import * as beDbPaginationNoOrderby from "./services/be-db.pagination-no-orderby
 import * as beDbUnawaitedWrite from "./services/be-db.unawaited-write";
 import * as beDbUnboundedUserLimit from "./services/be-db.unbounded-user-limit";
 import * as beDbUpdateDeleteNoWhere from "./services/be-db.update-delete-no-where";
+import * as beRedisFlushallInCode from "./services/be-redis.flushall-in-code";
 import * as beReliabilityAsyncRouteNoCatch from "./services/be-reliability.async-route-no-catch";
 import * as beReliabilityAwaitInMap from "./services/be-reliability.await-in-map";
 import * as beReliabilityBodyLimitMissing from "./services/be-reliability.body-limit-missing";
@@ -35,11 +36,14 @@ import * as beSecurityApiKeyInUrl from "./services/be-security.api-key-in-url";
 import * as beSecurityBcryptCostTooLow from "./services/be-security.bcrypt-cost-too-low";
 import * as beSecurityCorsCredentialsWildcard from "./services/be-security.cors-credentials-wildcard";
 import * as beSecurityCorsWildcard from "./services/be-security.cors-wildcard";
+import * as beSecurityDangerousHtmlConcat from "./services/be-security.dangerous-html-concat";
 import * as beSecurityErrorLeakToClient from "./services/be-security.error-leak-to-client";
 import * as beSecurityHardcodedSecret from "./services/be-security.hardcoded-secret";
 import * as beSecurityHighEntropySecret from "./services/be-security.high-entropy-secret";
 import * as beSecurityInsecureCookie from "./services/be-security.insecure-cookie";
 import * as beSecurityJwtNoExpiry from "./services/be-security.jwt-no-expiry";
+import * as beSecurityJwtNoneAlgorithm from "./services/be-security.jwt-none-algorithm";
+import * as beSecurityJwtSignLiteralSecret from "./services/be-security.jwt-sign-literal-secret";
 import * as beSecurityMassAssignment from "./services/be-security.mass-assignment";
 import * as beSecurityOpenRedirect from "./services/be-security.open-redirect";
 import * as beSecurityPathTraversal from "./services/be-security.path-traversal";
@@ -88,6 +92,7 @@ export const registry = {
   beDbUnawaitedWrite,
   beDbUnboundedUserLimit,
   beDbUpdateDeleteNoWhere,
+  beRedisFlushallInCode,
   beReliabilityAsyncRouteNoCatch,
   beReliabilityAwaitInMap,
   beReliabilityBodyLimitMissing,
@@ -105,11 +110,14 @@ export const registry = {
   beSecurityBcryptCostTooLow,
   beSecurityCorsCredentialsWildcard,
   beSecurityCorsWildcard,
+  beSecurityDangerousHtmlConcat,
   beSecurityErrorLeakToClient,
   beSecurityHardcodedSecret,
   beSecurityHighEntropySecret,
   beSecurityInsecureCookie,
   beSecurityJwtNoExpiry,
+  beSecurityJwtNoneAlgorithm,
+  beSecurityJwtSignLiteralSecret,
   beSecurityMassAssignment,
   beSecurityOpenRedirect,
   beSecurityPathTraversal,

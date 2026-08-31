@@ -280,6 +280,105 @@ fn pack_regex_issues_walks_every_matcher_kind() {
     assert_eq!(issues.len(), 5, "{issues:?}");
 }
 
+/// One pack, one rule per field, with `$PATTERN` substituted into the named field — the four fields the
+/// hand-written census used to miss (`CallScan::algorithm_pattern` / `line_pattern` /
+/// `line_exclude_pattern`, `LineScan::prev_line_exclude_pattern`), each isolated so an issue line can be
+/// attributed to exactly one of them.
+fn pack_over_the_late_pattern_fields(pattern: &str) -> String {
+    format!(
+        r#"{{
+            "id": "p",
+            "rules": [
+                {{"id": "algo", "severity": "info", "message": "m",
+                 "matcher": {{"type": "call-scan", "file_pattern": "ok",
+                              "algorithm_pattern": "{pattern}"}}}},
+                {{"id": "cline", "severity": "info", "message": "m",
+                 "matcher": {{"type": "call-scan", "file_pattern": "ok",
+                              "line_pattern": "{pattern}"}}}},
+                {{"id": "cexcl", "severity": "info", "message": "m",
+                 "matcher": {{"type": "call-scan", "file_pattern": "ok",
+                              "line_exclude_pattern": "{pattern}"}}}},
+                {{"id": "prev", "severity": "info", "message": "m",
+                 "matcher": {{"type": "line-scan", "file_pattern": "ok", "line_pattern": "ok",
+                              "prev_line_exclude_pattern": "{pattern}"}}}}
+            ]
+        }}"#
+    )
+}
+
+/// The regression this file exists to prevent, in its own words: a field the INTERPRETER regex-compiles
+/// at eval time (`dsl::call_scan`/`line_scan`'s `compile_opt`, whose `None` arm silently `return`s before
+/// a single site is evaluated) but the pre-scan census never compiled. All four were reachable through
+/// `zzop validate-rule-pack`, which answered `{"valid":true,"issues":[]}` for a rule that could never
+/// fire.
+#[test]
+fn pack_regex_issues_reports_a_bad_regex_in_every_eval_time_compiled_field() {
+    let pack = parse_dsl_pack(&pack_over_the_late_pattern_fields("(unclosed")).unwrap();
+    let issues = pack_regex_issues(&pack);
+    let text = issues.join("\n");
+    for (rule, field) in [
+        ("algo", "algorithm_pattern"),
+        ("cline", "line_pattern"),
+        ("cexcl", "line_exclude_pattern"),
+        ("prev", "prev_line_exclude_pattern"),
+    ] {
+        assert!(
+            text.contains(&format!("rule \"p/{rule}\": `{field}`")),
+            "{field} went unchecked: {text}"
+        );
+    }
+    assert_eq!(issues.len(), 4, "{issues:?}");
+}
+
+/// The other half of the assertion above, and the reason it is worth anything: a census that reported
+/// those four fields by reporting EVERYTHING would pass the test above and be useless. Same four fields,
+/// same shape, valid patterns — nothing may be reported.
+#[test]
+fn pack_regex_issues_is_silent_when_those_same_fields_hold_valid_regexes() {
+    let pack = parse_dsl_pack(&pack_over_the_late_pattern_fields("closed|fine")).unwrap();
+    let issues = pack_regex_issues(&pack);
+    assert!(issues.is_empty(), "{issues:?}");
+}
+
+/// ORDERING PIN, and the precondition of deriving the census from `for_each_pattern_field` (the same walk
+/// `expand_fragments` drives): `pack_regex_issues` must only ever see EXPANDED patterns. An unexpanded
+/// `${test-paths}` is not a valid regex — asserted here rather than assumed — so a census running before
+/// expansion would report every fragment-using rule in the shipped packs as broken.
+#[test]
+fn pack_regex_issues_sees_expanded_fragments_because_parse_expands_first() {
+    let json = r#"{
+        "id": "p",
+        "rules": [
+            {"id": "frag", "severity": "info", "message": "m",
+             "matcher": {"type": "line-scan", "file_pattern": "ok", "line_pattern": "ok",
+                         "file_exclude_pattern": "${test-paths}"}}
+        ]
+    }"#;
+    // Serde alone — the shape `parse_dsl_pack` starts from, before it runs `expand_fragments`. The raw
+    // reference is read back off the struct rather than retyped so this cannot pin a stale spelling.
+    let raw: RulePackDef = serde_json::from_str(json).unwrap();
+    let Matcher::LineScan(raw_m) = &raw.rules[0].matcher else {
+        panic!("fixture is a line-scan");
+    };
+    let unexpanded = raw_m.file_exclude_pattern.clone().unwrap();
+    assert!(
+        regex::Regex::new(&unexpanded).is_err(),
+        "an unexpanded fragment reference must NOT compile — if it ever does, this pin is inert"
+    );
+
+    let pack = parse_dsl_pack(json).unwrap();
+    let Matcher::LineScan(m) = &pack.rules[0].matcher else {
+        panic!("fixture is a line-scan");
+    };
+    assert_ne!(
+        m.file_exclude_pattern.as_deref().unwrap(),
+        unexpanded,
+        "parse_dsl_pack must expand before any caller can census the pack"
+    );
+    let issues = pack_regex_issues(&pack);
+    assert!(issues.is_empty(), "{issues:?}");
+}
+
 #[test]
 fn applies_to_matches_when_a_rule_file_pattern_matches() {
     let pack: RulePackDef = serde_json::from_str(&valid_pack("p")).unwrap();

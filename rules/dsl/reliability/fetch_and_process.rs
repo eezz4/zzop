@@ -4,6 +4,7 @@
 //! `examples/packs/tests/process_exit_and_race.rs`. All four rules used distinct fixtures, so nothing
 //! here had to be duplicated.
 
+use crate::assert_disqualifier_clause_precedes_imperative;
 use crate::{hits, scan, TempDir};
 
 // --- fetch-no-timeout ---
@@ -23,6 +24,38 @@ fn fetch_without_timeout_in_a_standalone_worker_repo_via_default_export_shape_is
     let h = hits(&out, "fetch-no-timeout");
     assert_eq!(h.len(), 1, "{:?}", out.findings);
     assert_eq!(h[0].line, 4);
+}
+
+/// §27 pin (2026-08-29). The sibling of `async-route-no-catch`'s pin, and the same self-diagnosis: a
+/// timeout set on a shared client instance in another file (`axios.create({ timeout })` in a helper
+/// module) is invisible to this per-function check, and the message calls that "the rule's biggest
+/// real-world false-positive vector". It sat BEHIND "Pass an explicit timeout ...", so the reader most
+/// likely to be wronged by this finding — the one whose codebase centralises its timeouts, which is the
+/// discipline the remedy is arguably teaching — never reached it. Pure sentence swap: 546 chars before
+/// and after, character multiset identical.
+///
+/// Unlike two of its three pack-mates this rule FIRES on the blind dogfood corpus — 18 findings
+/// across its 9 trees, against 0 apiece for `async-route-no-catch` and `reqwest-no-timeout` — so the
+/// new ordering is one a dry evaluator can actually meet rather than one only argued for here.
+#[test]
+fn fetch_no_timeout_message_puts_the_shared_client_blind_spot_before_the_timeout_imperative() {
+    let dir = TempDir::new("zzop-be-rel");
+    dir.write(
+        "src/jobs/refresh.ts",
+        "declare const ECB_URL: string;\n\nasync function fetchRates() {\n  return fetch(ECB_URL);\n}\n\nexport default {\n  async scheduled(controller: any, env: any, ctx: any) {\n    return fetchRates();\n  },\n};\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "fetch-no-timeout");
+    // Sentence repair only — the finding itself is unchanged.
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 4);
+
+    assert_disqualifier_clause_precedes_imperative(
+        "fetch-no-timeout",
+        &h[0].message,
+        "A timeout set on a shared client instance in another file",
+        "Pass an explicit timeout",
+    );
 }
 
 #[test]

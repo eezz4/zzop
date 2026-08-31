@@ -1,4 +1,4 @@
-use crate::{scan, TempDir};
+use crate::{assert_disqualifier_clause_precedes_imperative, scan, TempDir};
 
 // --- jquery-html-sink ---
 
@@ -135,5 +135,43 @@ fn jquery_html_sink_inside_a_test_fixture_path_is_not_flagged() {
             .all(|f| f.rule_id != "browser/jquery-html-sink"),
         "{:?}",
         out.findings
+    );
+}
+/// §27 pin (2026-08-29). The disqualifier is this rule's own "Known imprecision": a jQuery-OBJECT
+/// argument, `.append($('<div>'))`, is lexically identical to an HTML-string argument, so the rule fires
+/// on it and the message says so — "accepted as the FP-safe subset's price of admission". A reader who
+/// acts on "Use `.text()` for plain text" against that finding replaces a DOM node insertion with the
+/// node's stringified text and silently deletes the subtree. At HEAD the concession sat at byte 728 —
+/// the LAST sentence of the message — and the imperative at byte 267.
+///
+/// This is the one repair of the four where the DISQUALIFIER moved instead of the imperative, and the
+/// reason is that it could: the sentence names `.append(...)` and "an HTML string argument", both already
+/// established by the opening sentence, so it carries its antecedents with it. It now sits directly
+/// after that opening sentence and in front of the remedy. 991 chars before and after, character
+/// multiset identical.
+///
+/// ⚠ This rule fires ZERO times on the blind corpus, so no delivered finding will ever carry this
+/// ordering to a reader; the fixture below is the only place the repaired message is observed.
+#[test]
+fn jquery_html_sink_message_puts_the_known_imprecision_before_the_use_text_imperative() {
+    let dir = TempDir::new("zzop-browser");
+    dir.write(
+        "widget.js",
+        "import $ from 'jquery';\nexport function render(userHtml) {\n  $('#box').html(userHtml);\n}\n",
+    );
+    let out = scan(&dir);
+    let hits: Vec<_> = out
+        .findings
+        .iter()
+        .filter(|f| f.rule_id == "browser/jquery-html-sink")
+        .collect();
+    // Sentence repair only — the finding itself is unchanged.
+    assert_eq!(hits.len(), 1, "{:?}", out.findings);
+
+    assert_disqualifier_clause_precedes_imperative(
+        "jquery-html-sink",
+        &hits[0].message,
+        "Known imprecision: a DOM-element/jQuery-object argument",
+        "Use `.text()` for plain text",
     );
 }

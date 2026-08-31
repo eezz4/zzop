@@ -47,6 +47,7 @@ pub(super) fn oversized_artifact(
         config.profile_rules,
     );
     FileArtifact {
+        suppress_markers: Vec::new(),
         rel: rel.to_string(),
         symbols: Vec::new(),
         imports: ts_slot(language),

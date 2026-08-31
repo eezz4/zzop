@@ -48,6 +48,10 @@ pub(crate) const PINNED_NODE_KINDS: &[&str] = &[
     "qualified_name",
     "generic_name",
     "alias_qualified_name",
+    // EF Core's structural gate (`adapters::ef_core::declares_db_context`): a class deriving from a
+    // `…DbContext` base IS an EF Core context by the framework's own required inheritance, which is
+    // what stands in for the `using` a C# 10 `global using` moved out of the file.
+    "base_list",
     // Attributes (`util::attributes_of`, `adapters::provides`)
     "attribute_list",
     "attribute",

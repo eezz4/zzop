@@ -1,4 +1,5 @@
-//! `analyze_tree`'s result types — `AnalyzeOutput` and its `CacheStats` payload.
+//! `analyze_tree`'s result types — `AnalyzeOutput` and its `CacheStats` payload. The pack-load
+//! confirmation entry lives in the [`packs_loaded`] child module (see its own doc for the seam).
 
 use zzop_core::{dsl::RuleTiming, CommonIr, FileNode, Finding};
 use zzop_metrics::{
@@ -6,7 +7,13 @@ use zzop_metrics::{
     Scores, SeamCandidate,
 };
 
-use crate::{CoverageCensus, EngineConfig, PackSource, PackageImportSummary};
+use crate::{CoverageCensus, PackageImportSummary};
+
+mod native_analyses;
+mod packs_loaded;
+
+pub use native_analyses::NativeAnalyses;
+pub use packs_loaded::{PackLoaded, PackNotRun};
 
 /// The result of one `analyze_tree` call: the assembled tree-wide Common IR, every finding
 /// (per-file DSL + whole-graph native, merged/sorted via `zzop_core::merge_findings`), which files
@@ -22,6 +29,21 @@ pub struct AnalyzeOutput {
     pub ir: CommonIr,
     pub findings: Vec<Finding>,
     pub degraded: Vec<String>,
+    /// Files this tree's OWN `package.json` manifests name from a `scripts` command — the tree declaring,
+    /// in its own manifest, "this file is how I am BUILT, not what I ship" (`pipeline::package_json_entries`'s
+    /// `PackageJsonScan::script_paths`; disjoint from the shipped `entry_paths` by construction). Sorted,
+    /// deduped, and resolved against the walked file set, so every entry names a file this run analyzed.
+    ///
+    /// It is a plain fact, not a judgment: the consumer that acts on it is the summary layer's
+    /// first-screen ordering, which demotes findings on these files BELOW production findings of the same
+    /// severity (the build-surface tier beside the older test-path one). Nothing is dropped and no count
+    /// moves — see `zzop_summary`'s `shape_findings`.
+    ///
+    /// ALWAYS populated (never `Option`): the manifest walk is unconditional, so an EMPTY vec is the
+    /// honest "no `package.json` in this tree declared a resolvable script path" — the state every tree
+    /// outside the npm ecosystem is in by construction. Mode A (envelope) has no filesystem to walk and
+    /// is empty for a different reason, stated at its own construction site.
+    pub build_script_paths: Vec<String>,
     pub file_count: usize,
     /// Structural coverage census — see `CoverageCensus`. Always present (post-aggregate, never
     /// git-gated).
@@ -74,6 +96,16 @@ pub struct AnalyzeOutput {
     /// the same `config.packs`). Reflects LOADED packs, before `disabled_rules` gating: disabling a pack
     /// is the caller's own explicit config, not a load failure, so it must not look like one.
     pub packs_loaded: Vec<PackLoaded>,
+    /// The NATIVE-analysis counterpart of `packs_loaded`: how many native analyses this build
+    /// registers, and which of them could not have keyed this output's `findings` — split by cause
+    /// (config switched them off, versus they report into the cross-tree join's own
+    /// `crossLayerFindings` channel instead). See [`NativeAnalyses`] for why the causes are kept apart
+    /// and for the corpus measurement that forced the field.
+    ///
+    /// Always populated: unlike `rule_overrides_applied` this is not a report on what the caller
+    /// requested but on what this build contains, so there is no "nothing was asked" state in which
+    /// silence would be honest.
+    pub native_analyses: NativeAnalyses,
     /// Non-fatal diagnostics — e.g. git collection failing, or the cache directory failing to open.
     /// Analysis still completes normally in either case.
     pub warnings: Vec<String>,
@@ -160,6 +192,16 @@ pub struct RuleOverridesApplied {
     /// that a knob had been set, and `packsLoaded` cannot supply it (that field is a path-match census by
     /// its own doc, and it stays identical under BOTH knobs — it was never an enablement report).
     ///
+    /// ⚠ That last clause stopped being true on 2026-08-26. [`crate::PackLoaded::did_not_run`] now
+    /// marks each gated pack IN ITS OWN ROW (`"disabled"` / `"notAllowlisted"`), because the
+    /// census-only reading was measured doing real damage in the other direction: a disabled
+    /// `security` pack sitting in `packsLoaded` with 51 rules and a positive scanned-file count reads
+    /// as "ran, found nothing". The two fields are still not redundant and neither replaces the other
+    /// — this one answers *which entries of the caller's own request took effect* (a typo'd id never
+    /// appears here), while `did_not_run` answers *what happened to each loaded pack* (every pack
+    /// outside an allowlist is marked, which is exactly what the all-typo `only_packs` case needed and
+    /// this field structurally cannot say).
+    ///
     /// Only entries naming a pack in `config.packs` appear, mirroring `disabled`'s known-id filter: an
     /// allowlist entry that names no loaded pack contributed nothing to this run's gate. An all-typo
     /// `only_packs` is the more dangerous typo, because `is_pack_enabled` then admits NO pack and every
@@ -187,79 +229,4 @@ pub struct RuleOverridesApplied {
 pub struct CacheStats {
     pub hits: usize,
     pub misses: usize,
-}
-
-/// One `AnalyzeOutput::packs_loaded` entry — a loaded DSL rule pack's id, its rule count as loaded
-/// (before `disabled_rules` gating), its provenance (`PackSource::as_str`: `"dir"` | `"inline"`),
-/// how many of this tree's analyzed files fall in scope of >=1 of its rules' `file_pattern`s, and
-/// which of its rules' own path gates admitted zero files.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PackLoaded {
-    pub id: String,
-    pub rules: usize,
-    pub source: String,
-    /// The per-pack applicability signal (D16 follow-up): analyzed files matching at least one of this
-    /// pack's rule `file_pattern`s (`analyze::diagnostics::compute_dsl_scope`'s census — exact per-file
-    /// counts, shared with the tree-wide zero-applicability warning). `0` on a loaded pack is the
-    /// per-pack "never applicable here" disclosure: `typescript: 12 rules` on a pure-Go tree reads
-    /// `filesInScope: 0`, so zero findings from that pack means "out of scope", not "clean".
-    pub files_in_scope: usize,
-    /// The RULE-granularity half of the same census: sorted ids of this pack's rules whose own path
-    /// gates (`file_pattern` AND `file_exclude_pattern` — the definition's owner is
-    /// `analyze::diagnostics::pack_scope::rule_admission`'s module doc) admit ZERO analyzed files. A
-    /// rule listed here could not have read a single byte of this tree, so its zero findings are
-    /// scope, never a clean bill — the distinction `files_in_scope` cannot make one level down (a
-    /// pack with 100 in-scope files can still carry a rule whose own gates match nothing here).
-    /// Derived from the walked rel list, never from execution, so it is byte-identical on warm
-    /// (cache-replayed) and cold runs. In ENVELOPE mode the census additionally lists every rule
-    /// whose matcher kind that mode never evaluates (only `SymbolScan`/`IoScan` run there — see
-    /// `analyze::diagnostics::compute_dsl_scope_filtered`): such a rule read nothing however many
-    /// files its path gates match, so its green is vacuous too. Empty when every rule admits >=1
-    /// file, and DELIBERATELY empty
-    /// for a pack whose `files_in_scope` is 0 (admission is a subset of pattern candidacy, so "all of
-    /// them" is already said by the pack-level zero) — which also covers the empty tree. Same
-    /// loaded-not-gated convention as the rest of this struct: a disabled rule still counts by its
-    /// gates. On the wire this is `zeroAdmissionRules`, serialized only when non-empty (the
-    /// `testPaths` additive-disclosure precedent).
-    pub zero_admission_rules: Vec<String>,
-}
-
-impl PackLoaded {
-    /// Builds `AnalyzeOutput::packs_loaded` from `config.packs` + `config.pack_sources`, sorted by pack
-    /// id (deterministic regardless of load order). A pack id with no `pack_sources` entry reports
-    /// `"inline"` — see `EngineConfig::pack_sources`. `scope` is the ONE `compute_dsl_scope` census the
-    /// caller already computed over the same `config.packs`: its per-pack vectors are parallel to
-    /// `config.packs` ORDER (the pairing happens before the id sort), one entry per pack; a missing
-    /// entry (never happens from the two real call sites) degrades to `0`/empty. Shared by
-    /// `analyze::assemble` and `envelope::analyze_envelope`, so both entry points confirm the identical
-    /// pack set.
-    pub(crate) fn from_config(
-        config: &EngineConfig,
-        scope: &crate::analyze::DslScope,
-    ) -> Vec<PackLoaded> {
-        let mut loaded: Vec<PackLoaded> = config
-            .packs
-            .iter()
-            .enumerate()
-            .map(|(i, pack)| PackLoaded {
-                id: pack.id.clone(),
-                rules: pack.rules.len(),
-                source: config
-                    .pack_sources
-                    .get(&pack.id)
-                    .copied()
-                    .unwrap_or(PackSource::Inline)
-                    .as_str()
-                    .to_string(),
-                files_in_scope: scope.files_in_scope_by_pack.get(i).copied().unwrap_or(0),
-                zero_admission_rules: scope
-                    .zero_admission_rules_by_pack
-                    .get(i)
-                    .cloned()
-                    .unwrap_or_default(),
-            })
-            .collect();
-        loaded.sort_by(|a, b| a.id.cmp(&b.id));
-        loaded
-    }
 }

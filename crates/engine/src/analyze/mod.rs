@@ -40,10 +40,11 @@ pub(crate) use compose::{resolve_provide_body_refs, resolve_provide_response_ref
 // `envelope::analyze_envelope` also reaches the config-diagnostics quartet by this path (config-
 // diagnostics parity with `assemble` — a `disabled_rules` typo / dead exclude filter self-reports on
 // both entry points).
+pub use diagnostics::MIN_UNCOVERED_EXTENSION_SHARE_PCT;
 pub(crate) use diagnostics::{
     compute_dsl_scope_filtered, pack_scope_warnings, rule_overrides_applied, run_diagnostics,
-    uncompilable_rule_warnings, unmatched_global_exclude_warnings, unmatched_suppression_warnings,
-    zero_packs_warning, DslScope,
+    skipped_dirs_warning, uncompilable_rule_warnings, unmatched_global_exclude_warnings,
+    unmatched_suppression_warnings, zero_packs_warning, DslScope,
 };
 // `envelope::analyze_envelope` also imports these four native-analysis delegates by this path (same
 // convention `circular_findings`'s own doc describes) — re-exported, not merely imported, so they stay

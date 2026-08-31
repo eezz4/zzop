@@ -1,6 +1,76 @@
-use crate::{hits, scan, TempDir};
+use crate::{assert_landing_precedes_imperative, hits, scan, TempDir};
+
+/// The DOCTYPE landing for `xxe-no-guard`, spliced ahead of the `disallow-doctype-decl` imperative.
+///
+/// WHY (`1.architecture/rules/rule-quality.md` §27 leg 3, §37). The message already carried the
+/// CONDITIONAL exit — "if DOCTYPEs are genuinely required, set the two entity features instead" — but
+/// never the consequence that selects it. A reader who does not already know what their parser is fed
+/// has no way to tell whether the condition applies to them, so the exit reads as an aside and the
+/// first setting reads as the answer. It is not an aside: `disallow-doctype-decl` makes the parser
+/// raise a fatal error on the whole DOCUMENT, so an ingest path that accepts XHTML, a DTD-validated
+/// industry format, or a feed declaring its own entities starts rejecting ONE HUNDRED PERCENT of them.
+///
+/// NOT A DISQUALIFIER. A parser reading DOCTYPE-carrying documents is exactly the one this finding is
+/// most about — external entity resolution is only reachable through a DOCTYPE. The finding stands;
+/// what changes is which of the two settings the reader is in a position to choose.
+///
+/// POSITION, not presence: the invalidation probe is to move this constant behind the imperative with
+/// every token still spelled exactly once.
+const DOCTYPE_REJECTION_LANDING: &str = "`disallow-doctype-decl` REJECTS THE DOCUMENT, NOT JUST THE ENTITY: with it set the parser raises a fatal `SAXParseException` on ANY input that carries a `<!DOCTYPE ...>`, benign ones included";
+
+/// The trust-store landing for `trust-all-tls`, spliced ahead of the "use the default verifier"
+/// imperative.
+///
+/// WHY. This rule shipped at 331 characters with no caveat of any kind, and its remedy is one of the
+/// few in this pack that can take a working integration down on the first request after deploy. The
+/// trust-all is nearly always LOAD-BEARING — it is there because the peer presents a private-CA cert,
+/// a self-signed staging host, an IP with no matching SAN, or a TLS-inspecting proxy — so restoring
+/// the default verifier converts every call to that peer into a handshake exception. Nothing about
+/// that is visible at build time.
+///
+/// NOT A DISQUALIFIER, and the distinction matters more here than anywhere else in this file: a peer
+/// with a private CA is precisely the case where the finding is RIGHT and the naive fix is wrong. The
+/// landing therefore names the fix that keeps the call working (pin that CA into a `KeyStore`) rather
+/// than offering the reader a reason to leave the trust-all in place.
+///
+/// POSITION, not presence: the invalidation probe is to move this constant behind the imperative with
+/// every token still spelled exactly once.
+const TRUST_STORE_LANDING: &str = "RESTORING VERIFICATION IS NOT A NO-OP WHERE THE TRUST-ALL WAS LOAD-BEARING, AND IT FAILS AT RUNTIME RATHER THAN AT BUILD";
 
 // --- xxe-no-guard (Java) ---
+
+/// POSITION pin on a DELIVERED finding (§27 leg 3): what the prescribed setting costs is reached
+/// before the setting itself.
+#[test]
+fn the_doctype_landing_precedes_the_disallow_doctype_imperative() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "src/main/java/com/example/XmlParser.java",
+        "public class XmlParser {\n    public Document parse(InputStream in) throws Exception {\n        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();\n        DocumentBuilder builder = factory.newDocumentBuilder();\n        return builder.parse(in);\n    }\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "xxe-no-guard");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_landing_precedes_imperative(
+        "xxe-no-guard",
+        &h[0].message,
+        DOCTYPE_REJECTION_LANDING,
+        "Set `disallow-doctype-decl` to `true`;",
+    );
+    // The landing exists to make the message's OWN conditional exit selectable. Both halves have to
+    // stay: the population that breaks, and the instruction to go look at it.
+    for needle in [
+        "starts rejecting one hundred percent of them",
+        "Look at what this parser is actually fed",
+        "If DOCTYPEs are genuinely required",
+    ] {
+        assert!(
+            h[0].message.contains(needle),
+            "security/xxe-no-guard: the landing lost {needle:?}: {}",
+            h[0].message
+        );
+    }
+}
 
 #[test]
 fn document_builder_factory_with_no_guard_in_the_method_is_flagged() {
@@ -222,6 +292,39 @@ fn hostname_verifier_using_the_default_implementation_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(hits(&out, "trust-all-tls").is_empty(), "{:?}", out.findings);
+}
+
+/// POSITION pin on a DELIVERED finding (§27 leg 3): what restoring verification costs is reached
+/// before the instruction to restore it.
+#[test]
+fn the_trust_store_landing_precedes_the_default_verifier_imperative() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "src/main/java/com/example/InsecureSslContext.java",
+        "public class InsecureSslContext {\n    public X509TrustManager trustAllCerts = new TrustAllCerts();\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "trust-all-tls");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_landing_precedes_imperative(
+        "trust-all-tls",
+        &h[0].message,
+        TRUST_STORE_LANDING,
+        "Use the default (or a properly validating custom) trust manager/verifier.",
+    );
+    // The exit is the half that keeps this from reading as "leave it alone": a private chain is
+    // TRUSTED, not trusted-blindly, and the reader is told which artifact does that.
+    for needle in [
+        "`SSLHandshakeException`/`CertificateException`",
+        "load that CA into a `KeyStore`",
+        "still detects a man in the middle",
+    ] {
+        assert!(
+            h[0].message.contains(needle),
+            "security/trust-all-tls: the landing lost {needle:?}: {}",
+            h[0].message
+        );
+    }
 }
 
 #[test]

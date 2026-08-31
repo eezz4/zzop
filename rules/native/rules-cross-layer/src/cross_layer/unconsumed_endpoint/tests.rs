@@ -14,6 +14,7 @@ fn dead(key: &str, source: &str, file: &str, line: u32) -> TaggedProvide {
             file: file.to_string(),
             line,
             symbol: None,
+            ..Default::default()
         },
     }
 }
@@ -29,6 +30,7 @@ fn dead_kind(kind: &str, key: &str, source: &str, file: &str, line: u32) -> Tagg
             file: file.to_string(),
             line,
             symbol: None,
+            ..Default::default()
         },
     }
 }

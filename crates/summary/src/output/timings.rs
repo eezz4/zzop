@@ -39,7 +39,10 @@ const MEANING: &str = "Wall-clock time attributed to each DSL rule and whole-gra
      never cache-served — a much shorter list that is not a ranking of your rule costs. Profile against \
      a cold cache (delete the `cacheDir`, or set `\"cacheDir\": null`) to time the whole tree. `nanos` \
      is wall-clock and jitters run to run: rank rules by relative cost WITHIN one run rather than \
-     diffing raw `nanos` across runs. Timing never changes which rules run or what they report.";
+     diffing raw `nanos` across runs. Timing never changes which rules run or what they report. The \
+     `findings` column beside `nanos` is a FINDING count, not a count of places, and the two diverge \
+     per rule — this is the only ranked per-rule table zzop ships, so read that column under \
+     `findings.byRuleMeaning`, which owns the explanation.";
 
 /// Shapes the facade's `ruleTimings` array into the reply's `ruleTimings` object, or `None` when
 /// profiling was off (the facade serializes `null` there, and an absent key — never a `null` one — is

@@ -38,6 +38,10 @@ impl AnalysisCache {
         if entry.format_version != FORMAT_VERSION || entry.key != ir_key {
             return None;
         }
+        let payload = super::integrity::canonical_payload(&entry.ir).ok()?;
+        if !self.payload_verifies(&ir_key.digest_input(), &payload, &entry.payload_digest) {
+            return None;
+        }
         Some(entry.ir)
     }
 
@@ -45,9 +49,12 @@ impl AnalysisCache {
     /// `key.ruleset_fingerprint` — a later `put_ir` for the same content + parser + scope but a different
     /// ruleset overwrites the same entry (harmlessly: the IR itself does not vary with the ruleset).
     pub fn put_ir(&self, key: &CacheKey, ir: &FileIrSlice) -> io::Result<()> {
+        let ir_key = IrKey::from(key);
+        let payload = super::integrity::canonical_payload(ir).map_err(to_io_err)?;
         let entry = IrEntry {
             format_version: FORMAT_VERSION,
-            key: IrKey::from(key),
+            payload_digest: super::integrity::payload_digest(&ir_key.digest_input(), &payload),
+            key: ir_key,
             ir: ir.clone(),
         };
         let bytes = serde_json::to_vec(&entry).map_err(to_io_err)?;
@@ -63,13 +70,19 @@ impl AnalysisCache {
         if entry.format_version != FORMAT_VERSION || entry.key != *key {
             return None;
         }
+        let payload = super::integrity::canonical_payload(&entry.findings).ok()?;
+        if !self.payload_verifies(&key.digest_input(), &payload, &entry.payload_digest) {
+            return None;
+        }
         Some(entry.findings)
     }
 
     /// Stores `findings` under the full five-field key.
     pub fn put_findings(&self, key: &CacheKey, findings: &[Finding]) -> io::Result<()> {
+        let payload = super::integrity::canonical_payload(findings).map_err(to_io_err)?;
         let entry = FindingsEntry {
             format_version: FORMAT_VERSION,
+            payload_digest: super::integrity::payload_digest(&key.digest_input(), &payload),
             key: key.clone(),
             findings: findings.to_vec(),
         };

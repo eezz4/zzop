@@ -77,12 +77,15 @@ struct ClassRow {
     /// interface/annotation-type `String NAME = ...;`) declarations, unevaluated — see
     /// `resolve::eval_concat_expr` for how a raw expression becomes a literal value.
     constants: HashMap<String, String>,
-    /// This row's own DIRECT method/constructor routes, already resolved via `provides::method_route` —
-    /// module doc's "AST-native design change".
+    /// This row's own DIRECT method/constructor routes, already read via
+    /// `provides::method_route_match` — module doc's "AST-native design change".
     methods: Vec<MethodRoute>,
 }
 
 struct MethodRoute {
+    /// 1-based line of the MAPPING ANNOTATION this route was read from (`RouteMatch::anchor`) — not of
+    /// the method declaration, whose start row is its first modifier. See `crate::security`'s "Line
+    /// contract".
     line: u32,
     name: String,
     verb: String,

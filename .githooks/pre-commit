@@ -4,7 +4,8 @@
 # Enable once per clone (no dependency on husky or any package manager; plain git):
 #   git config core.hooksPath .githooks
 #
-# Scope: the fast guards. cargo test/clippy are excluded (too slow for a hook; CI owns them).
+# Scope: the fast guards, plus ONE conditional slow stage at the bottom. cargo test/clippy are still
+# excluded (too slow for a hook, on every commit; CI owns them).
 #
 # The parser-fingerprint guard used to run here. It is gone (2026-07-29): every fingerprint it
 # policed is now derived from a hash of the source that produces the cached bytes
@@ -70,3 +71,19 @@ for g in "${GUARDS[@]}"; do
   fi
 done
 echo "pre-commit: ${#GUARDS[@]} guards clean."
+
+# The one stage that is NOT a guard and NOT unconditional.
+#
+# None of the guards above opens cases/, so until now nothing on this side of a push compared real
+# findings to the adjudicated answer key. The gate that does was reachable only from
+# scripts/ci-local.sh, which runs once per batch and after the work. Measured consequence: the gate was
+# red for roughly ninety commits starting at 9b89e62 (2026-08-21) and three separate commits each took
+# a piece of it without any of them running it.
+#
+# It runs LAST because it is the expensive one. MEASURED on this machine: the guards above cost 287s
+# on an idle box and 586s while another batch was compiling; the gate adds 171s on top of that against
+# a warm target, and 2-3 min more when the release build is cold. It runs only when the staged set can
+# move a finding, which over the last 96 commits was 65.6% of them.
+# The script owns the trigger, the announcement and the escape hatch; read its header for what the
+# trigger is blind to (crates/, notably) before quoting a green run as "detection is fine".
+bash scripts/detection-gate-if-touched.sh

@@ -130,8 +130,20 @@ count=0
 # residual is strictly narrower than what was there before (a bare mention no longer counts at all),
 # it is confined to one hand-edited file, and it is recorded here rather than left for someone to
 # rediscover.
-invoked_in() { # <file> <guard base name>
-  awk -v base="$2" '
+# Every guard NAME this file actually invokes, harvested in ONE pass.
+#
+# This was `invoked_in <file> <base>`, an awk run per guard: ~40 guards, ~40 forks, and under
+# MSYS2 (fork emulated by copying the process) a fork from bash costs the better part of a second
+# on this machine. Traced 2026-08-18: this script spent most of its 120s in those spawns.
+#
+# The REGEX below is unchanged except that the guard name is now a capture rather than a
+# parameter -- the accepted spellings, the comment skip, and the two rejected spellings the header
+# discusses are all exactly as they were. What changed is the direction: instead of asking the
+# file 40 times "do you invoke THIS one", ask it once "which ones do you invoke" and look the
+# answers up. A name harvested here is a name the old regex would have matched, because it is the
+# same regex matching the same bytes.
+invocations_in() { # <file>  ->  one guard base name per line
+  awk -v base="([A-Za-z0-9._-]+)" '
     BEGIN {
       # `bash <p>` / `sh <p>` / `bash ./<p>` / `./<p>`, with optional flags after bash|sh and an
       # optional quote around the path (`bash "scripts/x.sh"`). The path must be the LITERAL
@@ -142,8 +154,17 @@ invoked_in() { # <file> <guard base name>
            "|[\"\047]?\\./)scripts/" base "\\.sh"
     }
     /^[[:space:]]*#/ { next }
-    $0 ~ re { found = 1; exit }
-    END { exit(found ? 0 : 1) }
+    {
+      line = $0
+      while (match(line, re)) {
+        seg = substr(line, RSTART, RLENGTH)
+        i = index(seg, "scripts/")
+        name = substr(seg, i + 8)
+        sub(/\.sh$/, "", name)
+        print name
+        line = substr(line, RSTART + RLENGTH)
+      }
+    }
   ' "$1"
 }
 
@@ -197,16 +218,50 @@ for lib in $guard_libs; do
   missing=1; wiring_missing=1
 done
 
+# The two wiring facts, each read ONCE into a set. Same tests as before, asked the other way
+# round: the loop below used to run a `grep` and an `awk` PER GUARD, so its cost was set by the
+# size of the fleet rather than by the size of the two files it reads. See invocations_in above
+# for the measurement and for why the regex is untouched.
+declare -A precommit_named=()
+while IFS= read -r line; do
+  # Trim, then compare whole -- `grep -qE "^[[:space:]]*NAME[[:space:]]*$"` is a whole-line match
+  # with optional surrounding blanks, which is what these two expansions do. A comment line keeps
+  # its `#` and so can never equal a guard name, exactly as the anchored pattern intended.
+  line="${line#"${line%%[![:space:]]*}"}"
+  line="${line%"${line##*[![:space:]]}"}"
+  [ -n "$line" ] && precommit_named["$line"]=1
+done < "$PRE_COMMIT"
+
+declare -A ci_invoked=()
+while IFS= read -r name; do
+  [ -n "$name" ] && ci_invoked["$name"]=1
+done < <(invocations_in "$CI")
+
+# The harvest must find SOMETHING. A regex that stops matching would otherwise report the entire
+# fleet as un-wired, which is loud -- but the opposite mistake, a harvest that silently returns
+# nothing while the loop below happens to be empty, would read as clean. Name it here instead.
+if [ ${#ci_invoked[@]} -eq 0 ]; then
+  echo "check-guards-wired: FAILED -- harvested ZERO guard invocations out of $CI. The invocation"
+  echo "  regex stopped matching; every guard below would be reported un-wired for the wrong reason."
+  exit 1
+fi
+
 while IFS= read -r -d '' f; do
-  base="$(basename "$f" .sh)"
+  # Builtins, not `basename`: this loop runs once per guard and each `$(...)` forks a subshell on
+  # top of the tool it calls. Measured 2026-08-18 on this machine, a fork from bash costs ~563ms
+  # (MSYS2 emulates fork by copying the process; native `git.exe` spawns in 30ms), so the two forks
+  # this line used to cost were the single largest line in this file. Same result: `${f##*/}` drops
+  # the directory, `${base%.sh}` drops the suffix — verified identical on multi-dot names too.
+  base="${f##*/}"
+  base="${base%.sh}"
   count=$((count + 1))
 
-  if ! grep -qE "^[[:space:]]*${base}[[:space:]]*$" "$PRE_COMMIT"; then
+  if [ -z "${precommit_named[$base]:-}" ]; then
     echo "check-guards-wired: ($base, $PRE_COMMIT) -- not wired into pre-commit's GUARDS array"
     missing=1; wiring_missing=1
   fi
 
-  if ! invoked_in "$CI" "$base"; then
+  if [ -z "${ci_invoked[$base]:-}" ]; then
     echo "check-guards-wired: ($base, $CI) -- not wired into CI's guards job"
     missing=1; wiring_missing=1
   fi
@@ -448,8 +503,12 @@ HAND_RUN_TOOLS=(
 # USED with an interpreter in the same file, which is a parse this line-shaped check cannot do.
 defense_invoked_anywhere() { # <path>
   local base esc
-  base="$(basename "$1")"
-  esc="$(printf '%s' "$base" | sed 's/[.]/[.]/g')"
+  # Builtins for the same reason the guard loop above uses them, and this one runs once per DEFENSE.
+  # `${base//./[.]}` is a GLOB substitution, where `.` is a literal dot, so it escapes every dot
+  # exactly as the `sed` it replaced did — checked against a multi-dot name (`a.b.c.sh`), not just
+  # the single-dot ones this tree happens to hold today.
+  base="${1##*/}"
+  esc="${base//./[.]}"
   # THIRD accepted shape, found the same way the second was -- by this axis producing a false RED on
   # scripts/measure/plant-revert.mjs, which two sibling defenses drive as
   # `import { withPlanted } from "./plant-revert.mjs"`. A module consumed by an invoked defense IS

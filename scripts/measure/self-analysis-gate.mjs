@@ -72,6 +72,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { PlantError, withPlanted } from "./plant-revert.mjs";
+import { resolveMessage } from "./resolve-folded-message.mjs";
 
 // --- what the canary plants, and where -----------------------------------------------------------
 // Hardcoded rather than parameterized ON PURPOSE. A probe target passed in from outside is a thing
@@ -228,7 +229,13 @@ function dslAxisNotProven(lines) {
 function dslFireability(run) {
   const disabled = new Set(run.ruleOverridesApplied?.disabled ?? []);
   const loaded = run.packsLoaded ?? [];
-  const fireable = loaded.filter((p) => (p.rules ?? 0) > 0 && (p.filesInScope ?? 0) > 0 && !disabled.has(p.id));
+  // `filesInScope` is ABSENT on a pack that did not run (2026-08-26 — the row carries `didNotRun`
+  // and `filesInScopeIfEnabled` instead), so `?? 0` already excludes it, and it now also excludes a
+  // pack a `packs.only` allowlist left out — which `disabled` never covered and this filter used to
+  // count as fireable. The explicit `didNotRun` test states that rather than leaning on the `??`.
+  const fireable = loaded.filter(
+    (p) => (p.rules ?? 0) > 0 && (p.filesInScope ?? 0) > 0 && !p.didNotRun && !disabled.has(p.id),
+  );
   const probeRuleFireable =
     fireable.some((p) => p.id === DSL_PACK) && !disabled.has(DSL_RULE_ID);
   return { loaded, disabled, fireable, probeRuleFireable };
@@ -301,9 +308,10 @@ function configDeclaredDisabledPacks() {
  * silently stops being computed and the banner explains it away.
  *
  * The materials to tell the two apart are already in hand, and neither needs a new engine field:
- *   1. `packsLoaded` lists a pack even when the config DISABLED it (`filesInScope: 0`; pinned by
- *      `crates/engine/tests/analyze_zero_scope_packs.rs`, "loading is not gating"). So a disabled pack
- *      MISSING from `packsLoaded` is a pack that was never loaded — not a pack that was turned off.
+ *   1. `packsLoaded` lists a pack even when the config DISABLED it — since 2026-08-26 the row says so
+ *      outright (`didNotRun: "disabled"`, with `filesInScopeIfEnabled` in place of `filesInScope`);
+ *      pinned by `crates/engine/tests/analyze_zero_scope_packs.rs`, "loading is not gating". So a
+ *      disabled pack MISSING from `packsLoaded` is a pack that was never loaded — not one turned off.
  *   2. The config's own `packs.disabled` says which ids to expect there.
  * Zero loaded packs is the degenerate case of the same test and is named separately, because it is the
  * shape a regression actually takes and deserves its own sentence.
@@ -572,9 +580,12 @@ if (total !== 0) {
   console.error("");
   console.error("  Sample below (`findings.shown` is capped by the summary surface's own limit, so it");
   console.error("  may be shorter than the counts above — those are the totals):");
+  // Resolved through `messageRef`, not read off `f.message`: the reply carries each rule's prose
+  // once and points every finding of that rule at it, so reading the raw field here would print
+  // the POINTER instead of the prescription — on the one screen a human sees findings at all.
   for (const f of run.findings?.shown ?? []) {
     console.error(`  ${f.severity}  ${f.ruleId}  ${f.file}:${f.line}`);
-    console.error(`      ${String(f.message).split(". ")[0]}.`);
+    console.error(`      ${String(resolveMessage(run.findings, f)).split(". ")[0]}.`);
   }
   console.error("");
   console.error("  There is no baseline file to add this to, on purpose. Fix the code, narrow the");

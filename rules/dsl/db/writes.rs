@@ -153,6 +153,51 @@ fn delete_many_with_function_keyword_predicate_is_not_flagged() {
 }
 
 #[test]
+fn delete_many_handed_its_whole_argument_by_name_is_not_flagged() {
+    // The rule's OWN message named this shape as a measured over-report — "the whole-argument form
+    // (`updateMany(args)`) ... fires at `critical` on a scoped write" — and until now the prediction was
+    // not wired into the judgment. `deleteMany(toDelete)` builds its argument object somewhere this
+    // matcher never reads, so the absence of a `where:` token here is a statement about THIS function,
+    // not about the query. Blind-corpus subject: cal.com
+    // `packages/features/calendar-subscription/lib/cache/CalendarCacheEventService.ts:66` fired
+    // `critical` on `calendarCacheEventRepository.deleteMany(toDelete)`, whose repository runs
+    // `prisma.calendarCacheEvent.deleteMany({ where: { OR: conditions } })` with an empty-array early
+    // return. Same class as the arrow-predicate carve-outs above, generalized from "the first argument
+    // is a function" to "the first argument is not an object literal this matcher can read".
+    let dir = TempDir::new("zzop-db");
+    dir.write(
+        "src/service.ts",
+        "declare const calendarCacheEventRepository: any;\nexport async function pruneCache(toDelete: any[]) {\n  await calendarCacheEventRepository.deleteMany(toDelete);\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "update-delete-no-where").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn update_many_whose_arguments_open_on_the_next_line_is_not_flagged() {
+    // The multi-line spelling of the same shape, and the one the corpus actually carries: seven of the
+    // nine corpus findings were `mongoQueryRunner.updateMany(` / `.deleteMany(` with the filter argument
+    // on the FOLLOWING line (typeorm `src/entity-manager/MongoEntityManager.ts`,
+    // `src/driver/mongodb/MongoQueryRunner.ts`). A trigger that accepted an open paren at end of line
+    // would keep every one of them.
+    let dir = TempDir::new("zzop-db");
+    dir.write(
+        "src/runner.ts",
+        "declare const collection: any;\nexport async function applyAll(filter: any, update: any) {\n  return collection.updateMany(\n    filter,\n    update,\n  );\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "update-delete-no-where").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
 fn delete_many_with_no_arguments_is_still_flagged() {
     let dir = TempDir::new("zzop-db");
     dir.write(
@@ -162,6 +207,25 @@ fn delete_many_with_no_arguments_is_still_flagged() {
     let out = scan(&dir);
     let h = hits(&out, "update-delete-no-where");
     assert_eq!(h.len(), 1, "{:?}", out.findings);
+}
+
+#[test]
+fn delete_many_handed_an_empty_argument_object_inline_is_still_flagged() {
+    // The PLANTED canary for the narrowed trigger, and it is planted because it has to be: after the
+    // narrowing, the surviving positive shape has ZERO instances across the whole corpus (every one of
+    // the nine findings the corpus carried was a call handed its arguments by name), so no corpus
+    // measurement can price what was kept. This fixture is one character away from
+    // `delete_many_handed_its_whole_argument_by_name_is_not_flagged` above — `({})` versus `(toDelete)`
+    // — which is exactly the discriminator the trigger now draws.
+    let dir = TempDir::new("zzop-db");
+    dir.write(
+        "src/service.ts",
+        "declare const prisma: any;\nexport async function wipeAll() {\n  await prisma.order.deleteMany({});\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "update-delete-no-where");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 3);
 }
 
 #[test]
@@ -385,5 +449,291 @@ fn awaited_prisma_user_create_is_not_flagged() {
         hits(&out, "unawaited-write").is_empty(),
         "{:?}",
         out.findings
+    );
+}
+
+// --- unawaited-write: the UPWARD enclosing-call veto (`enclosing_call_exclude_pattern`) ---
+//
+// Prisma's ARRAY transaction takes UN-awaited query builders as its elements: awaiting inside the
+// array literal runs each query immediately and OUTSIDE the transaction. The rule's remedy ("await
+// the call, or return it") therefore BREAKS the code at every such element, which is why the veto had
+// to reach the `$transaction([` opener several lines above rather than sharpen the same-line regex.
+
+#[test]
+fn array_transaction_elements_are_not_flagged_across_a_long_element_body() {
+    // R1 — the shape the veto exists for: two un-awaited builders inside one `$transaction([...])`,
+    // the second one 18 lines below the opener. BOTH must go quiet; awaiting either would take it out
+    // of the transaction.
+    let dir = TempDir::new("zzop-db");
+    dir.write(
+        "src/service.ts",
+        r#"declare const prisma: any;
+export async function moveBooking(id: string, target: string) {
+  const [moved, logged] = await prisma.$transaction([
+    prisma.booking.update({
+      where: { uid: id },
+      data: {
+        f1: target,
+        f2: target,
+        f3: target,
+        f4: target,
+        f5: target,
+        f6: target,
+        f7: target,
+        f8: target,
+        f9: target,
+        f10: target,
+        f11: target,
+        f12: target,
+      },
+    }),
+    prisma.auditLog.create({
+      data: {
+        g1: id,
+        g2: id,
+        g3: id,
+        g4: id,
+        g5: id,
+        g6: id,
+      },
+    }),
+  ]);
+  return [moved, logged];
+}
+"#,
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "unawaited-write").is_empty(),
+        "both array-transaction elements must go quiet: {:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn array_transaction_element_twenty_three_lines_under_the_opener_is_not_flagged() {
+    // R2 — the farthest opener->finding distance measured on cal.com @ `db/unawaited-write` is 23
+    // lines, and the two leading elements are `deleteMany` calls the rule's own `line_pattern` never
+    // matches (so a one-line lookback would never have reached the elements that DO fire).
+    let dir = TempDir::new("zzop-db");
+    dir.write(
+        "src/service.ts",
+        r#"declare const prisma: any;
+export async function replaceRows(id: string) {
+  await prisma.$transaction([
+    prisma.a.deleteMany({ where: { id } }),
+    prisma.b.deleteMany({ where: { id } }),
+    prisma.c.create({
+      data: {
+        h1: id,
+        h2: id,
+        h3: id,
+        h4: id,
+        h5: id,
+        h6: id,
+        h7: id,
+        h8: id,
+        h9: id,
+        h10: id,
+        h11: id,
+        h12: id,
+        h13: id,
+        h14: id,
+        h15: id,
+        h16: id,
+      },
+    }),
+    prisma.d.update({ where: { id }, data: { n: 1 } }),
+  ]);
+}
+"#,
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "unawaited-write").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn the_callback_form_of_a_transaction_still_flags_a_fire_and_forget_write() {
+    // R3 — the must-fire control, and the ONLY thing holding it: inside the CALLBACK form the write
+    // really is fire-and-forget and `await tx.user.create(...)` really is the fix. cal.com carries 16
+    // callback-form sites and none of them fires today, so a veto that went body-scoped would be
+    // invisible on the corpus and visible only here.
+    let dir = TempDir::new("zzop-db");
+    dir.write(
+        "src/service.ts",
+        r#"declare const prisma: any;
+export async function register(data: unknown) {
+  await prisma.$transaction(async (tx: any) => {
+    tx.user.create({ data });
+  });
+}
+"#,
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "unawaited-write");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 4);
+}
+
+#[test]
+fn a_write_after_a_closed_array_transaction_is_still_flagged() {
+    // R5 — the walk must CONSUME a group it sees close (`]);`) rather than climbing out of one
+    // statement into the previous one. The `$transaction([...])` above is already closed, so it can
+    // say nothing about the bare write that follows it.
+    let dir = TempDir::new("zzop-db");
+    dir.write(
+        "src/service.ts",
+        r#"declare const prisma: any;
+export async function settle(id: string) {
+  await prisma.$transaction([
+    prisma.a.create({ data: { id } }),
+  ]);
+  prisma.b.create({ data: { id } });
+}
+"#,
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "unawaited-write");
+    assert_eq!(
+        h.len(),
+        1,
+        "the veto must not go body-scoped: {:?}",
+        out.findings
+    );
+    assert_eq!(h[0].line, 6);
+}
+
+#[test]
+fn awaited_promise_all_array_elements_are_not_flagged() {
+    // R6 — same non-atomic-if-awaited shape without Prisma: `Promise.all([...])` consumes each
+    // element's promise, and awaiting inside the array serializes the calls it exists to parallelize.
+    let dir = TempDir::new("zzop-db");
+    dir.write(
+        "src/service.ts",
+        r#"declare const prisma: any;
+export async function seed(a: unknown, b: unknown) {
+  await Promise.all([
+    prisma.x.create({ data: a }),
+    prisma.y.create({ data: b }),
+  ]);
+}
+"#,
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "unawaited-write").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn a_builder_pushed_onto_an_array_before_the_transaction_still_fires_and_the_message_says_so() {
+    // R7 — the residual, pinned rather than hoped for: when the builder is collected by
+    // `arr.push(...)` and the transaction later spreads it (`$transaction([...ops])`), the enclosing
+    // call at the site is `push(`, which no enclosing-call veto can distinguish from a real
+    // fire-and-forget. 1 of cal.com's 18 has this shape. The rule's own message must disclose it.
+    let dir = TempDir::new("zzop-db");
+    dir.write(
+        "src/service.ts",
+        r#"declare const prisma: any;
+export async function bulk(ids: string[]) {
+  const ops: any[] = [];
+  ops.push(prisma.x.update({ where: { id: ids[0] }, data: { n: 1 } }));
+  await prisma.$transaction(ops);
+}
+"#,
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "unawaited-write");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 4);
+    assert!(
+        h[0].message.contains("push("),
+        "the message must disclose the out-of-reach shape: {}",
+        h[0].message
+    );
+}
+
+#[test]
+fn an_unawaited_promise_all_array_still_flags_its_elements() {
+    // R9 — the reason the veto pattern demands `await`/`return`/`yield` ON THE OPENER LINE: an
+    // enclosing call whose OWN promise nobody consumes leaves the writes genuinely unawaited, so
+    // vetoing on the opener text alone would hide a real bug.
+    let dir = TempDir::new("zzop-db");
+    dir.write(
+        "src/service.ts",
+        r#"declare const prisma: any;
+export function seedLoose(a: unknown) {
+  Promise.all([
+    prisma.x.create({ data: a }),
+  ]);
+}
+"#,
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "unawaited-write");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 4);
+}
+
+// --- §27 ordering pins (2026-08-26) ---
+//
+// Both rules in this file shipped a clause naming a measured shape on which their OWN finding is wrong,
+// and both put it behind the remedy. The repair is presentation only — no matcher, veto, severity or
+// count moved, and each pin asserts the unchanged count next to the offsets so a detection change cannot
+// hide inside a message edit.
+
+/// `update-delete-no-where` is the `critical` one, and the shape it disqualifies is the shape it is most
+/// likely to be handed: a filter that IS there, spelled as a spread or an object shorthand, so no `where:`
+/// token appears and the rule fires at `critical` anyway. That sentence used to sit ~490 bytes behind
+/// "Add a `where:` filter". The remedy now carries the premise instead.
+#[test]
+fn update_delete_no_where_message_puts_the_scope_condition_before_the_where_imperative() {
+    let dir = TempDir::new("zzop-db");
+    dir.write(
+        "src/service.ts",
+        "declare const prisma: any;\nexport async function bulkArchive() {\n  await prisma.order.updateMany({ data: { archived: true } });\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "update-delete-no-where");
+    // Detection is untouched: same site, same line, same severity band.
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 3);
+    assert_disqualifier_summary_precedes_imperative(
+        "update-delete-no-where",
+        &h[0].message,
+        "IF NO FILTER ALREADY SCOPES THIS CALL",
+        "add a `where:` filter",
+        "both fire at `critical` on a scoped write",
+    );
+}
+
+/// `unawaited-write` already CONDITIONED its remedy — but the condition trailed the verb ("Await the call
+/// ... — EXCEPT inside an array transaction"), so a reader who acts on the verb still acts first. The
+/// premise now sits in front of it, which also puts it ahead of the residual this pin names: the veto keys
+/// on the OPENER's own `await`, so a `$transaction([...])` bound to a variable and awaited on the next
+/// line keeps firing — a finding the remedy must not be applied to.
+#[test]
+fn unawaited_write_message_puts_the_array_transaction_condition_before_the_await_imperative() {
+    let dir = TempDir::new("zzop-db");
+    dir.write(
+        "src/service.ts",
+        "declare const prisma: any;\nexport async function recordAudit(actorId: string) {\n  prisma.audit.create({ data: { actorId } });\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "unawaited-write");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 3);
+    assert_disqualifier_summary_precedes_imperative(
+        "unawaited-write",
+        &h[0].message,
+        "IF THE CALL IS NOT AN ELEMENT OF AN ARRAY TRANSACTION",
+        "await the call (or return it",
+        "still fires, which is the safe direction",
     );
 }

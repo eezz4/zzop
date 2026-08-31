@@ -65,6 +65,23 @@ pub(super) fn eval_line_scan(
     ) else {
         return;
     };
+    // ...and its symmetric half — see `LineScan::next_line_exclude_pattern` doc.
+    let Some(next_exclude_re) = diag.compile_opt(
+        "next_line_exclude_pattern",
+        m.next_line_exclude_pattern.as_ref(),
+    ) else {
+        return;
+    };
+    // The UPWARD veto — see `LineScan::enclosing_call_exclude_pattern`. `compile_opt_MULTILINE`, not
+    // `compile_opt` like the two one-line fields above: this one is tested against a window of joined
+    // opener lines, so without the `(?m)` prefix an author's `^`/`$` would anchor to the whole window
+    // rather than to the opener line they wrote it for.
+    let Some(enclosing_exclude_re) = diag.compile_opt_multiline(
+        "enclosing_call_exclude_pattern",
+        m.enclosing_call_exclude_pattern.as_ref(),
+    ) else {
+        return;
+    };
     let marker = rule.suppress_marker();
     // The marker regexes are built from the rule id (escaped), so failure here means the id itself is
     // unusable — structural, not a pattern the author wrote wrong, but just as fatal to the rule. All
@@ -158,6 +175,22 @@ pub(super) fn eval_line_scan(
             // 1-line window as marker suppression) is tested under the same string masking as every
             // other line regex. Checked after the positive match so the previous line is only masked
             // for candidate lines. Line 0 has no predecessor and can never be vetoed here.
+            // The forward half, same contract: exactly the next line, same masking, and the LAST
+            // line of a file has no successor and can never be vetoed here — the mirror of line 0.
+            if let Some(re) = &next_exclude_re {
+                if let Some(next_raw) = lines.get(i + 1) {
+                    let next: std::borrow::Cow<'_, str> = if m.strip_string_literals {
+                        std::borrow::Cow::Owned(crate::dsl::string_mask::mask_string_literals(
+                            next_raw,
+                        ))
+                    } else {
+                        std::borrow::Cow::Borrowed(next_raw)
+                    };
+                    if re.is_match(&next) {
+                        continue;
+                    }
+                }
+            }
             if let Some(re) = &prev_exclude_re {
                 if i > 0 {
                     let prev: std::borrow::Cow<'_, str> = if m.strip_string_literals {
@@ -168,6 +201,29 @@ pub(super) fn eval_line_scan(
                         std::borrow::Cow::Borrowed(lines[i - 1])
                     };
                     if re.is_match(&prev) {
+                        continue;
+                    }
+                }
+            }
+            // The UPWARD half, which is a WINDOW rather than a line: the still-unclosed opener lines
+            // above the match, joined with `\n` (see `veto_window::enclosing_window`). Every ambiguity
+            // the walk meets comes back as `None`, which must read as NO suppression — hence the plain
+            // `if let` with no `else` branch. Masked per line when the rule opts in, so a
+            // `$transaction([` quoted inside a string literal cannot waive a real finding.
+            if let Some(re) = &enclosing_exclude_re {
+                if let Some(window) = super::veto_window::enclosing_window(&lines, i) {
+                    let win: std::borrow::Cow<'_, str> = if m.strip_string_literals {
+                        std::borrow::Cow::Owned(
+                            window
+                                .lines()
+                                .map(crate::dsl::string_mask::mask_string_literals)
+                                .collect::<Vec<_>>()
+                                .join("\n"),
+                        )
+                    } else {
+                        std::borrow::Cow::Borrowed(&window)
+                    };
+                    if re.is_match(&win) {
                         continue;
                     }
                 }

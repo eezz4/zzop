@@ -176,6 +176,7 @@ fn profiling_fixture() -> (zzop_core::NormalizedEnvelope, RulePackDef) {
         line: 2,
         symbol: None,
         body: None,
+        ..Default::default()
     });
     (envelope(vec![a]), pack)
 }

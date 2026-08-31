@@ -581,3 +581,279 @@ fn declared_imports_cell_is_measured_end_to_end_from_a_real_engine_run() {
     // Same run's unmeasured cell: prisma projects no import channel, so `null` — never 0.
     assert_eq!(cell("prisma"), Value::Null);
 }
+
+/// A tree whose `structural` files each carry a symbol and whose `unread` files were walked and
+/// nothing more — the directus shape: a TypeScript app plus a large `.vue` component tree no
+/// structural parser in this build claims.
+fn split_tree(id: &str, structural: &[String], unread: &[String]) -> Value {
+    let loc: serde_json::Map<String, Value> = structural
+        .iter()
+        .chain(unread.iter())
+        .map(|f| (f.clone(), json!(10)))
+        .collect();
+    let symbols: Vec<Value> = structural
+        .iter()
+        .map(|f| json!({ "file": f, "name": "s" }))
+        .collect();
+    json!({
+        "sourceId": id,
+        "output": { "ir": { "loc": loc, "symbols": symbols, "dep": {} },
+                     "degraded": [], "coverage": {} }
+    })
+}
+
+fn paths(n: usize, ext: &str) -> Vec<String> {
+    (0..n).map(|i| format!("app/src/f{i}.{ext}")).collect()
+}
+
+/// The measured defect (directus @ 06027c83, 2026-08-20): `blindSpots: []` beside 587 `.vue` files no
+/// structural parser read, and a basis sentence naming only the 4 crossed extensions — which reads as
+/// completeness to a reader who does not know a fifth existed. The per-rule cross stays restricted to
+/// structural extensions on purpose; the tree-level fact has to surface somewhere the reader of an
+/// empty `blindSpots` cannot walk past, and the basis is that array's own companion sentence.
+#[test]
+fn a_vue_heavy_tree_names_the_unread_extension_the_per_rule_cross_skipped() {
+    let v = run(json!([split_tree(
+        "directus-shape",
+        &paths(8, "ts"),
+        &paths(2, "vue")
+    )]));
+    let tree = &v["trees"][0];
+    // Unchanged: every declared sightline is fed by the `.ts` half, so the per-rule cross is empty.
+    assert_eq!(tree["blindSpots"].as_array().expect("array").len(), 0);
+    let unread = tree["unreadExtensions"].as_array().expect("array");
+    assert_eq!(unread.len(), 1, "{unread:?}");
+    assert_eq!(unread[0]["ext"], "vue");
+    assert_eq!(unread[0]["sharePct"], 20);
+    let basis = tree["blindSpotBasis"].as_str().expect("string");
+    assert!(basis.contains("EXCLUDED"), "{basis}");
+    assert!(basis.contains("unreadExtensions"), "{basis}");
+}
+
+/// The zero-proving half, without which the test above proves nothing (cheat-sheet: reporting a 0
+/// needs the device that proves the 0 first). A tree every structural parser read in full must leave
+/// the list EMPTY and must say in the basis that nothing was held back from the cross — otherwise
+/// "excluded" prose would ride every reply and stop carrying information.
+#[test]
+fn a_fully_read_tree_reports_an_empty_unread_list_and_a_basis_that_excluded_nothing() {
+    let v = run(json!([structural_tree("app", &["src/a.ts", "src/b.ts"])]));
+    let tree = &v["trees"][0];
+    assert_eq!(
+        tree["unreadExtensions"]
+            .as_array()
+            .expect("array")
+            .as_slice(),
+        &[] as &[Value],
+        "{tree}"
+    );
+    let basis = tree["blindSpotBasis"].as_str().expect("string");
+    assert!(
+        basis.contains("nothing above that share was held back"),
+        "{basis}"
+    );
+    assert!(!basis.contains("EXCLUDED"), "{basis}");
+}
+
+/// The all-clear is a claim about a population, so it must not ride a tree that HAS no such population.
+/// Reproduced 2026-08-20 on a tree of markdown and JSON: the basis asserted that every principal source
+/// filetype WAS read structurally on a run that read nothing, directly beside its own clause saying this
+/// empty list is absence of input rather than a coverage verdict — one sentence answering both ways.
+/// Vacuous truth over an empty set is what makes this a prose defect rather than a logic one, and it is
+/// the maximum-blindness case the whole cell exists to disclose.
+#[test]
+fn a_tree_with_no_structural_extension_is_never_told_everything_was_read() {
+    // Same shape as `a_docs_only_tree_gets_the_absence_of_input_basis_not_a_verdict`: no symbols and no
+    // dep entries, so nothing is a structural extension. That test pins the FIRST clause; this one pins
+    // that the second never joins it.
+    let tree = json!({
+        "sourceId": "docs",
+        "output": { "ir": { "loc": { "README.md": 4, "data/en.json": 9 }, "symbols": [], "dep": {} },
+                     "degraded": [], "coverage": {} }
+    });
+    let v = run(json!([tree]));
+    let tree = &v["trees"][0];
+    let basis = tree["blindSpotBasis"].as_str().expect("string");
+    assert!(basis.contains("absence of input"), "{basis}");
+    assert!(
+        !basis.contains("WAS read structurally"),
+        "a run that read nothing structurally must not claim it read everything: {basis}"
+    );
+}
+
+/// Noise gate 1, the engine's own `extraction_can_lose_facts` judgement rather than a second one: a
+/// `.md`/`.svg` file no parser read is not a coverage gap — there is no symbol, import or io fact in
+/// it to lose — however large its share of the tree. Five of these six files are docs/assets.
+#[test]
+fn docs_and_asset_extensions_are_never_named_unread() {
+    let unread: Vec<String> = [
+        "README.md",
+        "CHANGELOG.md",
+        "docs/a.md",
+        "logo.svg",
+        "icon.png",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    let v = run(json!([split_tree("docs-heavy", &paths(1, "ts"), &unread)]));
+    assert_eq!(
+        v["trees"][0]["unreadExtensions"]
+            .as_array()
+            .expect("array")
+            .as_slice(),
+        &[] as &[Value],
+        "{}",
+        v["trees"][0]
+    );
+}
+
+/// The other side of gate 1, and the correction this cell took on 2026-08-20: a DATA/CONFIG filetype
+/// is named, labelled — never suppressed. Suppressing it is what emptied this list beside macrozheng
+/// /mall's 114 `.xml` MyBatis mappers (906 SQL statements, 744 `${}` sites, essentially all the SQL the
+/// project has), because the gate in use answered the "should we ask for an XML parser" question
+/// instead of the "could this have cost facts" one.
+///
+/// On regression — the gate reverting to `is_non_source_extension`, or the data/config group being
+/// reclassified — this goes red at the exact byte a user would otherwise read as an all-clear.
+#[test]
+fn a_data_config_extension_is_named_and_labelled_rather_than_suppressed() {
+    let v = run(json!([split_tree(
+        "mappers",
+        &paths(2, "ts"),
+        &paths(8, "xml")
+    )]));
+    let entries = v["trees"][0]["unreadExtensions"].as_array().expect("array");
+    assert_eq!(entries.len(), 1, "{}", v["trees"][0]);
+    assert_eq!(entries[0]["ext"], "xml", "{entries:?}");
+    assert_eq!(
+        entries[0]["kind"], "data-config",
+        "the row must say which remedy applies — a mapper directory and a locale bundle are the same \
+         row until the reader looks, and this build does not pretend to know which it has: {entries:?}"
+    );
+    let meaning = v["unreadExtensionMeaning"].as_str().expect("legend");
+    assert!(
+        meaning.contains("data-config") && meaning.contains("kind \"source\""),
+        "the closed kind vocabulary must ride with the rows: {meaning}"
+    );
+}
+
+/// Noise gate 2, the engine's own principal-filetype floor: one stray `.vue` fixture in a 20-file
+/// TypeScript tree is 5%, under the same 10% line the engine's `NO loaded DSL rule targets ...` and
+/// `THIN DSL rule reach` reports use to decide "is this a language the tree is made of".
+#[test]
+fn an_unread_source_extension_under_the_principal_floor_stays_out() {
+    let v = run(json!([split_tree(
+        "one-widget",
+        &paths(19, "ts"),
+        &paths(1, "vue")
+    )]));
+    assert_eq!(
+        v["trees"][0]["unreadExtensions"]
+            .as_array()
+            .expect("array")
+            .as_slice(),
+        &[] as &[Value],
+        "{}",
+        v["trees"][0]
+    );
+}
+
+/// Determinism (a shipped contract) plus the pointing discipline: entries are ext-ordered, and each
+/// carries only the extension and the share that qualified it — the file counts stay in the
+/// `extensions` row, which is the one place they are measured.
+#[test]
+fn unread_entries_are_ext_ordered_and_point_at_the_row_instead_of_restating_it() {
+    let mut unread = paths(2, "vue");
+    unread.extend(paths(2, "svelte"));
+    let v = run(json!([split_tree("multi", &paths(1, "ts"), &unread)]));
+    let entries = v["trees"][0]["unreadExtensions"].as_array().expect("array");
+    let exts: Vec<&str> = entries.iter().map(|e| e["ext"].as_str().unwrap()).collect();
+    assert_eq!(exts, ["svelte", "vue"], "{entries:?}");
+    for e in entries {
+        let keys: Vec<&str> = e.as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(
+            keys,
+            ["ext", "kind", "sharePct"],
+            "no second copy of the row: {e}"
+        );
+        assert_eq!(
+            e["kind"], "source",
+            "`.vue`/`.svelte` are source dialects, not data: {e}"
+        );
+    }
+    // The vocabulary ships inside the reply, the `blindSpotMeaning` discipline.
+    let meaning = v["unreadExtensionMeaning"]
+        .as_str()
+        .expect("legend ships with the reply");
+    assert!(meaning.contains("no structural parser"), "{meaning}");
+    assert!(meaning.contains("10%"), "{meaning}");
+}
+
+/// A file a parser DID read, whose frontend projects io facts and nothing else — the shape
+/// `zzop-parser-sql` has by design ("`db-table` io PROVIDEs only ... no symbols/imports project for
+/// `.sql`") and `Prisma` shares. Counting only symbols and dep entries called it `lexicalOnly`, whose
+/// own legend promises "no parser in this build projected any symbol, import or io fact from the
+/// file" — false for this row, and it was false in the field: macrozheng/mall reported
+/// `{"ext":"sql","files":1,"structural":0,"lexicalOnly":1}` while all 76 of that run's `db-table`
+/// provides came out of that single file and the census counted it in `parserDispatched: 525`.
+///
+/// On regression (the io channel dropped from the membership test) this goes red on the exact cell a
+/// coverage auditor reads to decide whether a file was analyzed.
+#[test]
+fn a_file_whose_parser_projects_io_only_is_structural_not_lexical() {
+    let tree = json!({
+        "sourceId": "db",
+        "output": {
+            "ir": {
+                "loc": { "src/app.ts": 20, "schema/mall.sql": 400 },
+                "symbols": [ { "file": "src/app.ts", "name": "main" } ],
+                "dep": { "src/app.ts": [] },
+                "io": {
+                    "provides": [ { "file": "schema/mall.sql", "key": "table:orders", "kind": "db-table", "line": 3 } ],
+                    "consumes": []
+                }
+            },
+            "degraded": [],
+            "coverage": {}
+        }
+    });
+    let v = run(json!([tree]));
+    let rows = v["trees"][0]["extensions"].as_array().expect("array");
+    let sql = rows
+        .iter()
+        .find(|r| r["ext"] == "sql")
+        .unwrap_or_else(|| panic!("the table must carry a `sql` row: {rows:?}"));
+    assert_eq!(
+        sql["structural"], 1,
+        "a parser read this file and it yielded 1 io provide — the table must not call it unread: {sql}"
+    );
+    assert_eq!(sql["lexicalOnly"], 0, "{sql}");
+    // Non-vacuity: a file NO parser touched must still land in `lexicalOnly`, or the assertion above
+    // is satisfied by a membership test that admits everything.
+    let tree_unread = json!({
+        "sourceId": "db",
+        "output": {
+            "ir": {
+                "loc": { "src/app.ts": 20, "schema/mall.sql": 400 },
+                "symbols": [ { "file": "src/app.ts", "name": "main" } ],
+                "dep": { "src/app.ts": [] },
+                "io": { "provides": [], "consumes": [] }
+            },
+            "degraded": [],
+            "coverage": {}
+        }
+    });
+    let v2 = run(json!([tree_unread]));
+    let sql2 = v2["trees"][0]["extensions"]
+        .as_array()
+        .expect("array")
+        .iter()
+        .find(|r| r["ext"] == "sql")
+        .expect("row")
+        .clone();
+    assert_eq!(
+        sql2["structural"], 0,
+        "with no fact of any kind, the same file must read as unread: {sql2}"
+    );
+    assert_eq!(sql2["lexicalOnly"], 1, "{sql2}");
+}

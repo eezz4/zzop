@@ -268,3 +268,33 @@ fn build_dep_with_workspace_merges_re_exports_too() {
     );
     assert_eq!(dep["barrel.ts"], vec!["b.ts".to_string()]);
 }
+
+// --- Side-effect (specifier-less) `import "./x"` ---
+
+#[test]
+fn bare_side_effect_import_creates_dep_edge() {
+    // `import './b';` alone — no binding, no re-export, no dynamic import — used to be invisible to
+    // `build_dep` because `parse_imports` emitted nothing for it. It is a real synchronous module load,
+    // so it must be a plain (cycle-eligible) edge, exactly like a named import of the same target.
+    let imports = parse_imports("a.ts", "import './b';\n");
+    let all = paths(&["a.ts", "b.ts"]);
+    let (dep, noncycle) = build_dep(&[("a.ts".to_string(), imports)], &[], &[], &all);
+    assert_eq!(dep["a.ts"], vec!["b.ts".to_string()]);
+    assert!(
+        !noncycle.contains(&("a.ts".to_string(), "b.ts".to_string())),
+        "a side-effect import IS a synchronous load-order edge and must stay cycle-eligible"
+    );
+}
+
+#[test]
+fn side_effect_import_of_an_external_package_is_still_dropped() {
+    // The never-over-reach control: the new binding must not turn `import 'react-toastify/dist/x.css';`
+    // into an edge to something outside the tree — external specifiers resolve to `None` as always.
+    let imports = parse_imports(
+        "a.ts",
+        "import 'react-toastify/dist/x.css';\nimport './b';\n",
+    );
+    let all = paths(&["a.ts", "b.ts"]);
+    let (dep, _noncycle) = build_dep(&[("a.ts".to_string(), imports)], &[], &[], &all);
+    assert_eq!(dep["a.ts"], vec!["b.ts".to_string()]);
+}

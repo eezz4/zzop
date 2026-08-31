@@ -106,6 +106,7 @@ pub(crate) fn sample_re_export() -> ReExport {
 
 pub(crate) fn sample_io_provide() -> IoProvide {
     IoProvide {
+        route_version: None,
         kind: "http".to_string(),
         key: "GET /users/{}".to_string(),
         file: "src/user.controller.ts".to_string(),

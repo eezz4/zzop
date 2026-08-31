@@ -131,7 +131,6 @@ done
 
 # `<rule id>|<token>|<why>` — vetted misses. Every entry must still BE a miss (stale entries fail).
 ALLOWLIST=(
-  "config-file-secret|.yml|the matcher spells this extension \`ya?ml\` (one alternation covering .yaml and .yml), so the literal substring \`yml\` cannot appear; the claim is true, only unmatchable by substring"
   "taint-flow|message|names the rule's own \`message\` FIELD (\"see the rule's own \`message\` for the three documented precision limits\"), a pointer to documentation rather than matched vocabulary"
   "protected-path-no-auth-evidence|views.AdminView|an invented Django handler name, quoted to illustrate a token that would OVER-CLEAR the route if the guard vocabulary were widened; it survives the dotted-identifier shape filter that catches the other illustrations"
   "dev-path-no-guard-hint|views.DebugView|same illustration, same sentence, on the sibling rule"

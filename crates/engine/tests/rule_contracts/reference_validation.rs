@@ -275,6 +275,11 @@ fn every_flag_reference_in_shipped_source_names_a_real_cli_or_external_tool_flag
 ///   config `rules: {...}` ... if this island is reached by a mechanism this graph doesn't see (e.g.
 ///   dynamic `` `require` ``, a plugin loader)" aside names Node's `require()` as an example of an
 ///   invisible-to-the-graph reachability mechanism, not a config knob; same co-location pattern.
+/// - `notAllowlisted` — `crates/facade/src/output/packs_legend.rs`'s `packsLoadedMeaning` legend defines
+///   the two VALUES `` `packsLoaded[].didNotRun` `` takes, and the sentence for this one necessarily
+///   names the knob it reports on (`packs.only` / `packsOnly`) in the same clause. A wire value quoted
+///   beside a config key, not a key; its sibling value `disabled` needs no entry because that string
+///   really is one (`packs.disabled`).
 ///
 /// **What this proves**: every backtick-quoted, identifier/dotted-path-shaped token within 120 bytes of
 /// "config" on a code line of a scanned source file names a real config path/key, embedder field, or

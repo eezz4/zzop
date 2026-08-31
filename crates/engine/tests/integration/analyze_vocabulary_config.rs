@@ -247,6 +247,186 @@ fn declared_skip_dirs_remove_a_directory_from_the_walked_tree() {
     );
 }
 
+/// The other half of the test above: a prune that changes the answer must SAY it did. Until 2026-08-16
+/// `skipDirs` was the only filter in the config with zero trace in the output — the reply for a tree
+/// whose sources all sat under a skipped name was indistinguishable from the reply for a tree that
+/// genuinely held nothing, which is the one place the tool's central promise (never claim an absence it
+/// did not establish) broke under the vocabulary `zzop init` itself writes.
+///
+/// Asserts the three things a reader has to act on: the directory NAME (the literal string to remove
+/// from the config), the config KEY that did it, and the fact that the prune happened before reading —
+/// not merely that some warning exists.
+#[test]
+fn a_skipped_directory_is_disclosed_by_name_and_by_config_key() {
+    let dir = TempDir::new("zzop-vocab-skip-disclose");
+    dir.write("src/app.ts", "export const a = 1;\n");
+    dir.write("build/generated.ts", "export const b = 2;\n");
+    dir.write("build/nested/deep.ts", "export const c = 3;\n");
+
+    let skipping = analyze_tree(
+        dir.path(),
+        &EngineConfig {
+            dispatch: zzop_engine::DispatchConfig {
+                skip_dirs: vec!["build".to_string()],
+                ..zzop_engine::DispatchConfig::default()
+            },
+            ..EngineConfig::default()
+        },
+    );
+    assert_eq!(skipping.file_count, 1, "the fixture must actually prune");
+    let disclosure = skipping
+        .warnings
+        .iter()
+        .find(|w| w.contains("skipDirs"))
+        .unwrap_or_else(|| {
+            panic!(
+                "a prune that removed 2 of 3 files must self-report: {:?}",
+                skipping.warnings
+            )
+        });
+    assert!(
+        disclosure.contains("build"),
+        "the disclosure must name the pruned directory, since that name is the config edit: {disclosure}"
+    );
+    assert!(
+        disclosure.contains("vocabulary.skipDirs"),
+        "the disclosure must name the key that did it: {disclosure}"
+    );
+    // The nested directory is BELOW a pruned one, so the walk never reached it: reporting it would
+    // claim a second independent prune that never happened.
+    assert!(
+        !disclosure.contains("build/nested"),
+        "only the pruned directory itself is walked and reported: {disclosure}"
+    );
+
+    // Silence when nothing was pruned, or the reader learns to skip the line. An EMPTY skip list is the
+    // shape a config-file run reaches with `vocabulary.skipDirs` undeclared (`DispatchConfig::default()`
+    // is the Rust-API default and carries the built-in list, which would prune `build/` here too).
+    let untouched = analyze_tree(
+        dir.path(),
+        &EngineConfig {
+            dispatch: zzop_engine::DispatchConfig {
+                skip_dirs: Vec::new(),
+                ..zzop_engine::DispatchConfig::default()
+            },
+            ..EngineConfig::default()
+        },
+    );
+    assert_eq!(untouched.file_count, 3, "nothing declared, nothing pruned");
+    assert!(
+        !untouched.warnings.iter().any(|w| w.contains("skipDirs")),
+        "an undeclared skip list prunes nothing and must say nothing: {:?}",
+        untouched.warnings
+    );
+}
+
+/// What keeps the disclosure above from being noise, pinned as behaviour because the reasoning in
+/// `skipped_dirs_warning`'s doc rests on it: a directory a COMMITTED `.gitignore` already excludes never
+/// reaches the skip-list prune, so the shipped template's `node_modules`/`dist`/`target` — gitignored in
+/// virtually every tree they appear in — cost nothing in the line, and what survives to be named is the
+/// COMMITTED directory that was skipped anyway. That is the interesting case by construction. Measured on
+/// this repo the same day: 11 declared names, 2 reported.
+///
+/// If this ever inverts (the prune running ahead of the ignore matcher), the disclosure does not become
+/// wrong — it becomes loud, which is its own way of going unread. That is the failure this test catches.
+#[test]
+fn a_gitignored_directory_is_not_attributed_to_the_skip_list() {
+    let dir = TempDir::new("zzop-vocab-skip-gitignored");
+    dir.write("src/app.ts", "export const a = 1;\n");
+    dir.write(".gitignore", "node_modules/\n");
+    dir.write("node_modules/pkg/index.ts", "export const b = 2;\n");
+    dir.write("build/generated.ts", "export const c = 3;\n");
+
+    let out = analyze_tree(
+        dir.path(),
+        &EngineConfig {
+            dispatch: zzop_engine::DispatchConfig {
+                skip_dirs: vec!["node_modules".to_string(), "build".to_string()],
+                ..zzop_engine::DispatchConfig::default()
+            },
+            ..EngineConfig::default()
+        },
+    );
+    let disclosure = out
+        .warnings
+        .iter()
+        .find(|w| w.contains("skipDirs"))
+        .unwrap_or_else(|| panic!("`build/` is committed and pruned: {:?}", out.warnings));
+    assert!(
+        disclosure.contains("build"),
+        "the committed-but-skipped directory is the one worth naming: {disclosure}"
+    );
+    assert!(
+        !disclosure.contains("node_modules"),
+        "a gitignored directory was already out of the walk — attributing it to the skip list inflates \
+         the line with the entries nobody needs to read: {disclosure}"
+    );
+}
+
+/// The other volume guard, and the one that would otherwise fire on EVERY git repository: `.git` is
+/// pruned by the shipped skip list in every tree that has one, and no project can put analyzable source
+/// in git's object store. A permanently-present, never-actionable line is how a warning teaches its
+/// reader to skip the whole channel — including the `build/` case it exists for. See
+/// `config_filters::NOT_SOURCE_BY_CONSTRUCTION` for why this exclusion is drawn on the fact/convention
+/// axis and not on "this one looks boring".
+#[test]
+fn a_machine_owned_directory_is_pruned_but_never_named() {
+    let dir = TempDir::new("zzop-vocab-skip-machine-owned");
+    dir.write("src/app.ts", "export const a = 1;\n");
+    dir.write(".git/config", "[core]\n");
+    dir.write("zzop-reports/report.md", "# old\n");
+
+    let only_machine_owned = analyze_tree(
+        dir.path(),
+        &EngineConfig {
+            dispatch: zzop_engine::DispatchConfig {
+                skip_dirs: vec![".git".to_string(), "zzop-reports".to_string()],
+                ..zzop_engine::DispatchConfig::default()
+            },
+            ..EngineConfig::default()
+        },
+    );
+    assert!(
+        !only_machine_owned
+            .warnings
+            .iter()
+            .any(|w| w.contains("skipDirs")),
+        "a run whose only prunes are machine-owned has nothing to disclose: {:?}",
+        only_machine_owned.warnings
+    );
+
+    // And the filter must not swallow the line when a real directory is pruned alongside them.
+    dir.write("build/generated.ts", "export const b = 2;\n");
+    let mixed = analyze_tree(
+        dir.path(),
+        &EngineConfig {
+            dispatch: zzop_engine::DispatchConfig {
+                skip_dirs: vec![
+                    ".git".to_string(),
+                    "zzop-reports".to_string(),
+                    "build".to_string(),
+                ],
+                ..zzop_engine::DispatchConfig::default()
+            },
+            ..EngineConfig::default()
+        },
+    );
+    let disclosure = mixed
+        .warnings
+        .iter()
+        .find(|w| w.contains("skipDirs"))
+        .unwrap_or_else(|| panic!("`build/` still needs its line: {:?}", mixed.warnings));
+    assert!(
+        disclosure.contains("build") && !disclosure.contains(".git"),
+        "the reportable prune is named and the machine-owned ones are not: {disclosure}"
+    );
+    assert!(
+        disclosure.contains("1 directory"),
+        "the COUNT is over reportable prunes too — counting 3 while naming 1 invites the reader to hunt \
+         for two directories the line will never identify: {disclosure}"
+    );
+}
+
 /// Seals the no-fallback contract in ONE place, over the whole struct: an undeclared vocabulary must NOT
 /// produce the same findings as the declared built-in one. Before 2026-07-27 this test asserted the
 /// opposite — that the two were byte-identical — which was the fallback's own definition; inverting it is
@@ -274,4 +454,57 @@ fn an_undeclared_vocabulary_is_not_the_built_in_one() {
     // route it protects reports alongside the genuinely unguarded one.
     assert_eq!(count(&undeclared, "mutating-route-no-auth"), 2);
     assert_eq!(count(&declared, "mutating-route-no-auth"), 1);
+}
+
+/// The measured defect at the level a user meets it: `vocabulary.authGuardPattern` set to an
+/// unparseable regex produced `configWarnings: []`, exit 0, and output BYTE-IDENTICAL to the same run
+/// with a valid pattern. Every consumer compiles with `Regex::new(..).ok()`, so an uncompilable value
+/// collapses to the same `None` an UNDECLARED key has — and undeclared means "make no judgment". The
+/// project that took the trouble to declare, and fat-fingered a bracket, got exactly the treatment of
+/// the project that declared nothing.
+#[test]
+fn an_uncompilable_declared_pattern_is_reported_rather_than_swallowed() {
+    let dir = TempDir::new("zzop-engine-vocab-uncompilable");
+    dir.write("a.ts", "export function noop() { return 1; }\n");
+
+    let cfg = EngineConfig {
+        source_id: "t".to_string(),
+        vocabulary: zzop_engine::VocabularyConfig {
+            auth_guard_pattern: Some("(?i)((((zorp[".to_string()),
+            ..zzop_engine::VocabularyConfig::built_in()
+        },
+        ..EngineConfig::default()
+    };
+    let out = analyze_tree(dir.path(), &cfg);
+    assert!(
+        out.warnings
+            .iter()
+            .any(|w| w.contains("vocabulary.authGuardPattern") && w.contains("made no judgment")),
+        "the declaration was ignored and the run must say so: {:?}",
+        out.warnings
+    );
+    // Ignored, not fatal — the bad key costs its own judgment and nothing else.
+    assert_eq!(out.file_count, 1);
+}
+
+/// The invalidation: a valid vocabulary must add no warning. Without it, "report the uncompilable
+/// ones" is indistinguishable from "report every declared pattern".
+#[test]
+fn a_compilable_declared_pattern_adds_no_warning() {
+    let dir = TempDir::new("zzop-engine-vocab-compilable");
+    dir.write("a.ts", "export function noop() { return 1; }\n");
+
+    let cfg = EngineConfig {
+        source_id: "t".to_string(),
+        vocabulary: zzop_engine::VocabularyConfig::built_in(),
+        ..EngineConfig::default()
+    };
+    let out = analyze_tree(dir.path(), &cfg);
+    assert!(
+        !out.warnings
+            .iter()
+            .any(|w| w.contains("is not a valid regular expression")),
+        "{:?}",
+        out.warnings
+    );
 }

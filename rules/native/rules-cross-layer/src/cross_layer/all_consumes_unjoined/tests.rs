@@ -41,6 +41,7 @@ fn provide(source: &str, kind: &str, key: &str) -> TaggedProvide {
             file: "be/routes.ts".to_string(),
             line: 1,
             symbol: None,
+            ..Default::default()
         },
     }
 }

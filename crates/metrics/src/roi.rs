@@ -27,7 +27,6 @@ pub enum RecId {
     HotChurn,
     FatFanout,
     HiddenCoupling,
-    KnowledgeSilo,
     VersioningCandidate,
     /// Synthetic escalation-only group id — see the enum doc above.
     UrgentBugRisk,
@@ -71,7 +70,6 @@ fn reduction_ratio(rule_id: RecId) -> f64 {
     match rule_id {
         RecId::BugProne | RecId::Circular | RecId::FatFanout => 0.7,
         RecId::HotChurn | RecId::HiddenCoupling | RecId::VersioningCandidate => 0.5,
-        RecId::KnowledgeSilo => 0.3,
         RecId::UrgentBugRisk => {
             unreachable!("UrgentBugRisk is a post-escalation synthetic group id — compute_roi is only ever called with an item's original rule id, before escalation")
         }
@@ -108,7 +106,7 @@ mod tests {
 
     #[test]
     fn roi_zero_risk_is_zero() {
-        let r = compute_roi(RecId::KnowledgeSilo, Severity::Info, 0.0, 0, 0);
+        let r = compute_roi(RecId::VersioningCandidate, Severity::Info, 0.0, 0, 0);
         assert_eq!(r.estimated_reduction, 0.0);
         assert_eq!(r.roi, 0.0);
     }

@@ -75,11 +75,35 @@ for f in "$CENSUS" "$SURFACE" "$TEMPLATE"; do
   fi
 done
 
-# `path:CONST` of every census line whose axis column is exactly `convention`.
-convention_keys() { awk '$2 == "convention" { print $1 }' "$CENSUS"; }
+# `path:CONST` of every census line whose axis column is exactly `convention`, and the config path each
+# one claims — read in ONE pass and held in memory rather than re-derived per key.
+#
+# This used to be two awk functions called once per key from the loop below, which on this machine was
+# the whole cost of this guard: MSYS2 emulates fork by copying the process, so a subprocess spawned
+# from bash costs ~563ms here regardless of what it does (measured 2026-08-18; native `git.exe` spawns
+# in 30ms, so it is the shell boundary and not the machine). Per key that was a `$(...)` subshell plus
+# an awk plus up to three greps; across the census that is a few hundred forks to answer a question
+# whose inputs are three files that never change during the run.
+mapfile -t CONVENTION_KEYS < <(awk '$2 == "convention" { print $1 }' "$CENSUS")
+declare -A DECLARED_PATH=()
+while IFS=$'	' read -r _k _p; do
+  [ -n "$_k" ] && DECLARED_PATH["$_k"]="$_p"
+done < <(awk '$2 == "convention" && $3 == "->" { print $1 "	" $4 }' "$CENSUS")
 
-# The config path a census line claims, or empty. Format: `<key> convention -> <configPath> [# ...]`.
-declared_path_of() { awk -v k="$1" '$1 == k && $3 == "->" { print $4 }' "$CENSUS"; }
+# The two owner files as TEXT, read once. `$(<file)` is the one command substitution bash answers
+# without forking, so these two lines cost nothing on the axis this rewrite is about.
+SURFACE_TEXT="$(<"$SURFACE")"
+TEMPLATE_TEXT="$(<"$TEMPLATE")"
+
+# Just the `configKeys.top` array block, same line-state machine the per-key awk used to run. Joining
+# its lines and asking for a substring is equivalent to asking each line separately, because the needle
+# is a quoted key and can never straddle a newline.
+SURFACE_TOP_TEXT="$(awk '
+  /"top"[[:space:]]*:/ { intop = 1 }
+  intop { buf = buf $0 ORS }
+  intop && index($0, "]") { intop = 0 }
+  END { printf "%s", buf }
+' "$SURFACE")"
 
 # A claimed config path counts only if BOTH owners agree it exists. config-surface.json is read as text
 # (no jq in this repo's shells — same constraint the census header records): a dotted path must appear as
@@ -87,31 +111,31 @@ declared_path_of() { awk -v k="$1" '$1 == k && $3 == "->" { print $4 }' "$CENSUS
 # it, either dotted in its prose or as a quoted JSON key.
 path_is_declarable() { # <configPath>
   local p="$1" leaf="${1##*.}"
+  # Every test below is a FIXED-STRING containment question, which is exactly what [[ == *x* ]] asks of
+  # a variable and what grep -qF asked of a file — same answer, no process. The needles keep the quoting
+  # they had, so a key that appears only unquoted still fails the quoted tests.
   if [ "$p" = "$leaf" ]; then
     # Top-level key: must be inside the configKeys.top array.
-    awk -v k="\"$p\"" '
-      /"top"[[:space:]]*:/ { intop = 1 }
-      intop && index($0, k) { found = 1 }
-      intop && /\]/ { intop = 0 }
-      END { exit(found ? 0 : 1) }
-    ' "$SURFACE" || return 1
+    [[ $SURFACE_TOP_TEXT == *"\"$p\""* ]] || return 1
   else
-    grep -qF "\"$p\"" "$SURFACE" || return 1
+    [[ $SURFACE_TEXT == *"\"$p\""* ]] || return 1
   fi
-  # Two statements rather than `grep ... || grep ...`: the SIGPIPE seal's line scan reads the second
-  # `|` of a `||` as the head of a `| grep -q` pipeline, so the one-liner false-reds that guard.
-  if grep -qF "$p" "$TEMPLATE"; then return 0; fi
-  grep -qF "\"$leaf\"" "$TEMPLATE"
+  # Two statements rather than one || chain: the SIGPIPE seal reads the second | of a || as the head of
+  # a | grep -q pipeline, so the one-liner false-reds that guard. Kept although no grep remains here,
+  # because that seal reads TEXT and would read a restored one-liner exactly the same way.
+  if [[ $TEMPLATE_TEXT == *"$p"* ]]; then return 0; fi
+  [[ $TEMPLATE_TEXT == *"\"$leaf\""* ]]
 }
 
 # Undeclarable convention entries, in census order.
 undeclarable=""
-while IFS= read -r k; do
+for k in "${CONVENTION_KEYS[@]}"; do
   [ -n "$k" ] || continue
-  p="$(declared_path_of "$k")"
+  p="${DECLARED_PATH[$k]:-}"
   if [ -n "$p" ] && path_is_declarable "$p"; then continue; fi
-  undeclarable="${undeclarable}${k}"$'\n'
-done < <(convention_keys)
+  undeclarable="${undeclarable}${k}"$'
+'
+done
 undeclarable="$(printf '%s' "$undeclarable" | grep -v '^$' || true)"
 
 baseline_keys() { grep -v '^[[:space:]]*#' "$BASELINE" 2>/dev/null | grep -v '^[[:space:]]*$' || true; }

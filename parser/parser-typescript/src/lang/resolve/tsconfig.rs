@@ -7,8 +7,11 @@ use super::specifier::{normalize, try_ext};
 
 /// One directory's effective TypeScript path-mapping config: `compilerOptions.baseUrl` (POSIX dir
 /// relative to the analysis root, `""` for root) and `compilerOptions.paths` (alias pattern -> ordered
-/// target list, joined against `base_url` only at resolution time). Built from tsconfig.json (+ one
-/// local `extends` level) by `zzop-engine`'s `pipeline::tsconfig_scan`; stays pure/filesystem-free.
+/// target list, joined against `base_url` only at resolution time). Built by `zzop-engine`'s
+/// `pipeline::tsconfig_scan` from a discovered `tsconfig.json` plus the TWO links it follows, one level
+/// each — `extends` and `references` — so a target here may come from a file whose name this crate never
+/// sees (`tsconfig.app.json`), and the `references` half is a documented HEURISTIC rather than `tsc`
+/// semantics; that producer owns the statement of what it gets wrong. Stays pure/filesystem-free.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TsconfigPaths {
     pub base_url: String,

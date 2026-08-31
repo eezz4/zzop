@@ -130,6 +130,34 @@ fn parse_model_block(
     (model, i + 1)
 }
 
+/// `@@map` / `@@unique` / `@@index` on a model block.
+///
+/// The column list of `@@unique`/`@@index` is PSL's first POSITIONAL argument, and PSL accepts the same
+/// list spelled as the NAMED argument `fields:` — `@@unique(fields: [a, b], name: "x")` declares exactly
+/// the index `@@unique([a, b])` does. `re_unique`/`re_index` used to require `[` to follow `(`, so they
+/// recognized only the positional half, and the half they missed did not degrade to "unsure": no group
+/// was pushed, and the model projected as carrying NO such index — indistinguishable downstream from a
+/// schema that really has none. `schema/fk-no-index` reads these two lists to ask whether a foreign-key
+/// column LEADS some group; on calcom/cal.com `32919f9` it reported `SelectedSlots.userId` as unindexed
+/// while `schema.prisma:1447` declares
+/// `@@unique(fields: [userId, slotUtcStartDate, slotUtcEndDate, uid], name: "selectedSlotUnique")` with
+/// `userId` leading it. One spelling, one false finding, and no policy question involved.
+///
+/// Only `fields:`, and only in first position. Every other block-attribute argument PSL takes here
+/// (`name`, `map`, `type`, `clustered`, `sort`, `length`, `ops`) is a scalar, so the column list is the
+/// only bracketed argument — but matching "the first `[...]` anywhere inside the parens" would buy an
+/// argument ORDER nothing in the corpus writes, at the cost of a wildcard a quoted `name:` containing `]`
+/// could walk through. Measured on the 9-tree corpus (2 `.prisma` files, both under cal.com):
+/// `@@unique(fields:` **1**, `@@index(fields:` **0**, `@@id(fields:` **0**, `fields:` in any non-first
+/// position **0**. TRAILING named arguments already parsed and still do, because the capture stops at the
+/// closing bracket: `@@unique([a, b], name: "x")` **2**, `@@index([a], map: "x")` **0**. Both halves are
+/// pinned by tests, so the fix cannot be bought by narrowing what already worked.
+///
+/// `@@id` is still not read at all, and that is a MEASURED silence rather than an oversight: a composite
+/// `@@id([a, b])` is a primary key and therefore a real index, but all **4** occurrences in the corpus
+/// (`schema.prisma:80`, `:1401`, `:1415`, `:1608`) sit on models that ALSO declare the same leading column
+/// under an explicit `@@index`/`@@unique`, so reading them would harvest 0 findings while adding groups to
+/// a channel `schema/redundant-index` also consumes. Widening here needs its own harvest measurement.
 fn apply_block_attr(
     line: &str,
     table_name: &mut Option<String>,
@@ -157,6 +185,22 @@ fn parse_field(line: &str) -> Option<SchemaField> {
     })
 }
 
+/// Field attributes, with their argument text kept WHOLE across one level of nesting.
+///
+/// The nesting is not an edge case: Prisma's own default generators are calls, so `@default(now())`,
+/// `@default(uuid())`, `@default(cuid())` and `@default(autoincrement())` are the ordinary spellings.
+/// A regex that stopped at the first `)` handed every one of them a truncated argument — `@default(now())`
+/// projected as `now(` — and the consumer that asks "does this model carry a creation timestamp"
+/// (`zzop_rules_schema`'s `has_default_now`) tests `contains("now()")`, so it answered NO for every model
+/// whose creation timestamp is spelled anything other than the literal name `createdAt`. Measured on
+/// calcom/cal.com `176037d`: 8 of the 37 `schema/missing-timestamps` findings sat on models that DO carry a
+/// `DateTime @default(now())` — `User.createdDate`, `Feedback.date`, `UserFeatures.assignedAt` and five
+/// more. `docs/rules/catalog.md` promised that spelling counted, the rule's own code tried to honour it,
+/// and the projection under both of them made it unreachable.
+///
+/// One level, not arbitrary depth: `@default(dbgenerated("gen_random_uuid()"))` nests twice and is still
+/// truncated. Stated rather than left silent — it is strictly better than before and the shapes above are
+/// what the ecosystem writes. A real paren balancer belongs here only when a consumer needs depth 2.
 fn parse_attrs(rest: &str) -> Vec<FieldAttr> {
     re_attr()
         .captures_iter(rest)
@@ -198,9 +242,12 @@ lazy_re!(re_enum, r"^\s*enum\s+(\w+)\s*\{");
 lazy_re!(re_enum_member, r"^([A-Za-z_]\w*)");
 lazy_re!(re_close, r"^\s*\}");
 lazy_re!(re_map, r#"^@@map\s*\(\s*"([^"]+)"\s*\)"#);
-lazy_re!(re_unique, r"^@@unique\s*\(\s*\[([^\]]+)\]");
-lazy_re!(re_index, r"^@@index\s*\(\s*\[([^\]]+)\]");
+lazy_re!(
+    re_unique,
+    r"^@@unique\s*\(\s*(?:fields\s*:\s*)?\[([^\]]+)\]"
+);
+lazy_re!(re_index, r"^@@index\s*\(\s*(?:fields\s*:\s*)?\[([^\]]+)\]");
 lazy_re!(re_field, r"^(\w+)\s+(\w+)(\?|\[\])?\s*(.*)$");
-lazy_re!(re_attr, r"@(\w+)(\(([^)]*)\))?");
+lazy_re!(re_attr, r"@(\w+)(\(((?:[^()]|\([^()]*\))*)\))?");
 lazy_re!(re_block_comment, r"(?s)/\*.*?\*/");
 lazy_re!(re_line_comment, r"(?m)(^|[^:])//.*$");

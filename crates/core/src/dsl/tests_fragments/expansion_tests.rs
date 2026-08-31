@@ -192,6 +192,7 @@ fn expand_fragments_covers_every_pattern_bearing_field_on_every_matcher_kind() {
         "file-exclude-pattern",
         "patterns-pattern",
         "absent-pattern",
+        "trigger-call-exclude-pattern",
         "name-pattern",
         "key-pattern",
         "symbol-pattern",
@@ -251,6 +252,7 @@ fn expand_fragments_covers_every_pattern_bearing_field_on_every_matcher_kind() {
                 pattern: "${absent-pattern}".to_string(),
                 label: "a".to_string(),
             }],
+            trigger_call_exclude_pattern: Some("${trigger-call-exclude-pattern}".to_string()),
             require_call_kind: None,
             file_exclude_pattern: Some("${file-exclude-pattern}".to_string()),
             snippet_max: 160,
@@ -339,6 +341,10 @@ fn expand_fragments_covers_every_pattern_bearing_field_on_every_matcher_kind() {
     };
     assert_eq!(ms.patterns[0].pattern, "(?i)patterns-pattern-resolved");
     assert_eq!(ms.absent[0].pattern, "(?i)absent-pattern-resolved");
+    assert_eq!(
+        ms.trigger_call_exclude_pattern.as_deref(),
+        Some("(?i)trigger-call-exclude-pattern-resolved")
+    );
 
     let Matcher::SymbolScan(ss) = &pack.rules[2].matcher else {
         unreachable!()

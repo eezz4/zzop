@@ -91,98 +91,6 @@ pub(crate) const DEFAULT_SKIP_DIRS: &[&str] = &[
     ".zzop-cache",
 ];
 
-/// Extensions this engine deliberately never names in the "bring an adapter" per-extension disclosure
-/// (`analyze::diagnostics::unparsed_extension_warning`) — non-source file types where a dispatch-`None`
-/// result is simply correct, not a coverage gap: there is no code in a `.png` or a `.lock` file to extract
-/// io/symbol facts from. A mechanism list (like `DEFAULT_SKIP_DIRS` above), not rule vocabulary — nothing
-/// here names a rule or pack id, it only gates which extensions are worth surfacing as an unparsed-language
-/// signal. Grouped by kind, one comment line per group:
-/// - docs/text: prose, never source.
-/// - data/config: structured data a DSL `IoScan`/`SymbolScan` matcher has no symbols/io to key on.
-/// - styles: presentation, not logic.
-/// - markup-as-asset: plain `.html`/`.htm` are static assets in most trees this engine analyzes (SSR
-///   template dialects are the exception — `.jsp`/`.erb`/`.vue`/`.svelte` are deliberately NOT listed
-///   here, since those ARE plausible adapter targets and should still warn).
-/// - images/fonts/media/binaries+archives: no text to parse at all.
-/// - misc: certificates — data, not code.
-const NON_SOURCE_EXTENSIONS: &[&str] = &[
-    // docs/text
-    "md",
-    "mdx",
-    "txt",
-    "rst",
-    "adoc",
-    // data/config
-    "json",
-    "jsonc",
-    "json5",
-    "yaml",
-    "yml",
-    "toml",
-    "xml",
-    "csv",
-    "tsv",
-    "ini",
-    "properties",
-    "lock",
-    // styles
-    "css",
-    "scss",
-    "sass",
-    "less",
-    "styl",
-    // markup-as-asset
-    "html",
-    "htm",
-    // images
-    "png",
-    "jpg",
-    "jpeg",
-    "gif",
-    "webp",
-    "svg",
-    "ico",
-    "bmp",
-    "avif",
-    // fonts
-    "woff",
-    "woff2",
-    "ttf",
-    "otf",
-    "eot",
-    // media
-    "mp3",
-    "mp4",
-    "webm",
-    "wav",
-    "ogg",
-    "mov",
-    // binaries/archives
-    "zip",
-    "gz",
-    "tar",
-    "pdf",
-    "wasm",
-    "exe",
-    "dll",
-    "so",
-    "dylib",
-    "node",
-    "jar",
-    "map",
-    // misc
-    "pem",
-    "crt",
-];
-
-/// True if `ext` names a non-source file type (`NON_SOURCE_EXTENSIONS`) — the filter
-/// `unparsed_extension_warning`'s collection step applies before naming a dispatch-`None` extension as a
-/// coverage gap. Case-insensitive, mirroring `dispatch_by_extension`'s own `to_ascii_lowercase`
-/// normalization (the caller is not required to pre-lowercase `ext`).
-pub fn is_non_source_extension(ext: &str) -> bool {
-    NON_SOURCE_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str())
-}
-
 /// Configures the dispatcher: path-glob overrides (checked first, in list order — first match wins) and
 /// which directory names to skip while walking a tree.
 #[derive(Debug, Clone)]
@@ -282,7 +190,15 @@ fn matches_glob(path: &str, glob: &str) -> bool {
         .unwrap_or(false)
 }
 
+mod non_source;
 mod wire;
+
+// The extension-CLASSIFICATION half, re-exported so `zzop_engine::dispatch::*` stays one surface for
+// callers and `lib.rs`'s re-export list does not have to learn the internal split.
+pub use non_source::{
+    extension_content_kind, extraction_can_lose_facts, is_non_source_extension, non_source_kind,
+    NonSourceKind,
+};
 
 #[cfg(test)]
 mod tests;

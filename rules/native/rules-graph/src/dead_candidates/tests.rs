@@ -501,3 +501,263 @@ fn package_json_referenced_file_is_never_a_dead_candidate() {
     let paths: Vec<&str> = r.iter().map(|f| f.path.as_str()).collect();
     assert_eq!(paths, vec!["features/x/old-helper.ts"]);
 }
+
+// ---- Framework path-convention roots (module doc "Framework path conventions") ----------------
+// MEASURED (2026-08-26, 13 trees): the whole population these four tests cover is 75 findings —
+// cal.com 64 (62 under `apps/web/pages/**` + `example-apps/credential-sync/pages/**` +
+// `packages/platform/examples/base/src/pages/**`, plus 2 `instrumentation*`) and astro 11 (five
+// example/benchmark projects' `src/pages/**`). The control rows in each test are equally measured
+// and must keep reporting.
+
+#[test]
+fn nextjs_pages_router_files_are_not_dead_candidates() {
+    // The HARMFUL finding this gate exists for: `apps/web/pages/api/trpc/auth/[trpc].ts` is four
+    // lines of `export default createNextApiHandler(authRouter)`, routed by Next.js from its PATH.
+    // Deleting it 404s password change, email verification and 27 sibling tRPC namespaces.
+    let r = find_dead_candidates(
+        &[
+            // The DECLARATION that makes `apps/web/` a Next.js app root. Exempt on its own account
+            // (`is_tool_entry_file` carries `<name>.config.<ext>`), so it never appears in output.
+            n("apps/web/next.config.ts", 0, 1),
+            n("apps/web/pages/api/trpc/auth/[trpc].ts", 0, 1),
+            n("apps/web/pages/api/auth/[...nextauth].ts", 0, 1),
+            n("apps/web/pages/api/stripe/webhook.ts", 0, 1),
+            n("apps/web/pages/_app.tsx", 0, 1),
+            n("apps/web/pages/_document.tsx", 0, 1),
+            n("apps/web/pages/router/embed.tsx", 0, 1),
+            n("apps/web/instrumentation.ts", 0, 1),
+            n("apps/web/instrumentation-client.ts", 0, 1),
+        ],
+        &empty_dep(),
+        DEAD_MAX_CHANGES,
+        &no_extra_entries(),
+    );
+    assert!(r.is_empty(), "expected no candidates, got: {r:?}");
+}
+
+#[test]
+fn src_pages_router_under_a_next_app_root_is_covered_too() {
+    // `packages/platform/examples/base/` holds its Pages Router under `src/` — 18 of cal.com's 63.
+    let r = find_dead_candidates(
+        &[
+            n("packages/platform/examples/base/next.config.js", 0, 1),
+            n("packages/platform/examples/base/src/pages/_app.tsx", 0, 1),
+            n(
+                "packages/platform/examples/base/src/pages/api/refresh.ts",
+                0,
+                1,
+            ),
+            n(
+                "packages/platform/examples/base/src/pages/booking.tsx",
+                0,
+                1,
+            ),
+        ],
+        &empty_dep(),
+        DEAD_MAX_CHANGES,
+        &no_extra_entries(),
+    );
+    assert!(r.is_empty(), "expected no candidates, got: {r:?}");
+}
+
+#[test]
+fn astro_src_pages_under_an_astro_app_root_is_not_a_dead_candidate() {
+    // Same mechanism, a second framework, so the gate is not cal.com-shaped: MEASURED on
+    // `corpus/frameworks/astro`, where five example/benchmark projects each carry an
+    // `astro.config.*` beside a routed `src/pages/**` — 11 findings.
+    let r = find_dead_candidates(
+        &[
+            n("examples/ssr/astro.config.mjs", 0, 1),
+            n("examples/ssr/src/pages/api/cart.ts", 0, 1),
+            n("examples/ssr/src/pages/login.form.ts", 0, 1),
+            n(
+                "benchmark/static-projects/build-server/astro.config.js",
+                0,
+                1,
+            ),
+            n(
+                "benchmark/static-projects/build-server/src/pages/api/stats.json.js",
+                0,
+                1,
+            ),
+        ],
+        &empty_dep(),
+        DEAD_MAX_CHANGES,
+        &no_extra_entries(),
+    );
+    assert!(r.is_empty(), "expected no candidates, got: {r:?}");
+}
+
+#[test]
+fn a_pages_directory_with_no_framework_config_beside_it_still_reports() {
+    // NEGATIVE CANARY, and the whole reason the gate is anchored on a declaration rather than on the
+    // directory name. Every row is a MEASURED corpus path that a bare `(^|/)pages/` — or a bare
+    // `plugins/`/`middleware/`/`composables/` — would have erased:
+    //   - cal.com `packages/app-store/paypal/pages/setup/_getStaticProps.tsx` has ZERO references
+    //     repo-wide and no `next.config.*` above it. It is a genuinely dead file.
+    //   - typeorm's `docs/` is Docusaurus (`docusaurus.config.ts`), not Next or Astro.
+    //   - grafana `plugins/`, nest `plugins/`+`middleware/`, nocodb `composables/` are ordinary
+    //     directories that happen to be named after some other framework's convention (21+6+6
+    //     findings between them).
+    let paths = [
+        "packages/app-store/paypal/pages/setup/_getStaticProps.tsx",
+        "docs/src/pages/maintainers.tsx",
+        "e2e-playwright/test-plugins/app/plugins/example1-app/module.tsx",
+        "sample/01-cats-app/src/common/middleware/logger.middleware.ts",
+        "packages/nc-gui/composables/useServerConfig.ts",
+        "apps/web/instrumentation.ts",
+    ];
+    let nodes: Vec<FileNode> = paths.iter().map(|p| n(p, 0, 1)).collect();
+    let r = find_dead_candidates(&nodes, &empty_dep(), DEAD_MAX_CHANGES, &no_extra_entries());
+    let got: Vec<&str> = r.iter().map(|f| f.path.as_str()).collect();
+    let mut want: Vec<&str> = paths.to_vec();
+    want.sort_unstable();
+    let mut got_sorted = got.clone();
+    got_sorted.sort_unstable();
+    assert_eq!(got_sorted, want, "{r:?}");
+}
+
+#[test]
+fn a_next_app_roots_declaration_does_not_exempt_a_sibling_packages_pages_dir() {
+    // The anchor is the declaring directory, not "somewhere in this tree there is a Next app".
+    // cal.com carries both shapes at once and they must land on opposite sides.
+    let r = find_dead_candidates(
+        &[
+            n("apps/web/next.config.ts", 0, 1),
+            n("apps/web/pages/api/book/event.ts", 0, 1),
+            n(
+                "packages/app-store/paypal/pages/setup/_getStaticProps.tsx",
+                0,
+                1,
+            ),
+            n(
+                "apps/web/app/(use-page-wrapper)/(main-nav)/members/actions.ts",
+                0,
+                1,
+            ),
+        ],
+        &empty_dep(),
+        DEAD_MAX_CHANGES,
+        &no_extra_entries(),
+    );
+    let mut got: Vec<&str> = r.iter().map(|f| f.path.as_str()).collect();
+    got.sort_unstable();
+    assert_eq!(
+        got,
+        vec![
+            "apps/web/app/(use-page-wrapper)/(main-nav)/members/actions.ts",
+            "packages/app-store/paypal/pages/setup/_getStaticProps.tsx",
+        ],
+        "{r:?}"
+    );
+}
+
+/// §27 pin — POSITION, not existence. The framework-convention clause must sit BEFORE the
+/// imperative: a reader who acts on the first instruction never reaches a caveat placed after it,
+/// and the act this rule prescribes is DELETING A WHOLE FILE. Before this pin the only hedge in the
+/// message was the rule's own off switch at offset 1139, 401 characters past `Delete the file` at
+/// 738, and it named a bundler entry and a dynamic import — neither of which a reader holding a
+/// path-routed framework file would try on for size. Moving the clause after the verb leaves every
+/// token present and must still turn this test red.
+#[test]
+fn framework_convention_clause_precedes_the_imperative() {
+    let out = dead_candidate_findings(
+        &[n("features/x/Orphan.tsx", 0, 1)],
+        &empty_dep(),
+        &no_extra_entries(),
+    );
+    assert_eq!(out.len(), 1);
+    let clause = out[0]
+        .message
+        .find("A framework may load a whole file from its own path")
+        .expect("framework-convention clause is missing from the message");
+    let verb = out[0]
+        .message
+        .find("Delete the file")
+        .expect("imperative is missing from the message");
+    assert!(
+        clause < verb,
+        "clause at {clause} must precede the imperative at {verb}: {}",
+        out[0].message
+    );
+}
+
+/// §27 pin — POSITION, not existence, for the HALF-A-PRODUCT clause (2026-08-27). The sibling
+/// `unimported-export` closes with the same warning ("if this is public API consumed outside this
+/// repo (e.g. published to npm)") but places it AFTER its own imperative, and that placement cannot
+/// be ported: the act this rule prescribes is deleting a whole FILE. MEASURED (nocodb, 2026-08-27):
+/// `packages/nocodb/src/models/CommentReaction.ts` is told to delete a model whose only caller is
+/// the closed-source enterprise half of the same product — `document-comments.service.ts:58`
+/// `toggleReaction` is the CE stub of that call site, body `return null`, and the CE migrations
+/// still create `nc_comment_reactions`. INVALIDATION PROBE: move the clause behind the imperative
+/// and every token of it is still present in the message — only this assertion goes red, which is
+/// the whole reason it asserts an ordering rather than a `contains`.
+#[test]
+fn ce_ee_consumer_clause_precedes_the_imperative() {
+    let out = dead_candidate_findings(
+        &[n("features/x/Orphan.tsx", 0, 1)],
+        &empty_dep(),
+        &no_extra_entries(),
+    );
+    assert_eq!(out.len(), 1);
+    let clause = out[0]
+        .message
+        .find("Zero in-repo importers is also what HALF A PRODUCT looks like")
+        .expect("half-a-product clause is missing from the message");
+    let verb = out[0]
+        .message
+        .find("Delete the file")
+        .expect("imperative is missing from the message");
+    assert!(
+        clause < verb,
+        "clause at {clause} must precede the imperative at {verb}: {}",
+        out[0].message
+    );
+}
+
+/// The `32919f9` lesson, pinned: a closed enumeration reads as a checklist, and a reader who matches
+/// none of its items proceeds with the imperative. This clause must therefore SAY it is examples and
+/// must hand over the discriminating question — the same shape `unimported-export` landed in
+/// `f891570`. Deleting either half leaves a list a reader can fall off the end of.
+#[test]
+fn ce_ee_consumer_clause_is_open_and_hands_over_a_question() {
+    let out = dead_candidate_findings(
+        &[n("features/x/Orphan.tsx", 0, 1)],
+        &empty_dep(),
+        &no_extra_entries(),
+    );
+    let m = &out[0].message;
+    assert!(
+        m.contains("these are examples rather than a list to match yourself against"),
+        "the enumeration must declare itself open: {m}"
+    );
+    let q = m
+        .find("is any shipping part of it built from a repository you are not looking at?")
+        .expect("the discriminating question is missing: {m}");
+    let clause = m
+        .find("Zero in-repo importers is also what HALF A PRODUCT looks like")
+        .expect("half-a-product clause is missing");
+    assert!(q > clause, "the question belongs inside the clause: {m}");
+}
+
+/// The clause must NOT kill the prescription: a file with no importers and no out-of-tree half is
+/// still worth deleting, and the sentence has to end by saying so or a reader learns to disbelieve
+/// every finding this rule makes (`rule-quality.md` §32's withdrawn-draft lesson, applied to the
+/// disclosure's own tail).
+#[test]
+fn ce_ee_consumer_clause_returns_the_reader_to_the_prescription() {
+    let out = dead_candidate_findings(
+        &[n("features/x/Orphan.tsx", 0, 1)],
+        &empty_dep(),
+        &no_extra_entries(),
+    );
+    let m = &out[0].message;
+    let restore = m
+        .find("If it is not, no importers means what it says.")
+        .expect("the clause must return the reader to the prescription");
+    let verb = m.find("Delete the file").expect("imperative is missing");
+    assert!(
+        restore < verb,
+        "the restoring sentence must lead into the imperative: {m}"
+    );
+}

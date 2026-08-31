@@ -76,7 +76,10 @@ pub(crate) fn uncompilable_rule_warnings(packs: &[zzop_core::RulePackDef]) -> Ve
 
 /// Capability self-report: the "bring an adapter" per-extension disclosure — one line per distinct
 /// extension among files `dispatch::dispatch` returned `None` for, that are not a non-source extension
-/// (`dispatch::is_non_source_extension`) and not already covered by an adapter overlay (the overlay IS the
+/// (`dispatch::is_non_source_extension` — question 1 of `dispatch::NonSourceKind`'s doc, and the ONLY
+/// question this channel asks; "was anything lost" is question 2, answered by the coverage-gap surfaces
+/// through `dispatch::extraction_can_lose_facts`, and the two lists differ on purpose) and not already
+/// covered by an adapter overlay (the overlay IS the
 /// parser for those; see `analyze::assemble`'s collection site for the overlay-exclusion rationale). Before
 /// this change, such a file vanished from every self-report: `degraded: false`, no `io`/symbols, extension
 /// recorded nowhere — this closes that gap without naming a rule/language vocabulary, only a raw extension
@@ -129,7 +132,28 @@ const ON_RAMP_EXT_SAMPLE: usize = 5;
 /// path carries an embedded-contract twin): the guide (`contract envelope-guide`), the checker
 /// (`validate_envelope` / `zzop validate-envelope`), and a runnable example (`contract example-envelope`).
 /// Dropping one is a partial-claim regression; naming an unreachable one is the same regression in the
-/// other direction (the removed napi `analyzeEnvelope` binding is deliberately absent). Pinned by
+/// other direction (the removed napi `analyzeEnvelope` binding is deliberately absent).
+///
+/// ## The forwarding address is SCOPED, and the anecdote behind it does not ride the wire
+/// This string is built in the engine and reaches every lane that walks a tree, so a bare "…rides the
+/// `coverageGaps` field of this same reply" was true on only some of them: that field is the analyze
+/// SHAPER's invention (`zzop_summary::analyze::shape`), and neither `zzop_summary::cross`'s per-source
+/// entries (which forward `warnings` and `coverage`, not this) nor the raw `zzop-facade` output has it.
+/// A reader on those lanes followed a name that is not in their reply — the same failure the sentence
+/// exists to prevent, one level up. Naming the coverage view's `unreadExtensions` instead does not fix
+/// it either: that reply has no MCP twin, and `unparsed_extension_tests`'s CLI-vocabulary leg holds
+/// this file to it. So the pointer states WHICH reply carries the population and says plainly that the
+/// others do not.
+///
+/// The measurement that justifies the exclusion (macrozheng/mall: this line named 8 extensions /
+/// 21 files of mind-maps and binaries while 114 `.xml` mappers holding 906 SQL statements went
+/// unnamed) was **170 bytes** of one foreign repository's statistics paid on EVERY reply that hits
+/// this path, and the clause carrying it went from 345 bytes to 188. It has two owners in the source
+/// already — `dispatch::NonSourceKind`'s doc and `unparsed_extension_tests`' own — and a third copy on
+/// the wire bought the reader nothing the surrounding sentence does not say without it. What stays on
+/// the wire is the CLAIM (the count is not the tree's unread filetypes, and here is what it leaves
+/// out); what left is the evidence for it, which belongs where someone changing this code will read
+/// it. Pinned by
 /// `unparsed_extension_tests`.
 fn adapter_on_ramp_note(unparsed: &BTreeMap<String, (usize, Vec<String>)>) -> String {
     let named: Vec<String> = unparsed
@@ -145,7 +169,15 @@ fn adapter_on_ramp_note(unparsed: &BTreeMap<String, (usize, Vec<String>)>) -> St
     };
     format!(
         "No native parser exists for {} extension(s) in this tree ({}{more_note}) — one entry above per \
-         extension with its own count and sample paths. If any of those languages matter for the analysis, \
+         extension with its own count and sample paths. THAT COUNT IS NOT THE TREE'S UNREAD FILETYPES: \
+         this channel asks only \"is a parser adapter worth asking for\", so filetypes classed non-source \
+         (documents, structured data, configuration, styles, images, media, archives) are EXCLUDED from \
+         it however large they are here. A SHAPED analyze reply carries PART of that excluded \
+         population in its `coverageGaps` field — the source and structured-data halves, and only above \
+         two share floors; filetypes with nothing to project at all (prose, styles, images, media, \
+         archives) are named by NEITHER channel, so an empty `coverageGaps` is not a statement about \
+         them. The cross-tree join and the raw engine output carry no `coverageGaps` at all. \
+         If any of the languages named above matter for the analysis, \
          provide a Mode B adapter overlay via `overlays: [...]` in zzop.config.jsonc (embedders: \
          `adapterOverlays`) — a partial overlay covering just the missing channel/files is enough to \
          start (a tens-of-lines script; see the examples/ adapters in the repo (embedded: `zzop contract \

@@ -117,6 +117,7 @@ pub(super) fn walk(
                     });
                 }
                 out.push(IoProvide {
+                    route_version: None,
                     response: None,
                     body: None,
                     kind: "http".to_string(),

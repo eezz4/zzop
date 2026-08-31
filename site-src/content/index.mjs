@@ -99,8 +99,8 @@ export default {
               {
                 code: "  ",
                 comment: {
-                  ko: "   라우트는 있는데 부르는 쪽이 없다",
-                  en: "   the route nobody calls",
+                  ko: "   이 실행의 어느 트리도 부르지 않는 라우트",
+                  en: "   the route no analyzed tree calls",
                 },
               },
             ],
@@ -134,7 +134,7 @@ export default {
             {
               h: { ko: "교차 계층", en: "Cross-layer" },
               p: {
-                ko: "프론트 호출과 백엔드 라우트를 잇는다. 아무도 안 부르는 엔드포인트, 메서드 불일치, 경로 드리프트 — 저장소를 넘어서도.",
+                ko: "프론트 호출과 백엔드 라우트를 잇는다. 이 실행이 부르는 곳을 못 찾은 엔드포인트, 메서드 불일치, 경로 드리프트 — 저장소를 넘어서도.",
                 en: "Frontend calls joined to backend routes: unconsumed endpoints, method mismatches, path drift — even across repositories.",
               },
             },
@@ -148,8 +148,8 @@ export default {
             {
               h: { ko: "구조", en: "Structure" },
               p: {
-                ko: "순환 의존, 죽은 코드, 리팩터 우선순위. 구조적 부채를 파일 단위로 셈한다.",
-                en: "Circular dependencies, dead code, refactor priority — structural debt quantified per file.",
+                ko: "순환 의존, 닿지 않는 섬, 리팩터 우선순위. 구조적 부채를 파일 단위로 셈한다. 순환과 폐쇄 섬은 여덟 언어 전부에서, 고아 파일과 안 쓰이는 export 는 TypeScript 에서만.",
+                en: "Circular dependencies, unreachable islands, refactor priority — structural debt quantified per file. Cycles and closed islands run on all eight languages; orphan files and unused exports are TypeScript-only.",
               },
             },
           ],
@@ -243,11 +243,11 @@ export default {
           "p",
           {
             ko: `X(구 트위터)와 xAI 가 공개한 저장소 12개 — For You 피드부터 Grok 의 빌드 시스템까지 —
-      를 한 번에 걸었다. 아래 수는 2026-08-15 에 zzop 0.31.0 으로 잰 것이고,
+      를 한 번에 걸었다. 아래 수는 2026-08-16 에 zzop 0.33.0 으로 잰 것이고,
       <strong>수마다 무엇을 센 것인지가 다르다</strong>: <em>walked</em> 는 트리에서 걸은 파일,
       <em>파서 수신</em>은 그중 네이티브 파서 8종이 실제로 받은 것, 심볼은 그 파서들이 추출한 선언이다.`,
             en: `Twelve repositories X (formerly Twitter) and xAI have open-sourced — from the For You feed
-      to Grok's build system — in one run. The numbers below were measured 2026-08-15 with zzop 0.31.0,
+      to Grok's build system — in one run. The numbers below were measured 2026-08-16 with zzop 0.33.0,
       and <strong>each counts a different thing</strong>: <em>walked</em> is files visited in the tree,
       <em>dispatched</em> is the subset the eight native parsers actually received, and symbols are the
       declarations those parsers extracted.`,
@@ -322,11 +322,11 @@ export default {
         [
           "p",
           {
-            ko: `같은 저장소 12개에 룰을 걸었다(2026-08-15, zzop 0.32.0). 결함이 나온 곳은 <strong>4개뿐</strong>이고
+            ko: `같은 저장소 12개에 룰을 걸었다(2026-08-16, zzop 0.33.0). 결함이 나온 곳은 <strong>4개뿐</strong>이고
       <strong>8개는 0건</strong>이다 — 0건도 결과라, 숨기지 않고 공시한다. 합 <strong>171건</strong>:
       심각도로 나누면 <strong>critical 5 · warning 122 · info 44</strong>. 여기서 핵심은
       <strong>심각도가 취약점 판정이 아니라 렉시컬 판정</strong>이라는 것이다.`,
-            en: `The same twelve repositories, run against the rule packs (2026-08-15, zzop 0.32.0). Only
+            en: `The same twelve repositories, run against the rule packs (2026-08-16, zzop 0.33.0). Only
       <strong>four</strong> produced any finding; <strong>eight came back with zero</strong> — a zero is a
       result too, disclosed rather than hidden. <strong>171 in total</strong>, split
       <strong>5 critical · 122 warning · 44 info</strong>. The point that makes the number honest:
@@ -355,12 +355,23 @@ export default {
             {
               k: { ko: "진짜 신호는 warning 에", en: "The real signal is in the warnings" },
               v: {
-                ko: `가장 많이 뜬 룰: <code>command-and-interpolation</code> 33 · <code>reqwest-no-timeout</code> 24 ·
-      <code>hardcoded-secret</code> 19 · <code>high-entropy-secret</code> 13 · <code>fs-check-then-use</code> 9.
+                ko: `warning 을 낸 룰은 <code>command-and-interpolation</code> · <code>fs-check-then-use</code> ·
+      <code>hardcoded-secret</code> · <code>high-entropy-secret</code> · <code>reqwest-no-timeout</code> 등이다 —
+      알파벳 순이고 <strong>순위가 아니다</strong>. 룰별 카운트는 <strong>자리 수가 아니라 발견 수</strong>이고, 둘이
+      얼마나 벌어지는지는 트리가 아니라 <strong>룰의 성질</strong>이다: 메서드 본문을 훑는 룰은 본문 안 적격 줄이 몇 개든
+      <strong>본문당 발견 1건</strong>을 내고, 순환이나 중복 라우트를 보고하는 룰은 그 묶음 전체에 1건을 낸다. 그 수로
+      룰을 줄 세우면 서로 다른 두 양을 한 열에 놓는 것이라 이 페이지는 줄 세우지 않는다 — 리플라이도 스스로
+      <code>findings.byRuleMeaning</code> 에 같은 말을 담고, 접힌 발견은 저마다 진짜 크기를 함께 낸다.
       크로스-레인은 별도로, 소비되지 않는 엔드포인트·제공자 없는 호출 같은 계약 틈 20건을 냈다 — 파일 하나를 보는 룰이
       못 보는 층이다.`,
-                en: `Top rules by count: <code>command-and-interpolation</code> 33 · <code>reqwest-no-timeout</code> 24 ·
-      <code>hardcoded-secret</code> 19 · <code>high-entropy-secret</code> 13 · <code>fs-check-then-use</code> 9.
+                en: `The warnings came from rules like <code>command-and-interpolation</code>,
+      <code>fs-check-then-use</code>, <code>hardcoded-secret</code>, <code>high-entropy-secret</code> and
+      <code>reqwest-no-timeout</code> — alphabetical, <strong>not ranked</strong>. A per-rule count counts
+      <strong>findings, not places</strong>, and how far those two diverge is a property of the rule: one that
+      scans method bodies emits a single finding per body however many qualifying lines it holds, and one that
+      reports a cycle or a duplicated route emits a single finding for the whole group. Ranking rules on that
+      number would put two different quantities in one column, so this page does not — the reply says the same
+      in its own <code>findings.byRuleMeaning</code>, and every folded finding carries its true size.
       The cross-layer join added 20 more — contract gaps like unconsumed endpoints and unprovided calls, the
       layer a single-file rule cannot see.`,
               },

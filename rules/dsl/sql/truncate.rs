@@ -197,3 +197,63 @@ fn a_hash_commented_truncate_still_fires_in_python() {
         out.findings
     );
 }
+
+/// **The prose hole, pinned in both directions.** The keyword used to be `(?i)`, which made every quoted
+/// two-word English phrase a SQL statement: apache/superset's `t('Truncate Metric')` fired at CRITICAL,
+/// four times, on chart-control checkbox labels. The discriminator is the KEYWORD'S OWN CASING — Title
+/// Case is a prose convention and no SQL dialect writes it. Measured across the dogfood corpus plus
+/// superset, 117 matches of the old pattern: 12 carried a mixed-case keyword and all 12 were false; the
+/// 105 uniform-case ones were real SQL.
+///
+/// Four spellings in one call, because "Title Case is rejected" and "nothing fires" are the same
+/// assertion without the uppercase and lowercase controls beside it.
+#[test]
+fn a_title_case_truncate_is_prose_and_a_uniform_case_one_is_sql() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "src/controls.tsx",
+        "export const controls = [\n  { label: 'Truncate Metric' },\n  { label: 'Truncate labels' },\n];\n",
+    );
+    dir.write(
+        "src/cleanup.ts",
+        "export const upper = 'TRUNCATE TABLE users';\nexport const lower = 'truncate table sessions';\n",
+    );
+    let out = scan(&dir);
+    let files: Vec<&str> = hits(&out, "truncate-in-app-code")
+        .iter()
+        .map(|f| f.file.as_str())
+        .collect();
+    assert_eq!(
+        files,
+        vec!["src/cleanup.ts", "src/cleanup.ts"],
+        "prose must be silent and both uniform-case spellings must fire: {:?}",
+        out.findings
+    );
+}
+
+/// The same hole lived in the sibling rule, and was found only because the two were read together —
+/// `t('Delete from list')` is the identical shape. `update-no-where` never had it: `SET` gives that rule
+/// a second keyword, which is exactly what these two lack.
+#[test]
+fn a_title_case_delete_from_is_prose_and_a_uniform_case_one_is_sql() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "src/menu.tsx",
+        "export const items = [{ label: 'Delete from list' }, { label: 'Delete from board' }];\n",
+    );
+    dir.write(
+        "src/purge.ts",
+        "export const q = \"DELETE FROM sessions\";\n",
+    );
+    let out = scan(&dir);
+    let files: Vec<&str> = hits(&out, "delete-no-where")
+        .iter()
+        .map(|f| f.file.as_str())
+        .collect();
+    assert_eq!(
+        files,
+        vec!["src/purge.ts"],
+        "prose must be silent and the real statement must fire: {:?}",
+        out.findings
+    );
+}

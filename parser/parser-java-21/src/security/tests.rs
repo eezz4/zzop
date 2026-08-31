@@ -1,6 +1,11 @@
 //! Coverage for `extract_spring_guarded_lines`: method-level and class-level Spring method-security
 //! annotations, the route gate (a guarded non-route method is ignored), non-controller exclusion, and the
-//! line contract (the emitted line equals the mapping-annotated method's `provides::extract` anchor line).
+//! line contract (the emitted line equals the MAPPING ANNOTATION's line — the `provides::extract` anchor).
+//!
+//! Every fixture below except `an_annotation_above_the_mapping_does_not_move_the_anchor` puts the mapping
+//! annotation FIRST, where `line_of(method_declaration)` and `line_of(RouteMatch::anchor)` coincide — which
+//! is exactly why this file stayed green through the whole life of the method-node anchor bug. That one
+//! test is the fixture the old anchor cannot pass.
 
 use super::extract_spring_guarded_lines;
 use crate::provides::extract_http_provides;
@@ -147,9 +152,9 @@ public class Outer {
 fn a_guarded_non_literal_method_path_route_is_still_exempted() {
     // Regression (opus BLOCKING): the whole-corpus pass RESOLVES a non-literal method-path constant
     // (`@PostMapping(ApiPaths.CREATE)`) into a real route, so its guard-line MUST be emitted even though the
-    // per-file `extract_http_provides` drops it (no corpus). Uses `method_route_states` (route MEMBERSHIP),
-    // not the per-file `method_route` (which would drop this and desync the exemption -> a false
-    // `mutating-route-no-auth` on an actually `@PreAuthorize`-guarded route).
+    // per-file `extract_http_provides` drops it (no corpus). Uses the raw `method_route_match` (route
+    // MEMBERSHIP), not its per-file `literal_routes` view (which would drop this and desync the exemption
+    // -> a false `mutating-route-no-auth` on an actually `@PreAuthorize`-guarded route).
     let src = "\
 @RestController
 @RequestMapping(\"/api\")
@@ -164,5 +169,36 @@ public class UserController {
         lines,
         vec![4],
         "the guarded non-literal-path route's anchor line must be exempted"
+    );
+}
+
+#[test]
+fn an_annotation_above_the_mapping_does_not_move_the_anchor() {
+    // The mall shape, and the fixture the pre-2026-08-23 method-node anchor cannot pass: a Swagger
+    // `@Operation` leads the modifier list, so `line_of(method_declaration)` is 4 while the registration
+    // is on 5. BOTH sides must say 5 — the guard line (or the exemption misses) and the provide (or the
+    // reader is sent to a doc annotation). Every other fixture in this file puts the mapping first, where
+    // the two anchors coincide; that is why they never caught this.
+    let src = "\
+@RestController
+@RequestMapping(\"/admin\")
+public class UmsAdminController {
+  @Operation(summary = \"register a user\")
+  @PostMapping(value = \"/register\")
+  @PreAuthorize(\"hasRole('ADMIN')\")
+  public String register() { return \"\"; }
+}
+";
+    let lines = extract_spring_guarded_lines("UmsAdminController.java", src);
+    assert_eq!(lines, vec![5], "the @PostMapping line, not the @Operation");
+    let provides = extract_http_provides("UmsAdminController.java", src);
+    assert_eq!(provides.len(), 1, "{provides:?}");
+    assert_eq!(
+        provides[0].line, 5,
+        "the provide anchors on the mapping too"
+    );
+    assert!(
+        lines.contains(&provides[0].line),
+        "line contract: guard line == provide anchor"
     );
 }

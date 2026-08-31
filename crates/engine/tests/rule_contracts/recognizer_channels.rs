@@ -15,7 +15,7 @@
 //! The open question was whether an adapter's RETURN TYPE (`Vec<IoProvide>` vs `Vec<IoConsume>`)
 //! decides the channel. Measured across all eight parsers, it does not, twice over:
 //!
-//! - **A side is not a channel.** `channel::DB` is `"io.provides:db-table"` — a KIND, filled from both
+//! - **A side is not a channel.** `channel::DB_PROVIDES` is `"io.provides:db-table"` — a KIND, filled from both
 //!   sides (`entity_decorators` provides a table, `typeorm_repository` consumes one, both are `DB`).
 //!   So the classifier needs (side, kind), not side alone. Both are in the module's own source: the
 //!   struct literal names the side and its `kind:` field names the kind. [`channel_of`] derives the
@@ -263,24 +263,33 @@ pub(crate) fn unit_sources(root: &Path, unit: &str) -> Vec<String> {
 
 /// (side, kind) -> channel, derived from `zzop_core`'s own constants.
 ///
-/// The db channel is spelled `io.provides:db-table` — PROVIDES plus a kind — so it is recognized by
-/// recomputing that composite instead of matching a `"db-table"` literal this file would then own a
-/// second copy of. A kind no rule reads (the compose-phase sentinels `nest-global-prefix` and
-/// `client-base-prefix`) is deliberately no channel at all: those are stripped before assembly
-/// finishes, and counting them would credit `global_prefix`/`client_base` with provides/consumes they
-/// never contribute to the join.
+/// The db channels are spelled `io.provides:db-table` / `io.consumes:db-table` — a side plus a kind —
+/// so they are recognized by recomputing that composite against the side actually observed, instead
+/// of matching a `"db-table"` literal this file would then own a second copy of. A kind no rule reads
+/// (the compose-phase sentinels `nest-global-prefix` and `client-base-prefix`) is deliberately no
+/// channel at all: those are stripped before assembly finishes, and counting them would credit
+/// `global_prefix`/`client_base` with provides/consumes they never contribute to the join.
+///
+/// ⚠ The side used to be dropped on the floor here. Until 2026-08-26 the db arm read `if channel::DB
+/// == format!("{PROVIDES}:{kind}")` — a comparison of two CONSTANTS that is true for `db-table` no
+/// matter which side the module built, so a consume-only adapter evidenced the provide-named channel
+/// and this contract certified the over-claim it exists to catch. `typeorm_repository`, `raw_sql`,
+/// `db_table_consume` and rust's `raw_sql` all passed that way.
 fn channel_of(provide_side: bool, kind: &str) -> Option<&'static str> {
     if !RULE_READ_IO_KINDS.contains(&kind) {
         return None;
     }
-    if channel::DB == format!("{}:{kind}", channel::PROVIDES) {
-        return Some(channel::DB);
-    }
-    Some(if provide_side {
+    let side = if provide_side {
         channel::PROVIDES
     } else {
         channel::CONSUMES
-    })
+    };
+    for db in [channel::DB_PROVIDES, channel::DB_CONSUMES] {
+        if db == format!("{side}:{kind}") {
+            return Some(db);
+        }
+    }
+    Some(side)
 }
 
 /// Channels one source file's code evidences: the io sides it constructs crossed with the io kinds it
@@ -630,7 +639,7 @@ fn channel_evidence_is_not_vacuous() {
     for c in [
         channel::PROVIDES,
         channel::CONSUMES,
-        channel::DB,
+        channel::DB_PROVIDES,
         channel::AUTH_EVIDENCE,
     ] {
         assert!(

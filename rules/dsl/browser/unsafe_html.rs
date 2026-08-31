@@ -1,4 +1,4 @@
-use crate::{scan, TempDir};
+use crate::{assert_disqualifier_clause_precedes_imperative, scan, TempDir};
 
 // --- unsafe-html-sink ---
 
@@ -349,9 +349,107 @@ fn safe_suffixed_wrapper_is_not_flagged() {
 }
 
 #[test]
+fn mid_name_safe_token_wrapper_is_not_flagged() {
+    // FP class #4: the token sits in the MIDDLE of the name. `markdownToSafeHTML` does not START with
+    // a sanitizer verb and does not END with `Safe` (it ends with `HTML`), so a start-anchored verb arm
+    // and an end-anchored adjective arm both miss it — while the body is a real `sanitize-html` call.
+    // Measured on cal.com: this one name accounts for 3 of the rule's 9 findings there.
+    let dir = TempDir::new("zzop-browser");
+    dir.write(
+        "app.tsx",
+        "declare function markdownToSafeHTML(s: string): string;\ndeclare const source: string;\nexport function App() {\n  return <div dangerouslySetInnerHTML={{ __html: markdownToSafeHTML(source) }} />;\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        out.findings
+            .iter()
+            .all(|f| f.rule_id != "browser/unsafe-html-sink"),
+        "{:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn an_unsafe_named_wrapper_still_fires() {
+    // NEGATIVE PIN for the de-anchored adjective arm. `unsafeHTML` contains the letters `safe`, and the
+    // ONLY thing keeping it out of the veto is that the vocabulary spells the token with a capital `S`
+    // — `Unsafe` never produces `Safe`. That barrier is load-bearing, so it is asserted, not assumed.
+    let dir = TempDir::new("zzop-browser");
+    dir.write(
+        "raw.tsx",
+        "declare function unsafeHTML(s: string): string;\ndeclare const raw: string;\nexport function Raw() {\n  return <div dangerouslySetInnerHTML={{ __html: unsafeHTML(raw) }} />;\n}\n",
+    );
+    let out = scan(&dir);
+    let hits: Vec<_> = out
+        .findings
+        .iter()
+        .filter(|f| f.rule_id == "browser/unsafe-html-sink")
+        .collect();
+    assert_eq!(hits.len(), 1, "{:?}", out.findings);
+}
+
+#[test]
+fn a_mid_name_unsafe_wrapper_still_fires() {
+    // Same barrier one position over: `renderUnsafeHtml` carries `Unsafe` in the middle of the name,
+    // where the de-anchored arm now looks. Capital `U` + lowercase `nsafe` still yields no `Safe`.
+    let dir = TempDir::new("zzop-browser");
+    dir.write(
+        "raw2.ts",
+        "declare const el: HTMLElement;\ndeclare function renderUnsafeHtml(s: string): string;\ndeclare const raw: string;\nexport function render() {\n  el.innerHTML = renderUnsafeHtml(raw);\n}\n",
+    );
+    let out = scan(&dir);
+    let hits: Vec<_> = out
+        .findings
+        .iter()
+        .filter(|f| f.rule_id == "browser/unsafe-html-sink")
+        .collect();
+    assert_eq!(hits.len(), 1, "{:?}", out.findings);
+}
+
+#[test]
+fn a_snake_case_unsafe_html_wrapper_still_fires() {
+    // The capital-`S` barrier is spelling-dependent, and snake_case is where it would break: a
+    // vocabulary carrying a lowercase `safe` would veto `render_unsafe_html` outright. This pin is what
+    // forbids that widening — it goes red the moment a lowercase `safe` enters the token list.
+    let dir = TempDir::new("zzop-browser");
+    dir.write(
+        "raw3.ts",
+        "declare const el: HTMLElement;\ndeclare function render_unsafe_html(s: string): string;\ndeclare const raw: string;\nexport function render() {\n  el.innerHTML = render_unsafe_html(raw);\n}\n",
+    );
+    let out = scan(&dir);
+    let hits: Vec<_> = out
+        .findings
+        .iter()
+        .filter(|f| f.rule_id == "browser/unsafe-html-sink")
+        .collect();
+    assert_eq!(hits.len(), 1, "{:?}", out.findings);
+}
+
+#[test]
+fn a_mid_name_sanitizer_verb_still_fires() {
+    // SCOPE PIN, not a defect claim: only the ADJECTIVE arm was de-anchored. The verb arm stays
+    // start-anchored, so `htmlEscape` — a verb-final name that genuinely escapes — is still reported.
+    // Measured before shipping: de-anchoring the verbs too would have vetoed 0 additional lines across
+    // 61 corpus trees, so the widening was declined and this pin records that the scope was a choice.
+    // Deleting this test is the deliberate act that reopens the question.
+    let dir = TempDir::new("zzop-browser");
+    dir.write(
+        "esc.ts",
+        "declare const el: HTMLElement;\ndeclare function htmlEscape(s: string): string;\ndeclare const raw: string;\nexport function render() {\n  el.innerHTML = htmlEscape(raw);\n}\n",
+    );
+    let out = scan(&dir);
+    let hits: Vec<_> = out
+        .findings
+        .iter()
+        .filter(|f| f.rule_id == "browser/unsafe-html-sink")
+        .collect();
+    assert_eq!(hits.len(), 1, "{:?}", out.findings);
+}
+
+#[test]
 fn raw_json_stringify_into_an_html_sink_still_fires() {
     // `JSON.stringify` is NOT a sanitizer and must never be vetoed here. JSON encoding escapes only
-    // `"`, `\` and control characters — `<`, `>`, `&` and `/` pass through verbatim. So a value
+    // `"`, `` and control characters — `<`, `>`, `&` and `/` pass through verbatim. So a value
     // containing `</script><img src=x onerror=alert(1)>` breaks straight out of the surrounding
     // `<script>` block; `el.innerHTML = JSON.stringify(userData)` is the same hole without the tag.
     // The `jsonLdSafe` wrapper measured in the corpus (`JSON.stringify(x)` then `.replace(/</g, ...)`
@@ -631,5 +729,43 @@ fn a_plain_unsanitized_call_value_still_fires() {
         1,
         "{:?}",
         out.findings
+    );
+}
+/// §27 pin (2026-08-29). The disqualifier pinned here is the one an outside auditor's judgement actually
+/// turned on — "Residual 1 — VOCABULARY: sanitizer-NAMED is not sanitizer-PROVEN", which concedes that a
+/// differently-named function that genuinely IS safe is not recognised by the veto. The auditor had the
+/// edit half-written (swap a project's own markdown sanitiser for `DOMPurify.sanitize`, which would have
+/// destroyed the markdown rendering around it) and that sentence is what stopped it. At HEAD it sat at
+/// byte 2783 while the imperative sat at byte 291 — eight sentences after the reader had started.
+///
+/// The IMPERATIVE moved past ALL THREE residuals rather than Residual 1 moving forward. Two reasons.
+/// Residuals 2 and 3 are disqualifiers by the same criterion ("every one of those shapes still fires",
+/// "therefore fires"), so putting the verb after the last of them is the stronger claim, not just the
+/// cheaper one. And the residuals are numbered and introduced by "the rest were the standing residuals
+/// below" — lifting number 1 out of a numbered list breaks both the numbering and its introduction. The
+/// imperative is self-contained (no pronoun, its own examples) and now sits in front of the suppression
+/// marker. 4659 chars before and after, character multiset identical.
+#[test]
+fn unsafe_html_sink_message_puts_the_vocabulary_residual_before_the_use_textcontent_imperative() {
+    let dir = TempDir::new("zzop-browser");
+    dir.write(
+        "render.ts",
+        "declare const el: HTMLElement;\ndeclare const userInput: string;\nexport function render() {\n  el.innerHTML = userInput;\n}\n",
+    );
+    let out = scan(&dir);
+    let hits: Vec<_> = out
+        .findings
+        .iter()
+        .filter(|f| f.rule_id == "browser/unsafe-html-sink")
+        .collect();
+    // Sentence repair only — the finding itself is unchanged.
+    assert_eq!(hits.len(), 1, "{:?}", out.findings);
+    assert_eq!(hits[0].line, 4);
+
+    assert_disqualifier_clause_precedes_imperative(
+        "unsafe-html-sink",
+        &hits[0].message,
+        "Residual 1 — VOCABULARY: sanitizer-NAMED is not sanitizer-PROVEN",
+        "Use `textContent` for plain text",
     );
 }

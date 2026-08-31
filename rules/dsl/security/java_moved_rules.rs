@@ -1,4 +1,57 @@
-use crate::{hits, scan, TempDir};
+use crate::{assert_landing_precedes_imperative, hits, scan, TempDir};
+
+/// §33/§37 LANDING for `cmd-injection`, spliced ahead of the argv imperative.
+///
+/// WHY THIS RULE GETS ITS OWN CONSTANT rather than the shell family's
+/// (`security/shell_routing_landing.rs`). `Runtime.exec(String)` hands its string to NO shell — this
+/// rule's own message spends a paragraph on that, because it is why the rule is `warning` while the
+/// TypeScript sibling is `critical`. Splicing the shell landing here would tell a Java reader that
+/// their pipes and redirects break, in a call that never had any. What DOES break is the whitespace
+/// tokenization: `exec(String)` splits on whitespace with a `StringTokenizer` that honours no quoting,
+/// and `exec(String[])`/`ProcessBuilder(List)` do not split at all, so an interpolated value that used
+/// to expand into several tokens arrives as one argument after the prescribed rewrite. §37's test —
+/// "is the noun of that constant the same as this rule's failure" — separates the two families here.
+///
+/// THE MIRROR CASE IS IN THE LANDING ON PURPOSE. The same tokenizer was ALREADY splitting a path that
+/// contained a space, so for that call the rewrite is a fix rather than a break. A landing that named
+/// only the loss would push a reader to keep a bug; naming both is what makes "check which one your
+/// call depended on" an instruction rather than a hedge.
+///
+/// POSITION, not presence. The invalidation probe is to move this constant to the tail of the message:
+/// every token stays present and spelled exactly once, and this pin goes red on ORDER alone.
+const EXEC_TOKENIZATION_LANDING: &str = "`Runtime.exec(String)` HANDS NOTHING TO A SHELL, BUT IT DOES SPLIT ON WHITESPACE AND THE ARRAY FORM DOES NOT: it tokenizes with a plain `StringTokenizer` that honours no quoting, so an interpolated value that used to expand into several tokens — a variable holding `-Xmx1g -Dfoo=bar`, say — arrives as ONE argument the moment you move to `exec(String[])` or `new ProcessBuilder(List)`, and the called program rejects it or reads it as a filename. The mirror case runs the other way and is the reason to check rather than assume: a path containing a space was ALREADY being split into two arguments by that same tokenizer, and it starts working only after the rewrite. Where the command is deliberately routed through a shell (`sh`, then `-c`, then the whole command as one element), splitting that last element into further tokens takes the pipes, redirects and globs with it — keep it whole and validate what you interpolate into it instead.";
+
+#[test]
+fn cmd_injection_landing_precedes_the_imperative() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "PingAction.java",
+        "public class C {\n  private void run() {\n    String[] cmd = { \"/bin/bash\", \"-c\", \"ping \" + getAddress() };\n    Runtime.getRuntime().exec(cmd);\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "cmd-injection");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_landing_precedes_imperative(
+        "cmd-injection",
+        &h[0].message,
+        EXEC_TOKENIZATION_LANDING,
+        "Pass arguments as an array element per token",
+    );
+    // The fixture is the shell-routed argv spelling, which is the one case where splitting FURTHER is
+    // the harmful move — so the clause that covers it has to stay named.
+    for needle in [
+        "it tokenizes with a plain `StringTokenizer` that honours no quoting",
+        "arrives as ONE argument",
+        "a path containing a space was ALREADY being split into two arguments",
+        "keep it whole and validate what you interpolate into it instead",
+    ] {
+        assert!(
+            h[0].message.contains(needle),
+            "security/cmd-injection: the landing lost {needle:?}: {}",
+            h[0].message
+        );
+    }
+}
 
 // --- cmd-injection (Java, moved here from the dissolved java-security pack) ---
 

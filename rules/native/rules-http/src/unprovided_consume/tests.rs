@@ -11,6 +11,7 @@ fn provide(key: &str, file: &str, line: u32) -> zzop_core::IoProvide {
         file: file.to_string(),
         line,
         symbol: None,
+        ..Default::default()
     }
 }
 
@@ -288,6 +289,7 @@ fn a_non_http_provide_does_not_satisfy_the_zero_provides_gate() {
         file: "worker.ts".to_string(),
         line: 1,
         symbol: None,
+        ..Default::default()
     }];
     let consumes = vec![consume("http", Some("GET /missing"), "client.ts", 3)];
     assert!(

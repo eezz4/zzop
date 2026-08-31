@@ -20,8 +20,8 @@ use zzop_core::{IoConsume, IoFacts, IoProvide};
 
 use crate::analyze::diagnostics::{
     compute_dsl_scope, degraded_files_warning, global_exclude_diagnostics, minified_files_warning,
-    pack_scope_warnings, uncompilable_rule_warnings, unmatched_suppression_warnings,
-    unparsed_extension_warning, DslScope,
+    pack_scope_warnings, suppressed_findings_warning, uncompilable_rule_warnings,
+    unmatched_suppression_warnings, unparsed_extension_warning, DslScope,
 };
 use crate::EngineConfig;
 
@@ -36,6 +36,8 @@ pub(super) struct DiagnoseInput<'a> {
     /// divides by.
     pub(super) rels: &'a [&'a str],
     pub(super) minified: &'a [String],
+    /// Every suppression marker in the tree — see `suppressed_findings_warning`.
+    pub(super) suppress_markers: &'a [zzop_core::dsl::SuppressMarkerSite],
     /// Every degraded file with its cause — the substrate for the one self-report that can tell an
     /// oversized file from an unreadable one from a parse failure.
     pub(super) degraded: &'a [DegradedFile],
@@ -45,6 +47,15 @@ pub(super) struct DiagnoseInput<'a> {
     pub(super) csharp_rels: &'a [String],
     pub(super) package_import_files: &'a BTreeMap<String, BTreeSet<String>>,
     pub(super) loc_by_path: &'a HashMap<String, u32>,
+    /// The two projection channels this module's own measurement needs and no other field carries.
+    /// Together with `io_provides`/`io_consumes` (passed to [`sweep`] directly) and `degraded` above,
+    /// they are the whole substrate of S17's structural half — see
+    /// `zzop_engine::zero_extraction::structural_by_ext` for why all three channels are in it.
+    pub(super) all_symbols: &'a [zzop_core::ir::SourceSymbol],
+    pub(super) dep: &'a HashMap<String, Vec<String>>,
+    /// What each accepted adapter overlay contributed, by `parser` id — the provenance the merge is
+    /// about to make unrecoverable. See `diagnostics::overlay_provenance`.
+    pub(super) overlay_io: &'a BTreeMap<String, crate::envelope::OverlayIoCounts>,
 }
 
 /// Appends every post-rules self-report to `warnings`, and returns the pack-scope census the caller
@@ -72,6 +83,9 @@ pub(super) fn sweep(
     }
     warnings.extend(unparsed_extension_warning(input.unparsed_extensions));
     warnings.extend(unmatched_suppression_warnings(config, input.rels));
+    // Sits with the other config-filter self-reports: the marker is a suppression the AUTHOR wrote, the
+    // same axis as an `exclude` entry, and the only one whose effect leaves no number behind.
+    warnings.extend(suppressed_findings_warning(input.suppress_markers));
     warnings.extend(global_exclude_diagnostics(config, input.rels));
     warnings.extend(pack_scope_warnings(config, &dsl_scope));
     warnings.extend(uncompilable_rule_warnings(&config.packs)); // dead rule != quiet rule
@@ -83,6 +97,17 @@ pub(super) fn sweep(
     // namespaced away instead.
     warnings.extend(zzop_core::suppress_marker_collisions(&config.packs));
 
+    // S17's measured half, computed HERE rather than by the caller: the self-reports are this module's
+    // subject, and an orchestrator that assembled this map would be a second owner of what "structural"
+    // means. `zzop_engine::zero_extraction::structural_by_ext` owns the definition itself.
+    let structural_by_ext = super::helpers::structural_exts(
+        input.rels,
+        input.all_symbols,
+        input.dep,
+        io_provides,
+        io_consumes,
+        input.degraded,
+    );
     warnings.extend(super::warnings::framework_silence_warnings(
         input.root,
         io_provides,
@@ -92,11 +117,33 @@ pub(super) fn sweep(
         input.csharp_rels,
         input.package_import_files,
         input.loc_by_path,
+        &structural_by_ext,
         &config.vocabulary.resolve().fetch_wrapper_export_names,
         &config.rule_config,
+        input.overlay_io,
+    ));
+    // AFTER the tripwires, deliberately. Those say "zzop cannot see this framework"; this says "and
+    // here is what a caller handed it instead". Read in that order the pair is one story; reversed, the
+    // provenance line reads as an accusation before anything explains why an adapter was needed.
+    warnings.extend(crate::analyze::diagnostics::overlay_provenance_warning(
+        input.overlay_io,
+        io_provides.iter().filter(|p| p.kind == "http").count(),
     ));
 
     dsl_scope
+}
+
+/// The emptiest self-report there is: this run walked the root and found nothing to analyze.
+///
+/// `root.is_dir()` gates it so it does not duplicate `analyze_tree`'s more specific "root missing / not
+/// a directory" report (`lib.rs`'s `scope_warnings`); an existing-but-empty root gets no such sibling,
+/// which is exactly the case this covers. It lives here rather than in the orchestrator for the reason
+/// every other line in this module does: a self-report is this module's subject.
+pub(super) fn empty_root_warning(file_count: usize, root: &std::path::Path) -> Option<String> {
+    (file_count == 0 && root.is_dir()).then(|| {
+        "root produced 0 analyzable files — check the path exists and contains supported source files"
+            .to_string()
+    })
 }
 
 /// Folds the two io lists into `CommonIr.io`. `None` when BOTH are empty — an absent `io` block says

@@ -57,6 +57,11 @@ pub fn native_rule_channels() -> Vec<NativeRuleChannels> {
     declare_native_rule_channels(NATIVE_ANALYSES)
 }
 
+// The deployment-manifest vocabulary is exported for the PRODUCER of the manifest-boundary set
+// (`zzop_engine::analyze::assemble::rules`), for the same reason the guard vocabularies below are:
+// the producer must ask this crate what counts as a boundary instead of spelling a second list, which
+// would be a second answer to "what does zzop think a deployment boundary is".
+pub use duplicate_route::boundary::is_deployment_manifest;
 pub use duplicate_route::duplicate_route_findings;
 pub use http_scan::{
     rule_sightlines, scan_non_idempotent_write, scan_unsafe_read_endpoint,

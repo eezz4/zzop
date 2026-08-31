@@ -89,6 +89,42 @@ fn retry_sightline() -> String {
     )
 }
 
+/// The LANDING this rule puts AHEAD of its imperative (rule-quality.md §27) — what "make the handler
+/// idempotent" COSTS when it is done correctly, as distinct from whether this finding is true.
+///
+/// Why this rule needs one more than most: the mechanism the message already names — a handler reading
+/// the `Idempotency-Key` header — has NO answer for a request that carries no key, so the edit that
+/// actually delivers what this finding asks for ends with the route REJECTING those requests. And this
+/// rule is structurally unable to say who they are. Its trigger is `IoConsume::retry_configured`, set by
+/// one recognizer on an `axios-retry`-wired file or a `pRetry`/`backOff` wrapper, so every OTHER caller
+/// of the same provider route is invisible to it — and that invisible set is exactly the population the
+/// edit 4xx's. [`retry_sightline`] already spells that blindness out for a DIFFERENT purpose (what ZERO
+/// findings means); nothing connected it to the remedy, which is the gap this constant closes.
+///
+/// The closing sentences name the remedy that costs the wire contract NOTHING, because ending at the
+/// rollout advice would read as "there is no way to do this without breaking callers", which is false.
+/// That alternative carries its own landing rather than being offered as free — the same discipline
+/// `rules-schema`'s `FK_CONSTRAINT_LANDING` applies to `ADD CONSTRAINT`, which is the identical DDL
+/// validated against every row already stored. That constant is `pub(super)` in another crate and could
+/// not be spliced here; the sentence is written locally and the census entry says why.
+///
+/// Pinned by POSITION, not existence (`tests::the_rollout_landing_precedes_the_imperative`): a reader who
+/// acts on the first instruction never reaches a caveat placed behind it.
+const IDEMPOTENCY_ROLLOUT_LANDING: &str = "COUNT THIS ROUTE'S OTHER CALLERS BEFORE YOU REQUIRE A KEY: \
+     the mechanism named above dedupes on a client-supplied `Idempotency-Key`, and a request that \
+     carries no key leaves the handler nothing to dedupe on — so the edit that actually delivers this \
+     ends with the route rejecting every caller that omits the header. This finding names ONE caller, \
+     and its own trigger is why it can name no others: the retry tag is set on an `axios-retry`-wired \
+     file or a `pRetry`/`backOff` wrapper and nowhere else, so this route's hono-client, tRPC and \
+     fetch-wrapper callers, its callers written in any other language, and its callers in repositories \
+     outside this run are all invisible here — and every one of them starts failing on the deploy that \
+     makes the header mandatory. Ship the key OPTIONAL first (dedupe when it is present, accept the \
+     request when it is not), and require it only once the callers you can see are sending it. The \
+     remedy that costs the wire contract nothing is a dedup key the request ALREADY carries — a unique \
+     constraint on a natural key, or an upsert keyed on a client-supplied id — but that one is a \
+     migration rather than a handler edit: Postgres validates `ADD CONSTRAINT ... UNIQUE` against every \
+     row already in the table, so it fails mid-deploy on the first duplicate already stored.";
+
 /// Extensions whose files the TypeScript parser — the one BUILT-IN producer of
 /// `IoConsume::retry_configured` (see [`retry_sightline_claim`]) — is dispatched for. The prose
 /// claim deliberately names the producer instead of a list; the machine-readable declaration below
@@ -180,7 +216,8 @@ pub fn retrying_write_no_idempotency_findings(
              attribute is set (neither natively recognized — e.g. an inline handler reading the \
              `Idempotency-Key` header — nor injected via a Mode B overlay's `attributes`). If the retry fires \
              (timeout, dropped response, 5xx) the request is replayed, and a non-idempotent handler applies \
-             the write twice (double charge, duplicate order). Make the handler idempotent, or if it already \
+             the write twice (double charge, duplicate order). {IDEMPOTENCY_ROLLOUT_LANDING} Make the \
+             handler idempotent, or if it already \
              is, inject the attribute on the provider tree (paste-ready stub in this finding's \
              `data.injectionStub`; contract: MCP resource `zzop://contract/envelope-guide` on MCP hosts, \
              `zzop contract envelope-guide` with the CLI binary). {} {}",

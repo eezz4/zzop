@@ -229,6 +229,7 @@ pub(super) fn synthetic_artifact_from_projection(
         || !projection.dynamic_imports.is_empty();
 
     crate::pipeline::FileArtifact {
+        suppress_markers: Vec::new(),
         rel: projection.path.clone(),
         symbols: Vec::new(),
         // Was unconditionally `None` ("dead data" by design) — now carries the projection's own imports

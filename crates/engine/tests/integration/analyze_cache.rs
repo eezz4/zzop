@@ -832,3 +832,81 @@ fn call_scan_findings_survive_warm_cache_and_ruleset_moved_reevaluation() {
         reeval.findings
     );
 }
+
+/// The reviewer's one successful trick, end to end. Seven other staleness attacks all recomputed
+/// correctly; this one — hand-write a WELL-FORMED entry with every fingerprint left intact — deleted a
+/// real finding from three consecutive runs with no warning and exit 0. The key describes the inputs;
+/// nothing described the output, so an entry with a true key and a false payload was, to a key
+/// comparison, a perfectly good entry.
+#[test]
+fn a_hand_blanked_findings_entry_is_refused_and_the_finding_comes_back() {
+    let cache_dir = TempDir::new("zzop-cache-tamper-store");
+    let tree = TempDir::new("zzop-cache-tamper-tree");
+    tree.write(
+        "a.ts",
+        "export const apiKey = \"kJ8xQ2mVn9RtL4wPzY7bC3dF6gH1jS5a\";\n",
+    );
+    let cfg = config(cache_dir.path(), vec![secret_pack()]);
+
+    let cold = analyze_tree(tree.path(), &cfg);
+    let fired = |out: &zzop_engine::AnalyzeOutput| {
+        out.findings
+            .iter()
+            .filter(|f| f.rule_id == "test-cache-secret/entropy")
+            .count()
+    };
+    assert_eq!(fired(&cold), 1, "fixture must fire on the cold run");
+    assert_eq!(
+        fired(&analyze_tree(tree.path(), &cfg)),
+        1,
+        "and on the warm one"
+    );
+
+    // Blank the findings the way a hand-edit would: payload emptied, every fingerprint untouched.
+    let entries: Vec<_> = cache_entry_files(cache_dir.path())
+        .into_iter()
+        .filter(|p| p.parent().is_some_and(|d| d.ends_with("findings")))
+        .collect();
+    assert_eq!(entries.len(), 1, "one findings entry expected: {entries:?}");
+    let mut entry: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&entries[0]).unwrap()).unwrap();
+    entry["findings"] = serde_json::json!([]);
+    std::fs::write(&entries[0], serde_json::to_vec(&entry).unwrap()).unwrap();
+
+    let after = analyze_tree(tree.path(), &cfg);
+    assert_eq!(
+        fired(&after),
+        1,
+        "the credential is still in the source, so the run must still report it — the emptied entry \
+         must be recomputed, not served"
+    );
+    assert!(
+        after
+            .warnings
+            .iter()
+            .any(|w| w.contains("did not match") && w.contains("recomputed from source")),
+        "and the run must SAY the cache was modified — a silent self-heal is how a cache gets to be \
+         quietly wrong for a month: {:?}",
+        after.warnings
+    );
+}
+
+/// The invalidation: an untouched cache must stay silent and stay fast. Without this, "refuse tampered
+/// entries" is indistinguishable from "refuse every entry", which would pass the test above while
+/// making the cache do nothing.
+#[test]
+fn an_untouched_cache_still_hits_and_reports_no_tampering() {
+    let cache_dir = TempDir::new("zzop-cache-untampered-store");
+    let tree = fixture_tree();
+    let cfg = config(cache_dir.path(), vec![todo_pack()]);
+
+    analyze_tree(tree.path(), &cfg);
+    let warm = analyze_tree(tree.path(), &cfg);
+    let cache = warm.cache.as_ref().expect("cache stats present");
+    assert!(cache.hits > 0, "the warm run must actually hit: {cache:?}");
+    assert!(
+        !warm.warnings.iter().any(|w| w.contains("did not match")),
+        "a healthy run must say nothing about integrity: {:?}",
+        warm.warnings
+    );
+}

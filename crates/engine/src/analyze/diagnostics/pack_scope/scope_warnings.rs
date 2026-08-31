@@ -14,6 +14,15 @@ use super::DslScope;
 /// `file_pattern`-gated), so this is purely a DSL-coverage disclosure. `scope` must be the
 /// [`compute_dsl_scope`](super::compute_dsl_scope) census over the SAME `packs` slice (the caller
 /// computes it once and shares it with `AnalyzeOutput::packs_loaded`'s per-pack `files_in_scope`).
+///
+/// ## It names the lever (2026-08-17)
+/// Its per-pack sibling below has always ended with "and here is the lever"; this one stated the
+/// diagnosis and stopped. That gap is worst on exactly the run that needs it most: a Mode A envelope
+/// for a language zzop has no parser for lands here EVERY time, because every bundled rule gates on
+/// zzop's own native extensions — measured on a valid Ruby envelope, which drew zero DSL findings while
+/// the same envelope with `.rb` rewritten to `.py` drew three. So the message now names
+/// `packs.extraDirs`, which is the one answer, and says the envelope lane reads it too (it did not
+/// until the same date — `zzop_summary`'s `adjacent_config` owns that half).
 pub(super) fn no_applicable_dsl_rule_warning(
     packs: &[zzop_core::RulePackDef],
     scope: &DslScope,
@@ -26,7 +35,12 @@ pub(super) fn no_applicable_dsl_rule_warning(
         "{total_rules} DSL rule(s) loaded across {pack_count} pack(s), but 0 have a `file_pattern` \
          matching any file in this tree — the loaded packs target other filetypes. Native structural/ \
          whole-graph analyses still ran; zero DSL findings in this tree means \"no applicable rules\", \
-         not \"clean\".",
+         not \"clean\". The lever is a pack whose rules target THESE filetypes: point `packs.extraDirs` \
+         at it in zzop.config.jsonc, or drop it in `zzop/rules/` beside the config, which is discovered \
+         with no declaration at all (embedders: `packsDir`). That is also the answer for a \
+         Mode A envelope covering a language zzop parses natively for nobody — the bundled rules gate \
+         on zzop's own extensions, so an envelope's own filetype needs its own pack, and an envelope \
+         run reads the config sitting next to the envelope file for exactly these keys.",
         pack_count = packs.len()
     ))
 }
@@ -55,10 +69,12 @@ pub(super) fn no_applicable_dsl_rule_warning(
 /// the wall of noise readers learn to skip. Suppressed entirely for:
 /// * a pack the caller ALREADY disabled — whole-pack (`disabled_rules` carrying the bare pack id, which
 ///   is what the `packs.disabled` config key maps to) or every rule of it individually
-///   (`"<pack>/<rule>"`, what `pipeline::gate_pack_rules` drops). `packs_loaded` cannot be read for
-///   this: it reflects LOADING, not gating, so a disabled pack still appears there with
-///   `files_in_scope: 0`. Nagging about a decision the reader already made is the fastest way to teach
-///   them to ignore the channel.
+///   (`"<pack>/<rule>"`, what `pipeline::gate_pack_rules` drops). Nagging about a decision the reader
+///   already made is the fastest way to teach them to ignore the channel. NOTE (2026-08-26): the
+///   pack-level half of that state IS readable off `packs_loaded` now — `PackLoaded::did_not_run` says
+///   which packs were gated off, which is why this warning takes the enablement gate as an argument
+///   rather than reasoning about it here. The per-RULE half (every rule of a pack disabled
+///   individually) still has no field, so this filter keeps computing both.
 /// * a pack with no rules at all — there is no evaluation to skip, so there is no advice.
 /// * a tree that analyzed zero files ([`DslScope::analyzed_files`]), where EVERY pack is trivially
 ///   zero-scope and the count carries no information; `analyze::assemble`'s own "root produced 0

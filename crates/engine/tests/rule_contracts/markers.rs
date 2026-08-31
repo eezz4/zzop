@@ -9,6 +9,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use zzop_core::Matcher;
 
@@ -24,12 +25,21 @@ struct TempTree(PathBuf);
 
 impl TempTree {
     fn new() -> Self {
+        // A clock is not a unique name. Windows' `SystemTime` granularity is coarse enough
+        // that two threads entering here together read the SAME nanos, and two tests that then
+        // `git init` one directory collide inside git's own template copy — a red gate with
+        // nothing to do with the change under test. The counter is what makes the name unique;
+        // the clock only keeps runs apart, and this file was one of the last without it.
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("clock")
             .as_nanos();
-        let dir =
-            std::env::temp_dir().join(format!("zzop-marker-append-{}-{nanos}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "zzop-marker-append-{}-{nanos}-{n}",
+            std::process::id()
+        ));
         std::fs::create_dir_all(&dir).expect("create temp tree");
         TempTree(dir)
     }

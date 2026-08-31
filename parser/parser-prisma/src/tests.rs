@@ -77,6 +77,58 @@ fn parses_block_attributes() {
     assert_eq!(item.indexes, vec![vec!["name".to_string()]]);
 }
 
+/// `@@unique(fields: [...])` / `@@index(fields: [...])` — the NAMED-ARGUMENT spelling of the column
+/// list. PSL accepts it interchangeably with the positional `@@unique([...])`, and a schema that uses
+/// it declares exactly the same index; a reader that only recognizes the positional form records NO
+/// group at all for that model, which reads downstream as "this model has no index" rather than as
+/// "this reader could not tell".
+#[test]
+fn parses_named_fields_argument_on_block_attributes() {
+    let models = parse(
+        r#"
+model SelectedSlots {
+  id     Int      @id @default(autoincrement())
+  userId Int
+  uid    String
+  other  Int
+
+  @@unique(fields: [userId, uid], name: "selectedSlotUnique")
+  @@index(fields: [other])
+}
+"#,
+    );
+    let m = &models[0];
+    assert_eq!(
+        m.uniques,
+        vec![vec!["userId".to_string(), "uid".to_string()]]
+    );
+    assert_eq!(m.indexes, vec![vec!["other".to_string()]]);
+}
+
+/// The positional spelling keeps working, with and without a trailing `name:`/`map:` argument — the
+/// named-argument fix above must not be bought by narrowing what already parsed.
+#[test]
+fn keeps_parsing_positional_block_attributes_with_trailing_named_args() {
+    let models = parse(
+        r#"
+model Webhook {
+  userId           Int
+  subscriberUrl    String
+  platformClientId Int
+
+  @@unique([userId, subscriberUrl], name: "courseIdentifier")
+  @@index([platformClientId], map: "webhook_client_idx")
+}
+"#,
+    );
+    let m = &models[0];
+    assert_eq!(
+        m.uniques,
+        vec![vec!["userId".to_string(), "subscriberUrl".to_string()]]
+    );
+    assert_eq!(m.indexes, vec![vec!["platformClientId".to_string()]]);
+}
+
 #[test]
 fn ignores_comment_lines() {
     let models = parse("// comment\nmodel A { id String @id }\n");
@@ -194,5 +246,53 @@ fn parse_schema_enums_does_not_affect_model_parsing() {
     assert_eq!(
         models.iter().map(|m| m.name.as_str()).collect::<Vec<_>>(),
         vec!["User"]
+    );
+}
+
+/// **Attribute arguments survive one level of nesting**, which is not an exotic requirement: Prisma's
+/// own default generators are calls, so `@default(now())` / `@default(uuid())` / `@default(cuid())` /
+/// `@default(autoincrement())` are the ordinary spellings. Stopping at the first `)` projected
+/// `@default(now())` as the argument `now(`, and the one consumer that asks "does this model carry a
+/// creation timestamp" tests for `now()` — so it answered NO for every model whose creation column is
+/// named anything but `createdAt`. Measured on calcom/cal.com `176037d`: 8 of 37
+/// `schema/missing-timestamps` findings sat on models that DO carry one (`User.createdDate`,
+/// `Feedback.date`, `UserFeatures.assignedAt`, and five more).
+///
+/// The non-nested shapes ride along, because widening a regex can lose what it used to catch.
+#[test]
+fn attribute_arguments_keep_a_nested_call_whole() {
+    let models = parse(
+        "model Alpha {\n\
+        \x20 id          Int      @id @default(autoincrement())\n\
+        \x20 createdDate DateTime @default(now()) @map(name: \"created\")\n\
+        \x20 token       String   @default(uuid())\n\
+        \x20 ownerId     Int\n\
+        \x20 owner       Beta     @relation(fields: [ownerId], references: [id])\n\
+        }\n",
+    );
+    let f = |name: &str| {
+        models[0]
+            .fields
+            .iter()
+            .find(|f| f.name == name)
+            .unwrap_or_else(|| panic!("no field {name}"))
+    };
+    let arg = |name: &str, attr: &str| {
+        f(name)
+            .attrs
+            .iter()
+            .find(|a| a.name == attr)
+            .and_then(|a| a.args.clone())
+            .unwrap_or_else(|| panic!("no @{attr} args on {name}"))
+    };
+    assert_eq!(arg("id", "default"), "autoincrement()");
+    assert_eq!(arg("createdDate", "default"), "now()");
+    assert_eq!(arg("token", "default"), "uuid()");
+    // The `@map` beside a nested `@default` on the SAME line must still be its own attribute.
+    assert_eq!(arg("createdDate", "map"), "name: \"created\"");
+    // Un-nested arguments are unchanged — this is what a widened group can silently drop.
+    assert_eq!(
+        arg("owner", "relation"),
+        "fields: [ownerId], references: [id]"
     );
 }

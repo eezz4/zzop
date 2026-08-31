@@ -11,6 +11,7 @@ use crate::{AnalyzeOutput, EngineConfig};
 mod cross_tree_imports;
 mod join_io_filter;
 mod parallel_impl;
+mod unreported_read_drift;
 mod wildcard_disclosure;
 
 pub use parallel_impl::MIN_PARALLEL_IMPL_SIGNALS;
@@ -242,6 +243,11 @@ pub fn analyze_trees(trees: &[(PathBuf, EngineConfig)]) -> MultiAnalyzeOutput {
 
     let mut warnings = Vec::new();
     if let Some(w) = parallel_impl::maybe_warn(&cross_layer, &cross_layer_findings) {
+        warnings.push(w);
+    }
+    // The gate disclosure for read-verb drift — see its module doc for why it is a warning rather than
+    // a finding, and why the gates it names are staying.
+    if let Some(w) = unreported_read_drift::maybe_warn(&cross_layer) {
         warnings.push(w);
     }
 

@@ -55,12 +55,18 @@ pub(crate) const PINNED_NODE_KINDS: &[&str] = &[
     "formal_parameter",
     // Declarator/receiver shapes (`lang::used_names`, `spring_security`)
     "variable_declarator",
+    "assignment_expression",
     "enum_constant",
     "field_access",
     // Superclass node (`util`'s own tests walk to it by KIND; `project::collect` reaches the same node
     // through the `superclass` FIELD, which is a separate grammar vocabulary — see the reverse pin's
     // field-name stripping)
     "superclass",
+    // Spring Security customizer-lambda body walk (`spring_security::clauses`) — the lambda itself and
+    // the statement wrapper its block body holds. `block`/`enhanced_for_statement`/`method_invocation`
+    // are the same walk's other kinds, already pinned above for other readers.
+    "lambda_expression",
+    "expression_statement",
     // Literals/annotations (`util`)
     "string_literal",
     "annotation",

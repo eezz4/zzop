@@ -194,6 +194,165 @@ fn control_without_tsconfig_the_same_import_still_looks_orphaned() {
     );
 }
 
+// --- The three-layout matrix ---------------------------------------------------------------
+//
+// `npm create vite@latest` has scaffolded a SPLIT tsconfig for TypeScript projects for roughly two
+// years: the tree's `tsconfig.json` is a solution file (`"files": []`) that owns no compilerOptions and
+// only names project `references`, while the real `baseUrl`/`paths` sit in `tsconfig.app.json`. zzop
+// discovered a `tsconfig.json` at any depth and followed one local `extends` level, but never read a
+// referenced config — so every `@/*` import in that (very common) layout resolved to nothing.
+//
+// The three layouts differ ONLY in where the identical `@/*` -> `./src/*` mapping is written; all three
+// must resolve the same aliased import. The two inline layouts are the proof that following references
+// EXTENDS resolution rather than replacing it. Every layout pairs the newly-resolved `Navbar.tsx`
+// against `Ghost.tsx` — a file nothing imports — in the SAME assertion, because this change can only
+// ever REMOVE `dead-candidates` findings and a fix that over-suppressed would otherwise look identical
+// to a fix that worked.
+
+/// Writes the shared four-file frontend under `<root>/<prefix>`: an aliased importer, a relative-path
+/// importer, the alias target, and one file nothing imports at all (the control).
+fn write_alias_fixture(dir: &TempDir, prefix: &str) {
+    let p = |rel: &str| {
+        if prefix.is_empty() {
+            rel.to_string()
+        } else {
+            format!("{prefix}/{rel}")
+        }
+    };
+    dir.write(
+        &p("src/components/Navbar.tsx"),
+        "export function Navbar() { return null; }\n",
+    );
+    // Control: imported by nobody, under the same aliased root as Navbar.tsx.
+    dir.write(
+        &p("src/components/Ghost.tsx"),
+        "export function Ghost() { return null; }\n",
+    );
+    dir.write(
+        &p("src/router.tsx"),
+        "import { Navbar } from \"@/components/Navbar\";\nexport const routes = [Navbar];\n",
+    );
+    dir.write(
+        &p("src/app.tsx"),
+        "import { routes } from \"./router\";\nexport const App = routes;\n",
+    );
+}
+
+/// Asserts the alias target escaped `dead-candidates` AND the never-imported control did not — one
+/// assertion pair, so an over-suppressing fix cannot pass by clearing both.
+fn assert_alias_resolved_and_control_still_flagged(
+    out: &zzop_engine::AnalyzeOutput,
+    prefix: &str,
+    layout: &str,
+) {
+    let p = |rel: &str| {
+        if prefix.is_empty() {
+            rel.to_string()
+        } else {
+            format!("{prefix}/{rel}")
+        }
+    };
+    let dead = |f: &str| {
+        out.findings
+            .iter()
+            .any(|x| x.rule_id == "dead-candidates" && x.file == f)
+    };
+    assert!(
+        !dead(&p("src/components/Navbar.tsx")),
+        "[{layout}] Navbar.tsx is imported at src/router.tsx via the `@/*` alias — it must not be \
+         dead-candidates, got: {:?}",
+        out.findings
+    );
+    assert!(
+        dead(&p("src/components/Ghost.tsx")),
+        "[{layout}] Ghost.tsx is imported by nobody — it must STILL be dead-candidates, otherwise the \
+         alias fix is blanket-suppressing rather than resolving, got: {:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn matrix_paths_inline_in_a_nested_tsconfig_resolves() {
+    // Layout A — `web/tsconfig.json` carries the mapping itself. Already worked; here as the proof that
+    // reference-following did not break the nearest-ancestor walk it sits on top of.
+    let dir = TempDir::new("zzop-engine-tsconfig-matrix-a");
+    write_alias_fixture(&dir, "web");
+    dir.write(
+        "web/tsconfig.json",
+        r#"{"compilerOptions": {"paths": {"@/*": ["./src/*"]}}}"#,
+    );
+    let out = analyze_tree(dir.path(), &config());
+    assert_alias_resolved_and_control_still_flagged(&out, "web", "A: paths inline, nested");
+}
+
+#[test]
+fn matrix_paths_reached_only_through_project_references_resolves() {
+    // Layout B — the Vite scaffold. `web/tsconfig.json` owns no compilerOptions at all; the mapping is
+    // reachable ONLY by following `references`. This is the defect: before the fix Navbar.tsx was
+    // reported dead-candidates here while layouts A and C cleared it from identical source.
+    let dir = TempDir::new("zzop-engine-tsconfig-matrix-b");
+    write_alias_fixture(&dir, "web");
+    dir.write(
+        "web/tsconfig.json",
+        r#"{"files": [], "references": [{"path": "./tsconfig.app.json"}, {"path": "./tsconfig.node.json"}]}"#,
+    );
+    dir.write(
+        "web/tsconfig.app.json",
+        r#"{"compilerOptions": {"paths": {"@/*": ["./src/*"]}}, "include": ["src"]}"#,
+    );
+    // The scaffold's second reference: real, parsed, and contributing nothing. It must not disturb the
+    // first one's mapping.
+    dir.write(
+        "web/tsconfig.node.json",
+        r#"{"compilerOptions": {"strict": true}, "include": ["vite.config.ts"]}"#,
+    );
+    let out = analyze_tree(dir.path(), &config());
+    assert_alias_resolved_and_control_still_flagged(&out, "web", "B: paths via references");
+}
+
+#[test]
+fn matrix_paths_inline_at_the_tree_root_resolves() {
+    // Layout C — the mapping at the tree root. Second control for layout B.
+    let dir = TempDir::new("zzop-engine-tsconfig-matrix-c");
+    write_alias_fixture(&dir, "");
+    dir.write(
+        "tsconfig.json",
+        r#"{"compilerOptions": {"paths": {"@/*": ["./src/*"]}}}"#,
+    );
+    let out = analyze_tree(dir.path(), &config());
+    assert_alias_resolved_and_control_still_flagged(&out, "", "C: paths inline, root");
+}
+
+#[test]
+fn a_reference_that_maps_nothing_leaves_the_tree_exactly_as_it_was() {
+    // The suppression direction's own control: a solution-style tsconfig whose referenced configs carry
+    // NO `paths` must not start resolving anything. Both files stay reported.
+    let dir = TempDir::new("zzop-engine-tsconfig-ref-empty");
+    write_alias_fixture(&dir, "web");
+    dir.write(
+        "web/tsconfig.json",
+        r#"{"files": [], "references": [{"path": "./tsconfig.app.json"}]}"#,
+    );
+    dir.write(
+        "web/tsconfig.app.json",
+        r#"{"compilerOptions": {"strict": true}, "include": ["src"]}"#,
+    );
+    let out = analyze_tree(dir.path(), &config());
+    for f in [
+        "web/src/components/Navbar.tsx",
+        "web/src/components/Ghost.tsx",
+    ] {
+        assert!(
+            out.findings
+                .iter()
+                .any(|x| x.rule_id == "dead-candidates" && x.file == f),
+            "no referenced config declares `paths`, so `@/components/Navbar` must still resolve to \
+             nothing and {f} must stay dead-candidates, got: {:?}",
+            out.findings
+        );
+    }
+}
+
 #[test]
 fn tsconfig_extends_merges_paths_from_a_local_base_config() {
     let dir = TempDir::new("zzop-engine-tsconfig-extends");

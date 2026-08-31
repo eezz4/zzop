@@ -11,7 +11,11 @@ use zzop_core::Finding;
 /// `unprovided-mutation-call` asserts "no provider anywhere", which is simply FALSE when the provider is in
 /// the run behind an unresolved base. Nothing else is listed on purpose — an AGGREGATE (`prefix-drift`,
 /// `unresolved-consume-ratio`) is one-per-cause already and, when it fires, is the better message.
-const REPLACED: &[&str] = &[
+/// `pub` because the finding PUBLISHES this list in its own `data.replaces` (2026-08-31). A reply
+/// consumer downstream — the join reply's native-analysis roster — has to be able to tell a MEASURED
+/// zero from an id whose findings were dropped here, and it cannot do that by knowing the rule's
+/// internals: it reads the fired finding's declaration. One list, two readers, no second copy.
+pub const REPLACED: &[&str] = &[
     "cross-layer/ambiguous-consume",
     "cross-layer/unprovided-mutation-call",
 ];

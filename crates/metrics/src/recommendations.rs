@@ -59,7 +59,7 @@ use self::enrich::{enrich, is_filtered};
 use self::evidence::{bug_evidence_for, critical_findings_by_path, escalate_critical_bug_evidence};
 use self::rules::{
     rule_bug_prone, rule_circular, rule_fat_fan_out, rule_hidden_coupling, rule_high_churn_per_loc,
-    rule_knowledge_silo, rule_versioning_candidate,
+    rule_versioning_candidate,
 };
 use self::types::RawItem;
 
@@ -77,7 +77,6 @@ pub fn build_recommendations(
     raw.extend(rule_high_churn_per_loc(input.nodes, gates));
     raw.extend(rule_fat_fan_out(input.nodes, gates));
     raw.extend(rule_hidden_coupling(input.coupling, input.dep, gates));
-    raw.extend(rule_knowledge_silo(input.nodes, gates));
     raw.extend(rule_versioning_candidate(input.nodes, gates));
 
     let mut recs: Vec<Recommendation> = Vec::new();

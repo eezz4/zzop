@@ -32,17 +32,28 @@ use crate::request::{EnvelopeAnalyzeRequest, PacksDir};
 /// `zzop_engine::envelope`), so a bundled pack with neither contributes `packsLoaded` provenance
 /// (`source: "inline"`) but no findings.
 pub fn analyze_envelope_json(envelope_json: &str, config_json: &str) -> Result<String, String> {
-    let envelope: NormalizedEnvelope =
-        zzop_core::validate_envelope(envelope_json).map_err(|errors| {
-            format!(
-                "zzop-facade: invalid analyzeEnvelope() envelope JSON: {}",
-                errors.join("; ")
-            )
-        })?;
+    // Both axes off one deserialize, and the ADVISORY axis is the half this lane used to throw away.
+    // `validate_envelope` alone returned the accept/reject answer while the hints — the pass that
+    // computes the exact normalized key a producer should have emitted — were discarded, so the same
+    // envelope that `validate_envelope` (the tool) walked through by hand went silent when actually
+    // analyzed. The product knew the answer and did not say it at the one moment it mattered.
+    let verdict = zzop_core::validate_envelope_verdict(envelope_json);
+    let envelope: NormalizedEnvelope = verdict.result.map_err(|errors| {
+        format!(
+            "zzop-facade: invalid analyzeEnvelope() envelope JSON: {}",
+            errors.join("; ")
+        )
+    })?;
     let req: EnvelopeAnalyzeRequest = serde_json::from_str(config_json)
         .map_err(|e| format!("zzop-facade: invalid analyzeEnvelope() config JSON: {e}"))?;
 
-    let mut warnings = Vec::new();
+    // Only for an ACCEPTED envelope — the rejection branch above already returned, and a hint states
+    // the consequence its shape produces once analyzed, which never happened for a rejected one.
+    let mut warnings: Vec<String> = verdict
+        .hints
+        .into_iter()
+        .map(|hint| format!("envelope accepted, but: {hint}"))
+        .collect();
     let packs_opt_out = matches!(req.packs_dir, Some(None)); // explicit `"packsDir": null`
     let packs_dirs = req
         .packs_dir

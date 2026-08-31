@@ -176,6 +176,7 @@ mod tests {
             symbol: None,
             body: None,
             response: None,
+            ..Default::default()
         }
     }
 

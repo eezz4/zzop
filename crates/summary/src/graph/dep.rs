@@ -43,6 +43,7 @@ use serde_json::Value;
 /// doc's density note; a flowchart stops being readable well before it stops being renderable.
 pub const DEFAULT_DEP_TOP: usize = 40;
 
+mod disagreement;
 mod folded;
 mod node;
 mod render;
@@ -50,6 +51,7 @@ mod window;
 
 use super::fold::{self, Fold};
 
+use disagreement::mutual_pairs_outside_cycles;
 pub(super) use node::DepNode;
 use render::render;
 pub(super) use window::GitWindows;
@@ -76,6 +78,8 @@ struct DepCensus {
     drawn_edges: usize,
     in_scope_nodes: usize,
     cycles: usize,
+    /// See [`DepUniverse::mutual_outside_cycles`] — over the whole graph, never the drawn subset.
+    mutual_outside_cycles: usize,
 }
 
 /// Everything the run produced, before any `--scope` filter or `--top` cap. Pass 1 of `project`, lifted
@@ -89,6 +93,10 @@ pub(super) struct DepUniverse {
     pub(super) edges: BTreeSet<(String, String)>,
     pub(super) cycle_files: BTreeSet<String>,
     pub(super) cycles: usize,
+    /// The size of the disagreement between the two axes these lanes publish side by side — see
+    /// [`mutual_pairs_outside_cycles`] for why it can be non-zero with nothing wrong, and why both
+    /// formats have to say so.
+    pub(super) mutual_outside_cycles: usize,
     /// The git window(s) the nodes' history axes were measured over — a property of the RUN, not of a
     /// file, so it rides here rather than on every [`DepNode`]. See [`window`].
     pub(super) git_windows: GitWindows,
@@ -141,6 +149,20 @@ pub(super) fn collect(v: &Value) -> DepUniverse {
             }
         }
         // Cycle membership from the engine's own verdict — never a second Tarjan here.
+        //
+        // The key is `cycle` because that is what the rule EMITS (`rules-graph`'s `circular_findings`:
+        // `data: json!({ "cycle": cycle })`). This read `members` until 2026-08-30 — a key no rule in
+        // this repo has ever produced — so the loop always found an empty array and membership collapsed
+        // to the ANCHOR inserted just above: one representative file per cycle, on a lane whose own
+        // legend promises a hexagon for every member. Measured on a real tree, a 510-file cycle drew as
+        // one. Both lanes' test files hid it by hand-writing a fixture that spelled the same invented
+        // key; both now build the finding with the rule itself (`tests::circular_finding`).
+        //
+        // Repaired on the CONSUMER side rather than by teaching the rule to also emit `members`: one
+        // fact, one transport. An alias would put this path list in `data` a THIRD time (it already
+        // rides in `message` and in `evidencePaths`) on a payload that reaches ~33KB for a large cycle,
+        // and would leave every future consumer needing to know which of two keys a given producer
+        // spells.
         for f in t["output"]["findings"].as_array().unwrap_or(&empty) {
             if f["ruleId"].as_str() != Some("circular") {
                 continue;
@@ -149,7 +171,7 @@ pub(super) fn collect(v: &Value) -> DepUniverse {
             if let Some(file) = f["file"].as_str() {
                 cycle_files.insert(id(file));
             }
-            for m in f["data"]["members"].as_array().unwrap_or(&empty) {
+            for m in f["data"]["cycle"].as_array().unwrap_or(&empty) {
                 if let Some(m) = m.as_str() {
                     cycle_files.insert(id(m));
                 }
@@ -157,11 +179,13 @@ pub(super) fn collect(v: &Value) -> DepUniverse {
         }
     }
 
+    let mutual_outside_cycles = mutual_pairs_outside_cycles(&all_edges, &cycle_files);
     DepUniverse {
         nodes: all_nodes,
         edges: all_edges,
         cycle_files,
         cycles,
+        mutual_outside_cycles,
         git_windows,
     }
 }
@@ -173,6 +197,7 @@ pub(super) fn project(v: &Value, scope: Option<&str>, top: usize, fold: Fold) ->
         edges: all_edges,
         cycle_files,
         cycles,
+        mutual_outside_cycles,
         // The cosmograph census's business: the mermaid lane draws topology and emits no history
         // column, so it has nothing here to caveat.
         git_windows: _,
@@ -259,9 +284,16 @@ pub(super) fn project(v: &Value, scope: Option<&str>, top: usize, fold: Fold) ->
             in_scope.len()
         },
         cycles,
+        // The WHOLE graph, not the drawn one: a count scoped to the drawn subset would drop to zero as
+        // soon as the cap dropped one end — exactly when the reader cannot check it themselves.
+        mutual_outside_cycles,
     };
     render(&g, &census, scope, top, &fold_note, fold)
 }
 
+/// `pub(super)` rather than private: the cosmograph lane's tests read cycle membership through
+/// [`collect`] too, and they take the SAME rule-built `circular` fixture from here rather than writing a
+/// second one. Two fixtures for one fact is precisely how this module's `members`/`cycle` defect stayed
+/// invisible — see the cycle-membership comment in [`collect`].
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;

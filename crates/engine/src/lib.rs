@@ -59,6 +59,7 @@ use std::path::Path;
 
 use zzop_core::RuleRegistry;
 
+pub use analyze::MIN_UNCOVERED_EXTENSION_SHARE_PCT;
 pub use cache::surface::{engine_fingerprint, parser_fingerprints};
 pub use channel_direction::{
     channel_directions, enabled_rules_directed, ChannelDirection, RuleChannelDirection,
@@ -69,11 +70,20 @@ pub use disclosure::{
     blindness_registry, disclosure_contract_text, disclosure_counts, BlindnessClass,
     DisclosureStatus,
 };
-pub use dispatch::{declaration_only_extension, DispatchConfig, Language};
+pub use dispatch::{
+    declaration_only_extension, extension_content_kind, extraction_can_lose_facts,
+    is_non_source_extension, non_source_kind, DispatchConfig, Language, NonSourceKind,
+};
 pub use envelope::analyze_envelope;
 pub use io::IoOptions;
-pub use output::{AnalyzeOutput, CacheStats, GitWindow, PackLoaded, RuleOverridesApplied};
+pub use output::{
+    AnalyzeOutput, CacheStats, GitWindow, NativeAnalyses, PackLoaded, PackNotRun,
+    RuleOverridesApplied,
+};
 pub use recognizers::framework_recognizers;
+// The capability x measured cross, shared by the coverage reply cell and the analyze warning that
+// delivers the same fact — see `recognizers::zero_extraction` for why one owner and two callers.
+pub use recognizers::zero_extraction;
 pub use rule_channels::{enabled_native_rules_reading, native_rule_channels};
 pub use sightlines::rule_sightlines;
 pub use trees::{
@@ -131,6 +141,15 @@ pub(crate) fn analyze_tree_with(
         ));
     }
 
+    // A declared pattern that does not compile is read as an UNDECLARED key by every consumer
+    // (`Regex::new(..).ok()`), which means "make no judgment" — so a project that took the trouble to
+    // declare, and fat-fingered a bracket, is judged by a pattern it never wrote and told nothing.
+    // Checked HERE rather than in the config front end because every lane funnels through this
+    // function: a config file, an embedder calling the facade, an MCP tool. Empty on a healthy run.
+    scope_warnings.extend(vocabulary::uncompilable_vocabulary_warnings(
+        &config.vocabulary,
+    ));
+
     let mut cache_warnings = Vec::new();
     let analysis_cache = cache::open_cache(config, &mut cache_warnings);
     // Cache eviction is a state change the user never asked for and cannot otherwise see: opening the
@@ -145,14 +164,33 @@ pub(crate) fn analyze_tree_with(
         .as_ref()
         .map(|_| cache::CacheCounters::default());
 
-    let mut artifacts =
-        pipeline::run_file_pass(root, config, analysis_cache.as_ref(), counters.as_ref());
+    let mut skipped_dirs = Vec::new();
+    let mut artifacts = pipeline::run_file_pass(
+        root,
+        config,
+        analysis_cache.as_ref(),
+        counters.as_ref(),
+        &mut skipped_dirs,
+    );
+    // Its sibling above is decided at OPEN; this one can only be decided HERE, because it counts a
+    // per-lookup refusal and the lookups are what just happened. A cache entry whose payload does not
+    // hash to what zzop wrote there was recomputed rather than served — the right answer either way,
+    // which is exactly why it has to be said out loud: a self-heal that leaves no trace is how a cache
+    // gets to be quietly wrong for a month. Silent on every healthy run (`integrity_warning`).
+    if let Some(warning) = analysis_cache.as_ref().and_then(|c| c.integrity_warning()) {
+        cache_warnings.push(warning);
+    }
     if scope_warnings.is_empty() && artifacts.is_empty() {
         scope_warnings.push(format!(
             "0 source files found under root '{}' — this tree contributes nothing to any analysis. If that is unexpected, the root points at the wrong directory or every file was filtered before parsing.",
             root.display()
         ));
     }
+    // After the zero-files self-report, never before it: when a `skipDirs` prune is what emptied the tree,
+    // the reader needs "there are no files" first and "here is what removed them" as the explanation. It
+    // rides `scope_warnings` (not the general warning list) because it qualifies every other line the same
+    // way the two above do — the counts are about a subset of the tree the reader named.
+    scope_warnings.extend(analyze::skipped_dirs_warning(&skipped_dirs));
     let mut overlay_warnings = Vec::new();
     // `overlay_applied` is the apply loop's OWN verdict on what each overlay really did (validation
     // passed AND the projection carried a fact): `covered_paths` feeds the "no native parser" disclosure's

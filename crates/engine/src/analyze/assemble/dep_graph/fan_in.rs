@@ -1,18 +1,22 @@
 //! Fan-in bumps that mark a target file LIVE without adding a `dep`-graph node/edge — the shared shape
-//! behind the `.vue`/`.svelte` SFC `<script>`-import pre-scan and runtime asset-URL loads. Both resolve a
+//! behind the import PRE-SCAN (`<script>`-block, bare-ESM and Astro-frontmatter hosts alike), runtime
+//! asset-URL loads, and Nuxt AUTO-IMPORT (a bare symbol name with no import statement at all). All
+//! three resolve a
 //! reference the static import graph can't see to an EXISTING `ts_paths` participant and increment its
 //! `fan_in` ONLY (never `dep`/`all_paths`), so no new `FileNode`/`dead-candidates` false positive is
-//! minted (the F3 pin). Both also RETURN their resolved targets so `super::super::rules` can seed them
-//! into `unreachable`'s `extra_entries` — a file reached only by a mechanism the graph can't see is
+//! minted (the F3 pin). All three also RETURN their resolved targets so `super::super::rules` can seed
+//! them into `unreachable`'s `extra_entries` — a file reached only by a mechanism the graph can't see is
 //! effectively an entrypoint, so what it reaches must not read as a dead island.
 
 use std::collections::HashSet;
 
 use zzop_core::{DepStats, ImportMap};
 
-/// Bumps `dep_stats.fan_in` for every `.ts`/`.tsx`/... target a `.vue`/`.svelte` SFC's `<script>`-block
-/// imports resolve to — SOURCE-ONLY: the `.vue`/`.svelte` file itself is never inserted as a `dep`/
-/// `DepStats::all_paths` key or edge target, so it never becomes a `dep`-graph "participant"
+/// Bumps `dep_stats.fan_in` for every `.ts`/`.tsx`/... target a PRE-SCANNED file's imports resolve to
+/// (`zzop_parser_typescript::extract_prescan_imports` — a `<script>` block in a `.vue`/`.svelte`/`.md`,
+/// bare top-level ESM in a `.mdx`, or an Astro `---` frontmatter fence; this function never asks which,
+/// the pairs arrive already extracted) — SOURCE-ONLY: the pre-scanned file itself is never inserted as
+/// a `dep`/`DepStats::all_paths` key or edge target, so it never becomes a `dep`-graph "participant"
 /// (`zzop_rules_graph::dead_candidates::dep_graph_participants` reads straight off the raw `dep: DepGraph`
 /// this function never touches) and never mints a new `FileNode`/`dead-candidates` false positive of its
 /// own (the parser-owner-reviewed F3 pin this task exists to satisfy). The resolved TARGET is always an
@@ -20,25 +24,31 @@ use zzop_core::{DepStats, ImportMap};
 /// `build_dep_with_workspace`), so bumping its `fan_in` count alone — without touching
 /// `dep_stats.all_paths` — adds no new participant either.
 ///
-/// One resolved edge per (SFC file, target) pair at most (a `seen` set per file, mirroring
+/// One resolved edge per (pre-scanned file, target) pair at most (a `seen` set per file, mirroring
 /// `merge_python_dep_edges`'s own dedup convention) — two named imports from the same module must not
 /// double-count the same target's fan-in.
 ///
-/// Returns the SET of resolved `.ts` targets across ALL SFCs — the `unreachable` analysis seeds these as
-/// `extra_entries` ("loaded by a mechanism this graph can't see"): a `.ts` imported ONLY by a `.vue`/
-/// `.svelte` component has real fan-in (so it is no longer a `dead-candidates` FP) but is NOT reachable
-/// through any `dep` edge (the SFC is not a graph node), so without this it would flip from a dead
-/// candidate to a false `unreachable` island. A framework-mounted component is effectively an entrypoint,
-/// so what it imports is reachable.
-pub(super) fn merge_sfc_fan_in(
+/// Returns the SET of resolved `.ts` targets across ALL pre-scanned files — the `unreachable` analysis
+/// seeds these as `extra_entries` ("loaded by a mechanism this graph can't see"): a `.ts` imported ONLY
+/// by a `.vue`/`.svelte` component (or an `.md`/`.mdx` page, or an `.astro` component) has real fan-in
+/// (so it is no longer a `dead-candidates` FP) but is NOT reachable through any `dep` edge (the
+/// pre-scanned file is not a graph node), so without this it would flip from a dead candidate to a
+/// false `unreachable` island. A framework-mounted component is effectively an entrypoint, so what it
+/// imports is reachable.
+///
+/// That entry seed is also why the pre-scan's own precision matters more than a fan-in bump would
+/// suggest: an entry seeds a FORWARD CLOSURE, so one wrongly-admitted import silences every file its
+/// target reaches. The markdown/MDX fence strip exists for exactly that reason —
+/// `zzop_parser_typescript::extract_prescan_imports`'s doc measures the island it cost.
+pub(super) fn merge_prescan_fan_in(
     dep_stats: &mut DepStats,
-    sfc_import_pairs: &[(String, ImportMap)],
+    prescan_import_pairs: &[(String, ImportMap)],
     ts_paths: &HashSet<String>,
     workspace_pkgs: &std::collections::HashMap<String, zzop_parser_typescript::WorkspacePkg>,
     tsconfigs: &std::collections::BTreeMap<String, zzop_parser_typescript::TsconfigPaths>,
 ) -> HashSet<String> {
     let mut targets: HashSet<String> = HashSet::new();
-    for (rel, imports) in sfc_import_pairs {
+    for (rel, imports) in prescan_import_pairs {
         let mut seen: HashSet<String> = HashSet::new();
         for binding in imports.values() {
             if let Some(target) = zzop_parser_typescript::resolve_file_with_workspace(
@@ -59,15 +69,15 @@ pub(super) fn merge_sfc_fan_in(
 }
 
 /// Bumps `dep_stats.fan_in` for every file a runtime asset-URL reference resolves to — the same
-/// SOURCE-ONLY, no-`dep`-node/edge shape as `merge_sfc_fan_in` (the F3 pin): the resolved target is
+/// SOURCE-ONLY, no-`dep`-node/edge shape as `merge_prescan_fan_in` (the F3 pin): the resolved target is
 /// always an existing `ts_paths` participant (a `public/*.js` worklet/worker is dispatched to
 /// `Language::TypeScript` and already has a `dep` key + `FileNode`), so a count-only `fan_in` bump mints
 /// no new node/`dead-candidates` FP. One bump per (referencing file, target) pair (a `seen` set per
-/// file, mirroring the SFC pass's dedup). Returns the SET of resolved targets across all files — seeded
+/// file, mirroring the pre-scan's dedup). Returns the SET of resolved targets across all files — seeded
 /// into `unreachable`'s `extra_entries` (see `super::super::rules`): an asset loaded by a URL string is
 /// effectively an entrypoint (real fan-in, but NO incoming `dep` edge since we add none), so without the
 /// seed it would flip from a `dead-candidates` false positive to a false `unreachable` island — exactly
-/// the flip `merge_sfc_fan_in`'s own return value prevents for SFC-mounted `.ts` targets.
+/// the flip `merge_prescan_fan_in`'s own return value prevents for pre-scan-mounted `.ts` targets.
 pub(super) fn merge_asset_ref_fan_in(
     dep_stats: &mut DepStats,
     asset_ref_pairs: &[(String, Vec<String>)],
@@ -90,6 +100,39 @@ pub(super) fn merge_asset_ref_fan_in(
     targets
 }
 
+/// Bumps `dep_stats.fan_in` for every file a NUXT AUTO-IMPORT reference reaches — the third instance of
+/// the same SOURCE-ONLY, no-`dep`-node/edge shape as the two arms above (the F3 pin): the resolved
+/// target is a `ts_paths` participant by construction (`super::super::nuxt_auto_import::scan` only ever
+/// nominates tracked `.ts`/`.js`/`.mjs`/`.mts` files under an auto-import directory), so a count-only
+/// `fan_in` bump mints no new node and therefore no new `dead-candidates` false positive of its own.
+/// The `ts_paths` membership test is still made rather than assumed: a bump on a non-participant would
+/// be a silent no-op today and a real defect the day the nomination rule widens.
+///
+/// The COUNT is the number of distinct app-dir files that mention one of the target's public export
+/// names — the resolution itself, and the reason the two names differ, live in
+/// `super::super::nuxt_auto_import`'s module doc, which carries the measurement.
+///
+/// Returns the SET of reached targets, for the same reason its two siblings do — `super::super::rules`
+/// seeds them into `unreachable`'s `extra_entries`. Without that seed every file silenced here would
+/// flip from a `dead-candidates` false positive into a false `unreachable` island: an auto-imported
+/// composable has real fan-in but NO incoming `dep` edge (this function adds none), and a file reached
+/// by a mechanism the graph cannot see is effectively an entrypoint.
+pub(super) fn merge_auto_import_fan_in(
+    dep_stats: &mut DepStats,
+    auto_import: &crate::analyze::assemble::nuxt_auto_import::NuxtAutoImportRefs,
+    ts_paths: &HashSet<String>,
+) -> HashSet<String> {
+    let mut targets: HashSet<String> = HashSet::new();
+    for (rel, count) in &auto_import.by_target {
+        if !ts_paths.contains(rel) {
+            continue;
+        }
+        *dep_stats.fan_in.entry(rel.clone()).or_insert(0) += count;
+        targets.insert(rel.clone());
+    }
+    targets
+}
+
 /// Resolves ONE captured runtime asset-URL reference string to zero or more tree-relative file paths:
 /// - **Served-absolute** (`/x`): a `public/`-served path (Vite/CRA/Next serve `public/` — SvelteKit/Vite
 ///   also `static/` — at root `/`). Matches every tracked file whose path ends, at a segment boundary,
@@ -98,7 +141,7 @@ pub(super) fn merge_asset_ref_fan_in(
 ///   nodes, never mints one — and is commutative, so determinism holds against the `BTreeMap` fan-in.
 /// - **Relative** (`./x`/`../x`, e.g. `new URL("./worker.ts", import.meta.url)`): normal module
 ///   resolution relative to the referencing file, via `resolve_file_with_workspace` (exactly as
-///   `merge_sfc_fan_in` resolves an SFC import) — at most one file.
+///   `merge_prescan_fan_in` resolves a pre-scanned import) — at most one file.
 /// - **Bare specifier / full URL / `blob:` / `data:`**: no anchor or off-tree — resolves to nothing
 ///   (never guess a target, which would false-positive liveness).
 ///

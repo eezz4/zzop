@@ -124,8 +124,13 @@ fn render(routes: &[Route], total: usize, scope: Option<&str>, top: usize) -> St
     let unguarded = routes.iter().filter(|r| r.unguarded).count();
     let mut out = String::new();
     out.push_str("%% zzop graph --domain posture — mutating attack surface and its guard status\n");
+    // `extracted` rather than `total`: the number counts the mutating routes this run EXTRACTED, and
+    // calling it the total states something the census cannot know. Measured on an Express tree whose
+    // extractor missed 5 of 14 routes — this line said `total 4` where the tree had 7, and a reader
+    // has no way to tell a census of everything from a census of what was seen. The word is the whole
+    // fix; the number is the same number.
     out.push_str(&format!(
-        "%% mutating routes: drawn {} / total {} | reported unguarded: {} | per-tree cap --top {top}{}\n",
+        "%% mutating routes: drawn {} / extracted {} | reported unguarded: {} | per-tree cap --top {top}{}\n",
         routes.len(),
         total,
         unguarded,
@@ -134,6 +139,12 @@ fn render(routes: &[Route], total: usize, scope: Option<&str>, top: usize) -> St
     out.push_str(
         "%% NOT drawn: read routes (a GET is not unguarded, it is a read) and non-http io. Guard status \
          is this run's `mutating-route-no-auth` verdict, never re-derived here.\n",
+    );
+    out.push_str(
+        "%% `extracted` is what this run SAW, not what the tree contains: a route zzop's extractors did \
+         not recognize is absent from this picture entirely, and absent reads the same as guarded here. \
+         Check the run's own warnings for a route-extraction gap before reading this as an attack \
+         surface in full.\n",
     );
     out.push_str("flowchart LR\n");
 

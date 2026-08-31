@@ -1,13 +1,24 @@
 //! The ONE enumeration of "which matcher fields carry a pattern" — walked by
-//! [`RulePackDef::expand_fragments`](super::RulePackDef::expand_fragments) to resolve `${NAME}` refs, and
-//! by the inline-value census (`crate::dsl::tests_inline_census`) to enumerate what it must triage.
+//! [`RulePackDef::expand_fragments`](super::RulePackDef::expand_fragments) to resolve `${NAME}` refs, by
+//! the inline-value census (`crate::dsl::tests_inline_census`) to enumerate what it must triage, and by
+//! `pack_loader::pack_regex_issues` to decide which fields it must compile-check (the dead-rule census
+//! behind `zzop validate-rule-pack` and the engine's `uncompilable_rule_warnings`).
+//!
+//! That third caller reads AFTER expansion in every path that reaches it, and must: an unexpanded
+//! `${NAME}` is not a valid regex, so a census running before this walk's other job would report every
+//! fragment-using rule as broken. See `pack_regex_issues`' own doc for the ordering contract.
 //!
 //! # Why this is a function and not three lists
 //!
 //! Three sites used to answer "which fields bear a pattern", by hand, in three places: the four match
 //! arms inside `expand_fragments`, `tests_fragments::byte_identity::pattern_bearing_field_values` (whose
 //! own doc promised "the EXACT same field set" and had no way to keep that promise), and — as of the
-//! census — a third would have been born. A hand list goes stale on the day a field is added, and it goes
+//! census — a third would have been born. A FOURTH one existed all along and was found only after this
+//! file did: `pack_loader::pack_regex_issues` enumerated the same fields by hand, and by then had drifted
+//! by four — `CallScan::algorithm_pattern`/`line_pattern`/`line_exclude_pattern` and
+//! `LineScan::prev_line_exclude_pattern` were regex-compiled at eval time and compile-CHECKED nowhere, so
+//! `validate-rule-pack` reported `{"valid":true,"issues":[]}` for a rule that could never fire. It now
+//! derives from this walk too. A hand list goes stale on the day a field is added, and it goes
 //! stale SILENTLY: the new field simply is not walked, so no fragment resolves in it, no census row is
 //! emitted for it, and every guard reads green. Measured on this very tree, before this file existed:
 //! `IoScan::symbol_pattern` and `IoScan::anchor_exclude_pattern` are both regex fields, both shipped, and
@@ -31,8 +42,10 @@
 //!
 //! The attribute gates (`attr_present`, `attr_absent`, `require_attr_declared` on `LineScan` and
 //! `CallScan`; `attr_present`, `attr_absent` on `IoScan`) are plain attribute KEYS looked up in the
-//! `AttributeStore` — never regex-compiled (`pack_regex_issues` skips them by name, see each field's own
-//! doc). Visiting them would make them fragment-expandable, which would mean a `${NAME}` in one silently
+//! `AttributeStore` — never regex-compiled. Leaving them out here is now the ONLY thing that keeps them
+//! out of `pack_regex_issues` as well (it used to skip them by name, in its own list); each `field: _`
+//! line below is therefore a deliberate skip for both readers at once, and every one carries its reason.
+//! Visiting them would make them fragment-expandable, which would mean a `${NAME}` in one silently
 //! became an attribute key spelled as a regex. `MethodScan::trigger` and `LabeledPattern::label` are
 //! LABELS — they name a `patterns[]` entry, they are compared by equality, and a regex there would match
 //! nothing. Everything else on those structs is a bool or a `usize`.
@@ -99,6 +112,8 @@ pub(crate) fn for_each_pattern_field<E>(
             any,
             exclude_pattern,
             prev_line_exclude_pattern,
+            next_line_exclude_pattern,
+            enclosing_call_exclude_pattern,
             file_exclude_pattern,
             // Not patterns — see this module's header. Named individually rather than swallowed by `..`
             // so that adding a field to `LineScan` is a compile error here, not a silent omission.
@@ -125,6 +140,16 @@ pub(crate) fn for_each_pattern_field<E>(
                 prev_line_exclude_pattern,
                 visit,
             )?;
+            opt(
+                "next_line_exclude_pattern",
+                next_line_exclude_pattern,
+                visit,
+            )?;
+            opt(
+                "enclosing_call_exclude_pattern",
+                enclosing_call_exclude_pattern,
+                visit,
+            )?;
             opt("file_exclude_pattern", file_exclude_pattern, visit)?;
         }
         Matcher::MethodScan(MethodScan {
@@ -134,6 +159,7 @@ pub(crate) fn for_each_pattern_field<E>(
             require_file_absent,
             patterns,
             absent,
+            trigger_call_exclude_pattern,
             file_exclude_pattern,
             // `trigger` and `after` name a `patterns[].label` (equality, never a regex); the rest are
             // bools/usize. See this module's header.
@@ -153,6 +179,11 @@ pub(crate) fn for_each_pattern_field<E>(
             each("require_file_absent", require_file_absent, visit)?;
             labeled("patterns[].pattern", patterns, visit)?;
             labeled("absent[].pattern", absent, visit)?;
+            opt(
+                "trigger_call_exclude_pattern",
+                trigger_call_exclude_pattern,
+                visit,
+            )?;
             opt("file_exclude_pattern", file_exclude_pattern, visit)?;
         }
         Matcher::SymbolScan(SymbolScan {
@@ -191,6 +222,7 @@ pub(crate) fn for_each_pattern_field<E>(
             callee_pattern,
             algorithm_pattern,
             line_pattern,
+            line_exclude_pattern,
             // `kind` is an EXACT-match call-kind string (compared with `==`, never compiled), the three
             // `attr_*` are attribute keys, `in_loop` is a bool and `snippet_max` a usize. See this
             // module's header for why a `${NAME}` must not reach any of them.
@@ -206,6 +238,7 @@ pub(crate) fn for_each_pattern_field<E>(
             opt("callee_pattern", callee_pattern, visit)?;
             opt("algorithm_pattern", algorithm_pattern, visit)?;
             opt("line_pattern", line_pattern, visit)?;
+            opt("line_exclude_pattern", line_exclude_pattern, visit)?;
         }
         Matcher::LiteralScan(LiteralScan {
             file_pattern,

@@ -299,3 +299,45 @@ fn the_common_vendor_key_prefixes_all_survive_the_value_shape_veto() {
         out.findings
     );
 }
+
+/// **A shell/template placeholder is a placeholder whichever way it is spelled.** The SCREAMING_SNAKE
+/// veto required `[A-Z]` immediately after the opening quote, so the bare `"LLM_API_KEY"` was excluded
+/// while `"$LLM_API_KEY"` and `"${LLM_API_KEY}"` — the two spellings an OpenAPI example or a `.env`
+/// template actually uses — were reported. Measured on meilisearch `577f7af`: 3 of its 22 findings were
+/// one such line repeated across three `#[utoipa::path]` examples in a single file, each carrying a
+/// full credential-rotation message.
+///
+/// All three placeholder spellings ride with a REAL secret in the same call, because a veto is only
+/// worth having if something still fires beside it.
+#[test]
+fn a_dollar_or_braced_screaming_snake_placeholder_is_vetoed_like_the_bare_one() {
+    let dir = TempDir::new("zzop-security");
+    dir.write(
+        "src/openapi.ts",
+        "export const examples = {\n\
+        \x20 bare: { apiKey: \"LLM_API_KEY\" },\n\
+        \x20 shell: { apiKey: \"$LLM_API_KEY\" },\n\
+        \x20 braced: { apiKey: \"${LLM_API_KEY}\" },\n\
+        };\n",
+    );
+    // Split so no contiguous vendor-token prefix+body survives in tracked source — the value the scan
+    // sees is unchanged. Established convention: `vendor_token_committed.rs`'s header.
+    dir.write(
+        "src/leak.ts",
+        &format!(
+            "export const apiKey = \"{}{}\";\n",
+            "sk_", "live_9f3ba21c8e7d4a6b5c0f1e2d3a4b5c6d"
+        ),
+    );
+    let out = scan(&dir);
+    let files: Vec<&str> = hits(&out, "hardcoded-secret")
+        .iter()
+        .map(|f| f.file.as_str())
+        .collect();
+    assert_eq!(
+        files,
+        vec!["src/leak.ts"],
+        "all three placeholder spellings must be vetoed and the real credential must fire: {:?}",
+        out.findings
+    );
+}

@@ -24,9 +24,14 @@
 //! It does NOT mean the two writers produced identical BYTES, and this doc claimed that until 2026-07-29.
 //! Stored entries carry map fields typed `std::collections::HashMap`, whose serde_json object-key order
 //! follows a per-instance randomized hash seed — `grep -n 'HashMap' crates/cache/src/ir_slice.rs` names
-//! them (`const_map_fragment` is the standing example). Nothing here reads a stored entry byte-wise, so
-//! the difference has never had a consequence; it is corrected because the benign-race argument above was
-//! resting on it, and an argument resting on a false premise cannot be re-checked by whoever comes next.
+//! them (`const_map_fragment` is the standing example). The 2026-07-29 correction went on to say the
+//! difference had never had a consequence because nothing read a stored entry byte-wise. **That second
+//! half was already false when it was written**: [`super::integrity`]'s payload digest read the payload
+//! byte-wise on both the write and the read side, so a healthy entry hashed differently on the way out
+//! than on the way in and the corruption detector accused zzop's own writes on every warm run. Fixed
+//! where the byte-wise read lives, by digesting a canonical serialization — see that module. What stands
+//! here unchanged is the narrower true claim: two racing writers' entries are EQUIVALENT, not identical,
+//! and nothing may rest an argument on their bytes matching.
 
 use std::fs;
 use std::io;

@@ -234,6 +234,7 @@ pub(crate) fn compose_file_convention_provides<'a>(
 
 fn provide(verb: &str, url: &str, rel: &str, line: u32, symbol: &str) -> IoProvide {
     IoProvide {
+        route_version: None,
         response: None,
         body: None,
         kind: "http".into(),

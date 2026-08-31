@@ -13,7 +13,7 @@
 //! `SELECT <col> FROM <table> <alias>`, so shape analysis cannot separate it from prose — only case can.
 //! The cost is an honest under-report of lowercase SQL, pinned below.
 
-use crate::{hits, scan, TempDir};
+use crate::{assert_clauses_precede_imperative, hits, scan, TempDir};
 
 // The measured anchor shape (an external dogfood corpus' `createLedger.ts`, reconstructed here): an
 // optimistic-concurrency version check whose READ sits OUTSIDE the atomic write batch. Note the file
@@ -200,5 +200,64 @@ export async function postRevision(id: string) {
         hits(&out, "raw-sql-check-then-write").is_empty(),
         "{:?}",
         out.findings
+    );
+}
+
+/// FINDING 1, leg 3 (2026-08-23): the remedy said "add a unique constraint plus `ON CONFLICT`" without
+/// naming which conflict action. `DO NOTHING` and `DO UPDATE SET ...` are opposite edits and only one
+/// of them preserves the row that already exists, so the ambiguity is the same one-token-wide overwrite
+/// the ORM sibling was fixed for. The two non-overwriting alternatives offered in the same sentence
+/// (the version-checked conditional UPDATE, the FOR UPDATE row lock) make this milder than the ORM
+/// case, not closed -- naming the clause costs one phrase, so it is named.
+#[test]
+fn the_raw_sql_check_then_write_remedy_names_the_conflict_action() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "src/repo.ts",
+        "declare const db: any;\nexport async function ensure(email: string) {\n  const rows = await db.query(\"SELECT id FROM users WHERE email = $1\", [email]);\n  if (!rows.length) {\n    await db.query(\"INSERT INTO users (email) VALUES ($1)\", [email]);\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "raw-sql-check-then-write");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    let m = &h[0].message;
+    assert!(
+        m.contains("`ON CONFLICT ... DO NOTHING`")
+            && m.contains("`DO UPDATE SET ...` is the other clause and it OVERWRITES"),
+        "the raw-SQL remedy no longer names which conflict action it means: {m}"
+    );
+}
+
+/// This rule's fix list opens with a unique constraint, and that first option carries a precondition
+/// the rule cannot check: where the looked-up pair is one an owner may legitimately hold twice (two
+/// linked accounts at the same external provider, two installs of one integration), the constraint is
+/// refused by any table already holding such a duplicate and, forced through, rejects the second
+/// legitimate row. The other two options in that list (a conditional `UPDATE` on a version column, a
+/// `FOR UPDATE` row lock) do NOT depend on uniqueness, which is why the clause points at them rather
+/// than inventing a fourth.
+///
+/// Asserts POSITION, not presence (§27); named by ROLE only — no vendor, path, schema or corpus tree.
+#[test]
+fn the_raw_sql_remedy_questions_the_column_pair_before_it_prescribes_the_constraint() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "src/repo/members.ts",
+        "declare const db: any;\nexport async function addMember(orgId: string, userId: string) {\n  const rows = await db.query(\"SELECT id FROM members WHERE org_id = $1 AND user_id = $2\", [orgId, userId]);\n  if (rows.length === 0) {\n    await db.query(\"INSERT INTO members (org_id, user_id) VALUES ($1, $2)\", [orgId, userId]);\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "raw-sql-check-then-write");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    let m = &h[0].message;
+
+    assert_clauses_precede_imperative(
+        "raw-sql-check-then-write",
+        m,
+        "add a unique constraint",
+        &[
+            "NOT MEANT TO BE UNIQUE",
+            "legitimately hold twice",
+            "migration FAILS OUTRIGHT",
+            "second legitimate row is rejected",
+            "last two options below",
+        ],
     );
 }

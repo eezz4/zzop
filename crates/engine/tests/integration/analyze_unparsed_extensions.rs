@@ -133,6 +133,7 @@ fn projection_with_io(path: &str) -> FileProjection {
         file: path.to_string(),
         line: 1,
         symbol: None,
+        ..Default::default()
     });
     p
 }

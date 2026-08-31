@@ -8,9 +8,11 @@
 //! CACHE AXIS (judged for F4): this is a NON-CACHED assemble-time recomputation. Every input below
 //! (`imports` / `re_exports` / `dynamic_imports`) already rides the per-file cache slice
 //! (`zzop_cache::FileIrSlice`) — the count is derived from those cache-carried fields on every run,
-//! is never itself cached, and adds no `FileIrSlice` field, so no `CACHE_SCHEMA_VERSION`/
-//! `PARSER_FINGERPRINT` roll is needed. Same convention as the F5 census drains beside it in
-//! `collect`, which re-resolve cached specifiers per run.
+//! is never itself cached, and adds no `FileIrSlice` field, so no `CACHE_SCHEMA_VERSION` roll is
+//! needed. A `PARSER_FINGERPRINT` roll is not "needed" in the sense of REMEMBERED — it happens anyway,
+//! because `crates/engine/build.rs` derives `FP_ENGINE` from these bytes and that token suffixes every
+//! arm. Shape, not invalidation; the distinction matters now that nobody bumps by hand. Same convention
+//! as the F5 census drains beside it in `collect`, which re-resolve cached specifiers per run.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -26,8 +28,8 @@ use zzop_core::{ImportMap, ReExport};
 /// contributes NO key here — absence of a key means "never measured", never 0, and the facade coverage
 /// table renders it as an unmeasured cell. A parsed file with zero imports contributes a real 0 to its
 /// extension's sum (key present — measured zero). `.vue`/`.svelte` are deliberately OUT even though
-/// `sfc::collect_sfc_import_pairs` extracts their script-block imports: an SFC never becomes a
-/// dep-graph SOURCE (`dep_graph::merge_sfc_fan_in` is target-fan-in-only), so a declared count there
+/// `prescan::collect_prescan_import_pairs` extracts their imports: a pre-scanned file never becomes a
+/// dep-graph SOURCE (`dep_graph::merge_prescan_fan_in` is target-fan-in-only), so a declared count there
 /// would read as resolver blindness on a channel that structurally has no resolved side.
 ///
 /// NOT 1:1 with `CoverageCensus::resolved_import_edges`, in either direction: a declaration is a
@@ -73,11 +75,17 @@ pub(super) fn by_ext(
 }
 
 /// Lowercased tail after the last `.` of the last path segment; the whole name (lowercased) when there
-/// is no dot. MIRROR of the facade coverage table's own `ext_of`
-/// (`crates/facade/src/query_coverage.rs`) — the two must agree byte-for-byte or a measured extension
-/// key would miss its table row and read as unmeasured. Duplicated rather than shared because the
-/// facade deliberately keeps no engine-type dependency in that pure-JSON post-processor, and the
-/// definition is a fact of the path string, not a dispatch table that could drift in meaning.
+/// is no dot. It must agree byte-for-byte with every other reader of this key or a measured extension
+/// would miss its table row and read as unmeasured.
+///
+/// It USED to be justified as a deliberate duplicate of the facade's own copy, on the grounds that the
+/// facade keeps no engine dependency in that pure-JSON post-processor. That justification stopped being
+/// true on 2026-08-21: `crates/facade/src/query_coverage.rs`'s `ext_of` now delegates to
+/// `zzop_engine::zero_extraction::ext_of`, so the facade holds an engine dependency here and there is
+/// one owner on that side. This copy remains because it is in the engine's own assemble pass, which the
+/// shared recognizer sits downstream of — a fact of the path string with no dispatch table to drift.
+/// If a third reader ever appears, it delegates rather than copies; two is already one more than the
+/// argument above can carry.
 fn ext_of(rel: &str) -> String {
     let base = rel.rsplit('/').next().unwrap_or(rel);
     match base.rsplit_once('.') {

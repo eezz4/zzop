@@ -10,8 +10,10 @@ use crate::request::{AnalyzeRequest, PacksDir};
 
 mod declared;
 mod mounts;
+mod overlays;
 
 pub(crate) use mounts::fold_mounts;
+use overlays::typed_overlays;
 
 /// Renders a rule count with correct pluralization ("1 rule" / "2 rules") — mirrors
 /// `zzop_metrics::diagnostics`'s private `entry_count` helper's pattern (that one is not `pub`, so it
@@ -261,7 +263,7 @@ pub(crate) fn build_engine_config(
     // Overlays flow to `analyze_tree`'s unconditional `apply_adapter_overlays` merge; no cache-key
     // impact (applied post-cache, re-applied every run regardless of hit/miss). The lightweight `routes`
     // injection is expanded into ONE more synthetic overlay appended here, so it rides the identical path.
-    config.adapter_overlays = req.adapter_overlays.clone();
+    config.adapter_overlays = typed_overlays(&req.adapter_overlays, warnings);
     if let Some(overlay) =
         crate::route_injection::routes_overlay(&req.source_id, &req.routes, warnings)
     {

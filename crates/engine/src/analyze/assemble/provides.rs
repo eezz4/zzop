@@ -110,7 +110,7 @@ pub(super) fn compose(
     // Whole-corpus C# ASP.NET Core HTTP-provides resolution — the C# twin of the Java pass just above, resolving non-literal route
     // CONSTANTS (`[HttpGet(Routes.List)]`) across files and REPLACING the per-file C# `http` provides wholesale (`run_csharp_provides_project_pass`'s doc). A no-op when empty.
     if !csharp_rels.is_empty() {
-        run_csharp_provides_project_pass(root, csharp_rels, &mut io_provides);
+        run_csharp_provides_project_pass(root, csharp_rels, &mut io_provides, &mut warnings);
     }
 
     // Workspace-package manifest scan — hoisted above `build_dep` because `workspace_pkgs` also feeds

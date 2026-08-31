@@ -27,6 +27,7 @@ fn provide(file: &str, line: u32, response: Option<ProvideResponseShape>) -> IoP
         file: file.to_string(),
         line,
         symbol: None,
+        ..Default::default()
     }
 }
 

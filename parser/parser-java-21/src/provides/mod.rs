@@ -41,7 +41,7 @@ mod extract;
 pub use extract::extract_http_provides;
 
 pub(crate) use annotations::{
-    class_annotation_facts, method_route_states, route_path_arg, RoutePathState,
+    class_annotation_facts, method_route_match, route_path_arg, RoutePathState,
 };
 
 #[cfg(test)]

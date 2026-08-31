@@ -39,18 +39,47 @@ pub(super) struct PackLoadedView<'a> {
     id: &'a str,
     rules: usize,
     source: &'a str,
+    /// `"disabled"` | `"notAllowlisted"` — present ONLY on a pack that loaded and was never evaluated
+    /// (`zzop_engine::PackNotRun`). Absent is the ordinary case and means the pack ran, so an ungated
+    /// run's rows are byte-identical to what they were before this key existed: a disclosure that
+    /// fires when there is nothing to disclose is the noise that teaches readers to skip disclosures.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    did_not_run: Option<&'static str>,
     /// Per-pack applicability (D16 follow-up, `zzop_engine::PackLoaded::files_in_scope`'s doc): `0` on
     /// a loaded pack = "no analyzed file is in any of this pack's rules' scope" — zero findings from
     /// it means "out of scope", not "clean".
-    files_in_scope: usize,
+    ///
+    /// Its PRESENCE is now also a claim: this pack ran. On a pack that did not, the same census rides
+    /// [`Self::files_in_scope_if_enabled`] instead, because a positive scanned-file count on a pack
+    /// that read nothing was the half of the old row that made "not analyzed" look like "analyzed and
+    /// clean" (see `zzop_engine::PackLoaded`'s own doc for the measurement).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    files_in_scope: Option<usize>,
+    /// The SAME census as `filesInScope`, published under a counterfactual name on a pack that did not
+    /// run: "this is what it would have looked at". Kept rather than dropped because it is exactly the
+    /// number that says what re-enabling the pack would buy — 0 here means the pack has nothing to
+    /// offer this tree even if switched on, which is a different remedy from a large number.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    files_in_scope_if_enabled: Option<usize>,
     /// The rule-granularity half of the same census (`zzop_engine::PackLoaded::zero_admission_rules`'s
     /// doc): ids of this pack's rules whose own path gates admitted zero analyzed files — their zero
     /// findings are scope, never a clean bill. Serialized ONLY when non-empty (the `testPaths`
     /// additive-disclosure precedent: present exactly when it has something to say), so the common
     /// every-rule-admits-files entry — and the `filesInScope: 0` pack, where the pack-level zero
     /// already says "all of them" — stays byte-identical for existing consumers.
+    ///
+    /// Also dropped on a pack that DID NOT RUN, for the same reason it is dropped on a `filesInScope:
+    /// 0` pack: admission ranks rules within a scan, and there was no scan. `didNotRun` already says
+    /// "all of them" one level up.
     #[serde(skip_serializing_if = "slice_is_empty")]
     zero_admission_rules: &'a [String],
+    /// The ids behind `rules` (`zzop_engine::PackLoaded::rule_ids`'s doc has the measurement that
+    /// forced it): what this run could report from this pack, as a list rather than a count, so a
+    /// consumer validating a `--rule`/`rule` filter can answer "is there such a rule here" instead of
+    /// guessing from the pack prefix. Unconditionally serialized, unlike `zeroAdmissionRules` above —
+    /// an omitted list would read as "this build declines to say", which is precisely the state a
+    /// validator must be able to distinguish from "no such rule".
+    rule_ids: &'a [String],
 }
 
 /// `skip_serializing_if` helper for a borrowed-slice field (serde hands the serializer `&&[String]`,
@@ -59,14 +88,21 @@ fn slice_is_empty(s: &&[String]) -> bool {
     s.is_empty()
 }
 
+/// The one place the "loading is not running" split becomes JSON. `did_not_run` decides which of the
+/// two scope keys the row carries, so the pair is mutually exclusive by construction — a row can never
+/// publish both, and the census itself is copied unchanged into whichever key is honest for this run.
 impl<'a> From<&'a zzop_engine::PackLoaded> for PackLoadedView<'a> {
     fn from(p: &'a zzop_engine::PackLoaded) -> Self {
+        let ran = p.did_not_run.is_none();
         PackLoadedView {
             id: &p.id,
             rules: p.rules,
             source: &p.source,
-            files_in_scope: p.files_in_scope,
-            zero_admission_rules: &p.zero_admission_rules,
+            did_not_run: p.did_not_run.map(zzop_engine::PackNotRun::as_str),
+            files_in_scope: ran.then_some(p.files_in_scope),
+            files_in_scope_if_enabled: (!ran).then_some(p.files_in_scope),
+            zero_admission_rules: if ran { &p.zero_admission_rules } else { &[] },
+            rule_ids: &p.rule_ids,
         }
     }
 }
@@ -182,4 +218,30 @@ pub(crate) fn disclosure_views() -> Vec<BlindnessClassView> {
             status: c.status.as_str(),
         })
         .collect()
+}
+
+/// JSON view over `zzop_engine::NativeAnalyses` — the native-analysis roster (`nativeAnalyses`).
+///
+/// Both lists are serialized UNCONDITIONALLY, including when empty, and that breaks with the
+/// skip-if-empty convention its DSL sibling `zeroAdmissionRules` follows. The break is the point: this
+/// object exists to make a zero visible, and a channel whose population is "what I happened to find"
+/// reports nothing on a clean run in bytes indistinguishable from a channel that never ran. `disabled:
+/// []` beside `reportedInCrossLayerFindings` with 27 entries is a row a reader can compare; an absent
+/// key is not.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct NativeAnalysesView<'a> {
+    registered: usize,
+    disabled: &'a [String],
+    reported_in_cross_layer_findings: &'a [String],
+}
+
+impl<'a> From<&'a zzop_engine::NativeAnalyses> for NativeAnalysesView<'a> {
+    fn from(n: &'a zzop_engine::NativeAnalyses) -> Self {
+        NativeAnalysesView {
+            registered: n.registered,
+            disabled: &n.disabled,
+            reported_in_cross_layer_findings: &n.reported_in_cross_layer_findings,
+        }
+    }
 }

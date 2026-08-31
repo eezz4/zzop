@@ -3,7 +3,7 @@
 //! since `.use` alone carries the full middleware guard-name judgment (mount vs. `ScopedAttr`)
 //! across 1-arg/2-arg/multi-arg call shapes. See the parent module doc for the recognizer spec.
 
-use swc_core::ecma::ast::{CallExpr, Expr};
+use swc_core::ecma::ast::{CallExpr, Callee, Expr};
 use zzop_core::{ImportMap, RouterMountEntry};
 
 use super::build::string_lit_arg;
@@ -31,6 +31,58 @@ use super::RouterMountVocab;
 /// A single CALL argument (`app.use(requireAuth())`) is judged for guard vocabulary: a
 /// recognized guard emits a `ScopedAttr` at the router's root ("/"); an unjudged call
 /// (`app.use(cors())`) is skipped exactly as before.
+/// `require('<literal>')` sitting where a sub-router identifier would sit — the CommonJS half of
+/// the mount idiom, and the half this recognizer used to drop on the floor.
+///
+/// `app.use('/api/v1', require('./controllers/v1'))` is what `expressjs/express`'s own
+/// `examples/multi-router` ships, and it reached the CALL arm below, judged as a guard, failed that,
+/// and was skipped. Measured 2026-08-19 on a 3-file fixture: the mounted routes then composed at
+/// their OWN keys (`GET /`, `GET /users`) instead of `GET /api/v1/...`, which is the mis-keying the
+/// `MountRef` doc calls worse than not emitting — and two routers mounted at two prefixes therefore
+/// collided into a false `duplicate-route`. The identifier spelling of the same program
+/// (`const v1 = require('./controllers/v1'); app.use('/api/v1', v1)`) already composed correctly, so
+/// the defect was the shape of the ARGUMENT, never the mount.
+///
+/// Deliberately narrow: exactly one string-literal argument to a callee spelled `require`. A dynamic
+/// specifier is not a literal and stays skipped, because a specifier this pass cannot read is a
+/// target it cannot resolve.
+fn require_specifier(expr: &Expr) -> Option<String> {
+    let Expr::Call(call) = expr else { return None };
+    let Callee::Expr(callee) = &call.callee else {
+        return None;
+    };
+    let Expr::Ident(id) = unwrap_expr(callee) else {
+        return None;
+    };
+    if id.sym.as_str() != "require" || call.args.len() != 1 {
+        return None;
+    }
+    string_lit_arg(call.args.first())
+}
+
+/// The binding name the author WOULD have written for this module, used only as the by-name lookup
+/// key at compose. An inline `require` has no binding, and the composer needs some ident: it tries a
+/// fragment of that name in the resolved file and otherwise falls back to "the file declares exactly
+/// one router", which is the shape a controller module has. Getting this wrong therefore costs a
+/// lookup miss, and a missed mount DROPS the child's routes rather than emitting them at the wrong
+/// key — the direction this module already prefers.
+fn conventional_ident(specifier: &str) -> String {
+    let last = specifier.rsplit('/').next().unwrap_or(specifier);
+    let stem = last.rsplit_once('.').map_or(last, |(before, _)| before);
+    if stem.is_empty() || stem == "index" {
+        // `./controllers/index` names the DIRECTORY, which is what a reader would have bound it to.
+        let parent = specifier
+            .trim_end_matches('/')
+            .rsplit('/')
+            .nth(1)
+            .unwrap_or("");
+        if !parent.is_empty() && parent != "." && parent != ".." {
+            return parent.to_string();
+        }
+    }
+    stem.to_string()
+}
+
 pub(super) fn classify_use_call(
     call: &CallExpr,
     line: u32,
@@ -57,7 +109,16 @@ pub(super) fn classify_use_call(
                     }]
                 }
                 call_expr @ Expr::Call(_) => {
-                    if judge_guard_arg(call_expr, vocab) {
+                    // A require FIRST: `app.use(require('./routes'))` is a prefix-less mount, and
+                    // asking the guard vocabulary about it would only ever answer "not a guard".
+                    if let Some(spec) = require_specifier(call_expr) {
+                        vec![RouterMountEntry::Mount {
+                            prefix: "/".to_string(),
+                            ident: conventional_ident(&spec),
+                            specifier: Some(spec),
+                            attr_keys: Vec::new(),
+                        }]
+                    } else if judge_guard_arg(call_expr, vocab) {
                         vec![RouterMountEntry::ScopedAttr {
                             prefix: "/".to_string(),
                             key: AUTH_GUARDED_ATTR_KEY.to_string(),
@@ -98,7 +159,14 @@ pub(super) fn classify_use_call(
                     }]
                 }
                 call_expr @ Expr::Call(_) => {
-                    if judge_guard_arg(call_expr, vocab) {
+                    if let Some(spec) = require_specifier(call_expr) {
+                        vec![RouterMountEntry::Mount {
+                            prefix,
+                            ident: conventional_ident(&spec),
+                            specifier: Some(spec),
+                            attr_keys: Vec::new(),
+                        }]
+                    } else if judge_guard_arg(call_expr, vocab) {
                         vec![RouterMountEntry::ScopedAttr {
                             prefix,
                             key: AUTH_GUARDED_ATTR_KEY.to_string(),

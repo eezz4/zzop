@@ -51,6 +51,7 @@ fn provides() -> Vec<IoProvide> {
             line: 12,
             symbol: None,
             body: None,
+            ..Default::default()
         },
         IoProvide {
             response: None,
@@ -60,6 +61,7 @@ fn provides() -> Vec<IoProvide> {
             line: 20,
             symbol: None,
             body: None,
+            ..Default::default()
         },
     ]
 }

@@ -13,6 +13,19 @@
 //! So this file asks the same question a different way — it builds one real reply per surface and
 //! reads the keys that came out. Text cannot see derived keys; a JSON value cannot miss them.
 //!
+//! # The keys no row could ever govern (added 2026-08-29)
+//! The registry's field rows are pinned to the FACADE VIEWS, so a reply key that is not a view
+//! field — a projection (`sources`, `architecture`), a legend (`bucketMeaning`), a census
+//! (`buckets`, `coverageGaps`), or a per-tree field the join lifts to its root (`configWarnings`,
+//! `packsLoadedMeaning`, `nativeAnalyses`) — can hold no row, no status, and therefore no guard at
+//! all. That is a hole in the registry's SUBJECT rather than in its checks, and it was paid for:
+//! `nativeAnalyses` sat at `carry-conditional` on its own row while being absent from every byte of
+//! the cross reply, root and `sources[]` alike, and every guard stayed green. The registry now
+//! declares those keys in `_replyRootKeys` and [`assert_shape`] holds the declaration against a
+//! real reply in both directions: an undeclared key fails, and a key declared `always` that is
+//! missing fails. What stays uncovered, deliberately, is anything NESTED — the eight fields of a
+//! `sources[]` element are not top-level keys and no keyset can see them.
+//!
 //! # Deliberately ONE reply per surface, top-level keys only
 //! Not a matrix over every input combination. The registry is a claim about SHAPE ("this field either
 //! reaches the reply or does not"), and one honest response answers it. A combinatorial harness would
@@ -57,6 +70,22 @@ fn carried_fields(surface_block: &serde_json::Value) -> Vec<String> {
         .filter(|(_, row)| row.get("mcpAnalyzeReply").and_then(|v| v.as_str()) == Some("carry"))
         .map(|(name, _)| name.clone())
         .collect()
+}
+
+/// The reply-root keys one lane declares: `key -> {presence, why}` for every top-level key that is
+/// not a field of that lane's facade view. `_`-prefixed entries are the block's own prose.
+fn declared_root_keys(lane: &str) -> serde_json::Map<String, serde_json::Value> {
+    let mut declared = registry()["_replyRootKeys"][lane]
+        .as_object()
+        .unwrap_or_else(|| {
+            panic!(
+                "surface-parity.json's `_replyRootKeys` declares no `{lane}` block — every shipped \
+                 reply needs one, or its non-view keys ride with nothing saying they exist"
+            )
+        })
+        .clone();
+    declared.retain(|k, _| !k.starts_with('_'));
+    declared
 }
 
 fn registry() -> serde_json::Value {
@@ -111,6 +140,45 @@ fn assert_shape(reply: &str, block: &serde_json::Value, surface: &str) {
         "{surface}: fields the registry marks `carry` are absent from a real reply: {missing:?}\n\
          The registry documents TODAY's truth — if the field is genuinely gone, move its row to `omit` \
          with a note saying where the data is now.\nreply keys: {keys:?}"
+    );
+
+    // EVERY key accounted for. A field row covers a key only when the key IS a view field; the rest
+    // are declared in `_replyRootKeys`, and this is the assertion that makes the declaration cost
+    // something. Without it a reply can grow a channel that no document mentions — which is exactly
+    // how the join reply went a day with no native-analysis roster while the registry looked green.
+    let rows: Vec<String> = block
+        .as_object()
+        .expect("a surface block is an object of field -> row")
+        .keys()
+        .filter(|k| !k.starts_with('_'))
+        .cloned()
+        .collect();
+    let declared = declared_root_keys(surface);
+    let undeclared: Vec<&String> = keys
+        .iter()
+        .filter(|k| !rows.contains(k) && !declared.contains_key(*k))
+        .collect();
+    assert!(
+        undeclared.is_empty(),
+        "{surface}: top-level reply keys that are neither a registry field row nor declared in \
+         `_replyRootKeys.{surface}`: {undeclared:?}\n\
+         A key that is not a field of this lane's facade view CANNOT get a row (TEST 1/2 pin each \
+         root's key set to the view), so declare it in `_replyRootKeys` with its `presence` and a \
+         `why` — that block is the only place such a key can be said to exist."
+    );
+    let missing_declared: Vec<&String> = declared
+        .iter()
+        .filter(|(_, spec)| spec["presence"] == "always")
+        .map(|(k, _)| k)
+        .filter(|k| !keys.contains(k))
+        .collect();
+    assert!(
+        missing_declared.is_empty(),
+        "{surface}: keys declared `always` in `_replyRootKeys.{surface}` are absent from a real \
+         reply: {missing_declared:?}\n\
+         Either the reply stopped writing them (fix the reply) or they became conditional — in which \
+         case say `presence: conditional` and let the `why` name the condition, because `always` is \
+         the only half of this block a keyset can check.\nreply keys: {keys:?}"
     );
 }
 

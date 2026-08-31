@@ -150,6 +150,7 @@ mod tests {
                 file: file.to_string(),
                 line,
                 symbol: None,
+                ..Default::default()
             },
         }
     }
@@ -274,6 +275,7 @@ mod tests {
                         file: "a.sql".to_string(),
                         line: 1,
                         symbol: None,
+                        ..Default::default()
                     },
                 },
                 TaggedProvide {
@@ -286,6 +288,7 @@ mod tests {
                         file: "b.sql".to_string(),
                         line: 1,
                         symbol: None,
+                        ..Default::default()
                     },
                 },
             ],

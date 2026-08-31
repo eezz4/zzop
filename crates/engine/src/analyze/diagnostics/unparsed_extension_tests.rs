@@ -140,6 +140,87 @@ fn the_on_ramp_note_caps_the_named_extensions_and_counts_the_rest() {
     );
 }
 
+/// The count in that line is a count of ADAPTER CANDIDATES, and a reader who takes it for "what this
+/// run could not read" is off by the whole data/config group. Measured on macrozheng/mall: the line
+/// said 8 extensions (.conf/.emmx/.mf/.pdb/.pdm/.pos/.rp/.sh — 21 files of mind-maps and binaries)
+/// while 114 unread `.xml` MyBatis mappers holding 906 SQL statements were not in it, because they are
+/// not something you write a language frontend for. Naming them here instead would put a `.md`/`.json`
+/// row in almost every reply, so the exclusion stays and the line STATES it, naming the one reply
+/// shape that does carry the excluded population (see the scoping note below for the ones that do not).
+///
+/// On regression (the sentence dropped as verbosity) the count silently becomes a coverage claim it
+/// was never computed to support — which is precisely how two auditors read it.
+///
+/// The forwarding address is `coverageGaps` and ONLY `coverageGaps`, deliberately: this message is
+/// built in a shared crate and the identical sentence reaches an MCP client, where `zzop coverage` is
+/// a command that cannot be run and `unreadExtensions` sits on a reply with no MCP twin at all. A
+/// pointer the reader cannot follow is worse than none, and `host_vocabulary`'s CLI-only-vocabulary
+/// contract fails this file if the subcommand is ever named here again.
+///
+/// And that same rule applies to `coverageGaps`, which is why the pointer is SCOPED. The field is the
+/// analyze shaper's invention; `zzop_summary::cross` builds its per-source entries from `warnings` +
+/// `coverage` and never adds it, and the raw `zzop-facade` output has no shaper at all — while THIS
+/// warning is emitted by the engine on every lane that walks a tree, cross and raw included. An
+/// unqualified "rides the `coverageGaps` field of this same reply" was therefore false for two of the
+/// lanes that receive it: the reader searched their own reply for a key that is not in it. The leg
+/// below holds the qualification, not just the name, because the name alone is what regressed.
+#[test]
+fn the_on_ramp_note_says_what_its_count_excludes_and_where_that_population_is() {
+    let w = on_ramp(&[("py", 1, &["c.py"])]);
+    assert!(
+        w.contains("NOT THE TREE'S UNREAD FILETYPES"),
+        "the count must disown the reading it invites: {w}"
+    );
+    assert!(
+        w.contains("coverageGaps"),
+        "an exclusion with no forwarding address leaves the reader with nowhere to go: {w}"
+    );
+    assert!(
+        w.contains("SHAPED analyze reply") && w.contains("carry no `coverageGaps` at all"),
+        "this string reaches the cross join and the raw facade output too, and NEITHER carries \
+         `coverageGaps` — an unscoped pointer sends those readers hunting for a key their reply does \
+         not have: {w}"
+    );
+    // The pointer used to name SEVEN excluded groups and forward all of them to `coverageGaps`, which
+    // carries only the source and data/config halves and only above two share floors. A prose-and-
+    // images tree followed that pointer to an empty array — the same "pointer the reader cannot
+    // follow" this test exists to prevent, one level in. This leg holds the partiality.
+    assert!(
+        w.contains("PART of that excluded") && w.contains("named by NEITHER channel"),
+        "the forwarding address carries only part of the population the same sentence enumerates, \
+         so a reader whose tree is all prose and images must not be sent to an empty array: {w}"
+    );
+    assert!(
+        !w.contains("zzop coverage"),
+        "a CLI subcommand is not a route an MCP reader of this same sentence can take: {w}"
+    );
+}
+
+/// The anecdote behind the exclusion belongs in the source, not on every reply. It was 170 bytes of
+/// one foreign repository's statistics — "measured on one 723-file tree… a 114-file .xml majority" —
+/// re-serialized on every run that reaches this path, while `dispatch::NonSourceKind`'s doc and this
+/// file's own already owned the measurement for anyone who can act on it.
+///
+/// Deleting evidence is the wrong move when the evidence is the CLAIM, so this pins the split: the
+/// disclosure the reader needs (this count excludes the non-source filetypes, however large) stays,
+/// the numbers that only justify it to a maintainer go. Without this leg the next reviewer reading
+/// "state your evidence" restores the anecdote, and the wire pays for it again.
+#[test]
+fn the_on_ramp_note_states_the_exclusion_without_quoting_another_repositorys_measurements() {
+    let w = on_ramp(&[("py", 1, &["c.py"])]);
+    for anecdote in ["723-file", "114-file", "measured on one"] {
+        assert!(
+            !w.contains(anecdote),
+            "{anecdote:?} is a maintainer's evidence, not the reader's disclosure — its owners are \
+             `dispatch::NonSourceKind`'s doc and this test file: {w}"
+        );
+    }
+    assert!(
+        w.contains("classed non-source") && w.contains("EXCLUDED"),
+        "what the anecdote was evidence FOR must still be on the wire: {w}"
+    );
+}
+
 #[test]
 fn the_on_ramp_note_omits_the_more_suffix_when_every_extension_is_named() {
     let w = on_ramp(&[("py", 1, &["c.py"]), ("sql", 1, &["a.sql"])]);

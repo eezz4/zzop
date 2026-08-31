@@ -236,10 +236,6 @@ fn severity_order_critical_then_warning_then_info() {
             fan_out: 10,
             ..node("fat.ts")
         },
-        FileNode {
-            author_count: 7,
-            ..node("silo.ts")
-        },
     ];
     let dep = DepGraph::new();
     let coupling = CouplingMap::new();
@@ -248,5 +244,15 @@ fn severity_order_critical_then_warning_then_info() {
     let sevs: Vec<Severity> = recs.iter().map(|r| r.severity).collect();
     let idx_of = |s: Severity| sevs.iter().position(|&x| x == s).unwrap();
     assert!(idx_of(Severity::Critical) < idx_of(Severity::Warning));
-    assert!(idx_of(Severity::Warning) < idx_of(Severity::Info));
+    // The third tier is asserted as ABSENT rather than ordered, and that is a fact about this
+    // channel rather than a weakened test: `knowledge-silo` was the only rule that emitted `Info`,
+    // and it was deleted on 2026-08-18 for selecting the inverse of its own name. The `Info` arms
+    // in `roi.rs`/`evidence.rs` stay because `Severity` is shared with findings, so nothing about
+    // the type changed — only that no PRODUCER remains here. If a later rule emits `Info`, this
+    // assert fires and tells its author to restore the three-tier ordering check.
+    assert!(
+        !sevs.contains(&Severity::Info),
+        "a recommendation rule now emits Info ({sevs:?}) — restore the Warning < Info ordering \
+         assertion this comment replaced"
+    );
 }

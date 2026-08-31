@@ -10,6 +10,7 @@
 use super::args::{
     extract_finding_filters, extract_run_knobs, parse_trees_args, reject_flag_like_args,
 };
+use super::fail_on::{extract_fail_on, gate_or_exit, refuse_fail_on};
 use super::{print_or_exit, read_or_exit};
 
 /// `analyze <path> | analyze --config <file>` plus the findings knobs. The `--config` mode is the reason
@@ -19,8 +20,9 @@ use super::{print_or_exit, read_or_exit};
 /// mutually exclusive and the shared handler enforces that too — this parser only refuses the shapes
 /// that would be SILENTLY narrowed here (a trailing path after `--config` would be dropped).
 pub fn run_analyze(args: &[String]) -> ! {
-    const USAGE: &str = "usage: zzop analyze <path> | analyze --config <zzop.config.jsonc> [--severity <critical|warning|info>] [--rule <id>] [--limit <n>]";
+    const USAGE: &str = "usage: zzop analyze <path> | analyze --config <zzop.config.jsonc> [--severity <critical|warning|info>] [--rule <id>] [--limit <n>] [--fail-on <critical|warning|info>]";
     let (rest, knobs) = extract_run_knobs(args);
+    let (rest, fail_on) = extract_fail_on(&rest, USAGE);
     let (rest, filters) = extract_finding_filters(&rest, USAGE);
     let (path, config_path) = match rest.get(2).map(String::as_str) {
         Some("--config") => {
@@ -51,12 +53,13 @@ pub fn run_analyze(args: &[String]) -> ! {
             std::process::exit(2);
         }
     };
-    print_or_exit(zzop_summary::analyze_summary_with(
-        path,
-        config_path,
-        &filters,
-        knobs,
-    ));
+    // `gate_or_exit` prints the reply exactly as `print_or_exit` does and then applies the CI gate; an
+    // ERROR still takes the shared error path, so "zzop could not answer" keeps exit 1 and never
+    // reaches the gate's own exit code.
+    match zzop_summary::analyze_summary_with(path, config_path, &filters, knobs) {
+        Ok(text) => gate_or_exit(&text, fail_on.as_deref(), filters.rule.as_deref()),
+        Err(e) => print_or_exit(Err(e)),
+    }
 }
 
 /// `analyze-envelope <envelope.json>` plus the findings knobs — Mode A: the file's content REPLACES
@@ -74,8 +77,9 @@ pub fn run_analyze(args: &[String]) -> ! {
 /// no location, so it discovers nothing and says so in its own description — the asymmetry is in the
 /// callers, not in the analysis.
 pub fn run_analyze_envelope(args: &[String]) -> ! {
-    const USAGE: &str = "usage: zzop analyze-envelope <envelope.json> [--severity <critical|warning|info>] [--rule <id>] [--limit <n>] [--profile-rules]";
+    const USAGE: &str = "usage: zzop analyze-envelope <envelope.json> [--severity <critical|warning|info>] [--rule <id>] [--limit <n>] [--profile-rules] [--fail-on <critical|warning|info>]";
     let (rest, knobs) = extract_run_knobs(args);
+    let (rest, fail_on) = extract_fail_on(&rest, USAGE);
     let (rest, filters) = extract_finding_filters(&rest, USAGE);
     let Some(path) = rest.get(2) else {
         eprintln!("{USAGE}");
@@ -87,21 +91,36 @@ pub fn run_analyze_envelope(args: &[String]) -> ! {
     }
     reject_flag_like_args([path.as_str()], USAGE);
     let envelope_json = read_or_exit(path);
-    print_or_exit(zzop_summary::analyze_envelope_summary_with(
+    match zzop_summary::analyze_envelope_summary_with(
         &envelope_json,
         Some(path.as_str()),
         &filters,
         knobs,
-    ));
+    ) {
+        Ok(text) => gate_or_exit(&text, fail_on.as_deref(), filters.rule.as_deref()),
+        Err(e) => print_or_exit(Err(e)),
+    }
 }
 
-/// `cross <path>... | cross --config <path>` plus the findings knobs. `--config` = config-first mode (the
+/// `cross <path> <path>... | cross --config <path>` plus the findings knobs. `--config` = config-first mode (the
 /// config's trees define the join); trailing paths = paths mode, where each root loads its own
 /// config. Mirrors the `cross_repo`
 /// tool's two modes, and inherits every silent-narrowing guard from the shared [`parse_trees_args`].
 pub fn run_cross(args: &[String]) -> ! {
     const USAGE: &str = "usage: zzop cross <path> <path>... (2+ paths) | cross --config <zzop.config.jsonc> [--severity <critical|warning|info>] [--rule <id>] [--limit <n>]";
     let (rest, knobs) = extract_run_knobs(args);
+    // Refused, not ignored — see `fail_on::refuse_fail_on`. The reason is specific to this reply's
+    // SHAPE, so it is stated here rather than left to a generic "unsupported".
+    let (rest, fail_on) = extract_fail_on(&rest, USAGE);
+    if fail_on.is_some() {
+        refuse_fail_on(
+            "cross",
+            "this reply carries `crossLayerFindings.bySeverity` (the JOIN's own findings) and, per \
+             tree, a bare `findingCount` with no severity breakdown — so a gate here would silently \
+             cover the cross-layer half alone and pass a tree full of criticals. Gate each tree with \
+             `zzop analyze --fail-on`, which reads the census that exists.",
+        );
+    }
     let (rest, filters) = extract_finding_filters(&rest, USAGE);
     let (paths, config_path) = parse_trees_args(&rest, "cross", 2);
     print_or_exit(zzop_summary::cross_summary_with(

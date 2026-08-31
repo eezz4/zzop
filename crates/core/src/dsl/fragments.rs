@@ -103,6 +103,36 @@ pub(crate) fn is_shared_test_path_vocabulary(value: &str) -> bool {
         .any(|(name, body)| name.starts_with(TEST_PATH_FRAGMENT_PREFIX) && body == value)
 }
 
+/// Does this expanded pattern DECLINE TEST PATHS — as opposed to declining some other path class?
+///
+/// The looser sibling of [`is_shared_test_path_vocabulary`], and the two are not interchangeable. That
+/// one asks about PROVENANCE ("did a `${test-paths…}` ref put this exact string here?") because the
+/// expansion pass needs to know which values it produced. This one asks about BEHAVIOR ("does this
+/// pattern turn test paths off?"), so it accepts a value that merely CONTAINS a shared body — a pattern
+/// composed as the vocabulary plus an extra alternative still declines every test path the vocabulary
+/// names, and a caller reasoning about what a rule skips must count it.
+///
+/// ## Why this predicate exists at all
+/// `file_exclude_pattern` was, for the whole life of the bundled packs, a synonym for "skip test files":
+/// every use of it was a `${test-paths…}` ref. A guard written in that period could and did read the
+/// field's mere PRESENCE as the test-path decision (`zzop_facade`'s CLAUSE D), which held only while the
+/// synonymy did. It stopped holding on 2026-08-26, when `security/config-file-secret` took a
+/// `file_exclude_pattern` that declines TRANSLATION CATALOGUES (`locales/<lang>/…`, `i18n/<lang>.json`)
+/// and has nothing to do with test code. Asking the question directly is what keeps the guard's meaning
+/// attached to its name.
+///
+/// ## Residual
+/// A HAND-ROLLED test-path exclusion — one that spells `\.test\.tsx?$` itself instead of referencing the
+/// shared vocabulary — reads as `false` here. That is the same residual
+/// [`is_shared_test_path_vocabulary`] documents, and it is bounded by the same fact: no bundled rule
+/// carries a hand-rolled path exclusion (`vetoed_files`'s doc recounts both sides), and
+/// `tests_fragments::name_census` is the triage moment where a new spelling has to be looked at.
+pub fn declines_shared_test_paths(value: &str) -> bool {
+    shared_fragments()
+        .iter()
+        .any(|(name, body)| name.starts_with(TEST_PATH_FRAGMENT_PREFIX) && value.contains(body))
+}
+
 /// If `value` is EXACTLY `${NAME}` (the whole string, no other characters), returns `NAME`. This is the
 /// one collision-safe reference shape this pass supports — no inline substring composition (`"foo ${bar}
 /// baz"` is left untouched, a literal regex, never treated as a ref).

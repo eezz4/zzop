@@ -628,6 +628,62 @@ fn analyze_json_packs_loaded_zero_admission_rules_is_additive_only() {
         "a fully out-of-scope pack repeats nothing — filesInScope: 0 already says it, got: {value}"
     );
     assert_eq!(by_id("zz-python-only")["filesInScope"], 0, "got: {value}");
+
+    // `ruleIds` — the LIST behind the `rules` COUNT, unconditionally serialized (unlike
+    // `zeroAdmissionRules` above), because an absent list reads as "this build declines to say" and
+    // that is exactly the state a `--rule`/`rule` filter validator must be able to tell apart from
+    // "no such rule". Measured defect it closes (2026-08-20): `zzop analyze <tree> --rule
+    // security/no-such-rule` exited 0 with an empty stderr and `shown: 0` — a typo inside a LOADED
+    // pack, silently reported as a clean run — while `--rule zzz/qqq` (unloaded pack) correctly exited
+    // 2. The prefix was all the reply could answer with.
+    //
+    // Pinned HERE, on a config carrying an inline user pack, because that is the false-refusal case:
+    // validating against the catalog compiled into the binary would have refused every id of a pack
+    // like `zz-mixed`. Only the run's own ids are right for both pack sources.
+    //
+    // SORTED, not in the pack file's order (`zz-mixed` declares `ts-quiet` then `py-blind`): the
+    // sibling `zeroAdmissionRules` asserted six lines above is a SUBSET of this list and has always
+    // been sorted, so two orders inside one object made the obvious consumer question — which of this
+    // pack's rules DID admit files — a set difference across mismatched orders, with nothing on the
+    // wire saying the orders differ. `zzop_engine::PackLoaded::rule_ids` owns that reasoning.
+    assert_eq!(
+        by_id("zz-mixed")["ruleIds"],
+        serde_json::json!(["py-blind", "ts-quiet"]),
+        "a pack must publish every id it loaded with, in the same order its own zeroAdmissionRules \
+         subset uses, got: {value}"
+    );
+    // The subtraction that order buys, done on the wire shape a consumer actually holds.
+    let zero: Vec<&str> = by_id("zz-mixed")["zeroAdmissionRules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .collect();
+    let admitted: Vec<&str> = by_id("zz-mixed")["ruleIds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .filter(|id| zero.binary_search(id).is_err())
+        .collect();
+    assert_eq!(
+        admitted,
+        vec!["ts-quiet"],
+        "a sorted subtraction over the two id lists must name the rule that read this tree and \
+         reported nothing, got: {value}"
+    );
+    assert_eq!(
+        by_id("zz-mixed")["ruleIds"].as_array().unwrap().len(),
+        by_id("zz-mixed")["rules"].as_u64().unwrap() as usize,
+        "the list and the count are two reads of one Vec and must never disagree, got: {value}"
+    );
+    for id in ["aa-ts", "zz-mixed", "zz-python-only"] {
+        assert!(
+            by_id(id)["ruleIds"].is_array(),
+            "`ruleIds` is unconditional — a missing key means NO DATA to a validator, which would \
+             reopen the silent-empty-result hole for {id}: {value}"
+        );
+    }
 }
 
 #[test]
@@ -772,15 +828,15 @@ fn analyze_envelope_json_caller_pack_def_with_a_bundled_id_wins_the_collision_wh
         "the caller's override rule must fire, got: {value}"
     );
     // The replacement itself is silent no longer: a shadow warning must name the id and both
-    // sides' rule counts (bundled "security" ships 49 rules — see rules/dsl/security/security.json —
+    // sides' rule counts (bundled "security" ships 51 rules — see rules/dsl/security/security.json —
     // the caller's def has 1).
     let warnings = value["warnings"].as_array().expect("warnings array");
     assert!(
         warnings.iter().any(|w| {
             let w = w.as_str().unwrap();
-            w.contains("security") && w.contains("49 rules") && w.contains("replacement: 1 rule")
+            w.contains("security") && w.contains("51 rules") && w.contains("replacement: 1 rule")
         }),
-        "expected a shadow warning naming 'security' and both rule counts (49 -> 1), got: {value}"
+        "expected a shadow warning naming 'security' and both rule counts (51 -> 1), got: {value}"
     );
 }
 
@@ -798,7 +854,7 @@ fn analyze_envelope_json_extra_dir_pack_shadowing_the_bundled_security_pack_warn
 {
     // Reproduces the blind-test scenario directly: a custom on-disk pack (loaded the same way
     // `packs.extraDirs` ultimately reaches this engine — as a `packsDir` entry) declares `id:
-    // "security"`, colliding with the bundled 49-rule "security" pack the envelope path auto-seeds as
+    // "security"`, colliding with the bundled 51-rule "security" pack the envelope path auto-seeds as
     // inline `packDefs`. The custom 1-rule pack must win the collision whole (unchanged behavior) AND
     // the collision must now be named in `warnings`.
     let envelope = envelope_with_symbols(&["BadName"]);
@@ -833,7 +889,7 @@ fn analyze_envelope_json_extra_dir_pack_shadowing_the_bundled_security_pack_warn
         "the custom pack's rule must fire, got: {value}"
     );
 
-    // The shadowing is no longer silent: one warning names the id and both rule counts (bundled: 49,
+    // The shadowing is no longer silent: one warning names the id and both rule counts (bundled: 51,
     // replacement: 1), and identifies the winning side as coming from a packs directory.
     let warnings = value["warnings"].as_array().expect("warnings array");
     let shadow = warnings
@@ -842,8 +898,8 @@ fn analyze_envelope_json_extra_dir_pack_shadowing_the_bundled_security_pack_warn
         .find(|w| w.contains("security") && w.contains("packs directory"))
         .unwrap_or_else(|| panic!("expected a shadow warning for 'security', got: {value}"));
     assert!(
-        shadow.contains("49 rules") && shadow.contains("replacement: 1 rule"),
-        "expected both rule counts (bundled 49 -> replacement 1) in the shadow warning, got: {shadow:?}"
+        shadow.contains("51 rules") && shadow.contains("replacement: 1 rule"),
+        "expected both rule counts (bundled 51 -> replacement 1) in the shadow warning, got: {shadow:?}"
     );
 }
 
@@ -963,4 +1019,211 @@ fn envelope_analyze_request_defaults_pack_defs_to_empty() {
         req.pack_defs.is_empty(),
         "packDefs absent from envelope config JSON must default to empty"
     );
+}
+
+// -------------------------------------------------------------------------------------------------
+// A pack the config switched OFF must not look like a pack that ran and found nothing (2026-08-26).
+//
+// The defect these pin, from an uncontaminated outside auditor's four-file repro: with
+// `packs: { disabled: ["security", "browser"] }` the reply's `findings.total` fell 22 -> 2 and
+// `byRule` kept only `dead-candidates`, while `packsLoaded` still carried
+// `security  rules=51  filesInScope=9  ruleIds=[...51 ids...]` with nothing marking it off. The only
+// contrary signal was a DIFFERENT top-level key (`ruleOverridesApplied.disabled`). A reader who
+// joins the two fields the obvious way concludes "the security pack scanned 9 files with 51 rules
+// and reported nothing — clean". It never ran once. That turns "not analyzed" into "analyzed and
+// safe", for the security pack.
+//
+// `packs.only` is the same axis from the other side and is pinned here too: an allowlist suppresses
+// strictly MORE than `disabled`, and a fix that covered only `disabled` would leave the identical
+// lie standing under the other knob.
+//
+// NOTHING about which packs load or run changes here — only what the reply SAYS about them.
+// -------------------------------------------------------------------------------------------------
+
+/// Two packs, both reporting zero findings, for OPPOSITE reasons: `zz-ran` was evaluated over both
+/// fixture files and matched nothing; `zz-off` was never evaluated at all. The reply on its own — no
+/// second key to join, no prior knowledge of the caller's config — has to tell them apart. That
+/// discrimination IS this batch's acceptance condition.
+#[test]
+fn a_disabled_pack_is_distinguishable_from_a_pack_that_ran_and_found_nothing() {
+    let dir = cycle_fixture(); // a.ts + b.ts
+    let config = format!(
+        r#"{{"root": {:?}, "packDefs": [{}, {}], "disabledRules": ["zz-off"]}}"#,
+        dir.path().display(),
+        dsl_pack_json("zz-ran", "r1", "NEVER_MATCHES"),
+        dsl_pack_json("zz-off", "r1", "NEVER_MATCHES")
+    );
+    let out = analyze_json(&config).expect("analyze_json should succeed");
+    let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let loaded = value["packsLoaded"].as_array().expect("packsLoaded array");
+    let by_id = |id: &str| {
+        loaded
+            .iter()
+            .find(|p| p["id"] == id)
+            .unwrap_or_else(|| panic!("expected pack {id} in packsLoaded, got: {value}"))
+    };
+
+    // Precondition: both packs are still LOADED and both contribute zero findings. The row must not
+    // vanish — a pack that loaded is a fact, and a consumer validating a `--rule` id against
+    // `ruleIds` still needs it.
+    assert_eq!(loaded.len(), 2, "both packs still load, got: {value}");
+    assert!(
+        value["findings"]["byRule"].get("zz-off/r1").is_none()
+            && value["findings"]["byRule"].get("zz-ran/r1").is_none(),
+        "both packs report zero findings — that is the whole point, got: {value}"
+    );
+
+    // The pack that RAN says nothing new: no gating key at all.
+    assert!(
+        by_id("zz-ran").get("didNotRun").is_none(),
+        "a pack that ran must carry no gating disclosure, got: {value}"
+    );
+    // The pack that did NOT run says so, in its own row, naming the knob that switched it off.
+    assert_eq!(
+        by_id("zz-off")["didNotRun"],
+        "disabled",
+        "the switched-off pack must say so in its own row, got: {value}"
+    );
+}
+
+/// The opt-IN half. `packsOnly: ["zz-ran"]` leaves `zz-off` loaded and unevaluated exactly as
+/// `disabled` does, and it suppresses strictly more (every pack the allowlist fails to name), so the
+/// disclosure has to reach it too. An all-typo allowlist — the shape in which EVERY DSL rule goes
+/// silent at once — is the extreme of this same case.
+#[test]
+fn a_pack_outside_packs_only_is_disclosed_on_the_same_axis_as_a_disabled_one() {
+    let dir = cycle_fixture();
+    let config = format!(
+        r#"{{"root": {:?}, "packDefs": [{}, {}], "packsOnly": ["zz-ran"]}}"#,
+        dir.path().display(),
+        dsl_pack_json("zz-ran", "r1", "NEVER_MATCHES"),
+        dsl_pack_json("zz-off", "r1", "NEVER_MATCHES")
+    );
+    let out = analyze_json(&config).expect("analyze_json should succeed");
+    let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let loaded = value["packsLoaded"].as_array().expect("packsLoaded array");
+    let by_id = |id: &str| {
+        loaded
+            .iter()
+            .find(|p| p["id"] == id)
+            .unwrap_or_else(|| panic!("expected pack {id} in packsLoaded, got: {value}"))
+    };
+    assert!(
+        by_id("zz-ran").get("didNotRun").is_none(),
+        "the allowlisted pack ran, got: {value}"
+    );
+    assert_eq!(
+        by_id("zz-off")["didNotRun"],
+        "notAllowlisted",
+        "a pack an allowlist never named did not run either, got: {value}"
+    );
+}
+
+/// `filesInScope` was the half that made the lie convincing: a positive file count on a pack that
+/// read nothing. The key now means what section 1 of the output-philosophy says every key means —
+/// its PRESENCE is the claim that the pack ran. On a pack that did not run it is replaced by
+/// `filesInScopeIfEnabled`, which states the counterfactual instead of a fact.
+#[test]
+fn a_pack_that_did_not_run_reports_no_files_in_scope_and_says_what_it_would_have_been() {
+    let dir = cycle_fixture(); // two .ts files, both in scope of a `\.ts$` pack
+    let config = format!(
+        r#"{{"root": {:?}, "packDefs": [{}, {}], "disabledRules": ["zz-off"]}}"#,
+        dir.path().display(),
+        dsl_pack_json("zz-ran", "r1", "NEVER_MATCHES"),
+        dsl_pack_json("zz-off", "r1", "NEVER_MATCHES")
+    );
+    let out = analyze_json(&config).expect("analyze_json should succeed");
+    let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let loaded = value["packsLoaded"].as_array().expect("packsLoaded array");
+    let by_id = |id: &str| {
+        loaded
+            .iter()
+            .find(|p| p["id"] == id)
+            .unwrap_or_else(|| panic!("expected pack {id} in packsLoaded, got: {value}"))
+    };
+    assert_eq!(
+        by_id("zz-ran")["filesInScope"],
+        2,
+        "the pack that ran keeps the field unchanged, got: {value}"
+    );
+    assert!(
+        by_id("zz-off").get("filesInScope").is_none(),
+        "a pack that read nothing must not publish a scanned-file count, got: {value}"
+    );
+    assert_eq!(
+        by_id("zz-off")["filesInScopeIfEnabled"],
+        2,
+        "the counterfactual is still worth stating — it is what re-enabling would buy, got: {value}"
+    );
+    // Rule-level admission is a statement about a run that happened. On a pack that never ran, the
+    // pack-level disclosure already says "all of them", the same reasoning that omits the field on a
+    // `filesInScope: 0` pack.
+    assert!(
+        by_id("zz-off").get("zeroAdmissionRules").is_none(),
+        "admission is meaningless for a pack that did not run, got: {value}"
+    );
+}
+
+/// `packsLoadedMeaning` — the legend every other numeric channel in this reply already carries and
+/// this one did not. Two sentences it must contain, because the auditor found BOTH ambiguities in
+/// the same row: what `filesInScope` counts, and what a rule's presence in `zeroAdmissionRules`
+/// means (no file ever reached it — the opposite of "files reached it and it found nothing").
+#[test]
+fn packs_loaded_meaning_defines_the_scope_and_admission_axes() {
+    let dir = cycle_fixture();
+    let config = format!(
+        r#"{{"root": {:?}, "packDefs": [{}]}}"#,
+        dir.path().display(),
+        dsl_pack_json("zz-ran", "r1", "NEVER_MATCHES")
+    );
+    let out = analyze_json(&config).expect("analyze_json should succeed");
+    let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let meaning = &value["packsLoadedMeaning"];
+    assert!(
+        meaning.is_object(),
+        "the array needs a sibling legend — it cannot host one per row, got: {value}"
+    );
+    let scope = meaning["filesInScope"].as_str().unwrap_or_default();
+    assert!(
+        scope.contains("candidacy") && scope.contains("did not run"),
+        "the scope legend must say it is path candidacy AND what its absence means: {scope}"
+    );
+    let admission = meaning["zeroAdmissionRules"].as_str().unwrap_or_default();
+    assert!(
+        admission.contains("no analyzed file"),
+        "admission 0 has to be pinned to the harmless reading, not the clean-bill one: {admission}"
+    );
+    // No pack was gated, so the reply says NOTHING about gating. A disclosure that fires when there
+    // is nothing to disclose is the noise that teaches readers to skip disclosures.
+    assert!(
+        meaning.get("didNotRun").is_none(),
+        "no pack was gated — the legend must stay silent about gating, got: {value}"
+    );
+}
+
+/// The canary in both directions, on the field that carries the batch's whole claim: with no pack
+/// gated, not one row grows a `didNotRun` key. If this ever passes while
+/// `a_disabled_pack_is_distinguishable_from_a_pack_that_ran_and_found_nothing` also passes on a
+/// hardcoded value, the pair is inconsistent — the reason both live here.
+#[test]
+fn an_ungated_run_grows_no_gating_key_anywhere_in_packs_loaded() {
+    let dir = cycle_fixture();
+    let config = format!(
+        r#"{{"root": {:?}, "packDefs": [{}, {}]}}"#,
+        dir.path().display(),
+        dsl_pack_json("zz-one", "r1", "NEVER_MATCHES"),
+        dsl_pack_json("zz-two", "r1", "NEVER_MATCHES")
+    );
+    let out = analyze_json(&config).expect("analyze_json should succeed");
+    let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let loaded = value["packsLoaded"].as_array().expect("packsLoaded array");
+    assert_eq!(loaded.len(), 2, "{value}");
+    for row in loaded {
+        assert!(row.get("didNotRun").is_none(), "{value}");
+        assert!(row.get("filesInScopeIfEnabled").is_none(), "{value}");
+        assert!(
+            row.get("filesInScope").is_some(),
+            "every pack ran, so every row keeps the plain count: {value}"
+        );
+    }
 }

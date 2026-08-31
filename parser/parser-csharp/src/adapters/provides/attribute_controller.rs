@@ -24,11 +24,11 @@
 //! (`zzop_parser_java_21::project::resolve`).
 //!
 //! ## Method-level route composition
-//! `method_route` (below) recognizes `[HttpGet]`/`[HttpPost]`/`[HttpPut]`/`[HttpDelete]`/`[HttpPatch]`/
+//! `method_route_match` (below) recognizes `[HttpGet]`/`[HttpPost]`/`[HttpPut]`/`[HttpDelete]`/`[HttpPatch]`/
 //! `[HttpHead]` (verb implied by the attribute name) and `[Route("x")]` (no verb of its own). A method
 //! with NO recognized verb attribute at all — including one carrying ONLY a bare `[Route]` with no
 //! accompanying `HttpX` (ASP.NET's `[AcceptVerbs]` form is not implemented — roadmap) — is AMBIGUOUS
-//! and skipped, mirroring `zzop_parser_java_21::provides::annotations::method_route`'s identical
+//! and skipped, mirroring `zzop_parser_java_21::provides::annotations::method_route_match`'s identical
 //! `@RequestMapping`-with-no-`method`-attribute skip. When both an `HttpX` attribute AND a `[Route]`
 //! attribute are present on the SAME method, the `HttpX` attribute's own path argument wins (its
 //! absence, i.e. a bare `[HttpGet]`, falls back to the co-located `[Route]`'s path) — the full path is
@@ -124,16 +124,21 @@ fn walk_class(rel: &str, node: Node, src: &str, out: &mut Vec<IoProvide>) {
             // classes were already recursed above, gating independently.
             continue;
         };
-        let Some((verb, path)) = method_route(&attributes_of(member), src) else {
+        let Some(route) = method_route_match(member, src) else {
+            continue;
+        };
+        let line = line_of(route.anchor);
+        let Some((verb, path)) = route.literal_route() else {
             continue;
         };
         let full_path = format!("{prefix}/{path}");
         out.push(IoProvide {
+            route_version: None,
             response: None,
             kind: "http".to_string(),
             key: http_interface_key(&verb, &full_path),
             file: rel.to_string(),
-            line: line_of(member),
+            line,
             symbol: member
                 .child_by_field_name("name")
                 .map(|n| node_text(n, src).to_string()),
@@ -201,51 +206,65 @@ pub(crate) fn attr_path_state(args: &str) -> PathState {
     }
 }
 
-/// Reads `attrs` for a `(VERB, path-STATE)` route — the raw tri-state both callers act on, the C# parallel
-/// of `zzop_parser_java_21::provides::annotations::method_route_states`. `None` when the method is
-/// AMBIGUOUS (no recognized verb attribute). A LITERAL template on either attribute is a known route: the
-/// `HttpX` template wins when it is literal, but a literal `[Route]` still surfaces the endpoint when the
-/// `HttpX` template is non-literal (both attributes register routes in ASP.NET, and we can only key the one
-/// we can read). When no literal is available anywhere but a NON-LITERAL path IS present, the resulting
-/// `NonLiteral` carries its raw args forward — the per-file [`method_route`] drops it (no corpus), the
-/// whole-corpus pass (`crate::project`) resolves the constant. Both absent -> a bare verb, the base route.
-pub(crate) fn method_route_state(attrs: &[Node], src: &str) -> Option<(String, PathState)> {
-    let mut verb: Option<&str> = None;
-    let mut http_state = PathState::Absent;
-    let mut route_state = PathState::Absent;
-    for attr in attrs {
-        let Some(name) = attribute_name(*attr, src) else {
-            continue;
-        };
-        let args = attribute_raw_args(*attr, src).unwrap_or_default();
-        if let Some((_, v)) = METHOD_ATTRIBUTES.iter().find(|(n, _)| *n == name) {
-            verb = Some(v);
-            http_state = attr_path_state(&args);
-        } else if name == "Route" {
-            route_state = attr_path_state(&args);
-        }
-    }
-    let verb = verb?;
-    let path = match (http_state, route_state) {
-        (PathState::Literal(p), _) => PathState::Literal(p),
-        (_, PathState::Literal(p)) => PathState::Literal(p),
-        (PathState::NonLiteral(a), _) => PathState::NonLiteral(a),
-        (_, PathState::NonLiteral(a)) => PathState::NonLiteral(a),
-        (PathState::Absent, PathState::Absent) => PathState::Absent,
-    };
-    Some((verb.to_string(), path))
+/// The one route attribute a method's route was read FROM, plus that route — a unit because that attribute
+/// node is the route's ANCHOR. Anchoring on the `method_declaration` instead points at its FIRST ATTRIBUTE,
+/// the one the key was read from only when nothing precedes it: measured 2026-08-24 on
+/// `corpus/frameworks/aspnetcore`, 52 of 448 attribute routes landed one to five lines above the attribute
+/// their key came from — 13 of them on a NON-route attribute, 7 of THOSE on a security attribute.
+pub(crate) struct RouteMatch<'a> {
+    /// The `attribute` node the route's PATH was read from — EVERY consumer's anchor line, so the per-file
+    /// and whole-corpus passes agree by construction rather than by comment.
+    pub(crate) anchor: Node<'a>,
+    pub(crate) verb: String,
+    pub(crate) path: PathState,
 }
 
-/// The PER-FILE pass's view: reads `attrs` for a `(VERB, path)` route — `None` when the method is
-/// AMBIGUOUS (no recognized verb attribute) OR when its resolved path is a NON-LITERAL constant reference
-/// (unknown — dropped rather than keyed at the empty base; the whole-corpus pass resolves it instead).
-fn method_route(attrs: &[Node], src: &str) -> Option<(String, String)> {
-    let (verb, state) = method_route_state(attrs, src)?;
-    match state {
-        PathState::Literal(p) => Some((verb, p)),
-        PathState::Absent => Some((verb, String::new())),
-        PathState::NonLiteral(_) => None,
+impl RouteMatch<'_> {
+    /// The PER-FILE pass's view of [`RouteMatch::path`] (`walk_class`), which has no corpus to resolve a
+    /// constant in: a literal keys the route, ABSENT is the base route `""`, NON-LITERAL is DROPPED.
+    fn literal_route(self) -> Option<(String, String)> {
+        match self.path {
+            PathState::Literal(p) => Some((self.verb, p)),
+            PathState::Absent => Some((self.verb, String::new())),
+            PathState::NonLiteral(_) => None,
+        }
     }
+}
+
+/// Reads `member`'s own attributes for the route attribute that implies a route and the `(VERB, path-STATE)`
+/// it implies — the raw tri-state both callers act on, the C# parallel of
+/// `zzop_parser_java_21::provides::annotations::method_route_match`. `None` when the method is AMBIGUOUS (no
+/// recognized verb attribute). Which template wins is the module doc's "Method-level route composition"
+/// ladder, and [`RouteMatch::anchor`] is whichever attribute that winning template came from (the verb
+/// attribute when neither carries one). A `NonLiteral` path's raw args travel forward: the per-file
+/// [`RouteMatch::literal_route`] drops it, the whole-corpus pass (`crate::project`) resolves the constant.
+pub(crate) fn method_route_match<'a>(member: Node<'a>, src: &str) -> Option<RouteMatch<'a>> {
+    let mut http: Option<(&str, PathState, Node<'a>)> = None;
+    let mut route: Option<(PathState, Node<'a>)> = None;
+    for attr in attributes_of(member) {
+        let Some(name) = attribute_name(attr, src) else {
+            continue;
+        };
+        let args = attribute_raw_args(attr, src).unwrap_or_default();
+        if let Some((_, v)) = METHOD_ATTRIBUTES.iter().find(|(n, _)| *n == name) {
+            http = Some((v, attr_path_state(&args), attr));
+        } else if name == "Route" {
+            route = Some((attr_path_state(&args), attr));
+        }
+    }
+    let (verb, http_state, http_node) = http?;
+    let (path, anchor) = match (http_state, route) {
+        (PathState::Literal(p), _) => (PathState::Literal(p), http_node),
+        (_, Some((PathState::Literal(p), n))) => (PathState::Literal(p), n),
+        (PathState::NonLiteral(a), _) => (PathState::NonLiteral(a), http_node),
+        (_, Some((PathState::NonLiteral(a), n))) => (PathState::NonLiteral(a), n),
+        (PathState::Absent, _) => (PathState::Absent, http_node),
+    };
+    Some(RouteMatch {
+        anchor,
+        verb: verb.to_string(),
+        path,
+    })
 }
 
 /// The first `"..."` literal found in `args` — verbatim port of

@@ -8,7 +8,7 @@
 //! had to admit an arbitrary token run between the name and the `=`, which is exactly how a
 //! `key: string = getFromVault()` shape in another language starts matching.
 
-use crate::{hits, label_of, scan, TempDir};
+use crate::{assert_disqualifier_clause_precedes_imperative, hits, label_of, scan, TempDir};
 
 // --- sql-format-interpolation ---
 
@@ -102,6 +102,48 @@ fn a_placeholder_before_the_from_keyword_dynamic_columns_is_flagged() {
     let h = hits(&out, "sql-format-interpolation");
     assert_eq!(h.len(), 1, "{:?}", out.findings);
     assert_eq!(h[0].line, 2);
+}
+
+/// §27 POSITION pin (2026-08-30) — and the clause it pins is a REMEDY-DESTROYING one, not a
+/// finding-disqualifying one. This message prescribes "Bind the value as a query PARAMETER instead"
+/// and then, further down, names two shapes it fires on for which that remedy DOES NOT EXIST: a
+/// dynamic column list and a dynamic table name are identifiers, and no driver parameterizes an
+/// identifier. A reader who edits on the first instruction writes `$1` where a table name belongs and
+/// ships a statement the database rejects — §27's three legs, with the warning arriving too late.
+/// At HEAD the imperative sat at byte 292 and the clause at byte 802; the repair was a pure MOVE,
+/// 2926 characters and 2944 bytes before and after with the character multiset identical, leaving the
+/// clause at 660 and the imperative at 1009.
+///
+/// The fixture is the dynamic-column-list shape the clause names, so the pin and the clause are about
+/// the same line rather than merely the same rule.
+///
+/// WHAT MOVED: the imperative, not the clause. The clause is a parenthetical inside the sentence that
+/// enumerates which placeholder positions fire, and lifting it out would strand "on EITHER side of the
+/// statement keywords"; the sentence after it opens with "It does NOT prove", whose antecedent is that
+/// same enumeration, so the remedy could not be parked between them either. It went one sentence
+/// further, behind the `warning`-not-`critical` standing sentence, which strands nothing.
+///
+/// INVALIDATION PROBE: put the imperative back where it was, directly after the opening sentence.
+/// Every token stays present and spelled exactly once, a `contains` pin stays green, and this
+/// assertion alone goes red.
+#[test]
+fn the_non_parameterizable_shapes_precede_the_parameterize_imperative() {
+    let dir = TempDir::new("zzop-sec-rust");
+    dir.write(
+        "src/queries.rs",
+        "pub fn projection(cols: &str) -> String {\n    format!(\"SELECT {} FROM users\", cols)\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "sql-format-interpolation");
+    // Detection is untouched by the move: same site, same line.
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 2);
+    assert_disqualifier_clause_precedes_imperative(
+        "sql-format-interpolation",
+        &h[0].message,
+        "the classic non-parameterizable vector",
+        "Bind the value as a query PARAMETER instead",
+    );
 }
 
 /// A placeholder in the TABLE position of an UPDATE — the other before-the-second-keyword direction.

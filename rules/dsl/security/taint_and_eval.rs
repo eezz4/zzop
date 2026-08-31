@@ -1,4 +1,4 @@
-use super::{hits, scan, TempDir};
+use super::{assert_landing_precedes_imperative, hits, scan, TempDir};
 
 #[test]
 fn hono_req_json_into_eval_is_flagged() {
@@ -153,6 +153,54 @@ fn source_into_sink_inside_a_test_fixture_path_is_not_flagged() {
     );
     let out = scan(&dir);
     assert!(hits(&out, "taint-flow").is_empty(), "{:?}", out.findings);
+}
+
+/// §33/§37 LANDING for `eval-dynamic-code`, spliced ahead of the "avoid dynamic code" imperative.
+///
+/// WHY. The remedy names three substitutes — a plain function, a lookup table, `JSON.parse` — and each
+/// accepts strictly LESS than the call it replaces. JSON is a proper subset of the object syntax
+/// `eval` took, so unquoted keys, single quotes, a trailing comma, `undefined`, `NaN` and
+/// `new Date(...)` all parse today and throw tomorrow; the legacy shape this rule most often flags —
+/// an `eval` around a parenthesised object literal — is precisely a producer of that dialect, so the
+/// swap fails on the very inputs that motivated the call. A lookup table replaces NAMES, not an
+/// expression language, so where the built string is arithmetic or a user-authored predicate there is
+/// no table to write and the landing says the honest thing instead of a smaller lie.
+///
+/// NOT A DISQUALIFIER — this rule already carries one, and it answers the other question ("if any part
+/// of that string can be influenced by user input"). The finding stays right for a reader whose
+/// payload is a non-JSON dialect: they are still building code from a runtime string. What changes is
+/// that the cheapest of the three substitutes is not available to them.
+///
+/// POSITION, not presence. The invalidation probe is to move this constant to the tail of the message.
+const DYNAMIC_CODE_SUBSTITUTE_LANDING: &str = "EACH SUBSTITUTE IS NARROWER THAN WHAT IT REPLACES, AND THE INPUTS THAT NO LONGER FIT FAIL AT RUNTIME ON REAL DATA RATHER THAN IN REVIEW: JSON is a strict subset of the object syntax `eval` accepted, so a payload carrying unquoted keys, single-quoted strings, a trailing comma, a comment, `undefined`, `NaN` or a `new Date(...)` parsed yesterday and throws a `SyntaxError` out of `JSON.parse` today — and the legacy shape this rule most often flags, an `eval` wrapping a parenthesised object literal, is exactly a producer of that dialect. A lookup table replaces a fixed set of NAMES, not an expression language: where the string being built is arithmetic, a filter predicate or a template someone authored, there is no table to write and the honest answer is a real parser for the small language you actually accept. Read a sample of the strings this call has received in production before you pick one — the substitute is decided by that dialect, not by the call site.";
+
+#[test]
+fn eval_dynamic_code_landing_precedes_the_imperative() {
+    let dir = TempDir::new("zzop-security");
+    dir.write(
+        "run.ts",
+        "declare const userInput: string;\nexport function run() {\n  eval(userInput);\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "eval-dynamic-code");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_landing_precedes_imperative(
+        "eval-dynamic-code",
+        &h[0].message,
+        DYNAMIC_CODE_SUBSTITUTE_LANDING,
+        "Avoid dynamic code construction",
+    );
+    for needle in [
+        "JSON is a strict subset of the object syntax `eval` accepted",
+        "an `eval` wrapping a parenthesised object literal",
+        "A lookup table replaces a fixed set of NAMES, not an expression language",
+    ] {
+        assert!(
+            h[0].message.contains(needle),
+            "security/eval-dynamic-code: the landing lost {needle:?}: {}",
+            h[0].message
+        );
+    }
 }
 
 // --- eval-dynamic-code ---

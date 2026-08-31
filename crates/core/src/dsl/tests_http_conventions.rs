@@ -69,6 +69,7 @@ fn http_conventions_flags_unversioned_provided_endpoint() {
         line: 12,
         symbol: None,
         body: None,
+        ..Default::default()
     }];
     let f = scan_io_tree(&http_conventions_pack(), provides, vec![]);
     assert_eq!(f.len(), 1);
@@ -86,6 +87,7 @@ fn http_conventions_does_not_flag_versioned_endpoint() {
         line: 12,
         symbol: None,
         body: None,
+        ..Default::default()
     }];
     let f = scan_io_tree(&http_conventions_pack(), provides, vec![]);
     assert!(f

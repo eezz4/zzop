@@ -56,6 +56,7 @@ mod tests {
             line: 1,
             symbol: class.map(String::from),
             body: None,
+            ..Default::default()
         }
     }
 

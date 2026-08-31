@@ -148,7 +148,31 @@
   "api/api/sql.nplus1.ts:8": ["sql/nplus1"],
   "api/api/sql.race-condition-toctou.ts:13": ["db/find-then-create-no-unique", "sql/race-condition-toctou"],
   "api/prisma/schema.prisma:14": ["schema/unreferenced-field-name","schema/fk-no-index","schema/float-money","schema/missing-timestamps","schema/nullable-fk","schema/temporal-as-string"],
-  "api/prisma/schema.prisma:22": ["schema/unreferenced-field-name"],
+  // 2026-08-29 RE-ADJUDICATED, `model User` (lines 22-25). Both rules on this key changed what they
+  // claim, in opposite directions, and neither change was an accident — so this key is re-read from the
+  // fixture rather than restored. `schema.prisma` itself has not been touched since `2a15d35`.
+  //
+  //   -schema/unreferenced-field-name  (dropped, cause `9b89e62`)
+  //     `model User` declares exactly two fields: `id` (always skipped, `SKIP_FIELD_NAMES`) and
+  //     `orders Order[]`. `9b89e62` taught the rule that a field whose declared TYPE is another model in
+  //     this schema is a RELATION NAVIGATOR, not a deletable column — here it is the required opposite
+  //     side of `Order.user @relation(fields: [userId], references: [id])` on line 18, and deleting it
+  //     makes `prisma validate` fail outright. So this model now has ZERO candidate fields and the
+  //     expectation was asking the rule to give advice it correctly refuses to give.
+  //     COVERAGE LOSS 0: the rule keeps its anchor on line 14 (`Order.price`, `Order.dueDate`), so this
+  //     is not the rule losing its only fixture. ⚠ The per-tree ratchet counts key x ruleId PAIRS, so a
+  //     one-for-one swap inside one key is invisible to it — that is why the reason is written here.
+  //
+  //   +schema/missing-timestamps  (added, cause `36ef989`)
+  //     `36ef989` removed `LOOKUP_FIELD_MAX = 3`, which had exempted models of at most three fields as
+  //     "assumed lookup tables". `model User` has two, so it was exempt and now reports. The finding is
+  //     TRUE of this fixture on the rule's own terms: lines 22-25 carry no `createdAt`/`updatedAt` and no
+  //     `DateTime @default(now())`/`@updatedAt` field of any spelling.
+  //     ⚠ That commit's own comment states the removal's price as "unmeasured rather than zero ... no
+  //     model under three fields exists in the corpus". The corpus it measured was the 9 external trees;
+  //     THIS fixture is the missing member of that class and it lives in the repo. The price was one
+  //     finding, and it is this line.
+  "api/prisma/schema.prisma:22": ["schema/missing-timestamps"],
   "api/prisma/schema.prisma:35": ["schema/unreferenced-model-name"],
   "api/prisma/schema.prisma:45": ["schema/unreferenced-model-name"],
   // The TOP-LEVEL routes/ twin of api/sql.race-condition-toctou.ts (2026-08-03 anchor alignment): the
@@ -159,7 +183,15 @@
   "api/services/be-db.client-per-request.ts:10": ["db/client-new-in-handler"],
   "api/services/be-db.external-call-in-tx.ts:8": ["db/external-call-and-tx"],
   "api/services/be-db.float-money-compare.ts:3": ["db/float-money-compare"],
-  "api/services/be-db.pagination-no-orderby.ts:5": ["db/pagination-no-orderby"],
+  // 2026-08-29 RE-ANCHORED 5 -> 6 (cause `0a536ba`). `method-scan` anchors a finding at its TRIGGER
+  // line (`body_start + i`, crates/core/src/dsl/method_scan.rs), and `0a536ba` moved this rule's
+  // `trigger` from the `pagination` label (`\b(?:skip|take)\s*:`) to the `find-many` label
+  // (`\.findMany\s*\(`). The fixture's body spells its arguments as the shorthand `{ skip, take }` with
+  // no colon, so the ONLY line in the span the old trigger could match was the SIGNATURE — line 5's
+  // `skip: number, take: number` type annotations. The old anchor therefore pointed at a type
+  // annotation; line 6 is `prisma.order.findMany({ skip, take })`, the unordered pagination call the
+  // finding is actually about. This is the anchor getting better, not the expectation being relaxed.
+  "api/services/be-db.pagination-no-orderby.ts:6": ["db/pagination-no-orderby"],
   "api/services/be-db.unawaited-write.ts:6": ["db/unawaited-write"],
   "api/services/be-db.unbounded-user-limit.ts:5": ["db/unbounded-user-limit"],
   "api/services/be-db.update-delete-no-where.ts:6": ["db/update-delete-no-where"],
@@ -239,6 +271,21 @@
   // callees that are NOT that binding.
   "api/services/be-security.shell-exec-interpolation.ts:12": ["security/shell-exec-interpolation"],
   "api/services/be-security.jwt-no-expiry.ts:5": ["security/jwt-no-expiry"],
+  // Batch `cover` (2026-08-29). Four rules this gate could not speak about in EITHER direction until
+  // now: they had ZERO rows here, so neither a false negative nor a false positive was reachable for
+  // them and a green run said nothing about any of the four. They were picked by a census of the whole
+  // shipped id space — `docs/rules/catalog.md`'s 118 bundled DSL + 60 native = 178 — against the ids
+  // named in this file: 61 had no row, and these are that set's `critical` members plus the one case
+  // already known (`dangerous-html-concat`, whose §27 repair had to borrow a control from the pack's
+  // own `[[test]]` fixtures because this corpus had none).
+  //
+  // Each anchor is the `bad` line of a single-rule module whose `good` twin sits beside it, and each of
+  // the four also now has a whole-file decoy in the `benign` array naming it. The module headers record
+  // which co-fire each one is deliberately shaped to avoid, and why that shaping is not a weakening.
+  "api/services/be-security.dangerous-html-concat.ts:16": ["security/dangerous-html-concat"],
+  "api/services/be-security.jwt-none-algorithm.ts:11": ["security/jwt-none-algorithm"],
+  "api/services/be-security.jwt-sign-literal-secret.ts:13": ["security/jwt-sign-literal-secret"],
+  "api/services/be-redis.flushall-in-code.ts:13": ["redis/flushall-in-code"],
   "api/services/be-security.mass-assignment.ts:8": ["security/mass-assignment"],
   "api/services/be-security.open-redirect.ts:6": ["security/open-redirect"],
   "api/services/be-security.path-traversal.ts:9": ["security/path-traversal"],
@@ -718,10 +765,21 @@
   "sqllang/services/queries.go:14": ["sql/update-no-where"],
   "sqllang/services/queries.go:19": ["sql/truncate-in-app-code"],
   "sqllang/services/queries.go:37": ["sql/delete-no-where"],
+  // These four lines carry a SECOND, independent defect from the `sql/like-*` one their comments
+  // discuss, and the two rules partition the concern rather than contradict each other: those comments
+  // say SILENT about `sql/like-leading-wildcard` (an index-usage claim about a pattern that arrives at
+  // runtime), while `security/sql-interpolated-statement` reads the same lines for a different fact —
+  // a runtime value is spliced into the statement TEXT instead of bound as a parameter. Both readings
+  // are correct on the same source line. Added 2026-08-17 with the rule; the `%%` pair on go:53 is a
+  // genuine escaped wildcard AND an interpolation, so it is expected here exactly as go:47 is.
+  "sqllang/services/queries.go:47": ["security/sql-interpolated-statement"],
+  "sqllang/services/queries.go:53": ["security/sql-interpolated-statement"],
   "sqllang/services/queries.py:12": ["sql/delete-no-where"],
   "sqllang/services/queries.py:21": ["sql/update-no-where"],
   "sqllang/services/queries.py:30": ["sql/truncate-in-app-code"],
   "sqllang/services/queries.py:61": ["sql/delete-no-where"],
+  "sqllang/services/queries.py:76": ["security/sql-interpolated-statement"],
+  "sqllang/services/queries.py:81": ["security/sql-interpolated-statement"],
   "sqllang/services/queries.py:87": ["sql/update-no-where"],
   "sqllang/src/main/java/com/example/sqllangs/Queries.java:16": ["sql/delete-no-where"],
   "sqllang/src/main/java/com/example/sqllangs/Queries.java:21": ["sql/update-no-where"],
@@ -771,6 +829,15 @@
   "xbe/provides.ts:6": ["cross-layer/duplicate-route"],
   "xbe/provides.ts:7": ["cross-layer/unconsumed-endpoint"],
   "xbe/provides.ts:8": ["cross-layer/unconsumed-mutation-endpoint","mutating-route-no-auth"],
+  // Batch `cover` (2026-08-29): the PROVIDER half of the corpus's first `retrying-write-no-idempotency`
+  // pair — the fifth and last `critical` rule this file had no row for. Appended at the END of
+  // provides.ts rather than beside its sibling POST, because every key here is `file:line` and an
+  // insertion would have silently re-anchored `:12` and `:18` above.
+  //
+  // Only `mutating-route-no-auth` here, and the difference from `:8` is the whole point: this route IS
+  // consumed (twice, from xfe), so it is not an unconsumed-mutation-endpoint. Its unguarded-write half
+  // is unchanged, which is what makes it a route the retry rule can legitimately name.
+  "xbe/provides.ts:31": ["mutating-route-no-auth"],
   // MERGED KEY (was "<cross>/provides.ts:13"): route-shadowing anchors at xbe2's PATTERN provide site,
   // which is this same line. Under the old "<cross>" bucket this key was one line number away from
   // colliding with xbe/provides.ts -- both trees have a `provides.ts`.
@@ -786,6 +853,16 @@
   "xfe/consumes.ts:19": ["cross-layer/external-version-inconsistent"],
   "xfe/consumes.ts:5": ["cross-layer/method-mismatch","cross-layer/unprovided-mutation-call"],
   "xfe/consumes.ts:6": ["cross-layer/version-skew"],
+  // Batch `cover` (2026-08-29): the CONSUME half, and the anchor the rule actually reports at — the line
+  // the developer edits. `pRetry` is a distinctive retry-wrapper ident the egress recognizer knows by
+  // name, so this write carries `IoConsume::retry_configured`; the route it resolves to (xbe POST
+  // /charges) carries no witnessed `idempotency-guarded` attribute, so BOTH sides of the rule's
+  // two-sided check are real rather than merely unproven.
+  //
+  // Its silence control is `plainWrite` at :40 — the SAME joined write with the wrapper removed and
+  // nothing else changed. That line is deliberately absent from this file: any finding on it is an FP,
+  // and unlike a decoy file its in-scope-ness is beyond argument because its twin seven lines up fires.
+  "xfe/consumes.ts:33": ["cross-layer/retrying-write-no-idempotency"],
   // MERGED KEYS (were "<cross>/consumes.ts:{7,8}"): the cross-layer external-* rule and the per-tree rule
   // land on the same consume line -- 10.0.0.5 is both an IP literal and private-range egress; the vendor
   // URL carries both a secret query param (cross) and an api key (per-tree).
@@ -833,6 +910,9 @@
     "decoy/lib/dead.dynamic-loader.ts",
     "decoy/lib/dead.reexport-chain.decoy.ts",
     "decoy/lib/egress.http-url-literal.decoy.ts",
+    // Batch `cover` (2026-08-29): the silence arm for two of the four rules that gained a firing anchor
+    // in this batch. A firing case alone would leave a rule that reports on EVERYTHING scoring green.
+    "decoy/lib/redis.flushall-in-code.decoy.ts",
     "decoy/lib/reexports.ts",
     "decoy/lib/reliability.body-limit-missing.decoy.ts",
     "decoy/lib/reliability.console-in-loop.decoy.ts",
@@ -843,6 +923,7 @@
     "decoy/lib/security.api-key-in-url.decoy.ts",
     "decoy/lib/security.conn-string-credentials.decoy.ts",
     "decoy/lib/security.cors-wildcard.decoy.ts",
+    "decoy/lib/security.dangerous-html-concat.decoy.ts",
     "decoy/lib/security.eval-dynamic-code.decoy.ts",
     "decoy/lib/security.hardcoded-secret.decoy.ts",
     "decoy/lib/security.high-entropy-secret.decoy.ts",

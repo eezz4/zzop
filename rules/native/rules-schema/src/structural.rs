@@ -30,7 +30,7 @@ use zzop_core::{SchemaModel, Severity};
 /// a person can read in a cache path. Bump it when you want to SAY something changed; correctness no
 /// longer depends on you noticing. The lane split above is still worth reading — it explains which
 /// changes have a cache consequence at all — but it is now an explanation, not an obligation.
-pub const STRUCTURAL_RULES_VERSION: &str = "0.24.0";
+pub const STRUCTURAL_RULES_VERSION: &str = "0.33.0";
 
 /// A structural schema issue (source-agnostic; from a single model/field). `camelCase` here matches
 /// every other output-facing type, since this struct serializes verbatim into `Finding.data`.
@@ -65,9 +65,57 @@ pub(crate) fn severity_points(s: Severity) -> i64 {
     }
 }
 
-const GOD_THRESHOLD: usize = 15;
-/// Models with at most this many fields are excluded from the timestamps rule (assumed lookup tables).
-const LOOKUP_FIELD_MAX: usize = 3;
+/// Field count at or above which `god-model` reports. **A CONVENTION, NOT A MEASUREMENT** — written
+/// down here because this number decides the rule's entire output and, until 2026-08-29, nothing in
+/// the tree said where it came from.
+///
+/// What IS measured (2026-08-29, the only Prisma schema in the 9-tree corpus — calcom/cal.com,
+/// 100 models; two clean release builds of the same commit, one constant apart): 15 reports **27**
+/// models, 14 reports **32**, 16 reports **23**. One field moves the count by 4-5, so the number
+/// dominates the result rather than trimming its edges.
+///
+/// And it does not cut where the schema's own shape suggests. The field-count distribution runs
+/// 3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,21,22,24,25,26 and then jumps to 35,36,56,71,95,106 —
+/// exactly ONE gap in the whole range, at 26 -> 35, with six models above it (EventType 106, User 95,
+/// Team 71, Booking 56, SelectedCalendar 36, MonthlyProration 35). At 15 the rule reports those six
+/// plus 21 ordinary domain models of 15-26 fields: the line sits in the DENSE BODY of the
+/// distribution, not at its outlier boundary. That is the honest reading of the message's own
+/// "field count is a design opinion" — the opinion is where this constant sits.
+///
+/// **Not raised to the gap here on purpose.** Moving it to ~27 would delete 21 findings on the one
+/// schema anyone has measured, and deleting findings is the direction that leaves no trace
+/// (`.claude` rule-quality §24). That is a user's call with a second Prisma tree in hand, not a
+/// comment's. n=1: the corpus contains no other Prisma schema, so the numbers above are one data
+/// point, not a distribution — the next tree that has one should re-measure before anyone moves this.
+///
+/// POLICY VALUE, T2: also spelled by hand, in English prose, in `docs/rules/catalog.md` and
+/// `site/rules.html` (a Markdown/HTML page cannot reference a Rust constant) — pinned by
+/// `crate::message::tests::the_god_model_threshold_is_identical_in_the_constant_and_the_published_docs`,
+/// which compares both pages against [`god_model_threshold_claim`] and [`GOD_MODEL_MEASUREMENT`].
+/// The FINDING's own message is T1 rather than T2: it renders this constant and that sentence
+/// directly, so nothing stands between them to drift. `scripts/policy-census.txt` deliberately
+/// carries NO copy of the numbers above — that guard compares key and axis and never reads a tail,
+/// so a copy parked there is unguardable by construction (it held a stale one until 2026-08-31).
+pub(crate) const GOD_THRESHOLD: usize = 15;
+
+/// The MARKUP-FREE threshold claim the published pages must carry, rendered from
+/// [`GOD_THRESHOLD`] so the one part most likely to go stale cannot — the same arrangement
+/// `crate::message::sightline::field_usage_sightline_claim` uses for its extension list.
+pub(crate) fn god_model_threshold_claim() -> String {
+    format!("at least {GOD_THRESHOLD} fields")
+}
+
+/// The MEASUREMENT behind [`GOD_THRESHOLD`], in one markup-free sentence with ONE owner. The
+/// finding's message splices it and both published pages are pinned against it, because these four
+/// numbers were hand-copied into three prose surfaces and no two of them could be compared.
+///
+/// It states the threshold it was TAKEN at rather than interpolating [`GOD_THRESHOLD`], and that is
+/// the honest form: move the constant and 27/32/23 do not move with it — they become a reading about
+/// a line the rule no longer draws. The pin's `GOD_THRESHOLD == 15` assertion is what turns that into
+/// a red test instead of a quietly stale sentence, and re-measuring is the only way past it.
+pub(crate) const GOD_MODEL_MEASUREMENT: &str = "on the corpus's only Prisma schema (cal.com, 100 \
+     models), a threshold of 15 reports 27 of them, 14 reports 32 and 16 reports 23, so one field \
+     moves the count by 4-5";
 
 /// Field-name tokens denoting a whole monetary amount (matched as a case-insensitive substring).
 pub const MONEY_TOKENS: &[&str] = &[

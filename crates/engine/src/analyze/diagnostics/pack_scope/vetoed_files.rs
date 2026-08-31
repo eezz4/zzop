@@ -22,19 +22,23 @@ use super::DslScope;
 /// this set and every channel agreed with it.
 ///
 /// ## Its population against the BUNDLED packs is zero today, and that is measured, not assumed
-/// 106 of the 115 bundled rules carry a `file_exclude_pattern` (recounted 2026-08-12, after the
-/// `axis: opinion` export took the bundle from 123 rules to 115): 105 the shared
-/// `${test-paths}`/`${test-paths-stories}`/`${test-paths-migrations}` vocabulary, and one a pack-local
+/// Nearly every bundled rule carries a `file_exclude_pattern`, and NEITHER side of that split is
+/// retyped here as a number any more. The sentence that stood in this spot has been falsified twice:
+/// first as *"the other 9 — every one of them a `security` rule"* (both halves false by 2026-08-13),
+/// then as a `106 of the 115` census that outlived its own bundle. What is stable is the SHAPE, not the
+/// size: the excludes are drawn from the shared
+/// `${test-paths}`/`${test-paths-stories}`/`${test-paths-migrations}` vocabulary, with one pack-local
 /// extension of it (`reliability/sync-fs-in-handler`'s `${test-paths-stories-scripts}`). No bundled rule
 /// carries a hand-rolled pattern of its own any more — the one that did (`process-exit-in-lib`, naming
 /// `scripts?|tools|bin`) is now `code-hygiene/process-exit-in-lib` in `examples/packs/`, which does not
 /// change this report's reasoning but does remove the one bundled shape that was not vocabulary-derived.
-/// The rest carry NONE, and neither that roster nor its size is retyped here: the sentence that stood
-/// in this spot read *"the other 9 — every one of them a `security` rule"* and BOTH halves were false
-/// by 2026-08-13. Almost all of them are `security` rules whose subject IS the committed secret, so a
-/// fixture holding one is still a leak; the odd one out is `sql/destructive-migration`, whose
-/// `file_pattern` is anchored under `migrations?`/`migrate`/`alembic/versions?` and which an exclude
-/// drawn from the same vocabulary would empty. Recount both sides with:
+/// The rules carrying NONE are the `security` rules whose subject IS the committed literal, so a fixture
+/// holding one is still a leak. `sql/destructive-migration` was the one exception to that reading, and
+/// this doc used to say an exclude drawn from the shared vocabulary would EMPTY it, its `file_pattern`
+/// being anchored under `migrations?`/`migrate`/`alembic/versions?`. That was measured wrong on
+/// 2026-08-20: the rule took `${test-paths}` and still fires, because a migration under a test path is a
+/// fixture a suite runs rather than a history anyone deploys — which is a different set, not an empty
+/// complement. Recount both sides with:
 ///
 /// ```sh
 /// node -e 'for (const f of process.argv.slice(1)) {

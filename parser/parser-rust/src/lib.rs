@@ -154,10 +154,14 @@ pub const FRAMEWORK_RECOGNIZERS: &[FrameworkRecognizer] = &[
     // declare tables without ever writing SQL, and this build has no recognizer for either; that is the
     // residual a reader of this list should assume, because a row named after a crate would have implied
     // otherwise.
+    // It is the CONSUME side of the db kind and only that: `extract_rust_raw_sql_db_table_consumes`
+    // is the module's whole output, so a `.rs` tree that declares its tables in a migration this build
+    // cannot read gets no provide-side capability from this row. Declared `io.provides:db-table` until
+    // 2026-08-26, which said the opposite.
     FrameworkRecognizer {
         framework: "raw sql",
         extensions: &["rs"],
-        emits: &[channel::DB],
+        emits: &[channel::DB_CONSUMES],
     },
 ];
 

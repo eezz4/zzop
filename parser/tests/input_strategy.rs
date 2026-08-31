@@ -40,10 +40,19 @@
 //! Every seed is fed to every frontend, not only its own language's. That is the real production case
 //! (a `.ts` extension over a file that is actually SQL) and it is free here.
 //!
+//! The REL PATH is generated too, and separately — see [`rel_path`]. It is the input half that was
+//! missing until 2026-08-21, and a branch keyed on the path was unreachable by construction while it
+//! was.
+//!
 //! ## Case budget
 //!
-//! Each crate's `CASES` is chosen so that its property costs roughly the same WALL TIME as the others
-//! (~0.4-1.2 s each, ~6 s for all eight), not so that all eight run the same number of cases. The
+//! Each crate's `CASES` is chosen so that its property costs roughly the same WALL TIME as the
+//! others, not so that all eight run the same number of cases. Measured 2026-08-21 on a warm debug
+//! build: 0.5-2.5 s each, ~12 s for all eight. That is up from the ~6 s this paragraph recorded on
+//! 2026-07-29, and the cause is stated rather than absorbed — the fixed-edge-case loops became a
+//! CROSS when rel paths started being generated (see `FIXED_RELS`), so each crate now runs 160
+//! deterministic hammers where it ran 20. `FIXED_RELS` is already the trimmed half of that cross;
+//! trimming it further is the lever if this ever becomes the reason someone switches the gate off. The
 //! per-case cost differs by an order of magnitude across frontends — measured 2026-07-29 on a warm
 //! debug build, one case is ~0.12 ms for the regex scanners (sql, prisma), ~1.1 ms for swc and ruff
 //! (typescript, python), and ~7-18 ms for the tree-sitter frontends (go, java, csharp, which re-parse
@@ -339,6 +348,81 @@ pub fn config(cases: u32) -> ProptestConfig {
     }
     config
 }
+
+/// The REL PATH a generated case is parsed under — the second half of a frontend's input, and until
+/// 2026-08-21 not generated at all: each of the eight properties hammered ONE hardcoded rel
+/// (`src/app.ts`, `app/views.py`, `cmd/server/main.go`, ...), so a branch that keys on the path was
+/// unreachable BY CONSTRUCTION no matter how many cases ran.
+///
+/// Two such branches shipped in one frontend on that date, both in parser-typescript: `parse.rs` turns
+/// swc's JSX syntax on for `.jsx`/`.tsx` (the 2026-07-29 `const A = class this {}` panic came out of the
+/// NON-tsx path), and `sfc_imports.rs` gates a byte-index-slicing fenced-block strip on `.md`. An
+/// external reviewer fuzzed 200k cases against them and found no panic — which is exactly the point:
+/// today's code is safe, and the property could not have told us if it were not.
+///
+/// The pool is every extension ANY frontend branches on, plus the path shapes that are not extensions
+/// at all: none, a dotfile, a trailing dot, a directory-looking name, a non-ASCII segment, and a deep
+/// nesting. Every rel is fed to every frontend, the same way [`source_text`]'s seeds are — a `.sql`
+/// path over TypeScript source is a real production case (a misnamed file) and free here. In a frontend
+/// with no path-dependent branch the whole thing costs one string clone per case.
+pub fn rel_path() -> impl Strategy<Value = String> {
+    proptest::sample::select(RELS).prop_map(str::to_string)
+}
+
+/// The rel pool [`rel_path`] draws from, and the one the fixed-edge-case loops cross their inputs with.
+/// Kept as a const so a crate can iterate it directly without a proptest runner.
+pub const RELS: &[&str] = &[
+    // TypeScript frontend, whose branches this pool exists for: JSX syntax on/off, and the SFC/markdown
+    // pre-scan roster.
+    "src/app.ts",
+    "src/app.tsx",
+    "src/app.jsx",
+    "src/app.js",
+    "src/app.mjs",
+    "src/app.cjs",
+    "src/app.mts",
+    "src/app.cts",
+    "src/App.vue",
+    "src/App.svelte",
+    "docs/README.md",
+    "docs/page.mdx",
+    "src/pages/index.astro",
+    // One canonical rel per other frontend — the shapes those crates' own callers pass.
+    "app/views.py",
+    "src/main/java/com/example/App.java",
+    "cmd/server/main.go",
+    "Api/Controllers/OrdersController.cs",
+    "src/lib.rs",
+    "prisma/schema.prisma",
+    "db/migrations/0001_init.sql",
+    // Path SHAPES rather than languages: an extension-less file, a dotfile, a name ending in a dot, a
+    // segment that looks like a directory, a non-ASCII segment, deep nesting, and the empty rel.
+    "",
+    "Makefile",
+    ".env",
+    "src/weird.",
+    "src/dir.ts/inner",
+    "src/\u{d55c}\u{ae00}.ts",
+    "a/b/c/d/e/f/g/h/i/j/k.ts",
+];
+
+/// The rels the FIXED-edge-case loops cross their inputs with — a strict subset of [`RELS`], and
+/// deliberately so. That loop is a full cross, so pairing 20 texts with all of [`RELS`] multiplied the
+/// suite's wall time from ~6 s to ~13 s for coverage the generated property already gives: it draws a
+/// fresh rel per case and runs hundreds to thousands of them. What the fixed loop is for is the
+/// DETERMINISTIC floor, so this list keeps the rels whose SHAPE (rather than whose language) is what
+/// might break slicing — no extension, a trailing dot, a dot-directory segment, a non-ASCII segment,
+/// the empty rel — plus two ordinary ones as the control.
+pub const FIXED_RELS: &[&str] = &[
+    "src/app.ts",
+    "src/app.jsx",
+    "docs/README.md",
+    "",
+    "Makefile",
+    "src/weird.",
+    "src/dir.ts/inner",
+    "src/\u{d55c}\u{ae00}.ts",
+];
 
 /// Fixed inputs every frontend is hammered with in addition to the generated ones — the deterministic
 /// floor, so the suite still asserts something when the RNG seed changes. Each one is a shape a

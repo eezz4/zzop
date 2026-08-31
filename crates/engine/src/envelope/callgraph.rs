@@ -100,12 +100,16 @@ pub(super) fn run_envelope_callgraph(
     let resolve_file_fn = |specifier: &str, from_file: &str| {
         resolve_envelope_specifier(specifier, from_file, all_paths)
     };
-    let symbol_graph = zzop_core::callgraph::build_symbol_graph(
-        &raw_calls,
-        &imports_by_file,
-        &local_symbols_by_file,
-        &resolve_file_fn,
-    );
+    // Both halves — see the native lane's twin call. Mode A gets the same treatment on purpose: an
+    // adapter's envelope has exactly the same unplaceable-callee problem, and a rule that reads names
+    // on one lane and not the other would answer the same tree two ways.
+    let (symbol_graph, unresolved_callees) =
+        zzop_core::callgraph::build_symbol_graph_with_unresolved(
+            &raw_calls,
+            &imports_by_file,
+            &local_symbols_by_file,
+            &resolve_file_fn,
+        );
     // The resolver DROPS an unresolvable edge (never guesses — its contract); this pass's added duty
     // is to say so. Without it, a channel whose every edge evaporated ran the rules over an empty
     // graph with the exact same (silent) output shape as a fully-resolved one.
@@ -172,6 +176,7 @@ pub(super) fn run_envelope_callgraph(
         let t0 = profile.then(Instant::now);
         let found = zzop_rules_http::scan_mutating_route_no_auth(
             &zzop_rules_http::ScanMutatingRouteNoAuthInput {
+                unresolved_callees: &unresolved_callees,
                 io_provides,
                 symbols: all_symbols,
                 symbol_graph: &symbol_graph,

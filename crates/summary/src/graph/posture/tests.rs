@@ -28,7 +28,7 @@ fn only_mutating_http_routes_are_drawn() {
     assert!(m.contains("DELETE /users/{}"), "{m}");
     assert!(!m.contains("GET /users"), "a read is not unguarded:\n{m}");
     assert!(!m.contains("db-table"), "{m}");
-    assert!(m.contains("drawn 2 / total 2"), "{m}");
+    assert!(m.contains("drawn 2 / extracted 2"), "{m}");
 }
 
 /// Guard status is the rule's verdict, matched on the route's OWN file+line — not a re-derivation.
@@ -64,14 +64,14 @@ fn routes_are_grouped_by_tree_and_the_subgraph_id_is_sanitized() {
 #[test]
 fn the_cap_is_per_tree_and_the_drop_is_disclosed() {
     let m = project(&one_tree(), None, 1);
-    assert!(m.contains("drawn 1 / total 2"), "{m}");
+    assert!(m.contains("drawn 1 / extracted 2"), "{m}");
     assert!(m.contains("PARTIAL VIEW"), "{m}");
 }
 
 #[test]
 fn scope_filters_by_source_or_file_prefix() {
     let m = project(&one_tree(), Some("nope/"), DEFAULT_POSTURE_TOP);
-    assert!(m.contains("drawn 0 / total 2"), "{m}");
+    assert!(m.contains("drawn 0 / extracted 2"), "{m}");
 }
 
 /// "No routes extracted" and "no write surface" are different — the same silence-vs-clean rule.
@@ -113,7 +113,7 @@ fn every_write_method_the_rule_gates_on_is_drawn() {
         let v = json!({ "trees": [{ "sourceId": "a", "output": { "findings": [], "ir": { "io": {
             "provides": [{ "kind": "http", "key": format!("{method} /x"), "file": "a.ts", "line": 1 }] }}}}]});
         assert!(
-            project(&v, None, 5).contains("drawn 1 / total 1"),
+            project(&v, None, 5).contains("drawn 1 / extracted 1"),
             "{method}"
         );
     }

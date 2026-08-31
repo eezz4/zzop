@@ -1,4 +1,4 @@
-use crate::{hits, scan, TempDir};
+use crate::{assert_disqualifier_summary_precedes_imperative, hits, scan, TempDir};
 
 // --- insecure-cookie ---
 
@@ -220,4 +220,68 @@ fn print_stack_trace_with_no_response_object_in_the_method_is_not_flagged() {
         "{:?}",
         out.findings
     );
+}
+
+/// §27 pin (2026-08-28) for `insecure-cookie` (`1.architecture/rules/rule-quality.md` §27).
+///
+/// The remedy read: "Add `{ httpOnly: true }` (plus `secure`/`sameSite` as appropriate)." Hiding the
+/// cookie from scripts is the whole function of the flag, so the edit breaks every client-side reader of
+/// that cookie — and it breaks them SILENTLY, because a `document.cookie` scan returns `undefined` for a
+/// hidden cookie exactly as it does for an absent one. Measured shape, cal.com
+/// `packages/lib/cookie.ts`: `getCookie` is `document.cookie.split(';').find(...)?.split('=')[1]`, which
+/// answers `undefined` and throws nothing.
+///
+/// ⚠ THE POPULATION THIS DISCLOSURE IS FOR IS THE ONE NO GATE HERE CAN SEE, and the message says so
+/// rather than narrating a case the tool covers (`rule-quality.md` §30's trim). Measured: the corpus's
+/// single firing is cal.com `slots.controller.ts:69` `res.cookie("uid", uid)`, and every reader of that
+/// `uid` cookie in the tree is server-side (`req.cookies?.uid`, four sites) — for THAT finding the
+/// remedy breaks nothing. The breakage is real for the readers this rule reaches and cannot inspect, so
+/// the clause is a CHECK the reader can run on their own tree ("search your client for this cookie's
+/// name") rather than a landing about a deployed system they cannot query.
+///
+/// Two further repairs ride along. The legitimate exceptions are given as KINDS with the question that
+/// sorts an unlisted case, because "as appropriate" and a closed list are the two shapes that turn an
+/// incomplete enumeration into a push (rule-quality.md §27, `32919f9`). And `secure`/`sameSite` are
+/// unbundled: each was arriving as an unqualified add-on to a finding that did not measure it, while
+/// `secure: true` withholds the cookie from plain-HTTP origins and a lax/strict `sameSite` withholds it
+/// from cross-site requests.
+///
+/// Detection is untouched: the count and line asserted below are the pre-edit ones, and the
+/// `httpOnly: false` and `cookies.set` pins above still hold the matcher's shape.
+#[test]
+fn insecure_cookie_message_lands_the_client_reader_before_the_imperative() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/auth.ts",
+        "declare const res: any;\ndeclare const token: string;\nexport function login() {\n  res.cookie(\"session\", token);\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "insecure-cookie");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 4);
+    let msg = &h[0].message;
+    assert!(
+        !msg.contains("(plus `secure`/`sameSite` as appropriate)"),
+        "insecure-cookie: the unqualified add-on is back. `secure` and `sameSite` each withhold the \
+         cookie from a population this finding never measured, so bundling them behind `as appropriate` \
+         is the defect this pin exists for: {msg}"
+    );
+    assert_disqualifier_summary_precedes_imperative(
+        "insecure-cookie",
+        msg,
+        "ANY CLIENT CODE THAT READS THIS COOKIE BY NAME STOPS SEEING IT",
+        "IF THE SERVER IS THE ONLY READER, add `{ httpOnly: true }`",
+        "returns `undefined` for a hidden cookie exactly as it does for an absent one",
+    );
+    for needle in [
+        "Search your client for this cookie's name",
+        "examples rather than a list",
+        "double-submit CSRF token",
+        "withholds the cookie from any plain-HTTP origin",
+    ] {
+        assert!(
+            msg.contains(needle),
+            "insecure-cookie: the landing lost {needle:?}: {msg}"
+        );
+    }
 }

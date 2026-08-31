@@ -155,6 +155,7 @@ fn emit_routes(
 ) {
     for verb in verbs {
         out.push(IoProvide {
+            route_version: None,
             response: None,
             body: None,
             kind: "http".to_string(),

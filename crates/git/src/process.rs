@@ -31,9 +31,19 @@ pub(crate) fn decode_git_output(bytes: &[u8]) -> String {
 
 /// Runs `git log --numstat` over the whole repo (no path/branch scoping — see lib.rs module doc for
 /// why this crate always collects the full repo) and returns its raw stdout for `parse::parse_git_log`.
+///
+/// The author field is `%aE`, not `%ae`: the uppercase spelling applies the repo's own `.mailmap`, and
+/// every consumer of this field asks a question about PEOPLE rather than about address strings —
+/// `author_count` feeds `busFactor` ("a single author… nobody else understands it") and the
+/// `knowledge-silo` recommendation. With raw `%ae`, one human committing from a work address, a personal
+/// address and a `laptop.local` default counts as THREE, and the failure is a false all-clear on the one
+/// metric whose whole purpose is finding single points of human failure (measured: a three-address,
+/// one-person fixture reads 3 distinct under `%ae` and 1 under `%aE`). `.mailmap` is the repo DECLARING
+/// its own identity resolution, which is the evidence standard this project requires before collapsing
+/// anything; a repo without one sees no change at all, since `%aE` falls back to `%ae` verbatim.
 pub(crate) fn run_git_log(repo: &Path, opts: &CollectOptions) -> Result<String, GitError> {
     let format =
-        format!("--pretty=format:{COMMIT_MARKER}%H{FIELD_SEP}%cI{FIELD_SEP}%ae{FIELD_SEP}%s");
+        format!("--pretty=format:{COMMIT_MARKER}%H{FIELD_SEP}%cI{FIELD_SEP}%aE{FIELD_SEP}%s");
     let mut args: Vec<String> = vec![
         "log".into(),
         "--no-merges".into(),

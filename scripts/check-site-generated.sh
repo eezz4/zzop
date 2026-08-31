@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
-# Guards that the two COMMITTED pages scripts/gen-site.mjs writes — site/index.html (English) and
-# site/ko/index.html (Korean) — are still what that generator produces from site-src/.
+# Guards that every COMMITTED page scripts/gen-site.mjs writes is still what that generator
+# produces from site-src/.
+#
+# The set is DERIVED from what the generator writes, not listed here, and that is load-bearing: it
+# was two pages (the index in both editions) until 2026-08-18 and is more now, and a hand list would
+# have left every page added after it unchecked while this header still read as covering the site.
+# The count the run prints is the census — read it there, not here.
 #
 # ## Why a guard and not a build step
 # Those two files are generated AND committed, because GitHub Pages serves site/ as plain files. That
@@ -28,7 +33,7 @@
 # ## Why this writes into the working tree at all
 # The sibling generator-check, check-rules-catalog-sync.sh, calls `node scripts/gen-site-rules.mjs
 # --check`, which never writes. gen-site.mjs has no such mode: its non-preview target paths are fixed
-# (`site/index.html`, `site/ko/index.html`) and it resolves them from its own file location, so it
+# by its own DOCUMENTS table and it resolves them from its own file location, so it
 # cannot be pointed at a scratch directory from outside. Copying the whole repo to a temp tree to give
 # it somewhere else to write would cost more than the check.
 #
@@ -158,11 +163,43 @@ while IFS= read -r rel; do
   [ -f "$SITE/$rel" ] || drift="${drift}  NO LONGER BUILT  $SITE/$rel"$'\n'
 done <<< "$before"
 
+# EVERY page under site/ko/ must be one this run WROTE. The comparison above does not establish
+# that: it catches a generated page that is stale or uncommitted, and a committed page that is no
+# longer produced, but a HAND-WRITTEN file dropped into site/ko/ exists both before and after and
+# passes silently. That gap mattered the moment site/ko/ stopped being one file: the English-source
+# guard exempts the directory as a whole (Korean is legal there BECAUSE it is generated from
+# {ko, en} pairs), and an exemption for a DIRECTORY is only as true as the claim that everything in
+# it is generated. This is that claim, checked.
+unwritten=""
+while IFS= read -r rel; do
+  [ -n "$rel" ] || continue
+  case "$rel" in
+    ko/*) ;;
+    *) continue ;;
+  esac
+  # Herestring, not `| grep -q`: under pipefail the early exit SIGPIPEs the producer and the
+  # pipeline takes ITS status. check-shell-pipe-sigpipe.sh caught exactly that here, on this
+  # check's first commit — the guard that guards the guards, doing its job.
+  grep -qxF "site/$rel" <<< "$written" || unwritten="${unwritten}  $SITE/$rel"$'
+'
+done <<< "$after"
+if [ -n "$unwritten" ]; then
+  echo "check-site-generated: FAILED -- these files sit under site/ko/ and this run did not write them:" >&2
+  printf '%s' "$unwritten" >&2
+  echo >&2
+  echo "  site/ko/ is the GENERATED Korean edition, and scripts/check-english-source.sh exempts the" >&2
+  echo "  whole directory from the no-Hangul rule on exactly that basis. A hand-written page here" >&2
+  echo "  would inherit that exemption with no {ko, en} pair forcing an English sentence to exist" >&2
+  echo "  beside it -- hand-written Korean on a published page, which is what that guard exists to stop." >&2
+  echo "  Add it to gen-site.mjs TEMPLATED_PAGES (a template plus a content module), or delete it." >&2
+  exit 1
+fi
+
 if [ -n "$drift" ]; then
   echo "check-site-generated: FAILED -- regenerating the site changed these files:" >&2
   printf '%s' "$drift" >&2
   echo >&2
-  echo "  site/index.html and site/ko/index.html are GENERATED and COMMITTED. Changing an input without" >&2
+  echo "  The pages listed above are GENERATED and COMMITTED. Changing an input without" >&2
   echo "  regenerating leaves this repo carrying a page that will never be deployed, and every other" >&2
   echo "  check stays green because the stale page is still valid HTML about an input that is gone." >&2
   echo "  The inputs are site-src/ (the sentences and the stylesheet) AND site/graph.html, whose data" >&2

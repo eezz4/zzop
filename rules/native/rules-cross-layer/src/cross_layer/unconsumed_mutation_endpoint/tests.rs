@@ -19,6 +19,7 @@ fn unconsumed_provide(
             file: file.to_string(),
             line,
             symbol: symbol.map(str::to_string),
+            ..Default::default()
         },
     }
 }

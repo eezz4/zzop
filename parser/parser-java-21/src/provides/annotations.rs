@@ -77,64 +77,81 @@ pub(crate) fn class_annotation_facts(modifiers: Option<Node>, src: &str) -> Clas
     }
 }
 
-/// Reads `modifiers`' own directly-attached annotations for the `(VERB, path)` route(s) it implies —
-/// empty when no recognized mapping annotation is present, or the only `@RequestMapping` found carries
-/// no `method` attribute (ambiguous — module doc). A `@RequestMapping(method = {A, B})` listing several
-/// verbs yields ONE `(verb, path)` pair per verb, all sharing the same path — the `METHOD_ANNOTATIONS`
-/// shortcuts (`@GetMapping` etc.) always yield exactly one.
-///
-/// The per-annotation `(VERB, path-STATE)` route(s) — the raw tri-state the callers act on. The per-file
-/// pass ([`method_route`]) drops a `NonLiteral` path (no corpus to resolve the constant); the whole-corpus
-/// pass (`project::collect`/`walk`) instead carries the `NonLiteral` args forward and resolves the path
-/// constant against the corpus, exactly as it already does for a class-level `@RequestMapping` prefix
-/// (`project::resolve::resolve_method_path`). Empty when no recognized mapping annotation is present, or the
-/// only `@RequestMapping` found carries no `method` attribute (ambiguous — module doc).
-pub(crate) fn method_route_states(
-    modifiers: Option<Node>,
+/// The one mapping annotation a declaration's route(s) were read FROM, plus those routes — a unit because
+/// that annotation node is the route's ANCHOR. Anchoring on the `method_declaration` instead points at its
+/// FIRST MODIFIER, which is the mapping only when nothing precedes it and is a Swagger `@Operation` (or any
+/// other decoration) whenever one does: measured 2026-08-23 on the mall corpus, 246/246 Java `http` provides
+/// landed one to three lines ABOVE the `@*Mapping` they describe.
+pub(crate) struct RouteMatch<'a> {
+    /// The `annotation`/`marker_annotation` the routes below were read from — EVERY consumer's anchor line,
+    /// so all of them agree by construction rather than by comment (`security`'s guard-line contract IS
+    /// this identity).
+    pub(crate) anchor: Node<'a>,
+    /// Never empty: a `RouteMatch` exists only where a recognized mapping annotation yielded a verb.
+    pub(crate) routes: Vec<(String, RoutePathState)>,
+}
+
+impl RouteMatch<'_> {
+    /// The PER-FILE pass's view of [`RouteMatch::routes`] (`provides::extract`), which has no corpus in
+    /// which to resolve a constant. A literal keys the route and a genuinely ABSENT path (`@GetMapping`,
+    /// `@PostMapping(produces = "json")`) keys the controller-prefix-only base route `""`, but a NON-LITERAL
+    /// path (`@GetMapping(ApiPaths.USERS)`) is DROPPED rather than keyed at the empty base — collapsing it
+    /// to `""` used to fabricate a phantom base route AND lose the real one.
+    pub(crate) fn literal_routes(self) -> Vec<(String, String)> {
+        self.routes
+            .into_iter()
+            .filter_map(|(verb, state)| match state {
+                RoutePathState::Literal(path) => Some((verb, path)),
+                RoutePathState::Base => Some((verb, String::new())),
+                RoutePathState::NonLiteral(_) => None,
+            })
+            .collect()
+    }
+}
+
+/// Reads `modifiers`' own directly-attached annotations for the mapping annotation that implies a route and
+/// the `(VERB, path-STATE)` route(s) it implies — the raw tri-state the callers act on. The per-file pass
+/// ([`RouteMatch::literal_routes`]) drops a `NonLiteral` path (no corpus to resolve the constant); the
+/// whole-corpus pass (`project::collect`/`walk`) carries its args forward and resolves the constant, exactly
+/// as it already does for a class-level `@RequestMapping` prefix (`project::resolve::resolve_method_path`).
+/// A `@RequestMapping(method = {A, B})` yields ONE pair per verb, all sharing that path and that anchor; the
+/// `METHOD_ANNOTATIONS` shortcuts (`@GetMapping` etc.) always yield exactly one. `None` when no recognized
+/// mapping annotation is present, or the only `@RequestMapping` found carries no `method` attribute
+/// (ambiguous — module doc).
+pub(crate) fn method_route_match<'a>(
+    modifiers: Option<Node<'a>>,
     src: &str,
-) -> Vec<(String, RoutePathState)> {
+) -> Option<RouteMatch<'a>> {
     for ann in annotations_of(modifiers) {
         let Some(name) = annotation_name(ann, src) else {
             continue;
         };
         let args = annotation_raw_args(ann, src).unwrap_or_default();
         if let Some((_, verb)) = METHOD_ANNOTATIONS.iter().find(|(n, _)| *n == name) {
-            return vec![(verb.to_string(), route_path_state(&args))];
+            let routes = vec![(verb.to_string(), route_path_state(&args))];
+            return Some(RouteMatch {
+                anchor: ann,
+                routes,
+            });
         }
         if name == "RequestMapping" {
             let verbs = request_method_verbs(&args);
             if !verbs.is_empty() {
                 let state = route_path_state(&args);
-                return verbs
-                    .into_iter()
-                    .map(|verb| (verb, state.clone()))
-                    .collect();
+                let routes = verbs.into_iter().map(|v| (v, state.clone())).collect();
+                return Some(RouteMatch {
+                    anchor: ann,
+                    routes,
+                });
             }
             // No `method` attribute -> ambiguous, keep scanning (module doc).
         }
     }
-    Vec::new()
-}
-
-/// Reads `modifiers`' own directly-attached annotations for the `(VERB, path)` route(s) it implies — the
-/// PER-FILE pass's view (`provides::extract`), which has no corpus in which to resolve a constant. A literal
-/// keys the route, a genuinely ABSENT path (`@GetMapping`, `@PostMapping(produces = "json")`) keys the
-/// controller-prefix-only base route `""`, but a NON-LITERAL path (`@GetMapping(ApiPaths.USERS)`) is DROPPED
-/// rather than keyed at the empty base — collapsing it to `""` used to fabricate a phantom base route AND
-/// lose the real one. The whole-corpus pass instead resolves the constant (see [`method_route_states`]).
-pub(crate) fn method_route(modifiers: Option<Node>, src: &str) -> Vec<(String, String)> {
-    method_route_states(modifiers, src)
-        .into_iter()
-        .filter_map(|(verb, state)| match state {
-            RoutePathState::Literal(path) => Some((verb, path)),
-            RoutePathState::Base => Some((verb, String::new())),
-            RoutePathState::NonLiteral(_) => None,
-        })
-        .collect()
+    None
 }
 
 /// The tri-state a mapping annotation's raw argument text resolves to on the PATH axis — the method-level
-/// parallel of the class-prefix `project::PrefixState`. See [`method_route_states`] for how the per-file vs
+/// parallel of the class-prefix `project::PrefixState`. See [`method_route_match`] for how the per-file vs
 /// whole-corpus passes each act on `NonLiteral` (drop vs resolve-the-constant).
 #[derive(Clone)]
 pub(crate) enum RoutePathState {

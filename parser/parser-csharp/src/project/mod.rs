@@ -240,6 +240,7 @@ mod walk_entrypoint {
                 continue;
             }
             provides.push(IoProvide {
+                route_version: None,
                 response: None,
                 body: None,
                 kind: "http".to_string(),

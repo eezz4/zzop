@@ -28,7 +28,7 @@ fn extra_entry_with_fan_in_is_not_flagged_and_keeps_its_island_live() {
 #[test]
 fn asset_target_with_fan_in_but_no_dep_edge_needs_extra_entry() {
     // A `public/*.js` worklet gets fan_in from an asset-ref bump (`merge_asset_ref_fan_in`) but NO
-    // incoming `dep` edge (the engine adds none — it mirrors the SFC fan-in bump), so it reads as a
+    // incoming `dep` edge (the engine adds none — it mirrors the import pre-scan's fan-in bump), so it reads as a
     // false `unreachable` island unless seeded as an entry. This is the regression sentinel for the
     // mandatory `unreachable_entries.extend(asset_targets)` seed (assemble/rules.rs): without it, the
     // fix would trade a dead-candidates FP for an unreachable FP.
@@ -307,4 +307,92 @@ fn tool_entry_file_negatives() {
             "expected NOT a tool-entry match: {path}"
         );
     }
+}
+
+/// The tool-CONFIG subset, asserted in BOTH directions in one test so neither half can pass vacuously:
+/// a predicate that always said `true` would fail on the negatives, and one that always said `false`
+/// on the positives. It has a second reader beyond the exemption —
+/// `zzop_engine::analyze::assemble::rules::config_entries` reads the TEXT of exactly these files for
+/// the entry paths they declare — so a path admitted here is a file zzop will open and harvest, and a
+/// path refused here is a declaration zzop will never see.
+///
+/// `docs/.vitepress/config.mts` is the row the `<name>.config.<ext>` shape alone could not reach
+/// (measured on koel 3f5213d4, where it was reported as a dead file); the bare `config.ts` /
+/// `docs/config.ts` negatives pin that admitting it did NOT admit every file named `config`.
+#[test]
+fn tool_config_file_positives_and_negatives() {
+    for path in [
+        "vite.config.ts",
+        // A SECOND config for the same tool, reached only through that tool's own `--config` flag.
+        "vite.config.sw.js",
+        "webpack.config.prod.js",
+        "vitest.config.mts",
+        "jest.config.cjs",
+        "packages/app/vite.config.ts",
+        // `config.<ext>` directly inside a DOT-directory — a tool-owned directory, fixed convention path.
+        "docs/.vitepress/config.mts",
+        ".vitepress/config.ts",
+        ".storybook/config.js",
+    ] {
+        assert!(is_tool_config_file(path), "expected a tool config: {path}");
+        assert!(
+            is_tool_entry_file(path),
+            "every tool config is also a tool entry: {path}"
+        );
+    }
+    // `.jsx`/`.tsx` and an odd-cased extension are POSITIVES too — the candidacy population this
+    // predicate exempts from is `(?i)(ts|tsx|js|jsx|mjs|cjs|mts|cts)`, and a narrower list here left
+    // `.storybook/preview.jsx` reported as dead by a rule whose own catalog row says Storybook files
+    // are excluded.
+    for path in [
+        "docs/.vitepress/config.jsx",
+        ".storybook/config.tsx",
+        "vite.config.TS",
+    ] {
+        assert!(is_tool_config_file(path), "expected a tool config: {path}");
+    }
+    for path in [
+        // A name is required before `.config`, and a dot-DIRECTORY before a bare `config`.
+        "config.ts",
+        "docs/config.ts",
+        "src/config.ts",
+        // Depth two is ordinary source that a tool happens to load.
+        "docs/.vitepress/theme/index.ts",
+        ".vitepress/config.json",
+        // The other tool-entry rows are NOT configs: nothing declares entries inside them.
+        "vite-env.d.ts",
+        "src/setup-tests.ts",
+        "prisma/seed.ts",
+        // **THE SPLIT.** These are EXEMPT (a tool owns the directory) and NOT declaration sources: the
+        // harvest opens what this predicate admits and reads paths out of it, and
+        // `.storybook/copyAssets.ts`'s ordinary string `'../src/components/Icon/utils.ts'` is not an
+        // entry declaration. It is a real file in `corpus/frameworks/grafana`, and for one review cycle
+        // it silently exempted a source file that had no importer.
+        ".storybook/main.mjs",
+        ".storybook/preview.jsx",
+        ".storybook/copyAssets.ts",
+        "docs/.vitepress/other.ts",
+    ] {
+        assert!(
+            !is_tool_config_file(path),
+            "expected NOT a tool config: {path}"
+        );
+    }
+    // ...and the same four ARE tool entries. Asserted here rather than in a separate test so the two
+    // answers for one path sit in one call: a reader must not have to hunt for the other half.
+    for path in [
+        ".storybook/main.mjs",
+        ".storybook/preview.jsx",
+        ".storybook/copyAssets.ts",
+        "docs/.vitepress/other.ts",
+    ] {
+        assert!(
+            is_tool_entry_file(path),
+            "a file at depth 1 in a dot-directory is a tool entry: {path}"
+        );
+    }
+    assert!(
+        !is_tool_entry_file("docs/.vitepress/theme/index.ts"),
+        "depth two is neither"
+    );
 }

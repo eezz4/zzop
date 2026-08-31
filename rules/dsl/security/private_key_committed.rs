@@ -78,6 +78,46 @@ fn private_key_header_generated_via_template_interpolation_is_not_flagged() {
 }
 
 #[test]
+fn pem_header_as_a_react_placeholder_attribute_is_not_flagged() {
+    // A `placeholder=` attribute is the grey hint text an EMPTY input shows — it is a declaration in
+    // the source that the value is not here, the same standing the `${...}` interpolation veto rests
+    // on. Measured 2026-08-24 over 57 of the 58 checkouts (dotnet/aspnetcore did not finish an
+    // `analyze` run; its PEM lines are all `-----BEGIN CERTIFICATE-----`, which this rule's
+    // `PRIVATE\s+KEY-----` line pattern cannot match), this shape appears exactly twice, both in
+    // grafana: `public/app/plugins/datasource/azuremonitor/components/ConfigEditor/
+    // AppRegistrationCredentials.tsx:334` and
+    // `packages/grafana-sql/src/components/configuration/TLSSecretsConfig.tsx:128`. Both fired at
+    // CRITICAL telling the reader to rotate a key that is a form hint.
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "src/ConfigEditor.tsx",
+        "    <Input\n      onChange={onKeyChange}\n      placeholder=\"-----BEGIN PRIVATE KEY-----\"\n    />\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "private-key-committed").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+/// The boundary that veto must not cross: it is anchored to the `placeholder` attribute NAME, not to
+/// "a PEM header inside a JSX attribute". An attribute that carries a real VALUE (`defaultValue`,
+/// `value`) is not a hint, and a key parked in one is committed.
+#[test]
+fn pem_header_in_a_value_attribute_still_fires() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "src/ConfigEditor.tsx",
+        "    <Input\n      onChange={onKeyChange}\n      defaultValue=\"-----BEGIN PRIVATE KEY-----\"\n    />\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "private-key-committed");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 3);
+}
+
+#[test]
 fn private_key_ok_marker_above_the_header_line_suppresses_the_finding() {
     let dir = TempDir::new("zzop-be-sec");
     dir.write(

@@ -123,7 +123,7 @@ pub const OBSERVED: &[RuleChannelDirection] = &[
     row(
         "cross-layer/unconsumed-mutation-endpoint",
         HTTP_CONSUMES,
-        Unobserved,
+        Floods,
     ),
     row(
         "cross-layer/unconsumed-mutation-endpoint",

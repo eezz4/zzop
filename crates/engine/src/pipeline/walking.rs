@@ -1,11 +1,31 @@
 //! Single-threaded, pre-sorted file walk feeding `run_file_pass`'s `rayon::par_iter`.
 
 use std::path::{Component, Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use ignore::gitignore::Gitignore;
 use ignore::WalkBuilder;
 
 use crate::dispatch::{self, DispatchConfig};
+
+/// What one walk produced: the files to analyze, and the directories `config.skip_dirs` PRUNED.
+///
+/// The second field exists because a prune leaves NO other trace. Every downstream number — file count,
+/// findings, import edges, io — is computed from `files` alone, so a directory removed here is not a
+/// smaller number anywhere, it is an absent SUBJECT, and the reply reads exactly like one from a tree
+/// that never held it. Measured 2026-08-16 on an external tree whose sources sat under `build/`: the file
+/// count went 8 -> 3 and the findings 15 -> 2 with nothing in the output naming the cause. So the walk
+/// hands the prune list back and `analyze::skipped_dirs_warning` says it out loud.
+///
+/// Only the `skip_dirs` prune is collected. The other two prunes in `filter_entry` (the reserved `.zzop`
+/// namespace, this run's own `cache_dir`) remove zzop's OWN derived output, which was never a subject of
+/// the analysis — disclosing those would report a loss that did not happen.
+pub(super) struct Walked {
+    pub(super) files: Vec<(String, PathBuf)>,
+    /// Rel paths of the pruned directories, sorted and deduplicated — `ignore`'s directory-read order is
+    /// not stable across filesystems, and this list reaches the reply, which is byte-identical by contract.
+    pub(super) skipped_dirs: Vec<String>,
+}
 
 /// Walks `root` collecting every file not under a `config.skip_dirs` directory and not excluded by a
 /// committed `.gitignore` (nested ones, plus ancestor ones up to the git toplevel), as `(normalized rel
@@ -56,15 +76,17 @@ use crate::dispatch::{self, DispatchConfig};
 /// it resolves is a run-local knob pointing at DERIVED output, so for one source tree plus one config the
 /// set of SOURCE files walked is the same everywhere. They strengthen it, in fact: run N and run N+1 over
 /// an unchanged tree were not previously byte-identical to each other.
-pub(super) fn walk_files(
-    root: &Path,
-    config: &DispatchConfig,
-    cache_dir: Option<&Path>,
-) -> Vec<(String, PathBuf)> {
+pub(super) fn walk_files(root: &Path, config: &DispatchConfig, cache_dir: Option<&Path>) -> Walked {
     let mut out = Vec::new();
     let skip_config = config.clone();
     let ancestor_ignores = ancestor_gitignores(root);
     let own_output = cache_dir.and_then(|dir| own_output_dir(root, dir));
+    // `filter_entry` takes an `Fn + Send + Sync + 'static` predicate, so the prune list is shared through
+    // an `Arc<Mutex<_>>` rather than borrowed. The walk this feeds is the single-threaded `Walk` (the
+    // parallel builder is not used here), so the lock is uncontended.
+    let pruned = Arc::new(Mutex::new(Vec::new()));
+    let pruned_sink = Arc::clone(&pruned);
+    let walk_root = root.to_path_buf();
     let mut builder = WalkBuilder::new(root);
     builder
         .hidden(false)
@@ -89,6 +111,9 @@ pub(super) fn walk_files(
                         return false;
                     }
                     if dispatch::is_skip_dir(&name, &skip_config) {
+                        if let Ok(mut sink) = pruned_sink.lock() {
+                            sink.push(to_rel(&walk_root, entry.path()));
+                        }
                         return false;
                     }
                     if own_output.as_deref() == Some(entry.path()) {
@@ -105,7 +130,18 @@ pub(super) fn walk_files(
         }
     }
     out.sort_by(|a, b| a.0.cmp(&b.0));
-    out
+    let mut skipped_dirs = match pruned.lock() {
+        Ok(mut guard) => std::mem::take(&mut *guard),
+        // A poisoned lock means a panic crossed the closure; the walk's FILES are still complete, so the
+        // pass continues with an unreported prune rather than taking the whole run down.
+        Err(_) => Vec::new(),
+    };
+    skipped_dirs.sort();
+    skipped_dirs.dedup();
+    Walked {
+        files: out,
+        skipped_dirs,
+    }
 }
 
 /// `cache_dir` expressed as a path the walk will actually produce — `root` joined with `cache_dir`'s

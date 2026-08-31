@@ -1,7 +1,123 @@
-//! Dead-filter self-reports: a suppression or top-level exclude whose path/glob filter matched no
-//! scanned file (almost always a typo).
+//! Self-reports for the config keys that FILTER what a run sees: a suppression or top-level exclude
+//! whose path/glob filter matched no scanned file (almost always a typo), what an exclude that DID match
+//! removes from scoring, and what `vocabulary.skipDirs` removed from the walk before any of the above
+//! could see it.
 
 use crate::EngineConfig;
+
+/// Directory names [`skipped_dirs_warning`] never reports, though the walk really did prune them. The
+/// axis is NOT "this one is boring" — it is the same fact/convention split the vocabulary front end draws
+/// everywhere else: every other name in a skip list is a CONVENTION a project chose and could have
+/// chosen differently (a tree really can commit source under `build/`, which is the defect that produced
+/// this disclosure), while these are fixed by a tool and hold a machine's own bookkeeping by
+/// construction. `.git` is git's object store; the other two are zzop's own former report/cache
+/// directories, kept in the default skip list as legacy defense (`dispatch::DEFAULT_SKIP_DIRS`). No
+/// project can put analyzable source in them, so naming them is a prune the reader can never act on —
+/// and `.git` alone would put a permanent, unactionable line in every git repository's reply, which is
+/// how a warning teaches its reader to stop reading it.
+///
+/// The reserved `.zzop` namespace needs no entry: it is pruned ahead of the skip list entirely
+/// (`pipeline::walking::walk_files`), so it never enters the prune list this filters.
+const NOT_SOURCE_BY_CONSTRUCTION: &[&str] = &[".git", "zzop-reports", ".zzop-cache"];
+
+/// Whether `rel`'s own directory name is one of [`NOT_SOURCE_BY_CONSTRUCTION`]. Keyed on the NAME, not
+/// the path, so a nested `vendor/.git` (a committed submodule store) is filtered the same as a root one.
+fn is_not_source_by_construction(rel: &str) -> bool {
+    let name = rel.rsplit('/').next().unwrap_or(rel);
+    NOT_SOURCE_BY_CONSTRUCTION.contains(&name)
+}
+
+/// Scope self-report: which directories `vocabulary.skipDirs` pruned from the walk. `skipped` is the
+/// walk's own prune list (`pipeline::walking::Walked::skipped_dirs`), sorted and deduplicated; `None`
+/// when nothing REPORTABLE was pruned (see [`NOT_SOURCE_BY_CONSTRUCTION`]), so the ordinary run stays quiet.
+///
+/// This is the one filter in the config whose effect was, until 2026-08-16, invisible in every channel.
+/// The other three each already self-report: `exclude` names its dead filters and its scoring effect
+/// above, a size-capped file lands in `coverage.degraded`, an unparsed extension gets a per-extension
+/// warning. A `skipDirs` prune stops the walk at the directory, so the files under it are never counted,
+/// never parsed, and never judged — the reply is not a smaller answer about the tree, it is a complete
+/// answer about a different tree, and nothing said so. Measured on an external tree whose sources sat
+/// under `build/`: file count 8 -> 3, findings 15 -> 2, no trace.
+///
+/// Leads with the distinct directory NAMES, because a name is the literal string in the config list and
+/// therefore the whole edit. Example PATHS are appended only when at least one prune happened below the
+/// root — for a tree whose pruned directories all sit at the top level the paths ARE the names, and
+/// printing both produced `(.claude, .git): .claude, .git` in the first field run. Paths are capped at
+/// [`super::SAMPLE`]; names are not, being bounded by a list an author wrote by hand.
+///
+/// Deliberately silent about how many FILES were lost — counting them would mean walking the directories
+/// the key exists to not walk. The line names what was pruned and lets the reader decide.
+///
+/// `node_modules`, `dist`, `build` and the rest of the shipped list are NOT filtered out for reading as
+/// routine: which name is the surprising one is exactly what this engine cannot know, and the measured
+/// defect was a tree whose sources sat under `build/`. [`NOT_SOURCE_BY_CONSTRUCTION`] is the one
+/// exception and it is drawn on a different axis than "boring" — see its doc. Volume stays low without
+/// any further filtering, because a directory a committed `.gitignore` already excludes never reaches
+/// the prune at all (sealed by `a_gitignored_directory_is_not_attributed_to_the_skip_list`), so what
+/// survives to be named is the COMMITTED directory that was skipped anyway — the interesting case by
+/// construction. Measured on this repo: 11 declared names, 1 reported.
+pub(crate) fn skipped_dirs_warning(skipped: &[String]) -> Option<String> {
+    let skipped: Vec<&String> = skipped
+        .iter()
+        .filter(|rel| !is_not_source_by_construction(rel))
+        .collect();
+    if skipped.is_empty() {
+        return None;
+    }
+    let mut names: Vec<&str> = skipped
+        .iter()
+        .map(|rel| rel.rsplit('/').next().unwrap_or(rel.as_str()))
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    let nested = skipped.iter().any(|rel| rel.contains('/'));
+    let where_ = if nested {
+        let mut paths = skipped
+            .iter()
+            .take(super::SAMPLE)
+            .map(|rel| rel.as_str())
+            .collect::<Vec<&str>>()
+            .join(", ");
+        if skipped.len() > super::SAMPLE {
+            paths.push_str(&format!(", +{} more", skipped.len() - super::SAMPLE));
+        }
+        format!(" (e.g. {paths})")
+    } else {
+        String::new()
+    };
+    // Agreement is computed, not assumed plural: the single-prune case is the common one (this repo, and
+    // every tree that commits exactly one skipped directory), and "1 directory ... nothing under them"
+    // reads as a message written for some other run.
+    let (noun, obj, subj, contribute, its, cond) = if skipped.len() == 1 {
+        (
+            "directory",
+            "it",
+            "it",
+            "contributes",
+            "its",
+            "that name holds",
+        )
+    } else {
+        (
+            "directories",
+            "them",
+            "they",
+            "contribute",
+            "their",
+            "any of those names hold",
+        )
+    };
+    Some(format!(
+        "`vocabulary.skipDirs` pruned {} {noun} from the walk, named {}{where_}. Nothing under {obj} was \
+         read, so {subj} {contribute} no file to the census, no finding to any rule, and no node or edge \
+         to the import graph — {its} zero is an absence of EVIDENCE, not a clean bill, and every count in \
+         this reply describes the remaining tree only. If {cond} source in this tree, declare \
+         `vocabulary.skipDirs` without that name; the key replaces the list outright, so the declaration \
+         must name every directory that should still be skipped.",
+        skipped.len(),
+        names.join(", ")
+    ))
+}
 
 /// Capability self-report: a `rules[].exclude` (suppression) whose path/glob filter matches NONE of the
 /// scanned files — almost always a typo (classically `*.stories.tsx`, whose `*` cannot cross `/`, missing

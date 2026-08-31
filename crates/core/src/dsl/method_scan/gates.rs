@@ -1,11 +1,13 @@
-//! The two per-SPAN decisions `super::eval_method_scan` makes before it scans a symbol body's lines:
-//! which symbols are candidates at all (innermost-span priority), and whether a span carrying a
-//! `require_call_kind` gate has the projected witness that gate demands.
+//! The per-SPAN and per-LINE decisions `super::eval_method_scan` delegates: which symbols are
+//! candidates at all (innermost-span priority), whether a span carrying a `require_call_kind` gate has
+//! the projected witness that gate demands, and whether a trigger match satisfies `after`'s lexical
+//! order.
 //!
 //! Split out of `super` purely for the repo's per-file line cap, and along the seam that makes that
-//! split honest: everything here is a pure function of the file's projected facts, with no matcher
-//! state, no regex, and no finding construction. Anything that needs the scan's running state stays
-//! in `super`.
+//! split honest: everything here is a pure function of its arguments, with no matcher state and no
+//! finding construction. Anything that needs the scan's running state stays in `super`. A compiled
+//! regex arrives as a PARAMETER when a decision needs one — [`order_ok`] came here in the same change
+//! that pushed `super` back over the cap, and moving it did not change a byte of what it decides.
 
 use crate::dsl::source::SourceFile;
 
@@ -69,4 +71,31 @@ pub(super) fn call_kind_witnessed(
     f.call_sites
         .iter()
         .any(|s| s.kind == *kind && body_start <= s.line && s.line <= body_end)
+}
+
+/// Whether a trigger match on the line being scanned satisfies `MethodScan::after`.
+///
+/// No `after` (`after_re` is `None`) -> always true, byte-identical to the pre-`after` behaviour.
+/// Otherwise: true when the ordering label matched on an EARLIER line (`after_seen_earlier`, which the
+/// caller computes because it depends on the scan's running state), else only when it matches earlier
+/// ON THIS LINE by start offset — which is what makes a one-liner continuation
+/// (`p.then(r => setX(r))`) count while `setX(v); await f();` does not. Only the two FIRST-match
+/// offsets are compared; `MethodScan::after`'s doc owns the same-line nesting residual that follows
+/// from it.
+pub(super) fn order_ok(
+    after_re: Option<&regex::Regex>,
+    trigger_re: &regex::Regex,
+    after_seen_earlier: bool,
+    scan: &str,
+) -> bool {
+    let Some(after_re) = after_re else {
+        return true;
+    };
+    if after_seen_earlier {
+        return true;
+    }
+    match (after_re.find(scan), trigger_re.find(scan)) {
+        (Some(a), Some(t)) => a.start() < t.start(),
+        _ => false,
+    }
 }

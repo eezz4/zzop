@@ -47,6 +47,11 @@ fn analyze_output_view_rows() -> serde_json::Map<String, serde_json::Value> {
 /// A whitelist, deliberately: a new `carry-conditional` field fails closed (it lands in the denylist
 /// and this file goes red) until someone states which of the two lanes it took.
 const CONDITIONAL_UNDER_ITS_OWN_NAME: &[&str] = &[
+    // Added 2026-08-17: forwarded as `cache`, but as a shaped projection
+    // ({hitFiles, missFiles, fileCount, meaning}) and only when a cache was in play. It reaches this
+    // list rather than the denylist because the reply key IS spelled `cache`, the same test the
+    // `ruleTimings` row above passes.
+    "cache",
     "degraded",
     "findings",
     "gitWindow",
@@ -55,13 +60,58 @@ const CONDITIONAL_UNDER_ITS_OWN_NAME: &[&str] = &[
     // the run was instrumented. It reaches this list (rather than the denylist) because the shaper
     // spells `ruleTimings` as the reply key — see `output::timings`.
     "ruleTimings",
+    // Added 2026-08-26 with the `packsLoaded` gating disclosure: the legend for that array, forwarded
+    // verbatim under its own name and present only when a pack loaded. Same lane as `ruleTimings` —
+    // conditional, but the reply key is spelled exactly as the facade field is.
+    "packsLoadedMeaning",
+    // Added 2026-08-28 with the native-analysis disclosure. Both ride under their own names on every
+    // reply this build produces; they are `carry-conditional` because the shaper's forward is
+    // `.get()`-gated (an older engine/facade degrades to omission, not a JSON `null`) and because the
+    // `carry` status is asserted by a substring grep that a `summary.insert(<name>)` cannot satisfy —
+    // the registry rows carry the full reasoning. The enforcement they trade up to is behavioral:
+    // `the_shaped_reply_carries_the_native_analyses_disclosure_and_its_legend` below.
+    "nativeAnalyses",
+    "nativeAnalysesMeaning",
 ];
 
-/// The reply keys the SHAPER invents — the ones that are not `AnalyzeOutputView` fields at all, so the
-/// registry has no row for them: the tree-mode `path`/`config` echo, the `degradedTruncated`
-/// disclosure, and the compact `architecture` object. Also a whitelist, for the same fail-closed
-/// reason: a NEW reply key that nobody declared is exactly the growth this pin exists to notice.
-const SHAPER_INVENTED_KEYS: &[&str] = &["path", "config", "degradedTruncated", "architecture"];
+/// The reply keys the SHAPER invents — the ones that are not `AnalyzeOutputView` fields at all, so
+/// the registry has no row for them: the tree-mode `path`/`config` echo, the `degradedTruncated`
+/// disclosure, the `coverageGaps` census and the compact `architecture` object.
+///
+/// READ FROM THE SHIPPED REGISTRY (`_replyRootKeys.analyze_repo`) since 2026-08-29, not listed here.
+/// It was a Rust const until the JOIN reply needed the same declaration for its own invented keys
+/// (`sources`, `buckets`, `bucketMeaning`, the roster this batch added, ...). A second hand list would
+/// have made two owners of one fact, and the fact belongs where a human looking up what a reply
+/// carries actually looks — the contract document, beside the field rows this same file already
+/// reads. Each entry there carries a `presence` and a `why`, so the reason a key is legitimate is
+/// stated once and read by both pins: this one (an undeclared key must not exist) and
+/// crates/summary/tests/reply_keyset_parity.rs (a key declared `always` must be present in a real
+/// tree-mode reply). Still a WHITELIST, still fail-closed: a new reply key nobody declared is
+/// exactly the growth these pins exist to notice.
+fn shaper_invented_keys() -> Vec<String> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../docs/contracts/surface-parity.json");
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+    let keys: Vec<String> = serde_json::from_str::<serde_json::Value>(&text)
+        .expect("the surface-parity registry must be valid JSON")["_replyRootKeys"]["analyze_repo"]
+        .as_object()
+        .expect("the registry must carry a _replyRootKeys.analyze_repo block")
+        .keys()
+        .filter(|k| !k.starts_with('_'))
+        .cloned()
+        .collect();
+    // A vacuous-green floor, and the reason it points the safe way: a BROKEN read yields an empty
+    // whitelist, which makes the pin below stricter rather than looser (every invented key goes red
+    // naming itself). This assertion is here so the failure says `the registry stopped parsing`
+    // instead of listing four keys that were fine all along.
+    assert!(
+        !keys.is_empty(),
+        "surface-parity.json's `_replyRootKeys.analyze_repo` declared nothing — the shaper's own\
+         reply keys have a home and this read is not finding it"
+    );
+    keys
+}
 
 #[test]
 fn valid_envelope_shapes_to_a_summary_with_findings_and_coverage_keys() {
@@ -187,15 +237,16 @@ fn every_summary_reply_key_is_a_registry_field_or_a_declared_shaper_invention() 
         !summary_keys.is_empty(),
         "the shaped reply has no keys at all — an empty subject set must be RED, never a silent pass"
     );
+    let invented = shaper_invented_keys();
     let undeclared: Vec<&String> = summary_keys
         .iter()
-        .filter(|k| !rows.contains_key(k.as_str()) && !SHAPER_INVENTED_KEYS.contains(&k.as_str()))
+        .filter(|k| !rows.contains_key(k.as_str()) && !invented.contains(k))
         .collect();
     assert!(
         undeclared.is_empty(),
         "these keys ship in the shaped analyze reply but are neither an AnalyzeOutputView field \
          (docs/contracts/surface-parity.json) nor a declared shaper invention: {undeclared:?} — add \
-         the registry row, or declare it in SHAPER_INVENTED_KEYS with a reason"
+         the registry row, or declare it in surface-parity.json's `_replyRootKeys.analyze_repo` with a `why`"
     );
 }
 
@@ -487,4 +538,224 @@ mod profile_rules_wiring {
             "the disclosure's two numbers must actually ride the report: {timings}"
         );
     }
+}
+
+/// THE PACK AXIS on the located lane — the other half of what an adjacent config contributes, and the
+/// half that decides whether Mode A's escape hatch has a handle on the inside.
+///
+/// Every bundled rule gates on zzop's OWN native extensions, so a complete, valid envelope for a
+/// language zzop has no parser for draws zero DSL findings — which is precisely the case Mode A exists
+/// for. Measured before this lane forwarded `packs.*`: a Ruby envelope carrying two unguarded admin
+/// routes drew nothing, and the identical envelope with `.rb` rewritten to `.py` drew three findings.
+/// The answer (ship a pack targeting your filetype) was reachable from an embedder's request object and
+/// from no CLI or MCP caller.
+#[cfg(test)]
+mod adjacent_config_pack_axis {
+    use super::{no_filters, EXAMPLE_ENVELOPE};
+    use crate::output::RunKnobs;
+
+    /// A Ruby envelope: two admin routes, no guard evidence, and an extension no bundled rule targets.
+    fn ruby_envelope() -> String {
+        let version = serde_json::from_str::<serde_json::Value>(EXAMPLE_ENVELOPE)
+            .expect("the shipped example envelope must be valid JSON")["version"]
+            .as_str()
+            .expect("the example envelope declares its contract version")
+            .to_string();
+        format!(
+            r#"{{
+            "format": "zzop-normalized-ast",
+            "version": "{version}",
+            "parser": "sinatra-adapter/1",
+            "source": "ruby-pack-axis",
+            "files": [
+                {{
+                    "path": "app.rb",
+                    "loc": 40,
+                    "symbols": [{{"id": "app.rb#reset", "file": "app.rb", "name": "reset", "kind": "function", "line": 10, "exported": true}}],
+                    "imports": {{}},
+                    "re_exports": [],
+                    "used_names": [],
+                    "io": {{
+                        "provides": [
+                            {{"kind": "http", "key": "POST /api/admin/reset", "file": "app.rb", "line": 10}},
+                            {{"kind": "http", "key": "GET /api/admin/debug/env", "file": "app.rb", "line": 20}}
+                        ],
+                        "consumes": []
+                    }},
+                    "degraded": false
+                }}
+            ]
+        }}"#
+        )
+    }
+
+    /// One io-scan rule that targets `.rb` — what a Ruby adapter author writes, and the only thing that
+    /// can make Mode A judge Ruby at all.
+    const RUBY_PACK: &str = r#"{
+        "id": "ruby-http",
+        "schema_version": 1,
+        "rules": [{
+            "id": "admin-route-no-auth-evidence",
+            "severity": "warning",
+            "message": "An admin route with no auth evidence.",
+            "matcher": {
+                "type": "io-scan",
+                "file_pattern": "(?i)\\.rb$",
+                "kind": "http",
+                "direction": "provides",
+                "key_pattern": "(?i)/admin(/|$)",
+                "attr_absent": "auth-guarded"
+            }
+        }]
+    }"#;
+
+    /// `envelope.json` plus a config, and optionally a pack at `zzop/rules/` — the authored location the
+    /// mapper discovers with no declaration.
+    fn ruby_dir(name: &str, config: &str, authored_pack: bool) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("zzop-envpacks-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("envelope.json"), ruby_envelope()).unwrap();
+        std::fs::write(dir.join("zzop.config.jsonc"), config).unwrap();
+        if authored_pack {
+            let rules = dir.join("zzop").join("rules");
+            std::fs::create_dir_all(&rules).unwrap();
+            std::fs::write(rules.join("ruby.json"), RUBY_PACK).unwrap();
+        }
+        dir.join("envelope.json")
+    }
+
+    fn analyze(envelope: &std::path::Path) -> serde_json::Value {
+        let text = std::fs::read_to_string(envelope).unwrap();
+        let out = crate::analyze::analyze_envelope_summary_with(
+            &text,
+            Some(envelope.to_str().unwrap()),
+            &no_filters(),
+            RunKnobs::default(),
+        )
+        .expect("the envelope must analyze");
+        serde_json::from_str(&out).expect("the summary must be valid JSON")
+    }
+
+    fn ruby_finding_count(v: &serde_json::Value) -> u64 {
+        v["findings"]["byRule"]["ruby-http/admin-route-no-auth-evidence"]
+            .as_u64()
+            .unwrap_or(0)
+    }
+
+    /// The whole point, as an invalidation pair: the envelope, the config and the routes are identical,
+    /// and only the presence of a pack targeting `.rb` moves the verdict.
+    #[test]
+    fn an_adjacent_pack_is_what_makes_mode_a_judge_an_unsupported_language() {
+        let bare = analyze(&ruby_dir("bare", "{}", false));
+        assert_eq!(
+            ruby_finding_count(&bare),
+            0,
+            "no pack targets .rb, so nothing can fire — this is the state being repaired: {bare}"
+        );
+        assert!(
+            bare["warnings"].as_array().into_iter().flatten().any(|w| w
+                .as_str()
+                .is_some_and(|w| w.contains("no applicable rules"))),
+            "and the run must SAY that its zero is scope rather than cleanliness: {bare}"
+        );
+
+        let with_pack = analyze(&ruby_dir("authored", "{}", true));
+        assert_eq!(
+            ruby_finding_count(&with_pack),
+            2,
+            "a pack in the authored `zzop/rules/` location beside the config must reach the envelope \
+             lane, and both admin routes must fire: {with_pack}"
+        );
+    }
+
+    /// The declared spelling of the same lever, and the precedence that comes with it: a declared
+    /// `packs.extraDirs` REPLACES the authored-directory fallback outright, so `[]` is the opt-out and
+    /// the pack sitting in `zzop/rules/` stops loading. That is the tree lane's contract, and one config
+    /// file must not mean two different things depending on which lane read it.
+    #[test]
+    fn declared_extra_dirs_replace_the_authored_fallback_on_this_lane_too() {
+        let declared = analyze(&ruby_dir(
+            "declared",
+            "{ \"packs\": { \"extraDirs\": [\"./zzop/rules\"] } }",
+            true,
+        ));
+        assert_eq!(
+            ruby_finding_count(&declared),
+            2,
+            "an explicitly declared pack directory must load: {declared}"
+        );
+
+        let opted_out = analyze(&ruby_dir(
+            "opted-out",
+            "{ \"packs\": { \"extraDirs\": [] } }",
+            true,
+        ));
+        assert_eq!(
+            ruby_finding_count(&opted_out),
+            0,
+            "`extraDirs: []` is the explicit opt-out and must beat the authored-directory fallback, \
+             the same way it does on the tree lane: {opted_out}"
+        );
+    }
+
+    /// `packs.disabled` rides the same axis and must arrive too — otherwise a config could add rules on
+    /// this lane but never subtract them, which is one direction of a two-directional knob.
+    #[test]
+    fn disabling_the_pack_by_id_silences_it_again() {
+        let disabled = analyze(&ruby_dir(
+            "disabled",
+            "{ \"packs\": { \"disabled\": [\"ruby-http\"] } }",
+            true,
+        ));
+        assert_eq!(
+            ruby_finding_count(&disabled),
+            0,
+            "the pack is present on disk and disabled by id — the subtraction half of the axis must \
+             reach this lane as well: {disabled}"
+        );
+    }
+}
+
+/// The behavioral half of the native-analysis disclosure's surface-parity contract: the shaped reply
+/// — the one an MCP host and the CLI actually read — carries BOTH keys, with content.
+///
+/// This pin exists because the field's whole purpose is to not be silently absent, and its registry
+/// rows deliberately take `carry-conditional` (see those rows for why the `carry` grep cannot see a
+/// key inserted by name). A status the source-text guard does not assert needs an assertion that runs
+/// the shaper, or the field would be exactly as droppable as the blank it replaced. It runs on the
+/// ENVELOPE lane on purpose: that path never walks a filesystem, so a disclosure that quietly needed
+/// one would be caught here rather than on a corpus.
+#[test]
+fn the_shaped_reply_carries_the_native_analyses_disclosure_and_its_legend() {
+    let out = analyze_envelope_summary(EXAMPLE_ENVELOPE, &no_filters())
+        .expect("envelope analysis should succeed");
+    let v: serde_json::Value = serde_json::from_str(&out).expect("summary must be valid JSON");
+
+    let native = v
+        .get("nativeAnalyses")
+        .unwrap_or_else(|| panic!("the shaped reply dropped nativeAnalyses: {v}"));
+    assert!(
+        native["registered"].as_u64().unwrap_or(0) >= 40,
+        "the denominator must survive shaping: {v}"
+    );
+    assert!(
+        native["disabled"].is_array(),
+        "the empty list must survive shaping as an ARRAY — a dropped empty list is the exact shape \
+         that made 'not analyzed' and 'analyzed and clean' the same bytes: {v}"
+    );
+    assert!(
+        native["reportedInCrossLayerFindings"]
+            .as_array()
+            .map(|a| a.len() >= 20)
+            .unwrap_or(false),
+        "the cross-layer list must survive shaping: {v}"
+    );
+    assert!(
+        v.get("nativeAnalysesMeaning")
+            .and_then(|m| m.get("reportedInCrossLayerFindings"))
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|s| s.contains("crossLayerFindings")),
+        "the numbers must not arrive without the sentence that says where to go: {v}"
+    );
 }

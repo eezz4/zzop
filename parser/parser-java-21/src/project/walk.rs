@@ -178,6 +178,7 @@ fn emit_class_routes(
             continue;
         }
         provides.push(IoProvide {
+            route_version: None,
             response: None,
             body: None,
             kind: "http".to_string(),

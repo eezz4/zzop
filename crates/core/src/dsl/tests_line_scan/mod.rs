@@ -2,6 +2,7 @@
 //! `exclude_pattern` (v2 #2), `file_exclude_pattern` (v3), and `require_file_absent` (v4) extensions.
 
 mod comment_leaders;
+mod enclosing_call_exclude;
 mod prev_line_exclude;
 use super::test_support::{label, rule_pack, scan, scan_pack, snippet};
 use super::RulePackDef;

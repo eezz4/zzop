@@ -93,6 +93,21 @@ pub(super) fn render(
         )
     };
     out.push_str(&format!("  zzopNote[\"{note}\"]\n"));
+    // Independent of `c.cycles`, and that is the whole point: the measured instance had cycles == 0
+    // while drawing a two-way arrow pair, so a note gated on "we found a cycle" would have been silent
+    // exactly where the picture contradicted the census. Mermaid label text cannot carry `"` or square
+    // brackets, so this is the shared sentence's plain-language form rather than the const itself —
+    // `zzop_facade::CYCLE_GRAPH_EXCLUDES_ERASED_IMPORTS` is the full text and rides the cosmograph
+    // census, which has no such syntax to respect.
+    if c.mutual_outside_cycles > 0 {
+        out.push_str(&format!(
+            "  zzopNoncycle[\"{} file pair(s) import EACH OTHER but are in no reported cycle — an \
+             import erased at compile time (import type, dynamic import, or a name the target exports \
+             as a type/interface) loads no module, so it is subtracted before cycle detection and NOT \
+             from this graph. Two axes disagreeing by design, not a missed cycle.\"]\n",
+            c.mutual_outside_cycles
+        ));
+    }
     if c.cycles > 0 {
         let hexagon = if fold.is_on() {
             "a hexagon means the box CONTAINS a file in some cycle, not that the boxes form one — a \

@@ -5,7 +5,9 @@
 use tree_sitter::Node;
 use zzop_core::{http_interface_key, IoProvide};
 
-use super::annotations::{class_annotation_facts, method_route, route_path_state, RoutePathState};
+use super::annotations::{
+    class_annotation_facts, method_route_match, route_path_state, RoutePathState,
+};
 use crate::lang::symbols::is_type_decl_kind;
 use crate::util::{line_of, modifiers_of, node_text, valid_named_children};
 
@@ -96,7 +98,14 @@ fn walk_member(
         // rather than key them under the empty base (a phantom). Nested types were already recursed above.
         return;
     }
-    let routes = method_route(modifiers_of(node), src);
+    let Some(route) = method_route_match(modifiers_of(node), src) else {
+        return;
+    };
+    // The MAPPING ANNOTATION, not the `method_declaration`: the declaration node starts at its first
+    // modifier, which is a Swagger `@Operation`/`@Parameter` (or any other decoration) whenever one sits
+    // above the mapping — so the reported line pointed at the doc comment, never at the registration.
+    let line = line_of(route.anchor);
+    let routes = route.literal_routes();
     if routes.is_empty() {
         return;
     }
@@ -104,10 +113,10 @@ fn walk_member(
         return;
     };
     let symbol = node_text(name_node, src).to_string();
-    let line = line_of(node);
     for (verb, path) in routes {
         let full_path = format!("{prefix}/{path}");
         out.push(IoProvide {
+            route_version: None,
             response: None,
             body: None,
             kind: "http".to_string(),

@@ -93,6 +93,7 @@ mod tests {
             line: 1,
             symbol: None,
             body: None,
+            ..Default::default()
         }
     }
 

@@ -248,8 +248,15 @@ fn writes_a_java_fixture(body: &str) -> bool {
 /// classifier that silently skipped what it could not read would under-count exactly where a new test
 /// style appears.
 fn classify(body: &str) -> Result<Vec<(String, bool)>, String> {
+    // The binding may carry a type annotation (`let lines: Vec<u32> = hits(...)`), which the pack
+    // tests already use when they assert WHICH lines fired rather than how many. That shape was
+    // invisible here until 2026-08-18 — not silently, because the `bare hits(...)` arm below rejects
+    // what it cannot read, which is how it surfaced the moment such a test first used a `.java`
+    // fixture. The annotation is matched loosely (anything up to the `=`) rather than by naming
+    // `Vec<u32>`: this parses Rust with a regex either way, and a narrow spelling would just move the
+    // day the next annotation fails to match.
     let call = regex::Regex::new(
-        r#"(?:let\s+(?<bind>\w+)\s*=\s*)?hits\(&out,\s*"(?<id>[a-z0-9-]+)"\)\s*(?:(?<empty>\.is_empty\(\))|\.len\(\)\s*,\s*(?<n>\d+))?"#,
+        r#"(?:let\s+(?<bind>\w+)\s*(?::[^=]+)?=\s*)?hits\(&out,\s*"(?<id>[a-z0-9-]+)"\)\s*(?:(?<empty>\.is_empty\(\))|\.len\(\)\s*,\s*(?<n>\d+))?"#,
     )
     .expect("static regex");
 
@@ -263,13 +270,18 @@ fn classify(body: &str) -> Result<Vec<(String, bool)>, String> {
         } else if let Some(bind) = caps.name("bind") {
             // `let h = hits(&out, "id");` — the verdict is the first assertion made about `h` after it.
             let rest = &body[caps.get(0).expect("group 0").end()..];
+            // Three spellings of the same verdict: `.is_empty()`, `.len(), N`, and the line-list form
+            // `assert_eq!(lines, vec![2])` — where the vec being EMPTY is the non-firing claim, exactly
+            // as `.is_empty()` is. A `vec![]` that meant "fires" would be a contradiction, so reading
+            // emptiness here needs no separate arm.
             let asserted = regex::Regex::new(&format!(
-                r"\b{}\s*(?:(?<empty>\.is_empty\(\))|\.len\(\)\s*,\s*(?<n>\d+))",
+                r"\b{}\s*(?:(?<empty>\.is_empty\(\))|\.len\(\)\s*,\s*(?<n>\d+)|,\s*vec!\[(?<v>[^\]]*)\])",
                 regex::escape(bind.as_str())
             ))
             .expect("escaped binding");
             match asserted.captures(rest) {
                 Some(c) if c.name("empty").is_some() => false,
+                Some(c) if c.name("v").is_some() => !c["v"].trim().is_empty(),
                 Some(c) => &c["n"] != "0",
                 None => {
                     return Err(format!(

@@ -55,6 +55,38 @@ fn system_net_http_json_specifier_also_gates() {
 }
 
 #[test]
+fn generic_helpers_key_the_same_as_their_non_generic_overloads() {
+    // `GetFromJsonAsync<T>` is the CANONICAL `System.Net.Http.Json` spelling, not an edge case, and a
+    // generic invocation's `name` node is a `generic_name` whose text carries the type arguments —
+    // so the vocabulary lookup saw `GetFromJsonAsync<CatalogItem>` and matched nothing. One type
+    // argument made the whole egress row disappear. Measured on dotnet/eShop: 16 generic call sites
+    // tree-wide extracted 0, and both Blazor apps' service classes contributed no rows at all.
+    //
+    // The control is on the LINE BELOW in the same fixture, which is how the gap was found: the
+    // non-generic overload keyed normally the whole time, so the two lines differ only by `<T>`.
+    let src = concat!(
+        "using System.Net.Http.Json;\n",
+        "class C { async void M() {\n",
+        "  var a = await client.GetFromJsonAsync<CatalogItem>(\"/api/catalog/items\");\n",
+        "  var b = await client.GetFromJsonAsync(\"/api/catalog/brands\", ctx);\n",
+        "  await client.PostAsJsonAsync<Order>(\"/api/orders\", order);\n",
+        "} }\n",
+    );
+    let out = extract_csharp_http_consumes("f.cs", src);
+    let mut keys: Vec<&str> = out.iter().filter_map(|c| c.key.as_deref()).collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        vec![
+            "GET /api/catalog/brands",
+            "GET /api/catalog/items",
+            "POST /api/orders"
+        ],
+        "a type argument must not remove an egress row: {out:?}"
+    );
+}
+
+#[test]
 fn empty_on_parse_failure() {
     assert!(extract_csharp_http_consumes("f.cs", "\u{0}\u{1}not csharp{{{{").is_empty());
 }

@@ -4,12 +4,21 @@
 //!
 //! Backs the `rules/native/rules-graph` HTTP-handler-reachability rules (`scanUnsafeReadEndpoint` /
 //! `scanNonIdempotentWrite`, both BFS-over-`symbolEdges` from an HTTP handler symbol to a store-write call).
-
-use std::collections::{BTreeMap, HashMap, HashSet};
+//!
+//! The two halves split along the substrate's own seam and are re-exported flat, so this module's public
+//! surface is unchanged by the split: [`resolve`] turns raw calls into edges (and reports what it could
+//! not place), [`bfs`] walks the finished edge list and knows nothing about how it was built.
 
 use serde::{Deserialize, Serialize};
 
-use crate::ir::ImportMap;
+mod bfs;
+mod resolve;
+
+pub use bfs::bfs_reachable;
+pub use resolve::{
+    build_symbol_graph, build_symbol_graph_with_unresolved, resolve_calls_for_file,
+    resolve_calls_for_file_with_unresolved,
+};
 
 /// A single call site inside one file, attributed to its enclosing top-level symbol. Produced per-file by
 /// a parser (`zzop_parser_typescript::calls::parse_calls`); cross-file resolution into a `SymbolEdge` is
@@ -39,215 +48,9 @@ pub struct SymbolEdge {
     pub to: String,
 }
 
-/// The whole-repo symbol call graph: a flat edge list. The BFS helpers below build their adjacency index
+/// The whole-repo symbol call graph: a flat edge list. [`bfs`]'s helpers build their adjacency index
 /// from this on demand.
 pub type SymbolGraph = Vec<SymbolEdge>;
-
-/// Resolves one file's `RawCall`s into `SymbolEdge`s. `resolve_file` is an injected callback that resolves
-/// an import specifier to its canonical file path, or `None` for an external/unresolvable module (that
-/// call is then dropped, never guessed).
-///
-/// Resolution rules:
-/// - a method call (`RawCall::receiver_type` set): the receiver class resolves via `imports` (cross-file,
-///   `<resolvedFile>#<original>.<method>`; a namespace receiver — `original == "*"` — targets the bare
-///   member `<resolvedFile>#<method>`) or via `local_symbols` (same-file, `<from_file>#<receiver_type>.<method>`).
-/// - a plain identifier call or heritage super name: same lookup order by `callee_name` directly
-///   (`<resolvedFile>#<original>` or `<from_file>#<callee_name>`).
-/// - anything resolving through neither `imports` nor `local_symbols` (implicit global, unresolvable
-///   external) is dropped — this resolver never invents an edge for a name it cannot place.
-pub fn resolve_calls_for_file(
-    calls: &[RawCall],
-    imports: &ImportMap,
-    from_file: &str,
-    local_symbols: &HashSet<String>,
-    resolve_file: &dyn Fn(&str, &str) -> Option<String>,
-) -> Vec<SymbolEdge> {
-    calls
-        .iter()
-        .filter_map(|call| {
-            resolve_one(call, imports, from_file, local_symbols, resolve_file).map(|to| {
-                SymbolEdge {
-                    from: call.from_symbol.clone(),
-                    to,
-                }
-            })
-        })
-        .collect()
-}
-
-fn resolve_one(
-    call: &RawCall,
-    imports: &ImportMap,
-    from_file: &str,
-    local_symbols: &HashSet<String>,
-    resolve_file: &dyn Fn(&str, &str) -> Option<String>,
-) -> Option<String> {
-    match &call.receiver_type {
-        Some(receiver_type) => resolve_method(
-            receiver_type,
-            &call.callee_name,
-            imports,
-            from_file,
-            local_symbols,
-            resolve_file,
-        ),
-        // Heritage (super) and regular identifier calls share the same name resolution — the only
-        // difference is whether the super name is imported or local.
-        None => resolve_name(
-            &call.callee_name,
-            imports,
-            from_file,
-            local_symbols,
-            resolve_file,
-        ),
-    }
-}
-
-/// Resolves the receiver class via import or local, then combines to `<classFile>#<OriginalClass>.<method>`.
-///
-/// **The id it returns is a CANDIDATE, not a verified node.** Nothing here checks that a `SourceSymbol`
-/// with that id exists: an imported name is enough, so a Python `Annotated` alias, a TS `type` alias, or
-/// any other non-class binding mints a well-formed id for a symbol that was never declared. That is
-/// deliberate — a candidate graph is what lets a consumer decide how much evidence it needs — but it is
-/// a contract a consumer must read, and one did not: `mutating_route_no_auth` accepted such an id's
-/// QUALIFIER as auth evidence, so `session: SessionDep` + `session.add(...)` cleared an unauthenticated
-/// write route (2026-07-27, fixed on the rule side by requiring the qualifier name to be a declared
-/// symbol). Any consumer that reads meaning out of an id's SHAPE owes itself the same check.
-/// A namespace receiver (`import * as X` / `var X = require(...)`, `original == "*"`) targets the bare
-/// member `<file>#<method>` — matches how CommonJS/namespace exports are emitted as bare-member symbols.
-fn resolve_method(
-    receiver_type: &str,
-    method: &str,
-    imports: &ImportMap,
-    from_file: &str,
-    local_symbols: &HashSet<String>,
-    resolve_file: &dyn Fn(&str, &str) -> Option<String>,
-) -> Option<String> {
-    if let Some(binding) = imports.get(receiver_type) {
-        let file = resolve_file(&binding.specifier, from_file)?;
-        return Some(if binding.original == "*" {
-            format!("{file}#{method}")
-        } else {
-            format!("{file}#{}.{method}", binding.original)
-        });
-    }
-    if local_symbols.contains(receiver_type) {
-        return Some(format!("{from_file}#{receiver_type}.{method}"));
-    }
-    None
-}
-
-/// Resolves an identifier name: imported -> `<file>#<original>`; same-file declaration -> `<fromFile>#<name>`.
-fn resolve_name(
-    name: &str,
-    imports: &ImportMap,
-    from_file: &str,
-    local_symbols: &HashSet<String>,
-    resolve_file: &dyn Fn(&str, &str) -> Option<String>,
-) -> Option<String> {
-    if let Some(binding) = imports.get(name) {
-        let file = resolve_file(&binding.specifier, from_file)?;
-        return Some(format!("{file}#{}", binding.original));
-    }
-    if local_symbols.contains(name) {
-        return Some(format!("{from_file}#{name}"));
-    }
-    None
-}
-
-/// Builds the whole-repo `SymbolGraph` from every file's `RawCall`s — groups `calls` by the file segment of `RawCall::from_symbol`
-/// (`"<file>#<name>"`, split at the first `#`) and resolves each file's group with that file's own
-/// `ImportMap`/local-symbol set. A file with no entry in `imports_by_file`/`local_symbols_by_file` resolves
-/// as if both were empty (no imports, no local symbols) rather than panicking.
-pub fn build_symbol_graph(
-    calls: &[RawCall],
-    imports_by_file: &HashMap<String, ImportMap>,
-    local_symbols_by_file: &HashMap<String, HashSet<String>>,
-    resolve_file: &dyn Fn(&str, &str) -> Option<String>,
-) -> SymbolGraph {
-    let mut by_file: BTreeMap<&str, Vec<RawCall>> = BTreeMap::new();
-    for call in calls {
-        let file = call
-            .from_symbol
-            .split('#')
-            .next()
-            .unwrap_or(call.from_symbol.as_str());
-        by_file.entry(file).or_default().push(call.clone());
-    }
-    let empty_imports = ImportMap::new();
-    let empty_locals: HashSet<String> = HashSet::new();
-    let mut out = Vec::new();
-    for (file, file_calls) in by_file {
-        let imports = imports_by_file.get(file).unwrap_or(&empty_imports);
-        let locals = local_symbols_by_file.get(file).unwrap_or(&empty_locals);
-        out.extend(resolve_calls_for_file(
-            &file_calls,
-            imports,
-            file,
-            locals,
-            resolve_file,
-        ));
-    }
-    out
-}
-
-/// Downstream-only BFS depth map from `start` over `graph` (the only direction the two call-graph rules
-/// need; nodeId -> depth, 0 = `start`). Unreachable nodes are simply absent from the map.
-///
-/// Module-private: `bfs_reachable` is the only caller and the only shape any consumer has ever wanted
-/// ("closest reached site wins"). Exporting the raw depth map published a second entry point nobody
-/// used — widen it again when a caller outside this module actually needs the whole map.
-fn bfs_depths(graph: &SymbolGraph, start: &str) -> BTreeMap<String, u32> {
-    let mut adjacency: HashMap<&str, Vec<&str>> = HashMap::new();
-    for edge in graph {
-        adjacency
-            .entry(edge.from.as_str())
-            .or_default()
-            .push(edge.to.as_str());
-    }
-
-    let mut depth_by_node: BTreeMap<String, u32> = BTreeMap::new();
-    depth_by_node.insert(start.to_string(), 0);
-    let mut frontier: Vec<String> = vec![start.to_string()];
-    let mut depth = 0u32;
-    while !frontier.is_empty() {
-        let mut next = Vec::new();
-        for node in &frontier {
-            let Some(neighbors) = adjacency.get(node.as_str()) else {
-                continue;
-            };
-            for &neighbor in neighbors {
-                if !depth_by_node.contains_key(neighbor) {
-                    depth_by_node.insert(neighbor.to_string(), depth + 1);
-                    next.push(neighbor.to_string());
-                }
-            }
-        }
-        if next.is_empty() {
-            break;
-        }
-        frontier = next;
-        depth += 1;
-    }
-    depth_by_node
-}
-
-/// The reachable node (downstream of `start`, `bfs_depths` semantics) with the lowest depth for which
-/// `predicate` holds, tie-broken by symbol id ascending for determinism (this crate's general convention —
-/// see `registry::merge_findings`'s explicit tie-breaks — since `bfs_depths`' `BTreeMap` iteration order is
-/// already id-sorted, not BFS-discovery order). Returns `None` when no reachable node (including `start`
-/// itself) satisfies `predicate`. This is the shared "closest reached site wins" primitive behind
-/// `scanUnsafeReadEndpoint` / `scanNonIdempotentWrite`.
-pub fn bfs_reachable(
-    graph: &SymbolGraph,
-    start: &str,
-    predicate: impl Fn(&str) -> bool,
-) -> Option<(String, u32)> {
-    bfs_depths(graph, start)
-        .into_iter()
-        .filter(|(id, _)| predicate(id))
-        .min_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)))
-}
 
 #[cfg(test)]
 mod tests;

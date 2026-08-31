@@ -67,4 +67,6 @@ pub use dead_exports::{
     dead_export_findings, find_dead_exports, DeadExport, DeadExportCandidate, DeadExportInputFile,
     DeadExportReason,
 };
-pub use unreachable::{find_unreachable, unreachable_findings, UnreachableFile};
+pub use unreachable::{
+    find_unreachable, is_tool_config_file, unreachable_findings, UnreachableFile,
+};

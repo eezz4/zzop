@@ -49,6 +49,19 @@ pub const CONFIG_TEMPLATE_JSONC: &str = r#"// zzop configuration. JSONC: comment
   // The trees to analyze, resolved against this file's own directory. Swap in `trees` when a tree
   // needs its own id, adapter overlays or deployment topology, and "trees": "auto" to derive one tree
   // per workspace package of a monorepo.
+  //
+  // `trees` entries are OBJECTS, not paths — the shape is shown here because the sentence above was
+  // not enough twice: two independent reviewers wrote `"trees": ["./web", "./api"]` and only learned
+  // otherwise from the (accurate) error it produced. Every key but `root` is optional:
+  //
+  //   "trees": [
+  //     { "root": "./web", "sourceId": "web", "clientBase": "/api" },
+  //     { "root": "./api", "sourceId": "api", "mountedAt": "/api",
+  //       "routes": [{ "key": "GET /internal/health" }] }
+  //   ],
+  //
+  // `overlays` (adapter envelope files) belongs here too. What each key MEANS is the config-surface
+  // document's job, not this comment's — the shape is what was missing.
   "roots": ["."],
 
   // Rule packs — the DOMAIN-level on/off switch, and the one to reach for first: a pack is a whole
@@ -188,7 +201,13 @@ pub const CONFIG_TEMPLATE_JSONC: &str = r#"// zzop configuration. JSONC: comment
 
     // The Python side of the same guard question: what makes a dependency callable a gate, and the
     // three shapes that mean it reads or renders rather than rejects.
-    "pythonGuardSubstrings": ["authoriz","authentic","currentuser","activeuser","superuser","staffuser","permission","loginrequired","isauthenticated","isadminuser","requirelogin","requireauth","verifytoken","checktoken","jwtrequired","apikeyrequired"],
+    // The require-prefixed family is the FastAPI house idiom for a gate, and this list named only its
+    // login and auth members — so an admin gate spelled require_admin read as "not a guard" and every
+    // route it protected was reported as unauthorized. Measured 2026-08-16 on a 17-route FastAPI tree:
+    // 8 false alarms against 1 true one, all 8 cleared by that one string. The three admitted beside it
+    // close the same shape (require_staff, require_role) and the Django-style inversion (admin_required,
+    // whose login_required twin this list already covered).
+    "pythonGuardSubstrings": ["authoriz","authentic","currentuser","activeuser","superuser","staffuser","permission","loginrequired","isauthenticated","isadminuser","requirelogin","requireauth","requireadmin","requirestaff","requirerole","adminrequired","verifytoken","checktoken","jwtrequired","apikeyrequired"],
     "pythonGuardAnonymousVetoSubstrings": ["optional","ornone","maybe","anonymous"],
     "pythonGuardReportVetoPrefixes": ["list","count","serialize","render","format"],
     "pythonGuardReportVetoSuffixes": ["header","headers","serializer","serializers","handler","stats","metrics","report","summary"],

@@ -21,6 +21,8 @@ use super::{DegradeCause, FileArtifact};
 /// Cache flow: content-hash `bytes` -> `get_ir`. IR miss -> full parse via `compute_fresh_artifact`,
 /// then `put_ir` + `put_findings`. IR hit + findings hit -> full skip, no reparse. IR hit but findings
 /// miss (ruleset-only change) -> reuse the cached `FileIrSlice`, re-run `eval_packs`, `put_findings`.
+/// The suppression-marker census rides HERE rather than inside the cache-aware body, so it reads the
+/// same bytes once and is identical warm and cold (`zzop_core::dsl::suppress_marker_sites` owns why).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn process_file(
     rel: &str,
@@ -32,49 +34,87 @@ pub(super) fn process_file(
     ruleset_fingerprint: Option<&str>,
     counters: Option<&CacheCounters>,
 ) -> FileArtifact {
+    // ONE read, here: the census and the analysis are two questions about the same bytes, and reading
+    // twice would put a second syscall on every file of every run to answer the cheaper one.
     let bytes = match fs::read(abs) {
         Ok(b) => b,
         Err(_) => {
             // Unreadable (permission error, or a race with a concurrent delete) — never a panic, just a
-            // degraded empty artifact. No cache lookup: there's no content to hash.
-            return FileArtifact {
-                rel: rel.to_string(),
-                symbols: Vec::new(),
-                imports: None,
-                re_exports: Vec::new(),
-                dynamic_imports: Vec::new(),
-                asset_refs: Vec::new(),
-                loc: 0,
-                findings: Vec::new(),
-                degrade_cause: Some(DegradeCause::Unreadable),
-                minified_or_generated: false,
-                io: None,
-                rule_timings: Vec::new(),
-                used_names: Vec::new(),
-                exported_signature_names: Vec::new(),
-                const_map_fragment: std::collections::HashMap::new(),
-                procedure_router_fragments: Vec::new(),
-                router_mount_fragments: Vec::new(),
-                wrapper_def_fragments: Vec::new(),
-                wrapper_call_fragments: Vec::new(),
-                controller_prefix_route_fragments: Vec::new(),
-                class_shape_fragments: Vec::new(),
-                query_call_sites: Vec::new(),
-                field_usage_tokens: Vec::new(),
-                loop_spans: Vec::new(),
-                function_spans: Vec::new(),
-                test_spans: Vec::new(),
-                call_sites: Vec::new(),
-                string_literals: Vec::new(),
-            };
+            // degraded empty artifact, and no text to census.
+            return unreadable_artifact(rel);
         }
     };
+    let mut artifact = process_file_cached(
+        rel,
+        &bytes,
+        config,
+        vocab,
+        packs,
+        cache,
+        ruleset_fingerprint,
+        counters,
+    );
+    // `from_utf8_lossy` borrows for valid UTF-8, which is every source file, so this is not a second
+    // copy of the tree in memory.
+    artifact.suppress_markers =
+        zzop_core::dsl::suppress_marker_sites(rel, &String::from_utf8_lossy(&bytes));
+    artifact
+}
 
+/// The degraded artifact for a file that could not be read at all — no cache lookup either, since there
+/// is no content to hash.
+fn unreadable_artifact(rel: &str) -> FileArtifact {
+    FileArtifact {
+        rel: rel.to_string(),
+        suppress_markers: Vec::new(),
+        symbols: Vec::new(),
+        imports: None,
+        re_exports: Vec::new(),
+        dynamic_imports: Vec::new(),
+        asset_refs: Vec::new(),
+        loc: 0,
+        findings: Vec::new(),
+        degrade_cause: Some(DegradeCause::Unreadable),
+        minified_or_generated: false,
+        io: None,
+        rule_timings: Vec::new(),
+        used_names: Vec::new(),
+        exported_signature_names: Vec::new(),
+        const_map_fragment: std::collections::HashMap::new(),
+        procedure_router_fragments: Vec::new(),
+        router_mount_fragments: Vec::new(),
+        wrapper_def_fragments: Vec::new(),
+        wrapper_call_fragments: Vec::new(),
+        controller_prefix_route_fragments: Vec::new(),
+        class_shape_fragments: Vec::new(),
+        query_call_sites: Vec::new(),
+        field_usage_tokens: Vec::new(),
+        loop_spans: Vec::new(),
+        function_spans: Vec::new(),
+        test_spans: Vec::new(),
+        call_sites: Vec::new(),
+        string_literals: Vec::new(),
+    }
+}
+
+/// The cache-aware body: everything from the content hash to the artifact, over bytes the caller has
+/// already read. Split from [`process_file`] so the marker census above reads those same bytes once.
+#[allow(clippy::too_many_arguments)]
+fn process_file_cached(
+    rel: &str,
+    bytes: &[u8],
+    config: &EngineConfig,
+    vocab: &crate::vocabulary::ResolvedVocabulary<'_>,
+    packs: &[&RulePackDef],
+    cache: Option<&AnalysisCache>,
+    ruleset_fingerprint: Option<&str>,
+    counters: Option<&CacheCounters>,
+) -> FileArtifact {
     let language = dispatch::dispatch(rel, &config.dispatch);
 
     let cache_key = match (cache, ruleset_fingerprint) {
         (Some(_), Some(rsfp)) => Some(CacheKey {
-            content_hash: AnalysisCache::content_hash(&bytes),
+            content_hash: AnalysisCache::content_hash(bytes),
             parser_fingerprint: crate::cache::parser_fingerprint(language, config),
             // Without `scope`, two different files with byte-identical content could alias each
             // other's cached IR/findings (which embed their own `file` path).
@@ -94,11 +134,11 @@ pub(super) fn process_file(
                     c.record_hit();
                 }
                 // Full cache hit: no rule evaluation ran this call, so nothing to time.
-                let cause = cached_degrade_cause(ir.degraded, &bytes, config);
+                let cause = cached_degrade_cause(ir.degraded, bytes, config);
                 return artifact_from_ir(rel, ir, findings, Vec::new(), cause);
             }
             // IR hit, findings miss: reuse the parsed IR, re-run rules only.
-            let text = String::from_utf8_lossy(&bytes).into_owned();
+            let text = String::from_utf8_lossy(bytes).into_owned();
             let (mut findings, rule_timings, _minified) = eval_packs(
                 packs,
                 rel,
@@ -131,7 +171,7 @@ pub(super) fn process_file(
             if let Some(c) = counters {
                 c.record_miss();
             }
-            let cause = cached_degrade_cause(ir.degraded, &bytes, config);
+            let cause = cached_degrade_cause(ir.degraded, bytes, config);
             return artifact_from_ir(rel, ir, findings, rule_timings, cause);
         }
     }
@@ -141,8 +181,8 @@ pub(super) fn process_file(
         }
     }
 
-    let text = String::from_utf8_lossy(&bytes).into_owned();
-    let artifact = compute_fresh_artifact(rel, &bytes, &text, language, config, vocab, packs);
+    let text = String::from_utf8_lossy(bytes).into_owned();
+    let artifact = compute_fresh_artifact(rel, bytes, &text, language, config, vocab, packs);
 
     if let (Some(cache), Some(key)) = (cache, cache_key.as_ref()) {
         let ir_slice = FileIrSlice {
@@ -226,6 +266,7 @@ fn artifact_from_ir(
 ) -> FileArtifact {
     debug_assert_eq!(ir.degraded, degrade_cause.is_some());
     FileArtifact {
+        suppress_markers: Vec::new(),
         rel: rel.to_string(),
         symbols: ir.symbols,
         imports: ir.imports,

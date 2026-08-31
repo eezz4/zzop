@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use zzop_core::{DepGraph, ImportMap, ReExport};
+use zzop_core::{DepGraph, ImportMap, NoncycleCandidates, ReExport};
 
 use super::specifier::resolve_file;
 use super::tsconfig::TsconfigPaths;
@@ -34,7 +34,7 @@ fn build_dep_impl<F>(
     re_exports: &[(String, Vec<ReExport>)],
     dynamic_imports: &[(String, Vec<String>)],
     mut resolve: F,
-) -> (DepGraph, HashSet<(String, String)>)
+) -> (DepGraph, NoncycleCandidates)
 where
     F: FnMut(&str, &str) -> Option<String>,
 {
@@ -47,26 +47,20 @@ where
         .map(|(rel, ds)| (rel.as_str(), ds))
         .collect();
     let mut dep = DepGraph::new();
-    let mut noncycle_edges = HashSet::new();
+    let mut candidates = NoncycleCandidates::new();
     for (rel, imports) in files {
         let mut seen = HashSet::new();
         let mut resolved = Vec::new();
-        // target -> true iff EVERY edge resolving to it so far is excluded from cycle detection: a
-        // type-only import/re-export (erased at compile time) or a dynamic `import()` (async — never a
-        // synchronous module-load cycle). Any one plain value edge flips it false. The target still
-        // gains a real dep edge (fan-in) either way; only `circular_from_dep_excluding` consults this set.
-        // BTreeMap, not HashMap: this map is drained into `noncycle_edges` below, and an ordered
-        // walk removes the question of whether that drain order matters at all.
-        let mut target_noncycle: BTreeMap<String, bool> = BTreeMap::new();
         for binding in imports.values() {
             if binding.deferred {
                 continue; // lazy require/import: no module-load edge
             }
             if let Some(target) = resolve(&binding.specifier, rel) {
-                target_noncycle
-                    .entry(target.clone())
-                    .and_modify(|all| *all &= binding.type_only)
-                    .or_insert(binding.type_only);
+                // The IMPORTED NAME travels with the verdict instead of being folded away here: the
+                // export-side half of "is this edge erased at compile time?" is a question about the
+                // TARGET file's declarations, which this per-file loop cannot see. `NoncycleCandidates`
+                // holds every contributing binding until one whole-tree fold — see its module doc.
+                candidates.record(rel, &target, &binding.original, binding.type_only);
                 if seen.insert(target.clone()) {
                     resolved.push(target);
                 }
@@ -77,10 +71,7 @@ where
                 // Defect 1: a type-only re-export used to be dropped entirely (no edge, no fan-in). It
                 // now gets the same treatment as a type-only binding — a real edge, excluded from cycles.
                 if let Some(target) = resolve(&re.specifier, rel) {
-                    target_noncycle
-                        .entry(target.clone())
-                        .and_modify(|all| *all &= re.type_only)
-                        .or_insert(re.type_only);
+                    candidates.record(rel, &target, &re.original, re.type_only);
                     if seen.insert(target.clone()) {
                         resolved.push(target);
                     }
@@ -90,24 +81,19 @@ where
         if let Some(dyns) = dyn_import_map.get(rel.as_str()) {
             for spec in dyns.iter() {
                 // Defect 2: a dynamic `import()` gives the target fan-in (it IS used) but is never a
-                // synchronous-load cycle edge — always excludable. `or_insert(true)` (not `&= true`)
-                // because `& true` is identity: a pre-existing `false` from a value edge must stay false.
+                // synchronous-load cycle edge — always excludable, whatever it names, so it records an
+                // empty name with `erased: true` and the fold never looks the name up.
                 if let Some(target) = resolve(spec, rel) {
-                    target_noncycle.entry(target.clone()).or_insert(true);
+                    candidates.record(rel, &target, "", true);
                     if seen.insert(target.clone()) {
                         resolved.push(target);
                     }
                 }
             }
         }
-        for (target, all_noncycle) in target_noncycle {
-            if all_noncycle {
-                noncycle_edges.insert((rel.clone(), target));
-            }
-        }
         dep.insert(rel.clone(), resolved);
     }
-    (dep, noncycle_edges)
+    (dep, candidates)
 }
 
 /// `build_dep`, aware of workspace packages and tsconfig `paths`/`baseUrl`: resolves each binding/
@@ -122,6 +108,33 @@ pub fn build_dep_with_workspace(
     workspace_pkgs: &HashMap<String, WorkspacePkg>,
     tsconfigs: &BTreeMap<String, TsconfigPaths>,
 ) -> (DepGraph, HashSet<(String, String)>) {
+    let (dep, candidates) = build_dep_with_workspace_candidates(
+        files,
+        re_exports,
+        dynamic_imports,
+        all_paths,
+        workspace_pkgs,
+        tsconfigs,
+    );
+    (dep, candidates.refine(&[], false))
+}
+
+/// `build_dep_with_workspace`, returning the UNFOLDED [`NoncycleCandidates`] instead of an exclusion
+/// set — for a caller that also holds the tree's `SourceSymbol`s and can therefore ask the export-side
+/// question (`export type X` / `export interface X` in the TARGET file erases a value-spelled
+/// `import { X }` exactly as `import type` does). Fold it with `NoncycleCandidates::refine`.
+///
+/// The two `HashSet`-returning entry points above stay as they are and simply fold with no symbols,
+/// which is byte-for-byte the import-side-only behavior they always had: an embedder outside this
+/// workspace keeps its signature, and a caller with symbols opts in.
+pub fn build_dep_with_workspace_candidates(
+    files: &[(String, ImportMap)],
+    re_exports: &[(String, Vec<ReExport>)],
+    dynamic_imports: &[(String, Vec<String>)],
+    all_paths: &HashSet<String>,
+    workspace_pkgs: &HashMap<String, WorkspacePkg>,
+    tsconfigs: &BTreeMap<String, TsconfigPaths>,
+) -> (DepGraph, NoncycleCandidates) {
     build_dep_impl(files, re_exports, dynamic_imports, |specifier, rel| {
         resolve_file_with_workspace(specifier, rel, all_paths, workspace_pkgs, tsconfigs)
     })
@@ -138,9 +151,10 @@ pub fn build_dep(
     dynamic_imports: &[(String, Vec<String>)],
     all_paths: &HashSet<String>,
 ) -> (DepGraph, HashSet<(String, String)>) {
-    build_dep_impl(files, re_exports, dynamic_imports, |specifier, rel| {
+    let (dep, candidates) = build_dep_impl(files, re_exports, dynamic_imports, |specifier, rel| {
         resolve_file(specifier, rel, all_paths)
-    })
+    });
+    (dep, candidates.refine(&[], false))
 }
 
 #[cfg(test)]

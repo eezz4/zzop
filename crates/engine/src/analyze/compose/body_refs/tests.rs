@@ -34,6 +34,7 @@ fn provide_with_ref(file: &str, line: u32, dto_ref: &str) -> IoProvide {
         file: file.to_string(),
         line,
         symbol: None,
+        ..Default::default()
     }
 }
 
@@ -202,6 +203,7 @@ fn provide_with_no_dto_ref_is_left_untouched() {
         file: "controller.ts".to_string(),
         line: 1,
         symbol: None,
+        ..Default::default()
     }];
     let mut warnings = Vec::new();
     resolve_provide_body_refs(&mut provides, &ShapeMerge::build(&[]), &mut warnings);

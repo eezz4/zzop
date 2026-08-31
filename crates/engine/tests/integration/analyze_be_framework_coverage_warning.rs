@@ -903,3 +903,223 @@ fn the_empty_provide_channel_consequence_rides_s2_only_at_exact_zero() {
         one_route.warnings
     );
 }
+
+// --- Overlay provenance: what an adapter supplies must not be read as what zzop can see ---
+
+/// Six routes, handed over by an adapter, on the same koa tree S2 fires on natively.
+fn routes_overlay(parser: &str) -> zzop_core::NormalizedEnvelope {
+    let provides: Vec<zzop_core::IoProvide> = (1..=6)
+        .map(|i| zzop_core::IoProvide {
+            response: None,
+            body: None,
+            kind: "http".to_string(),
+            key: format!("GET /api/thing{i}"),
+            file: "src/app.ts".to_string(),
+            line: i,
+            symbol: None,
+            ..Default::default()
+        })
+        .collect();
+    zzop_core::NormalizedEnvelope {
+        format: zzop_core::NORMALIZED_AST_FORMAT.to_string(),
+        version: zzop_core::NORMALIZED_AST_CONTRACT_VERSION.to_string(),
+        parser: parser.to_string(),
+        source: String::new(),
+        files: vec![zzop_core::FileProjection {
+            path: "src/app.ts".to_string(),
+            loc: 7,
+            io: zzop_core::IoFacts {
+                provides,
+                consumes: Vec::new(),
+            },
+            ..Default::default()
+        }],
+    }
+}
+
+/// The measured defect. Writing the adapter is what the S2 warning ASKS the author to do — and doing it
+/// used to delete the warning, because the tripwire counted http provides without asking where they came
+/// from. A reader handed only the after-run concluded zzop parses koa natively. It does not, and the
+/// next unadapted koa tree in that stack would have been read as clean.
+#[test]
+fn an_overlay_supplying_routes_does_not_silence_the_tripwire_that_asked_for_it() {
+    let dir = koa_import_tree();
+
+    // Before: the tripwire fires, which is what sends the author to write an adapter.
+    let before = analyze_tree(dir.path(), &config());
+    assert!(
+        before
+            .warnings
+            .iter()
+            .any(|w| w.contains(S2_WARNING_SUBSTRING)),
+        "fixture must fire S2 without the overlay: {:?}",
+        before.warnings
+    );
+
+    let mut cfg = config();
+    cfg.adapter_overlays = vec![routes_overlay("koa-adapter/1")];
+    let after = analyze_tree(dir.path(), &cfg);
+
+    // The tree now HAS route visibility — that is what the adapter bought.
+    assert_eq!(
+        after
+            .ir
+            .ir
+            .io
+            .as_ref()
+            .map(|io| io.provides.len())
+            .unwrap_or(0),
+        6,
+        "the overlay's routes must actually be in the analysis"
+    );
+    // And zzop still cannot see koa, so it still says so.
+    assert!(
+        after
+            .warnings
+            .iter()
+            .any(|w| w.contains(S2_WARNING_SUBSTRING) && w.contains("koa")),
+        "the adapter answered the question 'does this tree have routes?', not 'can zzop parse koa?' — \
+         the tripwire asks the second: {:?}",
+        after.warnings
+    );
+    // The provenance line names who supplied them, and that zzop's own extractors read none.
+    assert!(
+        after
+            .warnings
+            .iter()
+            .any(|w| w.contains("koa-adapter/1") && w.contains("read no routes here at all")),
+        "{:?}",
+        after.warnings
+    );
+}
+
+/// The invalidation, and the one that keeps the change from being "make S2 fire forever": a tree whose
+/// routes zzop reads NATIVELY stays silent even with an overlay attached. Without this, subtracting the
+/// overlay's count could have been replaced by ignoring overlays entirely and both would pass.
+#[test]
+fn a_natively_extracted_tree_stays_silent_even_with_an_overlay_attached() {
+    let dir = TempDir::new("zzop-engine-coverage-native-plus-overlay");
+    dir.write(
+        "src/app.ts",
+        "import express from 'express';\nconst app = express();\napp.get('/a', h);\napp.get('/b', h);\n\
+         app.get('/c', h);\napp.post('/d', h);\napp.put('/e', h);\napp.delete('/f', h);\n",
+    );
+
+    let baseline = analyze_tree(dir.path(), &config());
+    let native_routes = baseline
+        .ir
+        .ir
+        .io
+        .as_ref()
+        .map(|io| io.provides.len())
+        .unwrap_or(0);
+    assert!(
+        native_routes >= 3,
+        "fixture must extract routes NATIVELY or it proves nothing: {native_routes}"
+    );
+    assert!(
+        !baseline
+            .warnings
+            .iter()
+            .any(|w| w.contains(S2_WARNING_SUBSTRING)),
+        "{:?}",
+        baseline.warnings
+    );
+
+    let mut cfg = config();
+    cfg.adapter_overlays = vec![routes_overlay("extra-adapter/1")];
+    let out = analyze_tree(dir.path(), &cfg);
+    assert!(
+        !out.warnings
+            .iter()
+            .any(|w| w.contains(S2_WARNING_SUBSTRING)),
+        "zzop reads this tree's routes itself — an overlay alongside must not make it claim blindness: \
+         {:?}",
+        out.warnings
+    );
+    // Provenance is still disclosed, but WITHOUT the "zzop saw nothing" clause.
+    let prov = out
+        .warnings
+        .iter()
+        .find(|w| w.contains("extra-adapter/1"))
+        .unwrap_or_else(|| panic!("{:?}", out.warnings));
+    assert!(!prov.contains("every one of them"), "{prov}");
+}
+
+/// A run with no overlay gains no provenance line at all — the channel must be silent when there is
+/// nothing to disclose, or it becomes noise on every single analysis.
+#[test]
+fn a_run_without_overlays_carries_no_provenance_line() {
+    let dir = koa_import_tree();
+    let out = analyze_tree(dir.path(), &config());
+    assert!(
+        !out.warnings
+            .iter()
+            .any(|w| w.contains("adapter overlay facts are part of this analysis")),
+        "{:?}",
+        out.warnings
+    );
+}
+
+// --- S16: partial route loss, the case every tree-wide tripwire is structurally blind to ---
+
+/// The measured shape. A tree that extracts MOST of its routes passes every existing coverage
+/// self-report — they all ask a tree-wide question and can only see a tree with almost none. And the
+/// downstream answers do not go quiet, they go confidently wrong: routes reported as having no
+/// provider when they are right there, a route census reporting what was seen as a total.
+#[test]
+fn a_tree_that_extracts_only_some_of_its_routes_is_no_longer_silent() {
+    let dir = TempDir::new("zzop-engine-coverage-partial");
+    // Routes zzop reads natively, so the tree is NOT in the total-silence case.
+    dir.write(
+        "src/app.ts",
+        "import express from 'express';\nconst app = express();\napp.get('/a', h);\napp.post('/b', h);\n\
+         app.put('/c', h);\napp.delete('/d', h);\n",
+    );
+    // Two files that import express and register nothing this extractor recognizes.
+    dir.write(
+        "src/routes/orders.ts",
+        "import type { Express } from 'express';\nexport function registerOrders(a: unknown) { void a; }\n",
+    );
+    dir.write(
+        "src/routes/reports.ts",
+        "import type { Express } from 'express';\nexport function registerReports(a: unknown) { void a; }\n",
+    );
+
+    let out = analyze_tree(dir.path(), &config());
+    // Precondition: this must NOT be the total-silence case, or the test proves nothing new.
+    assert!(
+        !out.warnings
+            .iter()
+            .any(|w| w.contains(S2_WARNING_SUBSTRING)),
+        "fixture must extract routes, so S2 stays quiet — otherwise S2 already covered this: {:?}",
+        out.warnings
+    );
+    let w = out
+        .warnings
+        .iter()
+        .find(|w| w.contains("import a server framework but contributed NO http route"))
+        .unwrap_or_else(|| panic!("partial loss must be disclosed: {:?}", out.warnings));
+    assert!(w.contains("src/routes/orders.ts"), "{w}");
+    assert!(w.contains("src/routes/reports.ts"), "{w}");
+}
+
+/// The invalidation: a tree whose framework-importing files all register routes must stay silent, or
+/// this tripwire is a warning on every healthy Express tree.
+#[test]
+fn a_tree_whose_framework_files_all_register_routes_stays_silent() {
+    let dir = TempDir::new("zzop-engine-coverage-partial-clean");
+    dir.write(
+        "src/app.ts",
+        "import express from 'express';\nconst app = express();\napp.get('/a', h);\napp.post('/b', h);\n\
+         app.put('/c', h);\napp.delete('/d', h);\n",
+    );
+    let out = analyze_tree(dir.path(), &config());
+    assert!(
+        !out.warnings
+            .iter()
+            .any(|w| w.contains("import a server framework but contributed NO http route")),
+        "{:?}",
+        out.warnings
+    );
+}

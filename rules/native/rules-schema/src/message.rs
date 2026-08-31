@@ -2,12 +2,23 @@
 //! structural rules (`structural.rs`) and the usage rules (`usage.rs`).
 
 use crate::join::JoinIssue;
-use crate::structural::SchemaIssue;
+use crate::structural::{god_model_threshold_claim, SchemaIssue, GOD_MODEL_MEASUREMENT};
 use zzop_core::disable_hint;
 
 mod sightline;
 
 use sightline::{field_usage_sightline, query_call_site_sightline};
+
+mod landing;
+
+use landing::{
+    DATA_LOSS_LANDING, FIELD_RETIREMENT_EXIT, FK_CONSTRAINT_LANDING, MIGRATION_LANDING,
+    MODEL_RETIREMENT_EXIT, NOT_NULL_LANDING, NULLABLE_FK_EXIT,
+};
+
+mod index_build;
+
+use index_build::{CONCURRENT_INDEX_EXIT, INDEX_BUILD_LANDING};
 pub use sightline::{rule_sightlines, QUERY_CALL_SITE_EXTENSIONS};
 // The two pinned CLAIM fragments are used only by this module's seal tests (`tests.rs` reaches them
 // through its `use super::*`), never by the message bodies — those splice the full sentences above.
@@ -85,9 +96,19 @@ pub fn schema_issue_message(issue: &SchemaIssue) -> String {
     };
     let body = match issue.rule.as_str() {
         "god-model" => format!(
-            "Model {} has {} fields — consider splitting it into smaller, more cohesive models.",
-            issue.model,
-            param("fieldCount").unwrap_or_default()
+            "Model {model} has {} fields — wide enough that its concerns are probably separable. \
+             THIS RULE REPORTS ANY MODEL WITH {claim}, AND THAT NUMBER IS A CONVENTION, NOT A \
+             MEASUREMENT: {GOD_MODEL_MEASUREMENT}, and the only real gap in that schema's \
+             field-count distribution sits far higher (26 to 35). So read this as `wider than a \
+             line someone drew`, not as `wider than comparable models`. \
+             {DATA_LOSS_LANDING} IF YOU SPLIT THIS MODEL: add the new models, then hand-edit the \
+             generated migration so it copies the rows across (`INSERT INTO \"New\" (...) SELECT \
+             ... FROM \"{model}\"`) BEFORE the `DROP COLUMN` statements Prisma appended, and deploy \
+             that as ONE migration; if you are not prepared to write that copy, leave the model as \
+             it is — field count is a design opinion, and no reading of it is worth the rows.",
+            param("fieldCount").unwrap_or_default(),
+            claim = god_model_threshold_claim(),
+            model = issue.model
         ),
         "missing-timestamps" => {
             let missing: Vec<String> = issue
@@ -105,14 +126,19 @@ pub fn schema_issue_message(issue: &SchemaIssue) -> String {
                 // A creation timestamp already exists, and an append-only/immutable model legitimately
                 // never gets an `updatedAt` — so this reads as a suggestion, not a defect claim.
                 format!(
-                    "Model {} has a creation timestamp but no updatedAt field — if this model supports \
-                     updates, consider adding an `updatedAt` field (with `@updatedAt`) to track them; if it \
-                     is append-only/immutable, no change is needed.",
+                    "Model {} has a creation timestamp but no updatedAt field. {MIGRATION_LANDING} IF \
+                     THIS MODEL SUPPORTS UPDATES: add an `updatedAt` field and ship it together with \
+                     that migration; if it is append-only/immutable, no change is needed.",
                     issue.model
                 )
             } else {
                 format!(
-                    "Model {} is missing timestamp field(s): {}.",
+                    "Model {} is missing timestamp field(s): {}. {MIGRATION_LANDING} IF THESE FIELDS \
+                     BELONG ON THIS MODEL: add `createdAt DateTime @default(now())`, which generates \
+                     its own default and deploys as-is (it stamps every existing row with the \
+                     migration's time, not the row's real creation time), and/or an `updatedAt` \
+                     field, which does not and needs one of the two shapes above; if the model is \
+                     append-only/immutable, it needs no `updatedAt`.",
                     issue.model,
                     param("missing").unwrap_or_default()
                 )
@@ -122,74 +148,53 @@ pub fn schema_issue_message(issue: &SchemaIssue) -> String {
             "Model {} field {field} has a redundant @@index — already covered by @id/@unique.",
             issue.model
         ),
-        "float-money" => format!(
-            "Model {} field {field} stores a monetary value as a lossy float type ({}) — use Decimal.",
-            issue.model,
-            param("type").unwrap_or_else(|| "Float".to_string())
+        "float-money" => landing::float_money_message(
+            &issue.model,
+            field,
+            &param("type").unwrap_or_else(|| "Float".to_string()),
         ),
         "stale-updated-at" => format!(
             "Model {} field {field} looks like an updatedAt timestamp but lacks @updatedAt — it will not auto-refresh on writes.",
             issue.model
         ),
-        "temporal-as-string" => format!(
-            "Model {} field {field} stores a date/time value as String — use DateTime instead.",
-            issue.model
-        ),
+        "temporal-as-string" => landing::temporal_as_string_message(&issue.model, field),
         "fk-no-index" => {
-            let coverage = issue
-                .params
-                .as_ref()
-                .and_then(|p| p.get("coverage"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("none");
-            if coverage == "non-leading" {
-                let composite_cols = issue
-                    .params
-                    .as_ref()
-                    .and_then(|p| p.get("compositeCols"))
-                    .and_then(|v| v.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|v| v.as_str())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    })
-                    .unwrap_or_default();
-                format!(
-                    "Model {} field {field} is a non-leading member of the composite ({composite_cols}) \
-                     @@index/@@unique — it is only covered for queries that ALSO constrain the leading \
-                     column(s) of that composite, not for queries filtering on {field} alone.",
-                    issue.model
-                )
-            } else {
-                format!(
-                    "Model {} field {field} looks like a foreign key but has no @@index/@@unique — queries filtering on it will scan the table.",
-                    issue.model
-                )
-            }
+            index_build::fk_no_index_message(&issue.model, field, issue.params.as_ref())
         }
         "nullable-fk" => format!(
-            "Model {} field {field} is a nullable foreign key — confirm the optional relation is intentional.",
+            "Model {} field {field} is a nullable foreign key — a declared `@relation` names it, so the \
+             optional side is a choice this schema made. {NOT_NULL_LANDING} {NULLABLE_FK_EXIT}",
             issue.model
         ),
         "implicit-fk" => format!(
-            "Model {} field {field} looks like a foreign key with no @relation — the relation is implicit/unmodeled.",
+            "Model {} field {field} looks like a foreign key with no @relation — the relation is \
+             implicit/unmodeled. {FK_CONSTRAINT_LANDING} IF EVERY EXISTING VALUE NAMES A REAL PARENT \
+             ROW: add `@relation(fields: [{field}], references: [id])`. Otherwise backfill the \
+             parentless values to NULL and make the column optional before adding it, or leave the \
+             relation unmodeled — an id this database does not issue has no relation to model.",
             issue.model
         ),
         "unreferenced-model-name" => format!(
             "Model {}'s name never appears as an identifier in source, and no `bound-model` attribute \
-             was injected for it — the model may be unused. {}",
+             was injected for it — the model may be unused. {} {DATA_LOSS_LANDING} \
+             {MODEL_RETIREMENT_EXIT}",
             issue.model,
             field_usage_sightline()
         ),
         "unreferenced-field-name" => format!(
             "Model {} field {field}'s name never appears as an identifier in source — the field may be \
-             unused. {}",
+             unused. {} {DATA_LOSS_LANDING} {FIELD_RETIREMENT_EXIT}",
             issue.model,
             field_usage_sightline()
         ),
         "model-churn" => format!(
-            "Model {} accumulated {} migration change(s) — the design may be unstable.",
+            "Model {} accumulated {} migration change(s) — the design may be unstable. THAT COUNT IS \
+             NOT ZZOP'S OWN: no native analysis produces migration churn, so it reached this rule from \
+             a producer that knows this project's migration layout and injected it. The two lines the \
+             count is read against — report at 5, escalate to critical at 10 — are round numbers with \
+             no measurement behind them, because zzop has never held a churn distribution to calibrate \
+             from. The raw count is in `data.count`: judge it against your own migration history \
+             rather than against these two.",
             issue.model,
             param("count").unwrap_or_default()
         ),
@@ -227,12 +232,19 @@ pub fn join_issue_message(issue: &JoinIssue) -> String {
             query_call_site_sightline(),
             disable_hint_tail("soft-delete-bypass")
         ),
+        // Shares `INDEX_BUILD_LANDING`/`CONCURRENT_INDEX_EXIT` byte-identically with `fk-no-index` (the
+        // mechanism belongs to the DDL, not to what either rule detects), and deliberately NOT
+        // `FK_INDEX_NO_READER_EXIT`: this finding is anchored at a call site that already sorts on the
+        // column, so "check that something reads it" is a question its own evidence has answered
+        // (rule-quality.md §30). The bare imperative that used to sit here now carries its own condition
+        // and follows the landing (§27).
         "orderby-unindexed" => format!(
             "Model {} is ordered by `{field}` in this {method}() call, but {field} has no @id/@unique of its \
              own and is not the leading column of any @@index/@@unique — this sort likely forces a full \
-             table scan or filesort as the table grows. Add `@@index([{field}])` to the schema (or make \
-             {field} the leading column of an existing composite index). {} If this is intentional (e.g. a \
-             small, bounded table), disable this finding {} \
+             table scan or filesort as the table grows. {INDEX_BUILD_LANDING} IF THAT COUNT IS SMALL: add \
+             `@@index([{field}])` to the schema (or make {field} the leading column of an existing \
+             composite index) and ship the generated migration as-is. {CONCURRENT_INDEX_EXIT} {} If this \
+             is intentional (e.g. a small, bounded table), disable this finding {} \
              (this rule has no inline suppression marker).",
             issue.model,
             query_call_site_sightline(),

@@ -1,6 +1,8 @@
 //! `cross_repo`'s cross-layer join summary assembly (`cross_summary`) — see the crate doc: hosts
 //! are thin protocol facades, all shaping logic lives here.
 
+mod native_analyses;
+
 use crate::output::{self, FindingFilters, RunKnobs};
 
 /// Cross-repo analysis — zzop's headline. Config-first mode (`config_path`) runs the config's `trees`;
@@ -113,6 +115,18 @@ pub fn cross_summary_with(
     // e.g. an `unresolvedConsumes` key is no longer a bare string with no call site to go look at.
     let (distinct_bucket_keys, distinct_bucket_key_first_sites) = output::distinct_bucket_keys(cl);
 
+    // ONE legend for every tree's `packsLoaded`, at the reply root rather than repeated in each of the
+    // N `sources[]` rows that carry the arrays. Merged (not "take the first"): the legend grows a
+    // `didNotRun` entry only on a tree that actually gated a pack, so a cross run where ONE tree
+    // switched a pack off must still explain the key — while a run where none did says nothing about
+    // gating at all. Merging is order-independent because every value here is the same build constant,
+    // so `sources[i]` and `sources[j]` can never contribute conflicting text for one key.
+    let packs_loaded_meaning: serde_json::Map<String, serde_json::Value> = trees
+        .iter()
+        .filter_map(|t| t["output"].get("packsLoadedMeaning")?.as_object())
+        .flat_map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())))
+        .collect();
+
     let mut summary = serde_json::json!({
         "config": loaded.config_path.as_deref().map(|p| p.display().to_string()),
         "sources": sources,
@@ -143,7 +157,12 @@ pub fn cross_summary_with(
         "distinctBucketKeys": distinct_bucket_keys,
         "distinctBucketKeyFirstSites": distinct_bucket_key_first_sites,
         "edges": edges_shown,
-        "crossLayerFindings": output::shape_findings(&cl_findings, filters),
+        // No manifest set here, and that is a judgment rather than an omission: a cross-layer finding
+        // straddles TWO trees, so "which tree's package.json declared this file build surface" has no
+        // single answer, and picking one tree's set would demote the other tree's paths on the strength of
+        // a name collision. The path-shape half of the axis (`.github/`, `*.example`) is
+        // tree-independent and still applies — it reads the finding's own path and nothing else.
+        "crossLayerFindings": output::shape_findings(&cl_findings, filters, &Default::default()),
         "configWarnings": config_warnings,
         // Run-global blindness-class registry, FOLDED to counts + a pointer to its full text (see
         // `output::disclosure`) — the meta-honesty channel with its magnitude intact and its
@@ -152,6 +171,24 @@ pub fn cross_summary_with(
     });
     if let Some(truncated) = edges_truncated {
         summary["edgesTruncated"] = truncated;
+    }
+    // The NATIVE roster for THIS join, and its legend. The per-tree lane got one in 9272ee0 because
+    // a cross-layer analysis with nowhere to report was byte-identical to one that ran clean; the
+    // same argument holds here and this reply had no roster at all — not at the root, not on any
+    // `sources[]` row. Its `crossLayerFindings.byRule` therefore listed the analyses that FIRED with
+    // no population beside them, in the one reply where those analyses are the whole subject. The
+    // keys are inserted by NAME (not as `json!` literals) and only when a tree published a roster, so
+    // an older engine degrades to omission rather than a JSON `null` — the same `.get()`-gated lane
+    // `packsLoadedMeaning` above takes. See `native_analyses` for the derivation, for why the legend
+    // forks by lane while the key name does not, and for the floor.
+    if let Some((roster, meaning)) = native_analyses::join_roster(trees, &cl_findings) {
+        summary["nativeAnalyses"] = roster;
+        summary["nativeAnalysesMeaning"] = meaning;
+    }
+    // Absent, never an empty object, when no tree loaded a pack — the same "omit rather than publish an
+    // empty legend" rule the single-tree lane follows.
+    if !packs_loaded_meaning.is_empty() {
+        summary["packsLoadedMeaning"] = serde_json::Value::Object(packs_loaded_meaning);
     }
     // Run-level warnings (distinct from sources[].warnings) — e.g. the parallel-implementation
     // tripwire ("0 cross-source edges but N duplicate/ambiguous findings"). ALWAYS PRESENT, empty

@@ -70,7 +70,12 @@ pub const FRAMEWORK_RECOGNIZERS: &[FrameworkRecognizer] = &[
     FrameworkRecognizer {
         framework: "gorm",
         extensions: &["go"],
-        emits: &[channel::DB],
+        emits: &[channel::DB_PROVIDES],
+    },
+    FrameworkRecognizer {
+        framework: "gorm",
+        extensions: &["go"],
+        emits: &[channel::DB_CONSUMES],
     },
     FrameworkRecognizer {
         framework: "net/http",

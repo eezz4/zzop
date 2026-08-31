@@ -70,6 +70,7 @@ use crate::key::{CacheKey, IrKey};
 
 mod atomic;
 mod entries;
+mod integrity;
 use atomic::write_atomic;
 
 const SCHEMA_VERSION_FILE: &str = "schema_version";
@@ -87,6 +88,9 @@ const FORMAT_VERSION: u32 = 1;
 #[derive(Serialize, Deserialize)]
 struct IrEntry {
     format_version: u32,
+    /// Self-hash binding this entry's payload to its key — [`integrity`] owns what it detects and,
+    /// just as importantly, what it does not.
+    payload_digest: String,
     #[serde(flatten)]
     key: IrKey,
     ir: FileIrSlice,
@@ -96,6 +100,7 @@ struct IrEntry {
 #[derive(Serialize, Deserialize)]
 struct FindingsEntry {
     format_version: u32,
+    payload_digest: String,
     #[serde(flatten)]
     key: CacheKey,
     findings: Vec<Finding>,
@@ -109,6 +114,10 @@ pub struct AnalysisCache {
     /// [`Self::evicted_entries`]). Recorded at open and never mutated afterwards — this counts the cap
     /// enforcement that already happened, not a running total of anything this handle does later.
     evicted: usize,
+    /// How many entries this handle READ and refused because their payload digest did not match (see
+    /// [`integrity`]). Unlike `evicted`, this is a running total: it counts a decision made per lookup,
+    /// so it can only be read after the lookups have happened.
+    rejected: std::sync::atomic::AtomicUsize,
 }
 
 impl AnalysisCache {
@@ -151,6 +160,7 @@ impl AnalysisCache {
         Ok(AnalysisCache {
             root: dir.to_path_buf(),
             evicted,
+            rejected: std::sync::atomic::AtomicUsize::new(0),
         })
     }
 
@@ -163,6 +173,51 @@ impl AnalysisCache {
     /// rather than re-deriving one from this number.
     pub fn evicted_entries(&self) -> usize {
         self.evicted
+    }
+
+    /// How many entries this handle read and REFUSED because their payload digest did not match the
+    /// payload — see [`store::integrity`](integrity) for exactly what that detects and what it does
+    /// not. 0 on every healthy run.
+    ///
+    /// Exposed for the same reason as [`Self::evicted_entries`], one degree more urgently: recomputing
+    /// silently would leave a cache that has been serving hand-edited answers indistinguishable from
+    /// one that never was. The number is meaningful only after the lookups it counts, so read it at the
+    /// end of a run.
+    pub fn rejected_entries(&self) -> usize {
+        self.rejected.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub(crate) fn record_rejected(&self) {
+        self.rejected
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// The user-facing disclosure for [`Self::rejected_entries`], or `None` when nothing was refused.
+    ///
+    /// `None` at zero for the same reason [`Self::eviction_warning`] is silent at zero — and here the
+    /// bar is higher still, because a line that appears on every healthy run is exactly how a reader
+    /// learns to skip the one run where it matters.
+    pub fn integrity_warning(&self) -> Option<String> {
+        let n = self.rejected_entries();
+        if n == 0 {
+            return None;
+        }
+        let (noun, verb) = if n == 1 {
+            ("entry", "its payload does")
+        } else {
+            ("entries", "their payloads do")
+        };
+        Some(format!(
+            "{n} cache {noun} did not match {} own recorded contents and {} recomputed from source \
+             instead of being served — {verb} not hash to what zzop wrote there, so something \
+             modified the entry after it was written (a hand-edit, a partial overwrite, or disk \
+             corruption). The findings you are reading for those files are freshly computed and \
+             correct. This is a detector, not an authenticity check: the digest is keyless and public, \
+             so an edit that also recomputed it would pass unnoticed. If you did not edit the cache, \
+             treat this as a reason to delete the cache directory and re-run.",
+            if n == 1 { "its" } else { "their" },
+            if n == 1 { "was" } else { "were" },
+        ))
     }
 
     /// The user-facing disclosure for [`Self::evicted_entries`], or `None` when nothing was evicted.

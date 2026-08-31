@@ -71,6 +71,13 @@ mod test_region_promise_tests;
 pub use analyze::{analyze_json, analyze_trees_json};
 pub use envelope::{analyze_envelope_json, validate_envelope_only_json};
 pub use explain::{explain, explain_with_config, native_analysis_ids};
+/// The LANE-INVARIANT half of the `nativeAnalysesMeaning` legend — what `registered` counts and what
+/// `disabled` means. Re-exported for `zzop_summary`, whose cross-layer join reply carries the same
+/// roster under the same key with a DIFFERENT action attached: there `crossLayerFindings` is the
+/// channel the reader is looking at, so the per-tree lane's "run the join" sentence is nonsense and
+/// only these two travel. Exported rather than copied for the reason every legend in this workspace
+/// has one owner: two replies that disagree about their own denominator is worse than either alone.
+pub use output::{NATIVE_ANALYSES_DISABLED_MEANING, NATIVE_ANALYSES_REGISTERED_MEANING};
 pub use query::query_io_json;
 pub use query_coverage::query_coverage_json;
 pub use query_file::{query_file_json, FILE_VERDICTS};
@@ -80,11 +87,21 @@ pub use request::{
 };
 pub use rule_pack::validate_rule_pack_json;
 pub use version::{version, version_string};
+/// The ecosystem-fixed BUILD-surface path predicate, compiled — the sibling of `test_path_re` above, and
+/// re-exported for the same layering reason: the summary layer's three-tier deployment-role ordering
+/// needs both classifications, and neither may be re-spelled there (`zzop_core::paths::is_build_path`
+/// carries why this one is a Rust predicate rather than a shared DSL fragment).
+pub use zzop_core::build_path_re;
 /// The DSL shared test-paths fragment, compiled — re-exported for zzop-summary, whose layering
 /// (no shipped dependency below this crate) is deliberate, and whose first-screen ordering of
 /// test-path findings (2026-08-09 U78 ruling) must read the SAME pattern the packs expand as
 /// their test-path exclusions. One string, one owner, two consumers that cannot disagree.
 pub use zzop_core::dsl::test_path_re;
+/// Its companion, and re-exported for exactly the same reason: `DEP_GRAPH_RESOLVED_ONLY` says what the
+/// dep graph leaves OUT, and this says that the CYCLE verdict beside it was computed over a smaller
+/// edge set still (`zzop_core::noncycle`). A surface that publishes both an edge list and an `inCycle`
+/// column — `zzop graph`'s two dep lanes do — owes the reader that sentence, and owes it once.
+pub use zzop_core::CYCLE_GRAPH_EXCLUDES_ERASED_IMPORTS;
 /// The dep graph's membership rule, in one sentence with ONE owner (`zzop_core::ir`). Re-exported for
 /// the same layering reason as the disclosure views below: `zzop-summary` publishes dep-graph-derived
 /// numbers (`fanIn`/`fanOut`/`degree` on the cosmograph points table) and must be able to disclose what
@@ -98,9 +115,38 @@ pub use zzop_core::DEP_GRAPH_RESOLVED_ONLY;
 /// live here): `zzop-summary` shapes the reply and serves the contract table, and it must not skip a
 /// layer to `zzop-engine` to do either — the facade/summary split is what `docs/contracts/
 /// surface-parity.json` and its metatests rest on. Both views read one `const` registry
-/// (`zzop_engine::BLINDNESS_REGISTRY`), which is what lets the reply carry counts while the text ships
+/// (`zzop_engine::blindness_registry()`), which is what lets the reply carry counts while the text ships
 /// once: a second owner of either would be a tally that can drift from the prose it summarizes.
 pub use zzop_engine::{disclosure_contract_text, disclosure_counts};
+/// Re-exported for `zzop-summary`, which must not depend on `zzop-engine` (its own `Cargo.toml` states
+/// that layering) and yet has to ask the SAME question this crate's `unreadExtensions` cell asks: is a
+/// filetype one whose absence from the analysis is a coverage gap, or one where reading nothing is
+/// simply correct? Two answers to that produced a measured contradiction on 2026-08-20 — `coverageGaps`
+/// named an i18n `locales/*.json` directory a dependency-graph gap on the same tree where
+/// `unreadExtensions` said nothing was held back. The re-export is the mechanism this crate already uses
+/// for `disclosure_*` above, and it keeps the classifier's one owner in the engine.
+///
+/// [`zzop_engine::extraction_can_lose_facts`] is the one the two coverage-gap cells gate on, and
+/// [`zzop_engine::extension_content_kind`] is the closed wire vocabulary both label their rows with,
+/// re-exported so neither shaper spells the tokens itself.
+///
+/// ## What is deliberately NOT re-exported, and why the omission is the point
+/// `is_non_source_extension`, `non_source_kind` and `NonSourceKind` stay behind this boundary. They
+/// crossed it for one review cycle, on the reasoning that "a surface may want to name the other
+/// predicate when explaining why the two lists differ" — no surface ever did (0 consumers, measured
+/// `grep -rn 'zzop_facade::is_non_source_extension' crates packages rules`), and the sentence they were
+/// exported for is prose, which needs the NAME, not the function.
+///
+/// What they were left exposed to is the defect `zzop_engine::NonSourceKind`'s doc records: those three
+/// answer "should this run ask the reader for a parser adapter", and reaching for them where
+/// `extraction_can_lose_facts` belongs is what reported macrozheng/mall's 114 MyBatis `.xml` mappers as
+/// an empty coverage-gap list. Everything above this crate — every reply shaper there is — can only see
+/// what this line publishes, so publishing exactly one of the pair is not tidying: it is the reason the
+/// next shaper's autocomplete cannot offer the wrong one. The engine keeps both (`zzop_engine`'s own
+/// root and `dispatch::`), where the "bring an adapter" collection site is their one real caller.
+pub use zzop_engine::{
+    extension_content_kind, extraction_can_lose_facts, MIN_UNCOVERED_EXTENSION_SHARE_PCT,
+};
 
 /// Re-exported for the same reason as the two above: a surface that wants to SAY how many health
 /// scores there are must read the registry, not retype the number. It was retyped, and v0.30.0's

@@ -67,6 +67,15 @@ const GUARD_SUBSTRINGS: &[&str] = &[
     "isadminuser",
     "requirelogin",
     "requireauth",
+    // The rest of the `require_*` family. Admitted 2026-08-16 after an outside run on a 17-route
+    // FastAPI tree reported 8 false alarms against 1 true one: `require_admin` is the house idiom for
+    // an admin gate, and this list named only two of its siblings, so every route it protected read as
+    // unguarded. `adminrequired` is the same gate spelled Django-style (`*_required`), whose
+    // `login_required` twin `loginrequired` above already covered.
+    "requireadmin",
+    "requirestaff",
+    "requirerole",
+    "adminrequired",
     // Credential-shaped gates, anchored (bare `token` is deliberately absent — `tokenizer`,
     // `token_bucket`, `create_access_token` are not gates).
     "verifytoken",

@@ -2,32 +2,20 @@
 //! shared fact-census predicate `overlay_file_carries_facts`, and the io `file`-field normalizer the
 //! two merge branches (see `merge`) share.
 
-use std::collections::HashSet;
-
 use zzop_core::{IoFacts, NormalizedEnvelope};
 
 use super::merge::{merge_projection_onto_artifact, synthetic_artifact_from_projection};
 
+mod application;
 mod facts;
 mod reports;
+
+pub(crate) use application::{OverlayApplication, OverlayIoCounts};
 
 use super::reserved::{
     drop_reserved_io, is_reserved_consume_kind, is_reserved_provide_kind, reserved_drop_warning,
 };
 use facts::overlay_file_carries_facts;
-
-/// What [`apply_adapter_overlays`] ACTUALLY applied, as opposed to what config DECLARED. Both sets are
-/// derived inside the apply loop, after the `validate_envelope` gate, so a REJECTED overlay contributes to
-/// neither — the whole point of returning them instead of letting a consumer re-read
-/// `EngineConfig::adapter_overlays`. `Default` is the honest empty value for a run with no overlays.
-/// `covered_paths` = every applied fact-carrying projection's path (`analyze::assemble`'s exclusion set
-/// for the "no native parser, bring an adapter" disclosure); `entry_paths` = its `is_entry: true` subset,
-/// unioned into `dead_candidate_findings`' `extra_entries` by `analyze::assemble::rules`.
-#[derive(Debug, Default)]
-pub(crate) struct OverlayApplication {
-    pub(crate) covered_paths: HashSet<String>,
-    pub(crate) entry_paths: HashSet<String>,
-}
 
 /// Merges each of `overlays` onto `artifacts` in place — the Mode B counterpart of `analyze_envelope`
 /// (Mode A): a partial envelope (typically just `io` + fragment channels for a handful of files) folded
@@ -37,11 +25,17 @@ pub(crate) struct OverlayApplication {
 /// pre-overlay path, byte-for-byte).
 ///
 /// Overlays are processed in `parser`-sorted order (deterministic regardless of assembly order) and
-/// each is re-validated via `zzop_core::validate_envelope` first — a malformed overlay degrades to one
-/// `warnings` entry naming its `parser` id and first few issues, then is skipped entirely.
+/// each is judged via `zzop_core::validate_envelope_verdict` first — BOTH its axes, off one
+/// deserialize. A malformed overlay degrades to one `warnings` entry naming its `parser` id and first
+/// few issues, then is skipped entirely.
 ///
-/// Three additional self-reports fire per ACCEPTED overlay (each an aggregate over the whole overlay,
-/// never per file):
+/// Self-reports that fire per ACCEPTED overlay (each an aggregate over the whole overlay, never per
+/// file). The first is the verdict's advisory half; the rest are this merge's own:
+/// - **Envelope hints**: a shape that validates, analyzes, and then quietly costs the producer
+///   something the acceptance never mentions — the archetype being an `http` key in non-normal form,
+///   which can never join. The hint carries the exact key the producer should have emitted. This lane
+///   used to take only the accept/reject half of the verdict and discard these, so the product computed
+///   the answer and stayed silent at the one moment it was worth something.
 /// - **Source mismatch** (G3): a `NormalizedEnvelope` self-declares `source` as the cross-layer join's
 ///   per-tree tag, but `apply_adapter_overlays` unconditionally merges every projection onto THIS tree's
 ///   artifacts regardless of what `source` says — an overlay whose `source` differs from `source_id`
@@ -113,29 +107,11 @@ pub(crate) fn apply_adapter_overlays(
     ordered.sort_by(|a, b| a.parser.cmp(&b.parser));
 
     for overlay in ordered {
-        let json = match serde_json::to_string(overlay) {
-            Ok(j) => j,
-            Err(e) => {
-                warnings.push(format!(
-                    "adapter overlay '{}' skipped: failed to serialize for validation: {e}",
-                    overlay.parser
-                ));
-                continue;
-            }
-        };
-        if let Err(issues) = zzop_core::validate_envelope(&json) {
-            let detail = issues
-                .iter()
-                .take(3)
-                .cloned()
-                .collect::<Vec<_>>()
-                .join("; ");
-            warnings.push(format!(
-                "adapter overlay '{}' skipped: {detail}",
-                overlay.parser
-            ));
+        if !super::gate::admit(overlay, warnings) {
             continue;
         }
+
+        applied.record_io(overlay);
 
         // G3 — source-mismatch self-report: `overlay.source` is this envelope's own declared cross-layer
         // join tag, but every projection below merges onto THIS tree's artifacts (tagged `source_id`)

@@ -9,7 +9,7 @@ use tree_sitter::Node;
 
 use super::{ClassPrefix, ClassRow, MethodPath, MethodRoute};
 use crate::adapters::provides::attribute_controller::{
-    attr_path_state, method_route_state, substitute_controller_token, PathState,
+    attr_path_state, method_route_match, substitute_controller_token, PathState,
 };
 use crate::util::{
     attribute_name, attribute_raw_args, attributes_of, has_modifier, line_of, modifiers_of,
@@ -113,25 +113,26 @@ fn class_prefix_state(attrs: &[Node], src: &str, simple_name: &str) -> ClassPref
     }
 }
 
-/// Records one route method's `(verb, path-state)` (`attribute_controller::method_route_state`) as a
+/// Records one route method's `(verb, path-state)` (`attribute_controller::method_route_match`) as a
 /// `MethodRoute`, carrying a non-literal path's raw args forward for corpus resolution — a non-route method
-/// (no recognized verb attribute) yields nothing.
+/// (no recognized verb attribute) yields nothing. The recorded `line` is the match's own ANCHOR (the route
+/// attribute), never `node`'s start row, which is whatever attribute happens to sit topmost.
 fn collect_method(rel: &str, node: Node, src: &str, methods: &mut Vec<MethodRoute>) {
-    let Some((verb, state)) = method_route_state(&attributes_of(node), src) else {
+    let Some(route) = method_route_match(node, src) else {
         return;
     };
-    let path = match state {
+    let path = match route.path {
         PathState::Literal(p) => MethodPath::Literal(p),
         PathState::Absent => MethodPath::Literal(String::new()),
         PathState::NonLiteral(a) => MethodPath::NonLiteral(a),
     };
     methods.push(MethodRoute {
         file: rel.to_string(),
-        line: line_of(node),
+        line: line_of(route.anchor),
         symbol: node
             .child_by_field_name("name")
             .map(|n| node_text(n, src).to_string()),
-        verb,
+        verb: route.verb,
         path,
     });
 }

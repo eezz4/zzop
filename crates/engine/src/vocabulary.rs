@@ -49,12 +49,14 @@
 //! the serialization, not over a hand-listed tuple), and every field must serialize unconditionally —
 //! a `#[serde(skip_serializing_if)]` would make two different vocabularies hash the same.
 
+mod compilable;
 mod normalizers;
 mod resolved;
 mod test_paths;
 
 use serde::{Deserialize, Serialize};
 
+pub use compilable::uncompilable_vocabulary_warnings;
 pub use normalizers::{normalizer_for, NormalizedKey, NORMALIZED_VOCABULARY_KEYS};
 pub(crate) use resolved::ResolvedVocabulary;
 pub(crate) use test_paths::extra_test_path_tail;

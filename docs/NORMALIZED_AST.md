@@ -165,6 +165,19 @@ Field semantics (all mirror the Rust `zzop-core` serde types — those are the n
     in `crates/core/src/io/facts/shapes.rs`'s `ProvideResponseShape` — including the one shape an adapter
     should NOT emit (`dtoRef` omitted AND `fields` empty, the native parser's internal
     "handler declared no return type" sentinel, which the engine strips and discloses).
+  - OPTIONAL version scope (additive since `route-version-v1`; omit and nothing changes): an
+    `IoProvide` may carry `routeVersion: "VERSION_2024_08_13_VALUE"` — the version scope the route was
+    declared under, for a framework that versions by something the URL never carries (a request header
+    or a media type, as NestJS's `VersioningType.HEADER`/`CUSTOM` does). Without it two such handlers
+    at one path have byte-identical `key`s and nothing separates them. **It is a normalized
+    EXPRESSION TEXT, never a resolved version**: whitespace stripped, array elements sorted
+    (`[VERSION_2024_04_15,VERSION_2024_06_11]`), and no constant is followed — the real values sit
+    packages away behind casts, so a producer that resolved them would be guessing. `duplicate-route`
+    reads it and may conclude only that two DIFFERENT texts are two different version scopes: not that
+    they are disjoint (two spellings can still overlap), and never that an absent one matches the other
+    side. It uses a difference to disclose and to move severity to `info`, never to drop a finding.
+    Emit it verbatim or omit it; `""` is not a version. Normative semantics in `crates/core/src/
+    io/facts.rs`'s `IoProvide::route_version`.
   - OPTIONAL handler provenance: an `IoProvide` may carry `symbol`, the name of the function that handles
     **this** route. Three native rules start a call-graph BFS from it (`mutating-route-no-auth`,
     `unsafe-read-endpoint`, `non-idempotent-write`) and `duplicate-route` compares it for equality, so a
@@ -315,8 +328,12 @@ Field semantics (all mirror the Rust `zzop-core` serde types — those are the n
     `crates/engine/src/analyze/assemble/rules.rs`'s `overlay_entry_paths`).
 
   It does NOT exempt a file from `unreachable`, in either mode: that analysis's entry set is seeded from
-  declared cargo targets plus SFC-only and runtime-asset import targets, and `is_entry` is not among
-  them.
+  declared cargo targets plus PRE-SCAN-only and runtime-asset import targets, and `is_entry` is not
+  among them. "Pre-scan-only" means imported from a file no structural parser frontend claims — a
+  `<script>` block in a `.vue`/`.svelte`/`.md`, bare top-level ESM in a `.mdx`, or an Astro `---`
+  frontmatter fence. It read "SFC-only" until 2026-08-21, when `.mdx` and `.astro` joined, each through
+  its own reader (`zzop_parser_typescript::PRESCAN_IMPORT_HOSTS`). In-edges only in every case: the
+  symbols and io such a file declares stay unprojected.
 
 - `overrides` — OPTIONAL (`#[serde(default)]`, default `{}`), and the one channel that DISPLACES a
   native fact rather than adding to it. Requires the envelope to declare `version` >= `"0.27.0"`; see
@@ -713,7 +730,18 @@ callers can refer to either unambiguously.
 
   Each overlay is validated with `validate_envelope` independently; an invalid overlay is skipped with
   one `AnalyzeOutput::warnings` entry naming its `parser` id — never a crash, never a failed analysis
-  for the other overlays or for the native files. Per `FileProjection` in a valid overlay:
+  for the other overlays or for the native files. **An overlay that does not fit the envelope SHAPE at
+  all** (a missing required field, so it cannot even become the type `validate_envelope` judges) takes
+  the same path and costs the same one warning: the request boundary types the overlays one at a time
+  for exactly this reason. Until 2026-08-17 it did not, and a single missing field failed the whole
+  request with exit 1 and zero findings.
+
+  An overlay that IS accepted carries its advisory hints into the same `warnings`, prefixed `was
+  applied, but:` — the shapes that validate, analyze, and then quietly cost you something acceptance
+  never mentions, the archetype being an `http` key in non-normal form that can never join (the hint
+  names the exact key to emit instead). These were computed and discarded on this path until
+  2026-08-17, so `validate_envelope` would tell you and running the same overlay would not. Mode A does
+  the same, prefixed `envelope accepted, but:`. Per `FileProjection` in a valid overlay:
   - If a native artifact exists at the SAME `path`/`rel`: its `io` is extended with the overlay's `io`
     entries (an overlay entry EXACTLY duplicating a native one — same kind/key/file/line — is deduped,
     never double-counted), its fragment channels (`procedure_router_fragments`/`router_mount_fragments`) are
