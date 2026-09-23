@@ -70,19 +70,93 @@ if [ -z "${tag:-}" ]; then
   exit 0
 fi
 
+# The tag NAME comes from the remote; the tag's CONTENT has to exist LOCALLY for `git show` to read
+# it. Those are two different questions and this guard asked only the first (2026-09-23, review
+# ledger V290 -- found on this guard's very first CI run, the v0.35.0 release commit).
+#
+# `actions/checkout@v4` fetches one commit and NO tag objects. So `git ls-remote` answered "v0.34.0"
+# and the SKIP branch above correctly did not fire -- the remote really does advertise that tag --
+# and then `git show v0.34.0:docs/rules/catalog.md` exited 128 because that object is not in this
+# clone. Under `set -e -o pipefail` that killed the script inside the `old_ids=` assignment, BEFORE
+# the "extracted ZERO ids" message could print: the job failed with exit 128 and ZERO BYTES of
+# output, which on screen is indistinguishable from a real finding. That is the `check-shell-mute-
+# floor` class, with this guard caught by it.
+#
+# The repair is that the guard fetches its own input. Giving the guards job `fetch-depth: 0` would also
+# turn it green, but it fixes one caller: `.githooks/pre-commit` runs this script too (recount the set
+# with `grep -rln check-rule-id-renames-recorded .githooks/ scripts/ .github/`), and a developer clone
+# that has never fetched the newest tag reaches the same missing object by a different road. The
+# script is the one place present in every caller.
+if ! git cat-file -e "$tag^{commit}" 2> /dev/null; then
+  # `--depth 1` is right in CI (the clone is already shallow; this adds one commit's tree) and WRONG
+  # in a developer clone, where it writes `.git/shallow` into a COMPLETE repository and truncates its
+  # history as a side effect of running a guard. Ask which one this is instead of assuming CI.
+  depth_arg=""
+  [ "$(git rev-parse --is-shallow-repository 2> /dev/null)" = "true" ] && depth_arg="--depth 1"
+  set +e
+  # shellcheck disable=SC2086
+  fetch_out="$(git fetch --no-tags $depth_arg origin "refs/tags/$tag:refs/tags/$tag" 2>&1)"
+  fetch_rc=$?
+  set -e
+  if [ "$fetch_rc" -ne 0 ] || ! git cat-file -e "$tag^{commit}" 2> /dev/null; then
+    echo "check-rule-id-renames-recorded: the remote advertises $tag but this clone cannot read it." >&2
+    echo "  Tried: git fetch --no-tags $depth_arg origin refs/tags/$tag:refs/tags/$tag -- exit $fetch_rc." >&2
+    [ -n "$fetch_out" ] && printf '  %s\n' "$fetch_out" >&2
+    echo "  Without that tag's objects there is no baseline to diff the catalog against. This is a" >&2
+    echo "  BROKEN GUARD, not a finding -- do not read it as 'a rename went unrecorded'." >&2
+    exit 1
+  fi
+fi
+
 ids_at() {
   # `| ` + backticked id, in the DSL-pack and native-analysis tables. The native table ends at the next
   # `###`, a convention `docs/rules/catalog.md` states in its own text -- counting past it double-counts
   # `circular`, which appears again as a recommendation id.
+  #
+  # 🔴 A DSL row spells the BARE TAIL (`| `goroutine-in-loop` |`) and its pack lives in the enclosing
+  # `### `<pack>`` heading, so the id a user actually configures against is the two joined. This
+  # function used to print the tail alone, and that made the guard blind to the single most likely
+  # way a rule id dies: a rule MOVING PACKS. The row changes sections, the tail does not change, the
+  # set diff is empty (2026-09-23, review ledger V291).
+  #
+  # 📏 Measured on the release that was in flight when this was found. v0.35.0 merged three packs
+  # that held one rule each, retiring `go/goroutine-in-loop`, `perf/api-in-loop` and
+  # `react/setstate-after-async-unguarded`; against v0.34.0 the tail-only extraction reported
+  # 178 ids on both sides and ZERO retired. The notes named all three correctly -- so the guard was
+  # not merely quiet, it was unable to reach either verdict, and a green run proved nothing.
+  #
+  # Native rows already carry the full id (`| `cross-layer/body-field-drift` |`) and are printed as
+  # found. A DSL row reached before any `###` is printed under `(no-pack)/` rather than dropped: a
+  # dropped row is a silent narrowing of the subject, which is the defect above wearing a new hat.
   { if [ "$1" = "WORKTREE" ]; then cat "$CATALOG"; else git show "$1:$CATALOG" 2> /dev/null; fi; } | awk '
-    /^## /   { sec = $0 }
-    /^### /  { if (sec ~ /Native analyses/) sec = "closed" }
-    /^\| `/  { if (sec ~ /DSL packs/ || sec ~ /Native analyses/) { gsub(/^\| `/, ""); gsub(/`.*$/, ""); print } }
+    /^## /   { sec = $0; pack = "" }
+    /^### /  {
+      if (sec ~ /Native analyses/) { sec = "closed" }
+      else if (sec ~ /DSL packs/)  { pack = $0; sub(/^### `/, "", pack); sub(/`.*$/, "", pack) }
+    }
+    /^\| `/ {
+      if (sec !~ /DSL packs/ && sec !~ /Native analyses/) next
+      id = $0; sub(/^\| `/, "", id); sub(/`.*$/, "", id)
+      if (sec ~ /Native analyses/) { print id }
+      else                         { print (pack == "" ? "(no-pack)" : pack) "/" id }
+    }
   ' | sort -u
 }
 
-old_ids="$(ids_at "$tag")"
-new_ids="$(ids_at WORKTREE)"
+# Both reads are wrapped because a FAILED read and an EMPTY read are different facts, and only the
+# second one has a message written for it. `ids_at` ends in a pipeline, so under `-o pipefail` a
+# `git show` that cannot find its object propagates out of the command substitution and `set -e`
+# ends the script here -- mute, with the diagnosis two lines further down, unreachable.
+set +e
+old_ids="$(ids_at "$tag")"; old_rc=$?
+new_ids="$(ids_at WORKTREE)"; new_rc=$?
+set -e
+if [ "$old_rc" -ne 0 ] || [ "$new_rc" -ne 0 ]; then
+  echo "check-rule-id-renames-recorded: reading $CATALOG FAILED (at $tag: exit $old_rc; in the working tree: exit $new_rc)." >&2
+  echo "  The comparison never ran, which is never the same as 'no id was retired'. Exiting loudly" >&2
+  echo "  on purpose: this branch exists because the same condition once exited 128 with zero bytes." >&2
+  exit 1
+fi
 if [ -z "$old_ids" ] || [ -z "$new_ids" ]; then
   echo "check-rule-id-renames-recorded: extracted ZERO ids at $tag or in the working tree." >&2
   echo "  An empty subject is a broken guard, never a catalog with no rules. The extraction shape is" >&2
