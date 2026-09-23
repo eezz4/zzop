@@ -70,12 +70,12 @@ pub struct MethodScan {
     /// invert the nesting and the finding disappears. Measured, not hypothesised:
     /// `await redis.set(key, Number(await redis.get(key)) + 1)` (`redis/counter-get-set`, a genuine
     /// lost-update read-modify-write) and `setData(await fetch(url));`
-    /// (`react/setstate-after-async-unguarded`, silent while the two-statement spelling on the next
+    /// (`reliability/setstate-after-async-unguarded`, silent while the two-statement spelling on the next
     /// fixture fires) are both dropped. This is structural, not a bug to fix here: separating "nested
     /// argument" from "later statement" needs nesting awareness two independent regexes over a flat line
     /// do not have. The policy is therefore DISCLOSE, not repair — every rule whose trigger regex can
     /// span a nested call publishes the residual in its own message (`redis/counter-get-set`,
-    /// `redis/lock-get-then-set`, `react/setstate-after-async-unguarded`,
+    /// `redis/lock-get-then-set`, `reliability/setstate-after-async-unguarded`,
     /// `db/find-then-create-no-unique`, `db/check-then-act-in-loop`, `reliability/fs-check-then-use`,
     /// `sql/race-condition-toctou`). A trigger regex that CANNOT span a nested call is immune by
     /// construction and stays silent about it: `db/non-atomic-counter-update`'s trigger is
@@ -87,7 +87,7 @@ pub struct MethodScan {
     /// plain co-occurrence, which is satisfied just as well by a setter that runs BEFORE the await. Without
     /// it, `patterns` proves only "both tokens appear somewhere in this span", and `trigger` anchors on the
     /// FIRST trigger match — routinely a line before the ordering token (measured on mono-hub: 9 of a
-    /// 15-finding `react/setstate-after-async-unguarded` sample anchored before the first `await` in the
+    /// 15-finding `reliability/setstate-after-async-unguarded` sample anchored before the first `await` in the
     /// whole file). Setting `after` fixes the anchor as a side effect: the finding lands on the first
     /// trigger match that actually follows, not on the first one anywhere.
     ///
@@ -111,7 +111,7 @@ pub struct MethodScan {
     /// Why it exists: a method-scan span is a DECLARED symbol's body, so a React component's whole
     /// function is one span and every anonymous closure inside it shares that scope. `after` then pairs a
     /// setter in one closure with an `await` in an unrelated SIBLING closure — measured as 4 of a
-    /// 15-finding `react/setstate-after-async-unguarded` sample. This gate requires the two matches to be
+    /// 15-finding `reliability/setstate-after-async-unguarded` sample. This gate requires the two matches to be
     /// in the same function, which is the scope an async continuation actually resumes into.
     ///
     /// Why it needs a PARSER fact and not just "nearest function": the naive partition splits a promise
@@ -144,7 +144,7 @@ pub struct MethodScan {
     /// initializer, exactly as before the gate. An external parser that projects spans only partially
     /// lands in the same place. Pinned by
     /// `a_class_property_setter_outside_every_function_span_keeps_the_pre_gate_pairing`
-    /// (`rules/dsl/react`).
+    /// (`rules/dsl/reliability`).
     #[serde(default)]
     pub after_in_same_function: bool,
     /// After every `patterns` entry is satisfied, the finding is vetoed if ANY of these also matches a

@@ -162,6 +162,40 @@ fn fetch_timeout_ok_marker_above_the_call_in_a_server_file_suppresses_the_findin
     );
 }
 
+#[test]
+fn a_receiver_qualified_http_create_server_still_admits_the_file() {
+    // The `createServer(` arm of `require_file` is receiver-qualified (`http.`/`https.`/`net.`/`http2.`/`tls.`).
+    // This is the POSITIVE half of that narrowing: a real Node server entry point is still scoped in, so the
+    // negative test below cannot be satisfied by an arm that stopped matching everything.
+    let dir = TempDir::new("zzop-be-rel");
+    dir.write(
+        "src/server.ts",
+        "import http from \"http\";\n\nexport const server = http.createServer(handler);\n\nexport async function handler() {\n  const res = await fetch(\"https://api.example.com/rates\");\n  return res.json();\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "fetch-no-timeout");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(h[0].line, 6);
+}
+
+#[test]
+fn a_bare_create_server_from_a_frontend_mock_library_does_not_admit_the_file() {
+    // MEASURED false positive (corpus/oss/fe-vite/src/main.jsx): miragejs exports a bare `createServer`,
+    // and so does Vite's dev server, so an unqualified `createServer\\s*\\(` arm read a frontend mock-server
+    // file as backend code and reported the app's own `axios.get` as a server-side missing deadline.
+    // The receiver qualification is what keeps this file out of scope; the test above keeps it honest.
+    let dir = TempDir::new("zzop-be-rel");
+    dir.write(
+        "src/main.jsx",
+        "import { createServer } from \"miragejs\";\nimport axios from \"axios\";\n\nconst mock = createServer({\n  routes() {},\n});\n\nexport async function load() {\n  const { data } = await axios.get(\"/api/articles\");\n  return data;\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "fetch-no-timeout").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
 // --- emitter-async-listener ---
 
 #[test]

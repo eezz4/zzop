@@ -148,8 +148,20 @@ fn a_pinning_fragment_held_in_a_name_is_out_of_reach_and_still_fires() {
 ///
 /// POSITION, not presence. A `contains` loop stays GREEN with every clause shoved back behind the
 /// remedy, which is how the ordering defect survives a green suite. THE INVALIDATION PROBE for the
-/// assertions below is exactly that move: put the four clauses back after the imperative and this test
-/// must go red with all four tokens, and the imperative, still present and still spelled exactly once.
+/// assertions below is exactly that move: put the clauses back after the imperative and this test
+/// must go red with every token, and the imperative, still present and still spelled exactly once.
+///
+/// THE SIXTH CLAUSE ARRIVED BY A MOVE, not by a rewrite. "What the veto does NOT reach ... a
+/// validator applied on a PRECEDING statement" sat 829 bytes BEHIND the imperative, and it is the
+/// clause that invalidates the most common mitigated site: cal.com's
+/// `packages/app-store/closecom/api/callback.ts` validates on the statement before the redirect, so
+/// the reader whose code is already correct met the instruction first and the reason it did not
+/// apply 829 bytes later. What moved is the whole veto paragraph — the veto DEFINITION, its
+/// NOT-REACH list and the authority gate's matching limit — because lifting the one sentence would
+/// have stranded "the veto" and "a limit of the same kind" from their antecedents. The imperative
+/// stayed put and the block landed in front of it: 4843 characters before, 4842 after, the whole
+/// difference being the joining " \u2014 " that became a sentence break (one em dash and one space
+/// out, one period in) and the `a` that became `A`.
 #[test]
 fn the_clauses_that_disqualify_a_finding_precede_the_remedy() {
     let dir = TempDir::new("zzop-be-sec");
@@ -186,6 +198,10 @@ fn the_clauses_that_disqualify_a_finding_precede_the_remedy() {
         (
             "states the gate that now exists",
             "HAS TERMINATED THE AUTHORITY",
+        ),
+        (
+            "invalidates the finding the veto ALREADY cleared in the code",
+            "a validator applied on a PRECEDING statement",
         ),
     ] {
         let at = m

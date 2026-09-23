@@ -1,7 +1,7 @@
 //! EF Core `DbSet<T>`/`[Table]` -> `db-table` PROVIDE extraction (the C# member of the ORM db-table
 //! family, alongside `zzop_parser_java_21::jpa`, `zzop_parser_go::adapters::gorm`, the TypeScript
-//! TypeORM adapters and the Prisma/SQL provide sides). Two declarative shapes, each behind ITS OWN
-//! import gate (a file importing neither yields nothing):
+//! TypeORM adapters and the Prisma/SQL provide sides). THREE shapes, each behind ITS OWN gate (a file
+//! matching none yields nothing):
 //!
 //! - **`[Table("…")]` attribute** on a class (gate: `using System.ComponentModel.DataAnnotations.Schema;`
 //!   — [`TABLE_ATTRIBUTE_SPECIFIERS`]): the string literal IS the physical table name, used verbatim. A
@@ -20,8 +20,22 @@
 //!   DbSet provide here — per-file extraction cannot see the rename; such a provide simply never joins
 //!   (inert), the same acceptance `gorm`'s wide net documents.
 //!
-//! Deliberately NOT recognized (disclosed): fluent `modelBuilder.Entity<T>().ToTable("…")` mapping
-//! (a method-call shape inside `OnModelCreating`, not a declarative annotation — roadmap), and a
+//! - **fluent `ToTable("…")` inside an `IEntityTypeConfiguration<T>` class** (gate: that base list — see
+//!   [`entity_config`]): the string literal IS the physical table name, and the entity comes from the
+//!   class's own base-list type argument, so no type resolver is needed. This is the shape .NET
+//!   actually writes: measured 2026-09-11 over three C# trees, `[Table(` reaches **0** files in all
+//!   three while `IEntityTypeConfiguration<` reaches 9 (eShop) and `ToTable(` 81/0/191 lines. It
+//!   OVERRIDES the `DbSet<T>` convention name in EF, but this build cannot suppress the losing provide:
+//!   the two shapes sit in different FILES and io projection is per-file, so both keys emit — the
+//!   `entity_config` module doc states the consequence in full.
+//!
+//! Deliberately NOT recognized (disclosed): the fluent LAMBDA overload
+//! `modelBuilder.Entity<T>(b => { b.ToTable("…"); })` inside `OnModelCreating` — a distinct shape whose
+//! `T` is an open generic parameter (`TUser`/`TRole`) in every measured site, so its `symbol` would key
+//! the entity-consume index on a type parameter rather than an entity; the chained
+//! `modelBuilder.Entity<T>().ToTable("…")` spelling, which occurs **0** times in eShop and aspnetcore;
+//! the SCHEMA segment (`modelBuilder.HasDefaultSchema("ordering")` — io keys carry no schema segment in
+//! ANY language, so a perfect ToTable read still yields `table:orders`, never `ordering.orders`); and a
 //! CONSUME side (`context.Users.Where(...)` query sites) — same one-side-at-a-time shape the JPA arm
 //! ships with.
 //!
@@ -84,7 +98,13 @@ pub fn extract_ef_core_db_table_provides(rel: &str, text: &str) -> Vec<IoProvide
     // emitted `table:users`. Not a missing fact — a WRONG one, at a table name the database does not
     // have, in the one file layout modern .NET writes.
     let table_attr = gate(TABLE_ATTRIBUTE_SPECIFIERS) || structural;
-    if !ef && !table_attr {
+    // The fluent arm's gate is its OWN structural signal and is deliberately NOT folded into `ef` or
+    // `table_attr`: a configuration class declares no `DbSet<T>` and carries no `[Table]`, so widening
+    // either of those gates with it would open files to passes that have nothing to read there. It is
+    // the arm the corpus census says is the one that matters — see `entity_config`'s module doc for the
+    // numbers ([Table( reaches 0 files in all three measured C# trees).
+    let entity_config = entity_config::declares_entity_config(root, text);
+    if !ef && !table_attr && !entity_config {
         return Vec::new();
     }
     let mut out = Vec::new();
@@ -105,6 +125,13 @@ pub fn extract_ef_core_db_table_provides(rel: &str, text: &str) -> Vec<IoProvide
             &table_attributed,
             &mut out,
         );
+    }
+    // Pass 3 — fluent `ToTable("…")` inside `IEntityTypeConfiguration<T>`. It runs BESIDE pass 2 rather
+    // than suppressing it: the two shapes live in DIFFERENT FILES in every measured layout, and per-file
+    // io projection gives one file no way to silence another's provide. Documented consequence — the
+    // convention-named `DbSet` key survives next to the correct fluent one.
+    if entity_config {
+        entity_config::collect_entity_config_provides(root, rel, text, &mut out);
     }
     out
 }
@@ -158,6 +185,7 @@ fn is_interface_name(name: &str) -> bool {
 // --- [Table] attribute side ---------------------------------------------------------------------------
 
 mod dbset;
+mod entity_config;
 mod table_attribute;
 
 use dbset::collect_dbset_provides;

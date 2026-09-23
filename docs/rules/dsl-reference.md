@@ -90,7 +90,7 @@ factored out the duplication, it never changed which files any rule scans.
 | `id` | string | — | Rule id within the pack. |
 | `axis` | `"defect"` \| `"opinion"` | `"defect"` | What KIND of claim this rule makes — see [Axis](#axis-defect-vs-opinion) below. |
 | `severity` | `"critical"` \| `"warning"` \| `"info"` | — | Default severity (overridable per-id via `RuleConfig::severity_overrides`). |
-| `message` | string | — | Human-facing cause/fix-hint, copied verbatim into every finding — but NOT the whole of what ships: the engine auto-appends TWO sentences at runtime, the suppress-marker line and the disable hint (see the note right below this table). |
+| `message` | string | — | Human-facing cause/fix-hint, copied verbatim into every finding — but NOT the whole of what ships, in either direction. The engine auto-appends TWO sentences at runtime (the suppress-marker line and the disable hint, see the note right below this table), and then a finding carrying exactly that assembled string ships a short pointer plus a `messageBy` field instead of the text, which a reader resolves by `ruleId` through `zzop explain` or `zzop://rule/{id}` — and only for packs compiled into the binary ([modules/facade.md](../modules/facade.md#the-third-lane--messageby-the-one-that-points-out-of-the-reply)). |
 | `matcher` | `Matcher` | — | One of the matcher shapes below (`type` tag, kebab-case). |
 
 There is **no `suppress_marker` field** — the inline ok-marker is DERIVED as `zzop-<id>-ok`
@@ -167,6 +167,12 @@ its own marker, so what you write replaces the generated line rather than doubli
 [authoring-guide.md](authoring-guide.md#the-auto-appended-disable-hint) for the full contract.
 
 ## Matchers
+
+> **On the `data` shapes below.** Each matcher's `data` payload is documented as what that matcher emits today, so
+> you can read a finding without guessing. It is NOT a frozen shape: `findings[].data` is on the compatibility surface
+> as a field (always present, always an object), and its inner keys are explicitly excluded — see
+> [VERSIONING.md](../../VERSIONING.md) and the `data` row in [facade.md](../modules/facade.md). Write adapters that
+> tolerate a key going missing; a key changing shape is a recorded change, not a major bump.
 
 `Matcher` is tagged on `"type"` (kebab-case). The shapes are not re-listed in this sentence — the
 `###` sections below are the list, one per shape, and that set is machine-checked against the
@@ -795,5 +801,5 @@ Every matcher emits `zzop_core::finding::Finding`:
 | `severity` | The rule's `severity` (or a config override — see `RuleConfig::severity_overrides`). |
 | `file` | The matched file's relative path. |
 | `line` | 1-based line: the matching line (line-scan), the trigger match's absolute line (method-scan), the symbol's declaration line (symbol-scan), or the IO entry's own line (io-scan). |
-| `message` | The rule's `message`, verbatim. |
+| `message` | The rule's `message`, verbatim — this table is what the MATCHER constructs, which is not always what reaches a reply: see the `message` row in the rule-fields table above. |
 | `data` | Matcher-specific JSON: `{"snippet"}` or `{"snippet","label"}` (line-scan); `{"snippet","method","triggerLines"}` (method-scan, `method` = the enclosing symbol's name, `triggerLines` = how many lines in that method body carry a qualifying trigger match — one finding per method either way, so this is the only way to tell a one-off from a repeated idiom); `{"snippet"}` = the symbol name (symbol-scan); `{"snippet","kind"}` (io-scan). |

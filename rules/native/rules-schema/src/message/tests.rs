@@ -971,3 +971,93 @@ fn the_field_usage_sightline_is_identical_in_the_findings_and_the_docs() {
         );
     }
 }
+
+// -----------------------------------------------------------------------------------------
+// The SILENT axis (`message/silent_breakage.rs`) -- §27 ORDER pins. Neither prescription emits
+// DDL and neither raises an error, so the cost is delivered later to a code path that stops
+// getting what it used to. Position, not existence: the invalidation probe for both moves the
+// landing behind that arm's imperative and leaves every token present.
+// -----------------------------------------------------------------------------------------
+
+/// Shared body of the two pins below.
+fn assert_silent_landing_order(
+    who: &str,
+    msg: &str,
+    disqualifier: &str,
+    landing: &str,
+    imperative: &str,
+) {
+    for (name, needle) in [
+        ("the disqualifier", disqualifier),
+        ("the landing clause", landing),
+        ("the imperative", imperative),
+    ] {
+        assert_eq!(
+            msg.matches(needle).count(),
+            1,
+            "{who}: {name} must be spelled ONCE, or an index comparison means nothing: {msg}"
+        );
+    }
+    let dq = msg.find(disqualifier).expect("disqualifier missing");
+    let land = msg.find(landing).expect("landing missing");
+    let verb = msg.find(imperative).expect("imperative missing");
+    assert!(
+        dq < land,
+        "{who}: disqualifier at {dq}, landing at {land}: {msg}"
+    );
+    assert!(
+        land < verb,
+        "{who}: the landing is at {land} and the imperative at {verb} -- a reader who acts on the \
+         instruction never reaches the caveat behind it: {msg}"
+    );
+}
+
+/// `schema/stale-updated-at` shipped 115 characters: an observation, no prescription, nowhere to put a
+/// qualifier (rule-quality.md §34). Its own disqualifier had to be written along with the landing.
+#[test]
+fn stale_updated_at_lands_the_orm_ownership_before_the_add_imperative() {
+    let msg = schema_issue_message(&issue("stale-updated-at", Some("updatedAt"), None));
+    assert_silent_landing_order(
+        "stale-updated-at",
+        &msg,
+        "it will not auto-refresh on writes",
+        super::silent_breakage::ORM_TIMESTAMP_OWNERSHIP_LANDING,
+        "IF NOTHING ELSE WRITES updatedAt: add",
+    );
+    for needle in [
+        "neither a default nor a constraint",
+        "EVERY update of the row",
+        "emits no DDL at all",
+        "cannot be the same field",
+    ] {
+        assert!(
+            msg.contains(needle),
+            "stale-updated-at lost {needle:?}: {msg}"
+        );
+    }
+}
+
+/// `soft-delete-bypass` keeps its EXISTING disqualifier (a `$use`/`$extends` filter this lexical check
+/// cannot see) ahead of the landing: whether the finding is true is answered before what acting costs.
+#[test]
+fn soft_delete_bypass_lands_the_deleted_row_reader_before_the_filter_imperative() {
+    let msg = join_issue_message(&join_issue("soft-delete-bypass", Some("deletedAt"), None));
+    assert_silent_landing_order(
+        "soft-delete-bypass",
+        &msg,
+        "is invisible to this static check",
+        super::silent_breakage::DELETED_ROW_READER_LANDING,
+        "IF THIS CALL SITE SHOULD ONLY EVER SEE LIVE ROWS: add",
+    );
+    for needle in [
+        "BECAUSE THIS RULE DID NOT",
+        "knows nothing about the function around them",
+        "Restore and undelete",
+        "which is a legal answer",
+    ] {
+        assert!(
+            msg.contains(needle),
+            "soft-delete-bypass lost {needle:?}: {msg}"
+        );
+    }
+}

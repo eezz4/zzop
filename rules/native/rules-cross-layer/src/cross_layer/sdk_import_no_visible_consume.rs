@@ -40,7 +40,7 @@
 //! cover. A fourth generator writing a fourth call shape stays invisible to both sides until its shape is
 //! added there; this rule will not cover for it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use zzop_core::{disable_hint, Finding, Severity};
 
@@ -88,6 +88,52 @@ impl PackageKind {
             PackageKind::OpaqueClient => "opaqueClient",
         }
     }
+}
+
+/// The sources this rule WITNESSES as join-blind: they import an SDK-shaped or opaque HTTP client
+/// widely enough to qualify, and the join can see fewer than [`MIN_TOTAL_CONSUMES`] http consumes from
+/// them. Exactly the population [`sdk_import_no_visible_consume_findings`] reports on, returned as a set
+/// so the SEVERITY path can read the same witnesses the finding text names.
+///
+/// ## Why this is separate (2026-09-07, review ledger V82)
+///
+/// `unconsumed-mutation-endpoint` picked its band from two inputs — the ratio predicate and the
+/// zero-contribution one — and this third witness was computed a few lines away without reaching it.
+/// The result was a reply that contradicted itself: twelve write endpoints at `warning`, each saying
+/// "no blindness was WITNESSED", beside this rule saying "the cross-layer join is blind for this
+/// source" about the very tree that would have been their caller. Measured on
+/// `corpus/oss/pair-redux-fastapi.jsonc`, where `fe-redux` routes every call through `superagent`.
+///
+/// It stays its own set rather than being folded into the others because the band's sentence names the
+/// mechanism, and the three are not interchangeable: a ratio witness saw call sites it could not
+/// resolve, a zero-contribution witness saw nothing at all, and this one saw an import of a client it
+/// structurally cannot read. Telling a reader the wrong one sends them looking for the wrong evidence.
+pub fn sdk_import_blind_sources(
+    package_imports: &[PackageImportSite],
+    http_consume_totals: &[(String, usize)],
+) -> BTreeSet<String> {
+    let sdk_re = regex::Regex::new(SDK_SPECIFIER_PATTERN).unwrap();
+    let opaque_re = regex::Regex::new(OPAQUE_HTTP_CLIENT_PATTERN).unwrap();
+    let totals: BTreeMap<&str, usize> = http_consume_totals
+        .iter()
+        .map(|(s, n)| (s.as_str(), *n))
+        .collect();
+    let mut out: BTreeSet<String> = BTreeSet::new();
+    for p in package_imports {
+        let qualifies = (p.file_count >= MIN_SDK_IMPORTING_FILES && sdk_re.is_match(&p.specifier))
+            || (p.file_count >= MIN_OPAQUE_CLIENT_IMPORTING_FILES
+                && opaque_re.is_match(&p.specifier));
+        if !qualifies {
+            continue;
+        }
+        // Same handoff as the findings function: at or above the floor, `unresolved-consume-ratio`
+        // owns the blind-spot report and this witness stands down.
+        if totals.get(p.source.as_str()).copied().unwrap_or(0) >= MIN_TOTAL_CONSUMES {
+            continue;
+        }
+        out.insert(p.source.clone());
+    }
+    out
 }
 
 pub fn sdk_import_no_visible_consume_findings(

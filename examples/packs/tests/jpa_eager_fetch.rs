@@ -1,7 +1,7 @@
 //! Exercises `examples/packs/orm-eager.json`'s `jpa-eager-fetch` line-scan rule: an explicit
 //! `fetch = FetchType.EAGER` on a JPA/Hibernate relation annotation. Uses its own `jpa_scan` helper
 //! (mirrors `perf.rs::scan`'s harness shape) since the shared `scan` helper filters to
-//! `perf/api-in-loop` only.
+//! `reliability/api-in-loop` only.
 
 use std::fs;
 use std::path::{Path, PathBuf};

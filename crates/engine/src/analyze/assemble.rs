@@ -4,10 +4,10 @@
 //! call-graph-BFS native analysis (plus its own whole-tree `Matcher::IoScan` DSL sub-phase), [`warnings`]
 //! framework-silence self-report, [`metrics`] git-dependent scores. Glue only — no analysis logic here.
 
-use zzop_core::{merge_findings, CommonIr, MinimalIr};
+use zzop_core::merge_findings;
 
-use crate::analyze::diagnostics::{rule_overrides_applied, run_diagnostics};
-use crate::{pipeline::FileArtifact, AnalyzeOutput, CoverageCensus, EngineConfig};
+use crate::analyze::diagnostics::rule_overrides_applied;
+use crate::{pipeline::FileArtifact, AnalyzeOutput, EngineConfig};
 
 mod collect;
 // The one degraded-file record, re-surfaced for `analyze::diagnostics`' cause self-report — the census
@@ -16,6 +16,8 @@ pub(in crate::analyze) use collect::DegradedFile;
 mod declared;
 mod dep_graph;
 mod diagnose;
+mod finalize;
+mod fuse;
 // `pub(in crate::analyze)`: `native_rules::callgraph`'s python/rust arms share these predicates and resolvers, reached as `assemble::helpers::*`. (`rules` below is the other cross-mod export.)
 pub(in crate::analyze) mod helpers;
 mod metrics;
@@ -47,6 +49,7 @@ pub(crate) fn assemble(
         ts_import_pairs,
         ts_re_export_pairs,
         ts_dynamic_import_pairs,
+        ts_call_graph_pairs,
         ts_asset_ref_pairs,
         ts_paths,
         mut degraded,
@@ -160,7 +163,9 @@ pub(crate) fn assemble(
         &tsconfigs,
         &ts_paths,
         &ts_import_pairs,
+        &ts_call_graph_pairs,
         &java_rels,
+        &java_index,
         &rust_workspace,
         &all_symbols,
         &dead_export_names_by_file,
@@ -186,6 +191,10 @@ pub(crate) fn assemble(
     helpers::sort_io_provides(&mut io_provides);
     helpers::sort_io_consumes(&mut io_consumes);
     let rels: Vec<&str> = loc_by_path.keys().map(String::as_str).collect();
+    // Filled by the provide-side tripwire trio inside `sweep`, and only when it actually measured (see
+    // its out-param doc). `None` travels out to the run-wide provide-blind gate meaning "not measured",
+    // which is NOT the same as "no routes visible" — the gate has to be able to tell those apart.
+    let mut visible_route_registrations: Option<usize> = None;
     let dsl_scope = diagnose::sweep(
         &diagnose::DiagnoseInput {
             root,
@@ -207,62 +216,50 @@ pub(crate) fn assemble(
         &io_provides,
         &io_consumes,
         &mut warnings,
+        &mut visible_route_registrations,
     );
     let io = diagnose::fold_io(io_provides, io_consumes);
 
-    let metrics::MetricsResult {
-        scores,
-        health,
-        recommendations,
-        critical,
-        seams,
-        layer_co_churn,
-        co_change,
-    } = metrics::compute(
-        config,
-        &nodes,
-        &dep,
-        &cycles,
-        &commits,
-        git_active,
-        &findings,
-        &mut rule_time,
-    );
-
-    let diagnostics_report =
-        run_diagnostics(file_count, &dep, &all_symbols, &commits, config, git_active);
-    warnings.extend(diagnostics_report.warnings);
-    let config_warnings = diagnostics_report.config_warnings;
-
-    warnings.extend(diagnose::empty_root_warning(file_count, root));
-
-    let rule_timings = config
-        .profile_rules
-        .then(|| crate::analyze::sort_rule_timings(rule_time));
-
-    let ir = CommonIr {
-        source: config.source_id.clone(),
-        // Multiple parser frontends (TypeScript + Prisma, v1 scope) fuse into one tree-wide IR here, so no
-        // single `parser` id is accurate the way it is for a single-frontend `build_common_ir` call — this
-        // is a zzop-only tag naming the fused engine itself rather than one frontend.
-        parser: "engine".to_string(),
-        ir: MinimalIr {
+    let finalize::Finalized {
+        metrics:
+            metrics::MetricsResult {
+                scores,
+                health,
+                recommendations,
+                critical,
+                critical_truncated,
+                seams,
+                layer_co_churn,
+                co_change,
+            },
+        config_warnings,
+        rule_timings,
+        ir,
+        coverage,
+        git_window,
+    } = finalize::run(
+        finalize::FinalizeInputs {
+            root,
+            config,
+            nodes: &nodes,
             dep,
-            symbols: all_symbols,
-            loc: loc_by_path,
+            cycles,
+            commits,
+            git_active,
+            findings: &findings,
+            rule_time,
+            file_count,
+            all_symbols,
+            loc_by_path,
             io,
+            parser_dispatched,
+            degraded: degraded.len(),
+            ts_import_pairs: &ts_import_pairs,
+            ts_re_export_pairs: &ts_re_export_pairs,
+            ts_dynamic_import_pairs: &ts_dynamic_import_pairs,
         },
-    };
-
-    let mut coverage = CoverageCensus::compute(file_count, parser_dispatched, &ir, degraded.len());
-    // F4 declared-import denominator — set here, not in `compute` (see `declared`'s module doc).
-    coverage.declared_imports_by_ext = declared::by_ext(
-        &ts_import_pairs,
-        &ts_re_export_pairs,
-        &ts_dynamic_import_pairs,
+        &mut warnings,
     );
-
-    let git_window = metrics::git_window(config, git_active);
 
     AnalyzeOutput {
         ir,
@@ -276,12 +273,14 @@ pub(crate) fn assemble(
         file_count,
         coverage,
         package_imports: crate::PackageImportSummary::census(package_import_files),
+        visible_route_registrations,
         attributes: attribute_store,
         nodes,
         scores,
         health,
         recommendations,
         critical,
+        critical_truncated,
         seams,
         folders,
         layer_co_churn,

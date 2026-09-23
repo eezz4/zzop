@@ -26,6 +26,56 @@ pub(in crate::analyze) fn git_not_requested_warning(config: &EngineConfig) -> Op
     )
 }
 
+/// §0 disclosure for a Spring Security config this build FOUND, READ, and then deliberately declined to
+/// draw a posture from — one line per such file, naming the bail. Empty when no Java file got past
+/// "not a security config at all", which is every tree that has no Spring Security config.
+///
+/// # Why this exists, and why its absence was the defect
+/// `extract_spring_security_posture` is parse-all-or-nothing ON PURPOSE: exempting a route wrongly hides
+/// a real finding, so an unrecognized clause yields NO posture and every route keeps reporting as
+/// unguarded. That refusal is correct and is not what changed here. What was wrong is that the refusal
+/// was SILENT: the extractor has always returned a NAMED bail so this report could exist, and until
+/// 2026-09-05 nothing read it, so the reply said "no auth evidence" about routes whose auth config had
+/// been located and parsed. Measured on macrozheng/mall (2026-09-05): its chain ends
+/// `.access(mgr == null ? authenticated() : mgr)` — `any-request-access-not-provable`, because the live
+/// arm could GRANT — and 114 of its 127 `mutating-route-no-auth` findings ride that silence.
+///
+/// The message states the DIRECTION of the consequence rather than leaving the reader to infer it: this
+/// bail makes findings appear, never disappear. A reader who thinks a missing posture might have
+/// SUPPRESSED something has the safety property backwards, and a disclosure that leaves that open invites
+/// the wrong repair.
+pub(in crate::analyze) fn spring_posture_bail_warnings(
+    bails: &[(String, &'static str, String)],
+) -> Vec<String> {
+    bails
+        .iter()
+        .map(|(file, name, detail)| {
+            // The DETAIL is the actionable half, rendered rather than folded into the name because
+            // several bail families hold many members that take entirely different work to support:
+            // `lambda-body` alone covers if_statement, chain-not-on-parameter, arguments, body,
+            // parameters and expression_statement. The first version of this warning printed the name
+            // alone and shipped that way for exactly one commit, which sent its reader to open the
+            // config and guess which member they hit — the guessing the bail enum exists to end.
+            // Empty for the variants that carry no payload; those already name one shape.
+            let shape = if detail.is_empty() {
+                String::new()
+            } else {
+                format!(", at: {detail}")
+            };
+            format!(
+                "Spring Security config read but NOT applied: {file} ({name}{shape}). This build located an \
+                 authorization chain in that file and declined to derive a route-auth posture from it, because \
+                 deriving one requires proving the chain is authenticated-by-default AND recognizing every clause \
+                 that configures it — anything less could clear a route that is actually open. NOTHING WAS \
+                 SUPPRESSED BY THIS: with no posture, every route stays unexempted, so route-auth findings here \
+                 are MORE numerous than they would be with the config understood, never fewer. To clear the \
+                 routes this config really does guard, inject the `auth-guarded` attribute for them through an \
+                 adapter overlay (Mode B) — the same channel a recognized guard writes to."
+            )
+        })
+        .collect()
+}
+
 /// Capability self-report: no DSL rule packs are loaded (`config.packs` is empty), so only the built-in
 /// native analyses ran. `pub(crate)` because it is shared between `assemble` and
 /// `envelope::analyze_envelope`, which gate DSL packs identically on `config.packs`. Per this codebase's
@@ -86,10 +136,31 @@ pub(crate) fn uncompilable_rule_warnings(packs: &[zzop_core::RulePackDef]) -> Ve
 /// and a count. `unparsed` must already carry each extension's TOTAL count in `.0` and its first (in
 /// artifact-visitation, i.e. `rel`-sorted) up-to-3 sample paths in `.1` — the caller (`analyze::assemble`)
 /// caps the sample during collection rather than here, so a huge tree never holds more than 3 rels per
-/// extension in memory. A `BTreeMap` key order makes the returned `Vec` deterministic (extension-ascending)
-/// with no sort needed here. No-extension files (README, Dockerfile) are deliberately excluded from
+/// extension in memory. No-extension files (README, Dockerfile) are deliberately excluded from
 /// `unparsed` altogether by the collection site, not here — see that site's own doc for why (ambiguous by
 /// construction: often config/docs, no reliable language signal).
+///
+/// ## The order is UNREAD-COUNT-descending, not extension-ascending
+/// These lines used to come out in `BTreeMap` key order, which is deterministic but ranks the gaps by
+/// how their extension is SPELLED. Nothing is dropped either way — this channel's own decision record
+/// rejects shortening it — so the whole remaining cost of the disclosure is which end of it a reader
+/// reaches first, and a name sort spends that on an accident. Measured on the dogfood corpus: nocodb's
+/// `.vue` line (962 unread files) was the 42nd of 49 `warnings` entries, under eight extensions of 1-10
+/// files each, because "v" sorts last; koel's `.php` (1412 files) sat 10th, one line below a single
+/// `.psd`; immich's `.svelte` (415) sat 25th of 38.
+///
+/// The key is the count each entry ALREADY carries — no roster of interesting extensions to fall out of
+/// date, and an extension this build learns about tomorrow is ranked by the same arithmetic as the rest.
+/// Ties break on the extension name, so the order is TOTAL: no pair is left to insertion order, and two
+/// runs over one map stay byte-identical (`two_calls_over_the_same_map_are_byte_for_byte_identical`).
+///
+/// It is a reading order, NOT a severity: a large unread count means this run read less of the tree, not
+/// that the tree is worse. The channel still states one fact per extension and judges none of them.
+///
+/// The sibling `coverageGaps` table keeps its extension-ascending order deliberately — it is floor-gated
+/// to a handful of principal filetypes, so there is no first-screen to lose there, and it is pinned that
+/// way by `coverage_gaps_tests`. Two surfaces of one subject, ordered for the two different problems
+/// they have.
 ///
 /// ## One fact line per extension, ONE guidance line per run
 /// The adapter on-ramp ([`adapter_on_ramp_note`]) is emitted ONCE, as the last entry, instead of being
@@ -104,7 +175,11 @@ pub(in crate::analyze) fn unparsed_extension_warning(
     if unparsed.is_empty() {
         return Vec::new();
     }
-    let mut out: Vec<String> = unparsed
+    // Biggest unread population first, name breaking the ties. `BTreeMap::iter` is already
+    // name-ascending, and `sort_by_key` is stable, so the tie-break needs no second comparator.
+    let mut ordered: Vec<(&String, &(usize, Vec<String>))> = unparsed.iter().collect();
+    ordered.sort_by_key(|(_, (count, _))| std::cmp::Reverse(*count));
+    let mut out: Vec<String> = ordered
         .iter()
         .map(|(ext, (count, sample_rels))| {
             let mut sample_str = sample_rels.join(", ");
@@ -117,12 +192,21 @@ pub(in crate::analyze) fn unparsed_extension_warning(
             )
         })
         .collect();
-    out.push(adapter_on_ramp_note(unparsed));
+    // The note SAMPLES this same order rather than re-deriving one: the five it names must be the five a
+    // reader has just read, or the one line a skimmer does read points away from the largest gap.
+    out.push(adapter_on_ramp_note(
+        &ordered
+            .iter()
+            .map(|(ext, _)| ext.as_str())
+            .collect::<Vec<_>>(),
+    ));
     out
 }
 
 /// Extensions named inline in the single on-ramp note before it collapses to a `+N more` count — the note
-/// points at the per-extension entries above it, so it never needs the full list.
+/// points at the per-extension entries above it, so it never needs the full list. Which five it names is
+/// not this constant's business: it takes the FIRST five of the order its caller emitted, so the sample
+/// and the entries can never disagree about which gaps are the big ones.
 const ON_RAMP_EXT_SAMPLE: usize = 5;
 
 /// The gap-to-creation funnel, stated once per run (`output-philosophy`, §2 capability gaps): a gap must
@@ -155,13 +239,20 @@ const ON_RAMP_EXT_SAMPLE: usize = 5;
 /// out); what left is the evidence for it, which belongs where someone changing this code will read
 /// it. Pinned by
 /// `unparsed_extension_tests`.
-fn adapter_on_ramp_note(unparsed: &BTreeMap<String, (usize, Vec<String>)>) -> String {
-    let named: Vec<String> = unparsed
-        .keys()
+///
+/// `ordered` is the extension list IN THE ORDER the fact lines above were emitted (unread-count
+/// descending — see [`unparsed_extension_warning`]), not the raw map: this note takes its sample off the
+/// front of that list so the five it names are the five the reader just passed. Taking them off the map
+/// instead put the five alphabetically-first extensions in the one line a skimming reader does read,
+/// which on nocodb meant naming `.bash`/`.bats`/`.db`/`.env`/`.eta` — 18 files between them — while 962
+/// unread `.vue` files went unnamed here.
+fn adapter_on_ramp_note(ordered: &[&str]) -> String {
+    let named: Vec<String> = ordered
+        .iter()
         .take(ON_RAMP_EXT_SAMPLE)
         .map(|ext| format!(".{ext}"))
         .collect();
-    let more = unparsed.len() - named.len();
+    let more = ordered.len() - named.len();
     let more_note = if more > 0 {
         format!(", +{more} more")
     } else {
@@ -189,7 +280,7 @@ fn adapter_on_ramp_note(unparsed: &BTreeMap<String, (usize, Vec<String>)>) -> St
          `zzop validate-envelope <file>` / MCP tool \
          `validate_envelope` before wiring it in); repo users, see docs/NORMALIZED_AST.md. (Mode A \
          full-envelope analysis: `zzop analyze-envelope <file>` / MCP tool `analyze_envelope`.)",
-        unparsed.len(),
+        ordered.len(),
         named.join(", ")
     )
 }

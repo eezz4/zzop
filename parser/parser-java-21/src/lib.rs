@@ -148,7 +148,7 @@ const TOP_LEVEL_DECLARATION_KINDS: &[&str] = &[
 pub(crate) fn parse_tree(text: &str) -> Option<tree_sitter::Tree> {
     let mut parser = tree_sitter::Parser::new();
     parser.set_language(&java_language()).ok()?;
-    let tree = parser.parse(text, None)?;
+    let tree = util::parse_within_depth(&mut parser, text)?;
     let root = tree.root_node();
     if root.is_error() {
         return None;

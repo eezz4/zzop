@@ -26,10 +26,12 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+mod duplicate_ids;
 mod marker_collisions;
 mod provenance;
 mod retired_fields;
 mod rule_issues;
+pub use duplicate_ids::pack_duplicate_id_issues;
 pub use marker_collisions::suppress_marker_collisions;
 pub use provenance::pack_export_staleness;
 pub use retired_fields::pack_retired_field_issues;
@@ -77,6 +79,19 @@ pub struct LoadResult {
 /// field already carries its resolved regex text, so nothing downstream (hashing, `RegexSet` prefilter,
 /// eval) needs to know fragments ever existed.
 pub fn parse_dsl_pack(text: &str) -> Result<RulePackDef, String> {
+    // Strip a UTF-8 BOM before anything reads this text. serde rejects one as "expected value at
+    // line 1 column 1", which names the wrong thing twice: the byte is invisible in an editor, and
+    // the message sends the author to re-read a file whose JSON is fine. Measured 2026-09-02, by an
+    // external reviewer writing their FIRST custom pack: PowerShell 5.1's `Out-File -Encoding utf8`
+    // adds the BOM, so on Windows the documented growth path -- drop a pack in `zzop/rules/` -- fails
+    // on the default way to create the file. It is stripped rather than reported because a BOM is an
+    // encoding artifact of the writer, not a defect in the pack; JSON parsers are permitted to ignore
+    // a leading BOM and most do.
+    //
+    // It happens HERE, at the single judgment point, and not in `load_dsl_packs`: the pre-load
+    // validator shares this function precisely so the two can never disagree, and stripping in the
+    // loader alone would have `validate-rule-pack` call invalid a file the loader accepts.
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     // A JSON ARRAY root is a special case — see `zzop_core::normalized::validate_envelope`'s identical
     // guard for the full rationale. `RulePackDef`'s derived `Deserialize` accepts a sequence as well as
     // a map, so a top-level array like `[1,2,3]` deserializes positionally against the struct's

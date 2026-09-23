@@ -65,11 +65,40 @@ pub(super) fn git_window(config: &EngineConfig, git_active: bool) -> Option<crat
         })
 }
 
+/// The scores config this run actually computes against: `EngineConfig::scores_config` as declared,
+/// plus the scored-POPULATION gate `scores.excludeTestFilesFromFileMetrics` opens.
+///
+/// Borrowed — the same struct, no copy — whenever that key is off, which is the default and which is
+/// what makes an unconfigured run byte-identical to one from before the key existed. Owned (one clone
+/// per analyzed tree) only when it is on.
+///
+/// The two halves of the test-path vocabulary are joined HERE rather than in `zzop-metrics` because
+/// this is the layer that holds both: the shared, ecosystem-fixed arms belong to `zzop_core`
+/// (`is_test_file`, which `PopulationFilter` calls), and the project's own additions arrive as
+/// `vocabulary.extraTestPathPatterns`, whose arm-by-arm validation and warning already live in
+/// `crate::vocabulary`. `super::dep_graph` calls the same resolver to push those warnings, so a
+/// pattern that cannot compile is reported once there and silently contributes nothing here.
+fn scores_config_for_run(
+    config: &EngineConfig,
+) -> std::borrow::Cow<'_, zzop_metrics::ScoresConfig> {
+    use std::borrow::Cow;
+    if !config.scores_exclude_test_files {
+        return Cow::Borrowed(&config.scores_config);
+    }
+    let extra = crate::vocabulary::extra_test_path_tail(&config.vocabulary).0;
+    let mut scores_config = config.scores_config.clone();
+    scores_config.population =
+        zzop_metrics::PopulationFilter::excluding_test_paths(extra.as_deref());
+    Cow::Owned(scores_config)
+}
+
 pub(super) struct MetricsResult {
     pub(super) scores: Option<Scores>,
     pub(super) health: Option<HealthIndex>,
     pub(super) recommendations: Vec<Recommendation>,
     pub(super) critical: Vec<CriticalFile>,
+    /// Rows `CRITICALITY_LIMIT` dropped from `critical`. See `AnalyzeOutput::critical_truncated`.
+    pub(super) critical_truncated: u32,
     pub(super) seams: Vec<SeamCandidate>,
     pub(super) layer_co_churn: Option<Vec<CrossLayerCoChurn>>,
     pub(super) co_change: Option<Vec<CoChangeEdge>>,
@@ -100,149 +129,165 @@ pub(super) fn compute(
     let criticality_on = is_enabled(&config.rule_config, "criticality");
     let seams_on = is_enabled(&config.rule_config, "seams");
 
-    let (scores, health, recommendations, critical, seams, co_change) = if git_active {
-        // Unconditional since 2026-08-06: `co_change` is an OUTPUT of its own now, not only an input to
-        // `recommendations`/`seams`, and it is ungated by `disabledRules` for the reason
-        // `layer_co_churn` is (see this module's doc). The gate it replaces only ever fired when both of
-        // those ids were disabled, so the common path costs the same.
-        let coupling = build_coupling(commits, COUPLING_TOP_PER_FILE);
-        // Derived from the SAME map the scores read, so the picture and the scores cannot disagree
-        // about what co-changed — a second computation here would be a second answer.
-        let co_change = co_change_edges(&coupling);
+    let (scores, health, recommendations, critical, critical_truncated, seams, co_change) =
+        if git_active {
+            // Unconditional since 2026-08-06: `co_change` is an OUTPUT of its own now, not only an input to
+            // `recommendations`/`seams`, and it is ungated by `disabledRules` for the reason
+            // `layer_co_churn` is (see this module's doc). The gate it replaces only ever fired when both of
+            // those ids were disabled, so the common path costs the same.
+            let coupling = build_coupling(commits, COUPLING_TOP_PER_FILE);
+            // Derived from the SAME map the scores read, so the picture and the scores cannot disagree
+            // about what co-changed — a second computation here would be a second answer.
+            let co_change = co_change_edges(&coupling);
 
-        // The top-level `exclude` says "do not judge these paths". It reaches the SCORE computation as a
-        // per-file subject gate rather than as a graph edit: the excluded file stays a node with all its
-        // edges, so every OTHER file's coupling, fan-out and blast radius are unchanged, and only the
-        // excluded file's own standing as a judged subject is removed — from the violation list and the
-        // denominator alike (`ScoresInput::is_scored`). Dropping it from the graph instead would not
-        // filter the report, it would state that a real dependency does not exist.
-        let is_scored =
-            |path: &str| !zzop_metrics::path_excluded(&config.rule_config.global_excludes, path);
+            // The top-level `exclude` says "do not judge these paths". It reaches the SCORE computation as a
+            // per-file subject gate rather than as a graph edit: the excluded file stays a node with all its
+            // edges, so every OTHER file's coupling, fan-out and blast radius are unchanged, and only the
+            // excluded file's own standing as a judged subject is removed — from the violation list and the
+            // denominator alike (`ScoresInput::is_scored`). Dropping it from the graph instead would not
+            // filter the report, it would state that a real dependency does not exist.
+            let is_scored = |path: &str| {
+                !zzop_metrics::path_excluded(&config.rule_config.global_excludes, path)
+            };
 
-        let computed_scores = (scores_on || health_on).then(|| {
-            let t0 = profile.then(Instant::now);
-            let scores = compute_scores(
-                &ScoresInput {
-                    nodes,
-                    dep,
-                    circular: cycles,
-                    // Both still empty, and both now SAY SO on the wire rather than passing silently.
-                    //
-                    // `target` selects the per-role LOC limit (`fe:100 / be:200 / all:200`); no config
-                    // key reaches this argument, so the table is never consulted and every run scores
-                    // against `DEFAULT_LOC_LIMIT`. That one is already visible — `fileSizeCompliance`
-                    // and `godFile` both publish the `limit` they actually used — so it is a dead knob,
-                    // not a silent measurement claim, and it is tracked as such rather than fixed here.
-                    //
-                    // `file_kinds` has no producer anywhere in the workspace, which used to leave
-                    // `mainSequence` publishing a distance computed from a fabricated `abstractness: 0`.
-                    // It now reports `classifiedFiles: 0` and drops out of `health.pain` entirely — see
-                    // `ScoresInput::file_kinds`. The two channels that had NO live half at all
-                    // (`type_safety_counts`, `lod_by_file`) are gone with their metrics.
-                    target: None,
-                    file_kinds: &FileKinds::new(),
-                    is_source: &is_source,
-                    is_scored: &is_scored,
-                },
-                &config.scores_config,
-            );
-            // `scores`/`health` produce one struct, not a `Vec` — `findings: 0` is the convention for a
-            // native analysis id with nothing list-shaped to count.
-            record_native_timing(rule_time, t0, "scores", 0);
-            scores
-        });
-
-        let health = computed_scores
-            .as_ref()
-            .filter(|_| health_on)
-            .map(|scores| {
+            let computed_scores = (scores_on || health_on).then(|| {
                 let t0 = profile.then(Instant::now);
-                let health = compute_health_index(scores);
-                record_native_timing(rule_time, t0, "health", 0);
-                health
+                let scores = compute_scores(
+                    &ScoresInput {
+                        nodes,
+                        dep,
+                        circular: cycles,
+                        // Both still empty, and both now SAY SO on the wire rather than passing silently.
+                        //
+                        // `target` selects the per-role LOC limit (`fe:100 / be:200 / all:200`); no config
+                        // key reaches this argument, so the table is never consulted and every run scores
+                        // against `DEFAULT_LOC_LIMIT`. That one is already visible — `fileSizeCompliance`
+                        // and `godFile` both publish the `limit` they actually used — so it is a dead knob,
+                        // not a silent measurement claim, and it is tracked as such rather than fixed here.
+                        //
+                        // `file_kinds` has no producer anywhere in the workspace, which used to leave
+                        // `mainSequence` publishing a distance computed from a fabricated `abstractness: 0`.
+                        // It now reports `classifiedFiles: 0` and drops out of `health.pain` entirely — see
+                        // `ScoresInput::file_kinds`. The two channels that had NO live half at all
+                        // (`type_safety_counts`, `lod_by_file`) are gone with their metrics.
+                        target: None,
+                        file_kinds: &FileKinds::new(),
+                        is_source: &is_source,
+                        is_scored: &is_scored,
+                    },
+                    &scores_config_for_run(config),
+                );
+                // `scores`/`health` produce one struct, not a `Vec` — `findings: 0` is the convention for a
+                // native analysis id with nothing list-shaped to count.
+                record_native_timing(rule_time, t0, "scores", 0);
+                scores
             });
 
-        let recommendations = if recommendations_on {
-            let t0 = profile.then(Instant::now);
-            let recommendations = build_recommendations(
-                &BuildRecInput {
+            let health = computed_scores
+                .as_ref()
+                .filter(|_| health_on)
+                .map(|scores| {
+                    let t0 = profile.then(Instant::now);
+                    // The population claim travels WITH the number: `pain` is re-based when the
+                    // key is on (measured on the fixed `corpus/frameworks/express` checkout: 30.0
+                    // off / 11.5 on, same bytes), and `architecture.painMeaning` turns this bool into
+                    // the sentence a reader compares two runs with.
+                    let health = compute_health_index(scores, config.scores_exclude_test_files);
+                    record_native_timing(rule_time, t0, "health", 0);
+                    health
+                });
+
+            let recommendations = if recommendations_on {
+                let t0 = profile.then(Instant::now);
+                let recommendations = build_recommendations(
+                    &BuildRecInput {
+                        nodes,
+                        dep,
+                        coupling: &coupling,
+                        circular: cycles,
+                        // The config's top-level `exclude` — the SAME list `zzop_core::is_suppressed` applies
+                        // to findings. Recommendations are scores rather than findings, and this argument was
+                        // hardcoded empty until 2026-07-29, which let this repo's own run headline
+                        // `topRecommendation.topItem = "cases/trees/graph/circularB.ts"` under a config that
+                        // excludes `cases/**`. See `zzop_metrics::recommendations`' module doc.
+                        excludes: &config.rule_config.global_excludes,
+                        findings,
+                    },
+                    &RecommendationGates::default(),
+                );
+                record_native_timing(rule_time, t0, "recommendations", recommendations.len());
+                recommendations
+            } else {
+                Vec::new()
+            };
+
+            let (critical, critical_truncated) = if criticality_on {
+                let t0 = profile.then(Instant::now);
+                let out = compute_criticality(
                     nodes,
                     dep,
-                    coupling: &coupling,
-                    circular: cycles,
-                    // The config's top-level `exclude` — the SAME list `zzop_core::is_suppressed` applies
-                    // to findings. Recommendations are scores rather than findings, and this argument was
-                    // hardcoded empty until 2026-07-29, which let this repo's own run headline
-                    // `topRecommendation.topItem = "cases/trees/graph/circularB.ts"` under a config that
-                    // excludes `cases/**`. See `zzop_metrics::recommendations`' module doc.
-                    excludes: &config.rule_config.global_excludes,
-                    findings,
-                },
-                &RecommendationGates::default(),
-            );
-            record_native_timing(rule_time, t0, "recommendations", recommendations.len());
-            recommendations
+                    // The same top-level `exclude` the line above hands `build_recommendations`, and the same
+                    // one `zzop_core::is_suppressed` applies to findings. Hardcoded absent until 2026-07-29,
+                    // which let TWO FIELDS OF THE SAME `architecture` OBJECT answer in opposite directions:
+                    // measured on this repo with `exclude: ["crates/core/**"]`, all three `criticalTop` slots
+                    // were `crates/core/...` while `topRecommendation` in the same run honoured the exclusion.
+                    // Blast radius itself is still computed over the whole graph — see
+                    // `zzop_metrics::criticality`'s doc for where exactly the filter attaches.
+                    &config.rule_config.global_excludes,
+                    CRITICALITY_MIN_BLAST_RADIUS,
+                    CRITICALITY_SILENT_CHANGE_MAX,
+                    CRITICALITY_LIMIT,
+                );
+                record_native_timing(rule_time, t0, "criticality", out.0.len());
+                out
+            } else {
+                // Not `(vec![], 0)` by accident: with the analysis switched off nothing was capped, and a
+                // non-zero here would claim rows were dropped by a computation that never ran.
+                (Vec::new(), 0)
+            };
+
+            let seams = if seams_on {
+                let t0 = profile.then(Instant::now);
+                // The declared never-extract vocabulary, whole — an undeclared project passes an empty set and
+                // filters nothing, which is this vocabulary class's contract rather than an oversight.
+                let noise: std::collections::BTreeSet<String> =
+                    config.vocabulary.seam_noise_dirs.iter().cloned().collect();
+                let seams = compute_seams(dep, &coupling, SEAMS_MIN_FILES, SEAMS_LIMIT, &noise);
+                record_native_timing(rule_time, t0, "seams", seams.len());
+                seams
+            } else {
+                Vec::new()
+            };
+
+            // `scores` is dropped here (not above) when only `health` asked for it — the field is
+            // suppressed, the work it fed was still real.
+            let mut scores = computed_scores.filter(|_| scores_on);
+            // The top-level `exclude` applied to the per-metric violation LISTS — deliberately after
+            // `compute_health_index` above has already read this struct, so `health.pain` is provably the
+            // whole-tree rollup it claims to be and stays comparable across runs. Every `.score` and the counts
+            // behind it are likewise untouched: only the "what should I look at" rows shrink. See
+            // `zzop_metrics::report_excludes`.
+            if let Some(scores) = scores.as_mut() {
+                apply_excludes_to_scores(scores, &config.rule_config.global_excludes);
+            }
+
+            (
+                scores,
+                health,
+                recommendations,
+                critical,
+                critical_truncated,
+                seams,
+                Some(co_change),
+            )
         } else {
-            Vec::new()
+            // `co_change` is `None`, not an empty Vec: nothing was MEASURED. An empty Vec here would claim
+            // the opposite — measured, and nothing co-changed.
+            // The `0` is the same statement `critical: Vec::new()` beside it makes: with git inactive the
+            // computation never ran, so no row was dropped by a cap. It is not "complete" either — that is
+            // what the empty list already says.
+            (None, None, Vec::new(), Vec::new(), 0, Vec::new(), None)
         };
-
-        let critical = if criticality_on {
-            let t0 = profile.then(Instant::now);
-            let critical = compute_criticality(
-                nodes,
-                dep,
-                // The same top-level `exclude` the line above hands `build_recommendations`, and the same
-                // one `zzop_core::is_suppressed` applies to findings. Hardcoded absent until 2026-07-29,
-                // which let TWO FIELDS OF THE SAME `architecture` OBJECT answer in opposite directions:
-                // measured on this repo with `exclude: ["crates/core/**"]`, all three `criticalTop` slots
-                // were `crates/core/...` while `topRecommendation` in the same run honoured the exclusion.
-                // Blast radius itself is still computed over the whole graph — see
-                // `zzop_metrics::criticality`'s doc for where exactly the filter attaches.
-                &config.rule_config.global_excludes,
-                CRITICALITY_MIN_BLAST_RADIUS,
-                CRITICALITY_SILENT_CHANGE_MAX,
-                CRITICALITY_LIMIT,
-            );
-            record_native_timing(rule_time, t0, "criticality", critical.len());
-            critical
-        } else {
-            Vec::new()
-        };
-
-        let seams = if seams_on {
-            let t0 = profile.then(Instant::now);
-            let seams = compute_seams(dep, &coupling, SEAMS_MIN_FILES, SEAMS_LIMIT);
-            record_native_timing(rule_time, t0, "seams", seams.len());
-            seams
-        } else {
-            Vec::new()
-        };
-
-        // `scores` is dropped here (not above) when only `health` asked for it — the field is
-        // suppressed, the work it fed was still real.
-        let mut scores = computed_scores.filter(|_| scores_on);
-        // The top-level `exclude` applied to the per-metric violation LISTS — deliberately after
-        // `compute_health_index` above has already read this struct, so `health.pain` is provably the
-        // whole-tree rollup it claims to be and stays comparable across runs. Every `.score` and the counts
-        // behind it are likewise untouched: only the "what should I look at" rows shrink. See
-        // `zzop_metrics::report_excludes`.
-        if let Some(scores) = scores.as_mut() {
-            apply_excludes_to_scores(scores, &config.rule_config.global_excludes);
-        }
-
-        (
-            scores,
-            health,
-            recommendations,
-            critical,
-            seams,
-            Some(co_change),
-        )
-    } else {
-        // `co_change` is `None`, not an empty Vec: nothing was MEASURED. An empty Vec here would claim
-        // the opposite — measured, and nothing co-changed.
-        (None, None, Vec::new(), Vec::new(), Vec::new(), None)
-    };
 
     // `AnalyzeOutput::layer_co_churn` — git-gated like `scores`/`health` above: `None` when git is
     // inactive, `Some` (possibly an empty `Vec`) when it succeeded. `layer_of` folds
@@ -260,6 +305,7 @@ pub(super) fn compute(
         health,
         recommendations,
         critical,
+        critical_truncated,
         seams,
         layer_co_churn,
         co_change,

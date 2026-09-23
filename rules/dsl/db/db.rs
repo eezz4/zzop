@@ -112,15 +112,25 @@ mod message_order_pins;
 /// work, and being wired eight times is what keeps it from being dropped by a single edit.
 #[path = "../message_order_verdicts.rs"]
 mod message_order_verdicts;
+
+/// The §33/§37 landing shared with the `sql` pack — the check-then-act family's unique-constraint
+/// precondition costs the same thing whichever rule reports it, and the two packs are separate test
+/// crates, so the one spelling lives beside the pins rather than inside either pack.
+#[path = "../unique_pair_precondition_landing.rs"]
+mod unique_pair_precondition_landing;
 use message_order_pins::{
     assert_clauses_precede_imperative, assert_disqualifier_summary_precedes_imperative,
+    assert_landing_precedes_imperative,
 };
 
 // Test modules (split by rule/theme; the fixtures above are shared via `use super::*;`).
+mod autocommit_replay_landing;
 mod client_lifecycle;
+mod isolation_abort_landing;
 mod money_and_catch;
 mod queries;
 mod races;
 mod raw_sql_writes;
 mod transactions;
+mod unique_pair_precondition_pin;
 mod writes;

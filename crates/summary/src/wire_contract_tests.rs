@@ -307,7 +307,7 @@ fn reference_html_publishes_exactly_the_registry_s_output_fields() {
     );
 }
 
-/// THE FOLD'S CROSS-LANGUAGE SEAM. `crates/summary/src/output/rule_prose.rs` folds each repeated
+/// THE FOLD'S CROSS-LANGUAGE SEAM. `crates/summary/src/output/rule_prose/mod.rs` folds each repeated
 /// message text to one copy and points every finding at it with `messageRef`; the repo's JS
 /// consumers of that reply have to resolve through that FIELD. This pin holds both ends of the seam
 /// from the producing side, because the two ends are in different languages and nothing else looks
@@ -336,6 +336,8 @@ fn the_repos_human_finding_renderer_resolves_prose_through_the_field() {
     for token in [
         "messageRef",
         "ruleMessages",
+        "templateParts",
+        "ruleMessageTemplates",
         "export function resolveMessage",
     ] {
         assert!(
@@ -347,6 +349,7 @@ fn the_repos_human_finding_renderer_resolves_prose_through_the_field() {
     // The producer really does emit the field the resolver reads. Spelled from the constant rather
     // than typed twice, so a rename moves both ends or fails here.
     assert_eq!(crate::output::message_ref_key(), "messageRef");
+    assert_eq!(crate::output::template_parts_key(), "templateParts");
 
     // The one human renderer resolves through it instead of reading the raw field.
     let gate = read_repo_file("scripts/measure/self-analysis-gate.mjs");

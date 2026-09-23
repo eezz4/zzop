@@ -70,7 +70,7 @@ fn run_git(dir: &Path, args: &[&str]) {
 }
 
 /// A real git repo (same `git init`/`config`/`commit` pattern as
-/// `crates/engine/tests/analyze_git.rs`'s `git_fixture_repo`) built to exercise every `HashMap`-typed
+/// `crates/engine/tests/integration/analyze_git.rs`'s `git_fixture_repo`) built to exercise every `HashMap`-typed
 /// field reachable from `AnalyzeOutputView` in one fixture:
 /// - `ir.dep` gets 2+ keys: `a.ts` imports both `b.ts` and `c.ts`, `b.ts` imports `c.ts`.
 /// - `ir.loc` gets 3 keys (one per file).

@@ -141,6 +141,7 @@ use message_order_pins::{
 mod client_no_error_listener;
 mod flushall_in_code;
 mod keys_command_in_code;
+mod lock_ttl_deadline_landing;
 mod redis_counter_get_set;
 mod redis_lock_get_then_set;
 mod redis_lock_no_ttl;

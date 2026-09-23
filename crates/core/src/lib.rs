@@ -7,7 +7,9 @@
 pub mod attributes;
 pub mod call_sites;
 pub mod callgraph;
+pub mod clock;
 pub mod coupling;
+pub mod cst_depth;
 pub mod dsl;
 pub mod file_nodes;
 pub mod finding;
@@ -20,6 +22,7 @@ pub mod noncycle;
 pub mod normalized;
 pub mod pack_loader;
 pub mod paths;
+pub mod posix_path;
 pub mod recognizer;
 pub mod registry;
 pub mod rule_channels;
@@ -80,16 +83,16 @@ pub use normalized::{
     NORMALIZED_AST_FORMAT, SUPPORTED_NORMALIZED_AST_VERSION,
 };
 pub use pack_loader::{
-    applies_to, check_dsl_schema_version, load_dsl_packs, pack_export_staleness, pack_regex_issues,
-    pack_retired_field_issues, parse_dsl_pack, suppress_marker_collisions, LoadResult,
-    PackLoadError,
+    applies_to, check_dsl_schema_version, load_dsl_packs, pack_duplicate_id_issues,
+    pack_export_staleness, pack_regex_issues, pack_retired_field_issues, parse_dsl_pack,
+    suppress_marker_collisions, LoadResult, PackLoadError,
 };
 pub use paths::{build_path_re, is_build_path, is_test_file};
 pub use recognizer::FrameworkRecognizer;
 pub use registry::{
-    apply_severity_override, global_exclude_matches_path, is_enabled, is_pack_enabled,
-    is_suppressed, merge_findings, register_native_analysis_stub, suppression_matches_path,
-    GlobalExclude, RuleConfig, RuleRegistry, Suppression, REDACTED,
+    apply_severity_override, glob_matches, global_exclude_matches_path, is_enabled,
+    is_pack_enabled, is_suppressed, merge_findings, register_native_analysis_stub,
+    suppression_matches_path, GlobalExclude, RuleConfig, RuleRegistry, Suppression, REDACTED,
 };
 pub use rule_channels::{declare_native_rule_channels, NativeRuleChannels, RuleIoChannel};
 pub use sightline::RuleSightline;

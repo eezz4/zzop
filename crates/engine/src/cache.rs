@@ -59,7 +59,6 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use zzop_cache::AnalysisCache;
-use zzop_core::RulePackDef;
 
 use crate::dispatch::Language;
 use crate::{CacheStats, EngineConfig};
@@ -108,32 +107,6 @@ pub const CACHE_SCHEMA_VERSION: &str = CACHE_SCHEMA_VERSION_DERIVED;
 /// [`parser_fingerprint`] puts on every arm. (This arm carried its own `FP_LEXICAL`, a hash of
 /// `src/pipeline`, until that subject became a strict subset of `FP_ENGINE`'s.)
 const LEXICAL_FALLBACK_ID: &str = "lexical";
-
-/// `ruleset_fingerprint`'s native-rule-logic-version token for `pipeline::schema_findings`
-/// (`zzop_rules_schema::apply_schema_rules`, wired into the fused per-file pass for Prisma files). Unlike
-/// a DSL pack (whose content already changes the fingerprint via `pack:?`), this is Rust logic with no
-/// pack content to hash, so the version counter (`zzop_rules_schema::STRUCTURAL_RULES_VERSION`) lives
-/// beside the rule itself. It covers everything that reaches the cached finding — not just the output
-/// SHAPE but rule bodies, thresholds, and the message/disable-hint text authored in
-/// `rules-schema`'s `message.rs`; see that const's doc for the cached (`structural.rs`) vs
-/// recomputed-every-run (`usage.rs`) lane split that decides whether a bump is needed.
-fn schema_structural_fingerprint() -> String {
-    format!(
-        "schema-structural-{}/{}",
-        zzop_rules_schema::STRUCTURAL_RULES_VERSION,
-        FP_SCHEMA_RULES
-    )
-}
-
-/// Logic-version token for the DSL *interpreter* (`zzop_core::dsl`) itself — the same stale-cache gap
-/// `schema_structural_fingerprint` closes for native rule logic. Pack JSON already self-invalidates via
-/// `{pack:?}` above, but a pure-Rust interpreter semantics change (matcher evaluation, suppress-marker
-/// window, ...) alters findings for byte-identical source AND identical pack content — invisible to the
-/// key without this token. **Nothing to restamp by hand**: `FP_DSL` is a derived source hash
-/// (`crates/engine/build.rs`), so an interpreter change moves it on its own. The instruction that used
-/// to sit here — "restamp with the current `CARGO_PKG_VERSION`" — outlived the 2026-07-29 derivation
-/// reform and would have had a reader edit a value that is not written by hand.
-const DSL_INTERPRETER_FINGERPRINT: &str = FP_DSL;
 
 /// Opens the on-disk cache at `config.cache_dir`, if set. Never panics: an open failure (bad permissions,
 /// path collides with a plain file, disk full while writing the schema-version marker, ...) degrades to
@@ -232,34 +205,21 @@ pub(crate) fn cache_scope(config: &EngineConfig, rel: &str) -> String {
 ///
 /// Consequence worth stating plainly: this hashes what was DECLARED, not what was RESOLVED, so a request
 /// that omits `vocabulary` entirely and a request that declares exactly the built-ins are two different
-/// fingerprints for one behavior. That is over-invalidation, which is the safe direction; the product
-/// front end (`zzop-config`) injects `VocabularyConfig::built_in()` into every request, so the CLI/MCP
-/// lanes are stable and only a raw-facade embedder can straddle the two.
+/// fingerprints — and since 2026-07-27 they are also two different BEHAVIOURS, so this is not
+/// over-invalidation at all.
+///
+/// 🔴 This paragraph used to end "the product front end (`zzop-config`) injects
+/// `VocabularyConfig::built_in()` into every request, so the CLI/MCP lanes are stable and only a
+/// raw-facade embedder can straddle the two". That injection was REMOVED on 2026-07-27 and this
+/// sentence did not follow — `zzop_config::mapper::options::build_vocabulary` states it outright
+/// ("Until 2026-07-27 it started from `built_in()` … Now they reach a run only by being written into
+/// the user's own file"). 📏 Measured 2026-09-14 (review ledger W1) on `corpus/frameworks/fastapi`:
+/// `authGuardPattern` declared with a value BYTE-IDENTICAL to `DEFAULT_AUTH_GUARD_PATTERN` still moves
+/// `mutating-route-no-auth` from 132 to 123, which is impossible if an undeclared key fell back to the
+/// built-in. The stale sentence cost a reader (me) a wrong ledger row before the measurement caught it.
 pub(crate) fn vocabulary_fingerprint(config: &EngineConfig) -> String {
     let declared = serde_json::to_string(&config.vocabulary).unwrap_or_default();
     AnalysisCache::content_hash(declared.as_bytes())
-}
-
-/// The ruleset-fingerprint half of a file's `CacheKey`, over the already `is_enabled`-filtered pack set
-/// `run_file_pass` computes once per `analyze_tree` call (see module doc for the composition and the
-/// deviations from the spec's literal "serialized JSON" wording).
-pub(crate) fn ruleset_fingerprint(enabled_packs: &[&RulePackDef], config: &EngineConfig) -> String {
-    let mut pack_parts: Vec<String> = enabled_packs
-        .iter()
-        .map(|pack| format!("{}\u{0}{pack:?}", pack.id))
-        .collect();
-    pack_parts.sort();
-
-    let mut disabled_sorted = config.rule_config.disabled_rules.clone();
-    disabled_sorted.sort();
-    let disabled_json = serde_json::to_string(&disabled_sorted).unwrap_or_default();
-
-    let schema_structural_fingerprint = schema_structural_fingerprint();
-    let combined = format!(
-        "{}\u{1}{disabled_json}\u{1}{schema_structural_fingerprint}\u{1}{DSL_INTERPRETER_FINGERPRINT}",
-        pack_parts.join("\u{0}")
-    );
-    AnalysisCache::content_hash(combined.as_bytes())
 }
 
 /// Deterministic hit/miss counters for `AnalyzeOutput::cache`, safe to share (by shared reference) across
@@ -291,7 +251,12 @@ impl CacheCounters {
 
 /// Shapes the manifest bytes `FP_ENGINE` hashes. Declared here so its tests run and so editing it moves
 /// the fingerprint it shapes; its CALLER is `build.rs`, which `include!`s the same file. See its header.
+mod ruleset;
+pub(crate) use ruleset::ruleset_fingerprint;
+
 mod manifest_version;
 pub(crate) mod surface;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod vocabulary_tests;

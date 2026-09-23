@@ -13,12 +13,15 @@
 //! "zzop answered, and the answer is bad" would make a broken config and a real critical finding
 //! indistinguishable in a CI log — the same conflation this whole product refuses elsewhere. So a
 //! threshold hit exits [`FAIL_ON_EXIT`], stdout still carries the whole reply (the gate composes with a
-//! pipeline instead of replacing it), and stderr carries one line naming the counts and the threshold.
+//! pipeline instead of replacing it), and stderr names the counts and the threshold — plus, when the
+//! reply's own list carries none of the rows it fired on, WHERE those rows are
+//! ([`name_the_evidence`]).
 //!
 //! # Why it reads the COUNTS
 //! `findings.bySeverity` is over every finding this run produced, never the filtered `shown` list, so a
 //! `--fail-on` gate and a `--limit`/`--severity` view can be asked in the same invocation without the
-//! view narrowing the gate.
+//! view narrowing the gate. That stays exactly as it is: [`name_the_evidence`] puts sites in the
+//! message, never a term in the verdict.
 
 /// Exit code for "the run succeeded and the findings met the declared threshold". Distinct from `1`
 /// (zzop failed to answer) and `2` (usage) on purpose — see the module doc.
@@ -44,6 +47,11 @@ pub fn extract_fail_on(args: &[String], usage: &str) -> (Vec<String>, Option<Str
                 eprintln!("{usage} (--fail-on takes critical, warning or info; got {value:?})");
                 std::process::exit(2);
             }
+            // A repeated `--fail-on` used to keep the LAST threshold silently, which on this flag
+            // decides an exit code: `--fail-on critical --fail-on info` gated on `info` while the log
+            // recorded a request to gate on `critical`. Refused for the same reason the missing value
+            // above is — see `super::args::refuse_repeated_flag`.
+            super::args::refuse_repeated_flag(threshold.is_some(), "--fail-on", usage);
             threshold = Some(value.clone());
             i += 2;
             continue;
@@ -89,8 +97,24 @@ pub fn refuse_fail_on(lane: &str, per_lane_reason: &str) -> ! {
 /// contains. Bare ids never reach here — `super::args::resolve_rule_filter` has already expanded a bare
 /// DSL id to its full form or refused it at argv time.
 ///
+/// # Why this derives NOTHING itself (2026-09-02)
+/// It used to walk `packsLoaded` here — native-id carve-out, pack lookup, `ruleIds` membership, two
+/// hand-written refusal sentences — and `zzop_summary::unmatchable_rule_filter` walked the identical
+/// structure for the MCP host, which turns the same verdict into `isError`. Two owners of one judgment
+/// behind two hosts' failure signals: the day one is corrected is the day they disagree, and the
+/// disagreement is invisible from either side. This now asks the shared function and only decides what
+/// a TERMINAL does with the answer, which is this file's actual job.
+///
+/// The two derivations were measured against each other before folding, on the three shapes plus a
+/// positive control (`tests/cli.rs`'s `a_rule_filter_that_can_never_match_is_loud_on_stderr_and_exits_two`
+/// pins all four): a bare id no run could report, a typo inside a pack that DID load, a real id from a pack
+/// this build ships but does not load, and a real loaded id. Both said the same thing on all four. The
+/// one structural difference was this side's extra `!packs.is_empty()` guard, which is unreachable —
+/// `packsLoaded` is emitted by the same build that reads it here and always carries an entry per
+/// bundled pack, including packs a config gated off (`didNotRun`, with their `ruleIds` intact).
+///
 /// # The second half: a typo INSIDE a loaded pack (fixed 2026-08-20)
-/// This check tested only the pack prefix, so `--rule security/no-such-rule` exited 0 with an empty
+/// The check tested only the pack prefix, so `--rule security/no-such-rule` exited 0 with an empty
 /// stderr and `shown: 0` — the silent empty result `zzop analyze --help` promises can never happen,
 /// and byte-identical in a CI log to "that rule is clean". It stayed one-sided because nothing in the
 /// reply enumerated a loaded pack's rule ids: `packsLoaded[].rules` was a COUNT, and validating
@@ -99,52 +123,16 @@ pub fn refuse_fail_on(lane: &str, per_lane_reason: &str) -> ! {
 /// publishes the ids it could report (`packsLoaded[].ruleIds`, whose engine-side doc weighs the size),
 /// so the refusal is decided by the packs that ACTUALLY loaded and is right for both pack sources.
 ///
-/// Still one-sided where it must be: a reply carrying no `packsLoaded` at all, or a pack entry with no
-/// `ruleIds` key (an older/edge shape), is left alone rather than turned into a false refusal. A
-/// refusal without evidence is the same defect in the other direction.
-fn refuse_unmatched_rule_filter(reply: &serde_json::Value, rule: &str) {
-    let Some((pack, name)) = rule.split_once('/') else {
+/// Still one-sided where it must be, and that stays the shared function's contract rather than a second
+/// copy of it here: a pack entry with no `ruleIds` key (an older/edge shape) is left alone rather than
+/// turned into a false refusal. A refusal without evidence is the same defect in the other direction.
+fn refuse_unmatched_rule_filter(reply: &str, rule: &str) {
+    let Some(reason) = zzop_summary::unmatchable_rule_filter(reply, rule) else {
         return;
     };
-    // The `<namespace>/<name>` shape belongs to TWO id spaces, and `packsLoaded` enumerates only one.
-    // The NATIVE analyses are namespaced the same way (`schema/god-model`, `cross-layer/route-near-miss`)
-    // and are compiled in rather than loaded from a pack, so they can never appear there — reading the
-    // prefix as a pack id alone refused a filter that had just matched, on a run whose own `shown` held
-    // the finding. Consulting the native registry is what tells "this id is not from a pack" apart from
-    // "this id is from a pack that did not load".
-    if zzop_summary::native_analysis_ids()
-        .iter()
-        .any(|id| id == rule)
-    {
-        return;
-    }
-    let Some(loaded) = reply["packsLoaded"].as_array().filter(|p| !p.is_empty()) else {
-        return;
-    };
-    if let Some(entry) = loaded.iter().find(|p| p["id"].as_str() == Some(pack)) {
-        // The pack loaded. Whether the RULE exists inside it is answerable only from the ids that pack
-        // published; a missing `ruleIds` is "no data", never "no such rule".
-        let Some(ids) = entry["ruleIds"].as_array() else {
-            return;
-        };
-        if ids.iter().any(|id| id.as_str() == Some(name)) {
-            return;
-        }
-        eprintln!(
-            "zzop: --rule {rule:?} matched nothing because pack {pack:?} loaded in this run and \
-             carries no rule {name:?} — this reply's `shown` is the filter, not a clean result. The \
-             pack's own `ruleIds` in the reply on stdout lists every id it could have reported; \
-             `zzop explain <id>` prints one rule's data."
-        );
-        std::process::exit(2);
-    }
-    eprintln!(
-        "zzop: --rule {rule:?} matched nothing because no pack {pack:?} was loaded in this run — this \
-         reply's `shown` is the filter, not a clean result. Two readings needing different fixes: the id \
-         may be misspelled, or its pack may be one this build SHIPS BUT DOES NOT LOAD (an exported pack \
-         is a real id, not a typo — retrieve it with `zzop contract example-pack-<stem>` and save it \
-         under <tree>/zzop/rules/). `packsLoaded` in the reply on stdout names the packs that DID load."
-    );
+    // The shared sentence is written for a READER of either host and names both dialects of its
+    // retrieval route; the only thing added here is that on this host the verdict is an exit code.
+    eprintln!("zzop: {reason}");
     std::process::exit(2);
 }
 
@@ -171,7 +159,7 @@ pub fn gate_or_exit(text: &str, threshold: Option<&str>, rule: Option<&str>) -> 
     // lie, and a threshold applied to a lie is worse than no threshold: `2` (you called it wrong)
     // therefore outranks `FAIL_ON_EXIT`. See `refuse_unmatched_rule_filter`.
     if let Some(rule) = rule {
-        refuse_unmatched_rule_filter(&reply, rule);
+        refuse_unmatched_rule_filter(text, rule);
     }
     let Some(threshold) = threshold else {
         std::process::exit(0);
@@ -204,5 +192,92 @@ pub fn gate_or_exit(text: &str, threshold: Option<&str>, rule: Option<&str>) -> 
          counts there cover every finding, while `shown` is a capped view.",
         breakdown.join(", ")
     );
+    name_the_evidence(&reply, rank);
     std::process::exit(FAIL_ON_EXIT);
+}
+
+/// The line above says a build should break and how many findings say so. This one says WHICH, and
+/// it exists because on a large tree the answer was nowhere at all.
+///
+/// # The measurement
+/// `zzop analyze --config <cal.com> --limit 1000 --fail-on critical` exits 3 naming `6 critical`,
+/// and the reply it had just printed carried 1000 rows of which NONE was critical: ordering is
+/// deployment role first, so criticals sitting on fixtures and release scripts sort behind every
+/// shipped finding and the cap takes the whole band. The counts were right and the list was right,
+/// and between them the reader had a red pipeline and no site to open.
+/// `truncated.severitiesNotShown.firstOmitted` now carries the first rows of any band the cut
+/// removed outright, which is what makes this printable from the reply the gate already parsed — no
+/// second run, no second ordering, and the gate still decides on the counts alone.
+///
+/// # Three states, and the third is why this is not one `if`
+/// For every severity the gate counted, the reply either shows it, names it as cut, or does
+/// neither — and the third is real: `--rule X --fail-on critical` gates on the WHOLE census while
+/// the view holds one rule, so a critical from another rule is in neither place. Saying nothing
+/// there would leave exactly the silence this function was added to end, one filter further along.
+///
+/// Silent when every gated severity is visible in `shown`: a reader who can already see a row does
+/// not need to be told where it is.
+fn name_the_evidence(reply: &serde_json::Value, rank: u8) {
+    let shown_severities: std::collections::HashSet<&str> = reply
+        .pointer("/findings/shown")
+        .and_then(|v| v.as_array())
+        .map(|rows| rows.iter().filter_map(|f| f["severity"].as_str()).collect())
+        .unwrap_or_default();
+    let cut = reply.pointer("/findings/truncated/severitiesNotShown/firstOmitted");
+    let census = reply
+        .pointer("/findings/bySeverity")
+        .and_then(|v| v.as_object());
+
+    let mut lines: Vec<String> = Vec::new();
+    for (severity, count) in census.into_iter().flatten() {
+        if zzop_summary::severity_rank(severity) < rank
+            || count.as_u64().unwrap_or(0) == 0
+            || shown_severities.contains(severity.as_str())
+        {
+            continue;
+        }
+        let sites: Vec<String> = cut
+            .and_then(|c| c.get(severity))
+            .and_then(|v| v.as_array())
+            .map(|rows| rows.iter().map(site).collect())
+            .unwrap_or_default();
+        if sites.is_empty() {
+            // In `shown`: no. Named as cut: no. So a `--rule`/`--severity` narrowed the VIEW while
+            // the gate read the whole census. Naming the cause is the difference between "the tool
+            // lost my findings" and "my filter did".
+            lines.push(format!(
+                "  {severity}: no row of this severity is in this reply's view — a `--rule`/`--severity` \
+                 filter kept it out while the gate read the whole census. Re-run with `--severity {severity}`."
+            ));
+        } else {
+            // The cause belongs on the LINE, not in the header: the two branches have different
+            // ones, and a header that explained the cap would be describing the wrong thing on
+            // every run where a filter was what hid the rows.
+            lines.push(format!(
+                "  {severity}: {} — from `findings.truncated.severitiesNotShown.firstOmitted` \
+                 (ordering puts test and build surface behind shipped code, so the cap took the \
+                 whole band)",
+                sites.join(", ")
+            ));
+        }
+    }
+    if lines.is_empty() {
+        return;
+    }
+    eprintln!(
+        "zzop: `shown` in that reply carries no row of the severity this fired on, so the artifact \
+         you just captured does not show what broke. Where those rows are:\n{}",
+        lines.join("\n")
+    );
+}
+
+/// `<ruleId> <file>:<line>` from one anchor, degrading key by key — an anchor omits what the
+/// finding did not carry, so a missing `line` has to shorten the text rather than print `:null`.
+fn site(anchor: &serde_json::Value) -> String {
+    let rule = anchor["ruleId"].as_str().unwrap_or("<unnamed rule>");
+    match (anchor["file"].as_str(), anchor["line"].as_u64()) {
+        (Some(file), Some(line)) => format!("{rule} {file}:{line}"),
+        (Some(file), None) => format!("{rule} {file}"),
+        (None, _) => rule.to_string(),
+    }
 }

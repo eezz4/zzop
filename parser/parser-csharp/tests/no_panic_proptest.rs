@@ -29,7 +29,7 @@ fn hammer(rel: &str, text: &str) {
     let _ = cs::extract_call_sites(rel, text);
     let _ = cs::extract_string_literals(rel, text);
     let _ = cs::csharp_namespaces_of(text);
-    let _ = cs::extract_csharp_http_provides(rel, text);
+    let _ = cs::extract_csharp_http_provides(rel, text, &cs::CSharpRouteVocab::built_in());
     let _ = cs::extract_csharp_http_consumes(rel, text);
     let _ = cs::extract_ef_core_db_table_provides(rel, text);
 
@@ -39,7 +39,7 @@ fn hammer(rel: &str, text: &str) {
         (rel.to_string(), text.to_string()),
         (format!("Other/{rel}"), text.to_string()),
     ];
-    let _ = cs::extract_csharp_http_provides_project(&files);
+    let _ = cs::extract_csharp_http_provides_project(&files, &cs::CSharpRouteVocab::built_in());
 }
 
 proptest! {

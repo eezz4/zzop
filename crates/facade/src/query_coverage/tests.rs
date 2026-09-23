@@ -647,11 +647,18 @@ fn a_fully_read_tree_reports_an_empty_unread_list_and_a_basis_that_excluded_noth
         "{tree}"
     );
     let basis = tree["blindSpotBasis"].as_str().expect("string");
-    assert!(
-        basis.contains("nothing above that share was held back"),
-        "{basis}"
-    );
+    assert!(basis.contains("none of THOSE was held back"), "{basis}");
     assert!(!basis.contains("EXCLUDED"), "{basis}");
+    // C1b: the all-clear must carry its own bar. It said "nothing above THAT SHARE was held back"
+    // while the share lived only in a sibling legend, so the one sentence a reader quotes alone had
+    // no antecedent for its own qualifier — and `PRINCIPAL`, a word, was the only thing limiting a
+    // sentence whose verb is `WAS read structurally`. The number and what it removed now ride here.
+    let floor = format!("{}%", zzop_engine::MIN_UNCOVERED_EXTENSION_SHARE_PCT);
+    assert!(basis.contains(&floor), "the bar must be a number: {basis}");
+    assert!(
+        basis.contains("size bar"),
+        "an all-clear that never names the population it skipped is the defect: {basis}"
+    );
 }
 
 /// The all-clear is a claim about a population, so it must not ride a tree that HAS no such population.

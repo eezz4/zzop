@@ -202,9 +202,23 @@ list_guards() {
 # indistinguishable from a real finding. `sort -u` and `printf` exiting 0 does not save it: with
 # pipefail the reachability of this floor is decided by the LAST FAILING stage, not the last stage.
 # scripts/lib/tracked-grep.sh:219-226 carries the same pair for the same reason.
-guard_libs=$(grep -hoE '(^|[;&[:space:]])(\.|source)[[:space:]]+\./scripts/lib/[A-Za-z0-9_-]+\.sh' \
-  scripts/*.sh scripts/lib/*.sh .githooks/* 2>/dev/null |
-  grep -oE 'scripts/lib/[A-Za-z0-9_-]+\.sh' | sort -u || true)
+# 🔴 The needle matches the FILENAME, not one spelling of the path (widened 2026-09-13, review
+# ledger V188). It used to require the literal `./scripts/lib/<name>.sh`, and a library sourced any
+# other way was invisible: `. "$(dirname "${BASH_SOURCE[0]}")/lib/x.sh"` and
+# `. "$repo_root/scripts/lib/x.sh"` are both normal, and both were missed. Measured the day this was
+# widened: `scripts/lib/require-gnu.sh` existed, was sourced by three guards, and this guard saw
+# three libraries out of four.
+#
+# That is the same shape this fleet keeps finding -- a needle chosen for the spelling in front of the
+# author, then treated as the population. Matching `lib/<name>.sh` and normalising covers every form
+# a source line can take without asking the author to write one blessed path.
+#
+# Population includes scripts/measure/*.sh: those run in CI and pre-commit exactly as the check-*
+# guards do, and a shared library they source is as load-bearing. None sources one today; the point is
+# that the guard would see it if one did.
+guard_libs=$(grep -hoE '(^|[;&[:space:]])(\.|source)[[:space:]]+[^;&|]*lib/[A-Za-z0-9_-]+\.sh' \
+  scripts/*.sh scripts/lib/*.sh scripts/measure/*.sh .githooks/* 2>/dev/null |
+  grep -oE 'lib/[A-Za-z0-9_-]+\.sh' | sed 's|^lib/|scripts/lib/|' | sort -u || true)
 lib_count=$(printf '%s\n' "$guard_libs" | grep -c '.' || true)
 if [ "$lib_count" -lt 1 ]; then
   echo "check-guards-wired: no guard sources a scripts/lib/*.sh at all -- either every shared library" >&2
@@ -482,6 +496,11 @@ HAND_RUN_TOOLS=(
   "scripts/measure/classify-method-scan-spans.mjs|a one-off census used while designing the span contract; its output is a reading, not a gate"
   "scripts/preflight-build-env.sh|a preflight a human runs BEFORE starting a long build (its own usage block says so); wiring it into CI would gate every job on the runner disk budget of a dev box"
   "scripts/measure/config-warnings-gate.mjs|its subject is corpus/oss/*/zzop.config.jsonc, which is gitignored, so CI structurally has nothing to point it at; run by hand after a vocabulary rename"
+  "scripts/measure/line-census.mjs|a census, not a gate: it reports how many lines of this workspace ship vs. test, AND how much that split moves under four other classifiers. There is deliberately no pass/fail -- the whole finding (review ledger V91) is that the number is a function of the definition, so any threshold CI could enforce would be picking one definition and re-creating the problem. Run it by hand when a document wants to quote the figure, and quote the SCRIPT rather than the number"
+  "scripts/measure/wire-key-census.mjs|a RELEASE-time census, not a gate: it prints today key paths for a human to compare against the previous release print. It has no committed baseline to diff against because two node classes (keys built from data, and the analyze-vs-cross lane split) would churn it on every unrelated change, so there is no pass/fail for CI to read -- see its header and the release checklist step that owns it"
+  "scripts/measure/vocab-key-census.mjs|a census, not a gate: it reports which LANES read each vocabulary key, and its own header says the lane split is path-based and therefore cannot tell plumbing from consumption. A pass/fail would have to assert that no key is read from two lanes, which is false today for seventeen of them and correct for most -- the finding it exists for (a key whose NAME promises more than its readers deliver) needs a human to read the list. Run it by hand when naming or removing a vocabulary key"
+  "scripts/measure/tools-list-anatomy.mjs|a census, not a gate: it prints what the MCP session fixed cost is made of, and its whole point is that three of those figures have no single value -- overlap depends on the tokenization rule (three stated rules give three answers), the reply legend count depends on the key pattern AND on whether git ran, and the config refusal interpolates the missing path twice so its size is a slope of 2 bytes per path character rather than a constant. A pass/fail would have to pick one of those and re-create the defect it exists to expose. Run it by hand before quoting any tools/list number"
+  "scripts/measure/subtraction-trend.sh|a TREND, not a gate: it prints the added/removed line ratio and the net-decrease commit count for a git range, and review-ledger row V125 records the points and the judgement made from them. Wiring it in would turn a reading into a threshold, which is the proxy-metric failure the design cheatsheet names twice -- and the row already refuses a numeric target by name (a line goal makes people delete docs). Run it when a release arc closes and add the point to the row."
 )
 
 

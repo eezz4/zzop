@@ -46,6 +46,10 @@ jobs:
   # or the gate silently voids.
   guards:
     runs-on: ubuntu-latest
+    # Hang ceiling, not a budget. GitHub's default is 360 minutes, so before 2026-09-06 ANY hang in
+    # this workspace burned six runner-hours and reported "cancelled" — which is what a parser that
+    # loops instead of panicking would have done (review ledger V27). Measured warm locally: the guard fleet runs in tens of seconds, far inside this ceiling. The FLEET SIZE is deliberately not spelled here -- `ls scripts/check-*.sh | wc -l` answers it, and the number that used to sit in this line said 45 while three files disagreed (review round 18).
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - name: English-only source guard
@@ -58,12 +62,71 @@ jobs:
         run: bash scripts/check-ruff-isolation.sh
       - name: syn isolation guard
         run: bash scripts/check-syn-isolation.sh
+      - name: parser reachability census (transitive; the four text guards above see direct edges only)
+        run: bash scripts/check-dep-closure.sh
       - name: tree-sitter isolation guard
         run: bash scripts/check-tree-sitter-isolation.sh
+      - name: rule extension closure (a rule that reads .js must read .jsx/.mjs/.cjs)
+        run: bash scripts/check-rule-extension-closure.sh
       - name: git spawn isolation guard
         run: bash scripts/check-git-spawn-isolation.sh
       - name: guards-wired meta-guard
         run: bash scripts/check-guards-wired.sh
+      - name: pack message ↔ pre-migration fixture pairing guard
+        # Those fixtures are byte-identity snapshots and are therefore a SECOND copy of every rule
+        # message. The convention that they must be updated together lived only in a comment and was
+        # violated three times, the last of which left HEAD red for two days and kept a deleted
+        # dangerous prescription alive in the fixture. Pure text comparison, no build.
+        run: bash scripts/check-fragment-fixture-pairing.sh
+      - name: MCP tool roster -> README guard
+        # README is the install page an operator reads to decide what zzop can answer, and its tool
+        # roster had been one short (check_coverage) for as long as anyone measured -- a shipped
+        # capability nobody would ask for. Text comparison against definitions.rs, no build.
+        run: bash scripts/check-mcp-tools-listed.sh
+      - name: CLI flag surface -> docs floor guard
+        # A flag no page names is one no user can find, and it comes back as a bug report saying the
+        # capability is missing. This is a FLOOR (zero undocumented), not a completeness rule: README
+        # is an install page, not a manual. Text comparison, no build.
+        run: bash scripts/check-cli-flags-documented.sh
+      - name: Rule-id rename record guard
+        # `VERSIONING.md` promises rule ids are a frozen surface and that every rename reaching a
+        # release lands as a row. Every other half of that promise was machine-held; this half was not,
+        # so a rename that edited the catalog and the labelled corpus together passed the whole fleet
+        # green with no CHANGELOG row (review ledger V86). Diffs the catalog id set against the release
+        # tag read from `git ls-remote` -- a local `git tag` answers when this clone last fetched.
+        run: bash scripts/check-rule-id-renames-recorded.sh
+      - name: CI job hang-ceiling guard
+        # Every job in this file must declare timeout-minutes. Without one it inherits GitHub's
+        # 360-minute default, so a hang -- the failure shape the parser property tests structurally
+        # cannot see, since they assert "does not panic" -- burns six runner-hours and then reports
+        # "cancelled", which reads as infrastructure flaking rather than a defect here. Text scan of
+        # this same file, no build. It guards itself.
+        run: bash scripts/check-ci-job-timeouts.sh
+      - name: cached per-file finding producers guard
+        # cache::cache_relevant_disabled_rules narrows the per-file cache key to the disabled ids that
+        # can actually reach a cached entry -- so a whole-graph toggle stops costing a cold run (2,298
+        # hits -> 2,298 misses, measured). That narrowing rests on there being exactly TWO producers of
+        # cached findings; this fails the moment a third appears. Text scan, no build.
+        run: bash scripts/check-cached-finding-producers.sh
+      - name: rule message -> shipped band guard
+        # The sibling of the step below, one layer along: that one ties the PUBLISHED severity to the
+        # shipped one, this one ties the severity a message SPEAKS to it. Nine messages explained why
+        # they were `warning` while shipping `info`, and two pointed at a sibling band a different
+        # batch had already moved. Text comparison, no build.
+        run: bash scripts/check-message-band-claims.sh
+      - name: catalog severity -> shipped pack severity guard
+        # A severity is the one cell in that table a user ACTS on: it decides whether --fail-on
+        # warning breaks their build. It was also the one column nothing tied back to the packs --
+        # 27 rules moved warning -> info and the catalog (and the site it feeds) kept the old value
+        # with all 40 guards and the whole test suite green. Text comparison, no build.
+        run: bash scripts/check-catalog-severity-sync.sh
+      - name: shipped-off set -> the six documents that enumerate it
+        # Which analyses do NOT run by default is invisible in a reply's findings -- a shipped-off
+        # analysis produces no key, exactly like one that ran clean -- so prose is the only channel that
+        # says so, and six files spell the same three ids out. A stale copy does not read as stale: it
+        # reads as "this id runs by default" and sends a user to debug a rule that never ran. Total
+        # accounting both ways, so a REMOVAL from the set fails too. Text comparison, no build.
+        run: bash scripts/check-shipped-off-sync.sh
       - name: rules catalog ↔ site sync guard
         run: bash scripts/check-rules-catalog-sync.sh
       - name: generated site pages ↔ site-src freshness guard
@@ -119,6 +182,8 @@ jobs:
         # the old name said `examples/` while the pathspec read `cases/` only, so the two configs
         # outside `cases/` had never been read (25 committed, 23 checked).
         run: bash scripts/check-committed-config-vocabulary.sh
+      - name: config-surface readBy column is derived, not hand-edited
+        run: bash scripts/check-config-surface-read-by.sh
       - name: shell pipe-to-grep-q SIGPIPE seal
         run: bash scripts/check-shell-pipe-sigpipe.sh
         # A different needle from the seal above, on the same hazard family: that one bans `| grep -q`,
@@ -126,6 +191,11 @@ jobs:
         # about the other's shape.
       - name: unreachable empty-set floor seal
         run: bash scripts/check-shell-mute-floor.sh
+        # Third needle on the same family, and the only one whose subject is SIZE: a here-string over
+        # 64 KiB deadlocks the script silently, and the strings that grow to 64 KiB are the ones this
+        # fleet builds out of `git ls-files`. Neither of the two above says anything about length.
+      - name: here-string 64 KiB deadlock seal
+        run: bash scripts/check-shell-herestring-scale.sh
       - name: version-string parser-completeness guard
         run: bash scripts/check-version-lists-parsers.sh
       - name: framework recognizer ↔ parser prose guard
@@ -220,7 +290,19 @@ jobs:
           node --test $files
 
   test:
+    # Linux only, and that is a recorded choice rather than an oversight (2026-09-07, review ledger
+    # V72). `prebuild.yml` builds five targets and smoke-tests three of them by running `version`;
+    # nothing but this job ever runs the suite, so macOS and Windows are proven to LOAD and not to
+    # ANALYZE. The engine carries no platform-specific code path -- the split that would justify a
+    # matrix here -- and macOS runner minutes bill at ten times Linux, so the trade is stated in
+    # README's download section for the reader who has to weigh it, instead of being paid blindly.
+    # If a platform-conditional path ever lands in the engine, this comment is the thing that is now
+    # wrong: add the matrix in the same change.
     runs-on: ubuntu-latest
+    # Hang ceiling, not a budget. GitHub's default is 360 minutes, so before 2026-09-06 ANY hang in
+    # this workspace burned six runner-hours and reported "cancelled" — which is what a parser that
+    # loops instead of panicking would have done (review ledger V27). Measured warm locally: `cargo test --workspace` is 304s, before fmt/clippy and a cold build.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -237,6 +319,10 @@ jobs:
     # already *is* x86_64-unknown-linux-gnu, so no --target/cross-linker setup is needed, and Node is
     # preinstalled on the runner image.
     runs-on: ubuntu-latest
+    # Hang ceiling, not a budget. GitHub's default is 360 minutes, so before 2026-09-06 ANY hang in
+    # this workspace burned six runner-hours and reported "cancelled" — which is what a parser that
+    # loops instead of panicking would have done (review ledger V27). Dominated by one release build of the CLI binary.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -246,6 +332,13 @@ jobs:
         # path resolution only checks a release build (../../target/release/zzop[.exe] relative to
         # packages/cli, no debug fallback), so this needs --release, not a debug build.
         run: cargo build -p zzop-cli-bin --release
+      - name: the break-a-route demo still demonstrates what it says
+        # The headline capability had no runnable public demonstration for ~34 releases: the older
+        # demo needs corpus/oss/, which is gitignored and which nothing fetches. This one runs on a
+        # committed pair and ASSERTS the join state at each step, so it fails instead of narrating a
+        # state it is not in -- the failure mode a README block here already reached four times.
+        # It rides this job for the same reason the step below does: the release binary is built above.
+        run: bash docs/demo/break-a-route-shipped.sh
       - name: site graph is regenerated from the tree it claims to draw
         # `site/graph.html` carries a COMMITTED data block — every node of this repo — plus three prose
         # totals that describe it. All four are written by scripts/site-graph-data.mjs. (A fourth prose
@@ -265,9 +358,15 @@ jobs:
           ./target/release/zzop graph --domain dep --format cosmograph-nodes --config zzop.config.jsonc > /tmp/n.ndjson
           ./target/release/zzop graph --domain dep --format cosmograph-links --config zzop.config.jsonc > /tmp/l.ndjson
           node scripts/site-graph-data.mjs /tmp/n.ndjson /tmp/l.ndjson
-          if ! git diff --quiet -- site/; then
-            echo "::error::site/ is stale — regenerating it changed these files:" >&2
-            git --no-pager diff --stat -- site/ >&2
+          # `site-src/graph/page.html` is the file the generator WRITES; `site/` is what
+          # `gen-site.mjs` later builds from it. Diffing only `site/` made this step unable to fail
+          # from 2026-08-18 (when the shipped page moved to `gen-site.mjs`) until 2026-09-08:
+          # `zzop graph` reported 1,683 nodes while both committed pages said 1,677, and every
+          # guard was green. Both paths, so the chain closes — this step proves the SOURCE is fresh
+          # and `check-site-generated.sh` proves `site/` is that source rendered.
+          if ! git diff --quiet -- site/ site-src/graph/page.html; then
+            echo "::error::the site graph is stale — regenerating it changed these files:" >&2
+            git --no-pager diff --stat -- site/ site-src/graph/page.html >&2
             echo "Run: zzop graph --domain dep --format cosmograph-nodes/links > … then node scripts/site-graph-data.mjs <nodes> <links>" >&2
             exit 1
           fi
@@ -338,12 +437,22 @@ jobs:
     # stops naming an artifact path it has no business knowing (that path is also wrong under
     # $CARGO_TARGET_DIR, and CI and local now agree instead of each having their own spelling).
     runs-on: ubuntu-latest
+    # Hang ceiling, not a budget. GitHub's default is 360 minutes, so before 2026-09-06 ANY hang in
+    # this workspace burned six runner-hours and reported "cancelled" — which is what a parser that
+    # loops instead of panicking would have done (review ledger V27). Measured locally: 69-98s to score 25 trees once the release binary exists.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Detection benchmark
         run: bash scripts/measure/detection-gate.sh
+      - name: README reproduction block vs the real run
+        # The README block is a COPY of numbers only a run knows. It went stale four times before
+        # anything checked it, and the fourth shipped in v0.34.0 with every guard green. It rides in
+        # THIS job because it needs a --release build -- which is exactly why it is not a check-*.sh
+        # (this job states that argument above). With no index staged it runs unconditionally.
+        run: bash scripts/measure/readme-result-block.sh
 
   site-render-check:
     # The one lane that looks at the PICTURE. Every other site lane checks data — staleness (the
@@ -360,6 +469,10 @@ jobs:
     # Its own job, not a scripts/check-*.sh: the browser download is not a pre-commit hook's budget
     # (check-guards-wired.sh would force it into .githooks/pre-commit).
     runs-on: ubuntu-latest
+    # Hang ceiling, not a budget. GitHub's default is 360 minutes, so before 2026-09-06 ANY hang in
+    # this workspace burned six runner-hours and reported "cancelled" — which is what a parser that
+    # loops instead of panicking would have done (review ledger V27). A browser download plus two page checks; no cargo build.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

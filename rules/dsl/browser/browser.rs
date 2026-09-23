@@ -74,7 +74,16 @@ mod message_order_pins;
 /// work, and being wired eight times is what keeps it from being dropped by a single edit.
 #[path = "../message_order_verdicts.rs"]
 mod message_order_verdicts;
-use message_order_pins::assert_disqualifier_clause_precedes_imperative;
+
+/// The §33/§37 landing shared with the `security` pack — the sanitize/render-as-text remedy costs the
+/// same thing on both sides of the wire, and the two packs are separate test crates, so the one
+/// spelling lives beside the pins rather than inside either pack.
+#[path = "../sanitizer_subtraction_landing.rs"]
+mod sanitizer_subtraction_landing;
+use message_order_pins::{
+    assert_disqualifier_clause_precedes_imperative, assert_landing_precedes_imperative,
+};
+use sanitizer_subtraction_landing::sanitizer_subtraction_landing;
 
 mod dialogs;
 mod javascript_url;

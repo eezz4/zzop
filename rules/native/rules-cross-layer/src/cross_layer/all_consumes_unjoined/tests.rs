@@ -463,3 +463,48 @@ fn a_replaced_rule_with_no_consume_source_is_kept() {
     );
     assert_eq!(kept.len(), 1);
 }
+
+/// §27 CONDITIONING pin. Of the four repairs this message lists, the FIRST is the only one that edits
+/// shipped code, and literalising a base that differs per environment pins the app to one of them. §27
+/// accepts conditioning the imperative in place of moving a clause ahead of it, so the pin asserts the
+/// condition sits AHEAD of the verb it governs -- the invalidation probe swaps the two and leaves every
+/// token present.
+#[test]
+fn the_literal_base_repair_is_conditioned_ahead_of_its_verb() {
+    let mut cl = base();
+    cl.unprovided_consumes = vec![
+        tagged("fe", "http", "GET /api/v1/items", "sdk.gen.ts", 19),
+        tagged("fe", "http", "POST /api/v1/items", "sdk.gen.ts", 61),
+        tagged("fe", "http", "DELETE /api/v1/items/{}", "sdk.gen.ts", 106),
+    ];
+    let out = all_consumes_unjoined_findings(&cl, &BTreeSet::new(), &BTreeSet::new());
+    let msg = &out.findings[0].message;
+    let cond = "IF THAT BASE IS THE SAME STRING IN EVERY ENVIRONMENT";
+    let verb = "make it a string literal at its assignment";
+    for needle in [cond, verb] {
+        assert_eq!(
+            msg.matches(needle).count(),
+            1,
+            "all-consumes-unjoined: {needle:?} must be spelled ONCE, or an index comparison means \
+             nothing: {msg}"
+        );
+    }
+    let c = msg.find(cond).expect("condition missing");
+    let v = msg.find(verb).expect("verb missing");
+    assert!(
+        c < v,
+        "the condition is at {c} and the verb it governs at {v} -- a reader who acts on the instruction \
+         never reaches a caveat placed behind it: {msg}"
+    );
+    // The cost the condition exists to name, and the fact that the other three repairs do not pay it.
+    for needle in [
+        "if it varies per environment, do not",
+        "pinned into source",
+        "change no shipped code at all",
+    ] {
+        assert!(
+            msg.contains(needle),
+            "all-consumes-unjoined lost {needle:?}: {msg}"
+        );
+    }
+}

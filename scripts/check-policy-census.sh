@@ -210,8 +210,37 @@ census_file="scripts/policy-census.txt"
 # census by exactly the three names above and nothing else (measured: every `u8` const across all scan
 # dirs is one of those three), so the "if it balloons, narrow back down" caution three notes up did not
 # apply.
-type_alternation='&str|&\[&str\]|&\[u8\]|&\[\(&str,[[:space:]]*&str\)\]|\[&str;[[:space:]]*[0-9]+\]|\[\(&str,[[:space:]]*&str\);[[:space:]]*[0-9]+\]|&\[\(&str,[[:space:]]*&\[&str\]\)\]|&\[\(&str,[[:space:]]*&\[&str\],[[:space:]]*&str\)\]|&\[\(&str,[[:space:]]*SeverityValue\)\]|&\[\(&str,[[:space:]]*NonSourceKind\)\]|&\[\(&str,[[:space:]]*PrescanMode\)\]|&\[\(&str,[[:space:]]*&\[RuleIoChannel\]\)\]|&\[BlindnessClass\]|&\[FrameworkRecognizer\]|&\[RuleChannelDirection\]|&\[NormalizedKey\]|&\[RuleIoChannel\]|RuleIoChannel|RiskWeights|usize|u32|u64|i32|i64|f64|f32|u8'
-pattern="^[[:space:]]*(pub(\\((crate|super|in [^)]+)\\))? )?const [A-Z_][A-Z0-9_]*: ($type_alternation)"
+# &[(&str, &str, &str)] joined 2026-09-14 (review ledger V236): the 2-tuple `(&str, &str)` was read from
+# the start and the 3-tuple never was, which is a SHAPE hole and not a scope one — the same door u8 came
+# through. 📏 What proves it is not hypothetical: widening surfaced a const that had been on disk all
+# along and had never once been triaged, `crates/config/build.rs:EXAMPLE_PACK_CONTRACTS`. The census had
+# been reporting OK over it. A table whose population cannot see a shape reports clean about that shape
+# forever, and "clean" and "blind" print the same word.
+type_alternation='&str|&\[&str\]|&\[u8\]|&\[\(&str,[[:space:]]*&str\)\]|&\[\(&str,[[:space:]]*&str,[[:space:]]*&str\)\]|\[&str;[[:space:]]*[0-9]+\]|\[\(&str,[[:space:]]*&str\);[[:space:]]*[0-9]+\]|&\[\(&str,[[:space:]]*&\[&str\]\)\]|&\[\(&str,[[:space:]]*&\[&str\],[[:space:]]*&str\)\]|&\[\(&str,[[:space:]]*SeverityValue\)\]|&\[\(&str,[[:space:]]*NonSourceKind\)\]|&\[\(&str,[[:space:]]*PrescanMode\)\]|&\[\(&str,[[:space:]]*&\[RuleIoChannel\]\)\]|&\[BlindnessClass\]|&\[FrameworkRecognizer\]|&\[RuleChannelDirection\]|&\[NormalizedKey\]|&\[RuleIoChannel\]|RuleIoChannel|RiskWeights|usize|u32|u64|i32|i64|f64|f32|u8'
+# `static` joined `const` on 2026-09-10 (review ledger V134). A const-only needle had a shape hole, not
+# a scope hole: `static NAME: &[&str]` carries policy exactly as `const NAME: &[&str]` does, and the
+# census read one and not the other. It cost a real miss — `seams`' never-extract folder vocabulary sat
+# in a `static` and was the ONE item in this whole class holding a name vocabulary, so it never reached
+# the triage moment this census exists to force. (It is `vocabulary.seamNoiseDirs` now, V136.)
+#
+# It found one immediately, and the first draft of this comment said it would find none. That claim was
+# written from a hand-rolled grep with a SHORTER type list than the alternation below — measured with a
+# different ruler than the guard uses, which is the same mistake in a smaller costume. What it found:
+# `crates/config/build.rs`'s BUNDLED_PACK_SOURCES, matched inside the template STRING that build.rs
+# writes; the declaration itself lands in OUT_DIR, which is not scanned, so that line is the only line
+# that can ever name it. Triaged `internal` — a derivation from what is on disk.
+#
+# 124 module-level `static UPPER:` declarations exist across the scan dirs and the rest stay invisible,
+# correctly: they are `OnceLock<Regex>`, `AtomicU64`, `Mutex` and friends — containers EMPTY at their
+# declaration and filled elsewhere, so there is no policy value there to triage. Recount:
+#   grep -rnE '^[[:space:]]*(pub[^ ]* )?static [A-Z_][A-Z0-9_]*:' --include=*.rs crates/ rules/ parser/ | grep -vc /tests
+#
+# Proven in both directions rather than assumed, because a widened needle that never fires looks
+# exactly like a needle that cannot: dropping `pub static CANARY_PROBE: &[&str] = &["x"];` into
+# crates/engine/src reports it as drift, and removing it returns the census to OK. ⚠ Use a FULLY
+# scanned dir for that — crates/metrics/src is in `name_only_dirs` below and a canary there stays
+# silent for a reason that has nothing to do with the needle.
+pattern="^[[:space:]]*(pub(\\((crate|super|in [^)]+)\\))? )?(const|static) [A-Z_][A-Z0-9_]*: ($type_alternation)"
 
 # Const types the census DELIBERATELY does not read, one line per type with its reason. Nothing is
 # excluded implicitly — an implicit exclusion is precisely the defect the blind-spot assertion exists to
@@ -226,7 +255,8 @@ pattern="^[[:space:]]*(pub(\\((crate|super|in [^)]+)\\))? )?const [A-Z_][A-Z0-9_
 #           would track the enumeration rather than any policy value, and the thing worth guarding is
 #           already guarded by the compiler plus a round-trip test.
 ignored_types='char
-&'"'"'static [Language]'
+&'"'"'static [Language]
+()'
 
 # The axis vocabulary — see the header block. `?` is deliberately absent: it is what --update writes for
 # an untriaged key, and its whole job is to fail this check.
@@ -381,19 +411,36 @@ vocab_dirs=("${dirs[@]}" "${name_only_dirs[@]}")
 
 rust_consts() {
   grep -rnE "$pattern" "${dirs[@]}" 2>/dev/null \
-    | sed -E 's/^([^:]+):[0-9]+:[[:space:]]*(pub(\((crate|super|in [^)]+)\))? )?const ([A-Z_][A-Z0-9_]*):.*/\1:\5/'
+    | sed -E 's/^([^:]+):[0-9]+:[[:space:]]*(pub(\((crate|super|in [^)]+)\))? )?(const|static) ([A-Z_][A-Z0-9_]*):.*/\1:\6/'
   if [ ${#name_only_dirs[@]} -gt 0 ]; then
     grep -rnE "^[[:space:]]*(pub(\\((crate|super|in [^)]+)\\))? )?const [A-Z_][A-Z0-9_]*: ($name_type_alternation)" \
       "${name_only_dirs[@]}" 2>/dev/null \
-      | sed -E 's/^([^:]+):[0-9]+:[[:space:]]*(pub(\((crate|super|in [^)]+)\))? )?const ([A-Z_][A-Z0-9_]*):.*/\1:\5/'
+      | sed -E 's/^([^:]+):[0-9]+:[[:space:]]*(pub(\((crate|super|in [^)]+)\))? )?(const|static) ([A-Z_][A-Z0-9_]*):.*/\1:\6/'
   fi
 }
 
 # `path:Type::field` — the `::` is what tells a reader (and `grep`) a census line is field-form rather
 # than a const. Multi-line aware on purpose: `hierarchy_shared_dirs`'s literals sit on the lines AFTER
 # the field name, and a single-line scan silently missed it while appearing to work on `router_names`.
+#
+# The file list reaches awk through `xargs`, not through argv, and that is a capacity decision rather
+# than a style one (2026-09-12, review ledger V173). The argument vector this builds grows with the
+# repo -- measured 22,879 bytes -- and an argv-shaped channel whose input scales with the tree is the
+# class that already took this repo's guard fleet down once: `git ls-files -- '*.rs'` crossing bash's
+# 65,536-byte here-string pipe buffer, where six guards hung with no error, no exit code and no
+# output (review ledger V109). Headroom is wide on the platforms that run this today (ARG_MAX is
+# 1,048,576 on this machine and larger on the CI runner), but a limit you are under is not a limit
+# you are safe from, and this one moves on its own every time a `.rs` file is added.
+#
+# Chunking is safe here specifically because the awk program is PER-FILE: `FNR == 1` resets every
+# piece of state it carries, and there is no END block, so a run split across several awk invocations
+# produces the same lines. Output order can differ between chunks; the caller pipes this through
+# `sort -u`, so it cannot matter. NUL-delimited so the split is on the separator rather than on
+# whatever whitespace a path might contain.
 rust_default_field_vocab() {
-  awk '
+  find "${vocab_dirs[@]}" -name '*.rs' -not -name 'tests.rs' -not -path '*/tests/*' -print0 2>/dev/null \
+    | sort -z \
+    | xargs -0 -r awk '
     FNR == 1 { inblock = 0; cur = ""; hit = 0 }
     /^impl Default for /{ t = $4; sub(/[ {].*/, "", t); intype = t; inblock = 1; cur = ""; hit = 0; next }
     inblock && /^}/ {
@@ -410,7 +457,7 @@ rust_default_field_vocab() {
       }
       if (cur != "" && index($0, "\"")) hit = 1
     }
-  ' $(find "${vocab_dirs[@]}" -name '*.rs' -not -name 'tests.rs' -not -path '*/tests/*' 2>/dev/null | sort)
+  '
 }
 
 current="$( { rust_consts; rust_default_field_vocab; } | sort -u)"

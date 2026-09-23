@@ -44,6 +44,7 @@ mod raw_sql_check_then_write;
 mod suppression;
 mod toctou;
 mod truncate;
+mod unique_pair_precondition_pin;
 
 struct TempDir(PathBuf);
 
@@ -139,4 +140,10 @@ mod message_order_pins;
 /// work, and being wired eight times is what keeps it from being dropped by a single edit.
 #[path = "../message_order_verdicts.rs"]
 mod message_order_verdicts;
-use message_order_pins::assert_clauses_precede_imperative;
+
+/// The §33/§37 landing shared with the `db` pack — the check-then-act family's unique-constraint
+/// precondition costs the same thing whichever rule reports it, and the two packs are separate test
+/// crates, so the one spelling lives beside the pins rather than inside either pack.
+#[path = "../unique_pair_precondition_landing.rs"]
+mod unique_pair_precondition_landing;
+use message_order_pins::{assert_clauses_precede_imperative, assert_landing_precedes_imperative};

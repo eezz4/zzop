@@ -86,9 +86,17 @@ trap 'rm -rf "$tmp"' EXIT
 # site/usage.html (a new `graph --domain` value, which no generator owns) made this step fail on three
 # consecutive runs while regeneration was provably a no-op each time. A guard that cannot be made green
 # by doing the thing it asks for teaches people to skip it.
+# BOTH paths. `site-graph-data.mjs` writes `site-src/graph/page.html` and nothing under `site/`
+# (its own header says the shipped page moved to `gen-site.mjs` on 2026-08-18), so copying only
+# `site/` compared the generator's output against a directory it does not write — this step could
+# not fail for three weeks, and did not, while the committed page said 1,677 nodes for a 1,683-node
+# tree. Review ledger V102.
 cp -R site "$tmp/site-before"
+mkdir -p "$tmp/site-src-before/graph"
+cp site-src/graph/page.html "$tmp/site-src-before/graph/page.html"
 node scripts/site-graph-data.mjs "$tmp/n.ndjson" "$tmp/l.ndjson"
-if ! diff -rq "$tmp/site-before" site > "$tmp/site-drift" 2>&1; then
+if ! diff -rq "$tmp/site-before" site > "$tmp/site-drift" 2>&1 ||
+  ! diff -q "$tmp/site-src-before/graph/page.html" site-src/graph/page.html >> "$tmp/site-drift" 2>&1; then
   echo "site/ is stale — regenerating it changed these files:" >&2
   cat "$tmp/site-drift" >&2
   echo "The regeneration has ALREADY been applied to your working tree; commit it." >&2
@@ -103,6 +111,12 @@ step "cli-shim-test: zzop analyzes zzop — findings pinned at zero, with a cana
 # is what keeps YOUR uncommitted work in that file — this script is meant to be run on a dirty tree.
 bash scripts/measure/self-analysis-gate.sh || fail "self-analysis gate"
 
+step "cli-shim-test: docs/demo/break-a-route-shipped.sh"
+# The runnable half of the break-a-route demo. It ASSERTS the join state at each step, so it is a
+# gate and not a narration: if the shipped pair or the join changes, this goes red instead of the
+# page quietly describing a run that no longer happens. Rides this job for the release build above.
+bash docs/demo/break-a-route-shipped.sh || fail "break-a-route demo"
+
 step "cli-shim-test: CLI shim tests"
 # The ONLY thing proving the @zzop/cli npm shim can spawn the native binary at all. Needs this
 # job's release build — the shim's dev-fallback resolution checks target/release only, no debug
@@ -114,6 +128,12 @@ node --test $files || fail "CLI shim tests"
 # --- job: detection-benchmark --------------------------------------------------------------------
 step "detection-benchmark: scripts/measure/detection-gate.sh"
 bash scripts/measure/detection-gate.sh || fail "detection gate"
+
+step "detection-benchmark: scripts/measure/readme-result-block.sh"
+# The README reproduction block is a COPY of numbers only a run knows, and it shipped stale in
+# v0.34.0 with every guard green. With nothing staged this runs unconditionally, which is what a
+# local mirror of a CI job should do.
+bash scripts/measure/readme-result-block.sh || fail "README result block"
 
 # --- job: site-render-check ----------------------------------------------------------------------
 step "site-render-check: npm ci --prefix scripts/site-render-check"
@@ -128,6 +148,19 @@ npm ci --prefix scripts/site-render-check || fail "npm ci (site-render-check)"
 
 step "site-render-check: node scripts/site-render-check/check.mjs site"
 node scripts/site-render-check/check.mjs site || fail "site render check"
+
+# --- verification stamp ---------------------------------------------------------------------------
+# Written ONLY here, and only after every job above passed. Its reader is this repo's review-ledger
+# meter (a maintainer-side script, not published), which printed "100% of my share" on 2026-09-07
+# while the tree was red. Those are two different measurements: that percent counts
+# REVIEW FINDINGS LANDED, and nothing in that view ever measured the tree. The meter cannot run this
+# script (minutes), so it reads what this one leaves behind: which commit was verified, and when.
+#
+# It reports STALENESS, never "green" — a stamp records that a run happened at a sha, not a claim about
+# the working tree now. .zzop/ is already gitignored, so the stamp is local by construction and cannot
+# travel to another checkout to be read as a claim about that tree.
+mkdir -p .zzop
+printf '%s %s\n' "$(git rev-parse HEAD)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > .zzop/last-verified
 
 printf '\n\033[1;32mci-local: every mirrored CI job passed.\033[0m\n'
 printf 'Not covered here: the guards job (pre-commit owns it).\n'

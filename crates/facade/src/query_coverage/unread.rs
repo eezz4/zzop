@@ -60,10 +60,16 @@ use serde_json::{json, Value};
 /// second copy of either is a number that goes stale.
 ///
 /// `kind` is [`zzop_engine::extension_content_kind`]'s token, never one spelled here, and it is what
-/// makes a `data-config` row readable rather than alarming: it says which of the two remedies applies
-/// (`source` — an adapter or parser is missing; `data-config` — look at what these files hold before
-/// concluding anything). Extensions with nothing to lose never reach the row at all, so the token
-/// `"no-facts-to-lose"` cannot appear here; that is a property of the filter, stated in [`legend`].
+/// makes a row readable rather than alarming: it says which remedy applies (`source` — this build HAS a
+/// parser for that filetype, so a fix or an adapter is the answer; `data-config` — look at what these
+/// files hold before concluding anything; `unclassified` — this build has no classification for the
+/// filetype, so read it before assuming anything is missing at all). Extensions with nothing to lose
+/// never reach the row, so `"no-facts-to-lose"` cannot appear here; that is a property of the filter,
+/// stated in [`legend`].
+///
+/// 🔴 `unclassified` used to be spelled `source`, which made the vocabulary's DEFAULT its strongest
+/// claim — a `.gitignore` was published as a missing parser (2026-09-06, review ledger V23). The token
+/// now asserts the parser table rather than a gap in a list.
 pub(super) fn extensions<'a>(per_ext: impl Iterator<Item = (&'a str, usize, usize)>) -> Vec<Value> {
     let rows: Vec<(&str, usize, usize)> = per_ext.collect();
     let total: usize = rows.iter().map(|(_, files, _)| files).sum();
@@ -102,9 +108,14 @@ pub(super) fn legend() -> Value {
          {floor}% floor is the same \
          principal-filetype line the engine's `NO loaded DSL rule targets …` and `THIN DSL rule reach` \
          self-reports use, so \"is this a language the tree is made of\" keeps one answer. Each row's \
-         kind field says which of TWO remedies applies and they are not interchangeable. \
-         kind \"source\": no frontend read a language this tree is written in (SSR template dialects \
-         like .vue/.svelte are deliberately in this class) — bring a parser adapter. \
+         kind field says which remedy applies and they are not interchangeable. \
+         kind \"source\": no frontend read a language this tree is written in — either this build parses \
+         the filetype and did not here, or it is a dialect this build recognizes without parsing (SSR \
+         templates like .vue/.svelte are deliberately in this class) — bring a parser adapter. \
+         kind \"unclassified\": this build has NO classification for the filetype, which is not the same \
+         as knowing it holds source. Read the files before assuming a parser is missing: a .gitignore \
+         and an unsupported language land here alike, and until 2026-09-06 both were published as \
+         \"source\", which sent readers to write adapters for git metadata. \
          kind \"data-config\": a structured data or configuration filetype, where whether anything was \
          lost DEPENDS ON WHAT THE FILES HOLD and this build \
          cannot tell without reading them: a MyBatis .xml mapper directory is 900 SQL statements this \

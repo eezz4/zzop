@@ -208,14 +208,42 @@ fn unprovided_write_fe_tree() -> TempDir {
 /// `provide_blind_sources` into `cross-layer/unprovided-mutation-call`'s severity gate. Registers `/health`
 /// only — never `/api/orders` — so it never satisfies `unprovided_write_fe_tree`'s write call either way;
 /// this tree's whole point is to make the RUN provide-blind, not to actually provide the target.
-fn provide_blind_be_tree() -> TempDir {
-    let dir = TempDir::new("zzop-engine-xlf-provide-blind-be");
+/// A HEALTHY micro-BE: express imported, two routes, both extracted. Named for what it is, because
+/// under the pre-2026-09-06 absolute floor a tree of exactly this shape counted as "provide-blind"
+/// run-wide and dragged a real finding's severity down with it (review ledger V49).
+fn healthy_micro_be_tree() -> TempDir {
+    let dir = TempDir::new("zzop-engine-xlf-healthy-micro-be");
     dir.write(
         "src/app.ts",
         "import express from \"express\";\n\
          const app = express();\n\
-         app.get(\"/health\", () => {});\n",
+         app.post(\"/api/group\", () => {});\n\
+         app.get(\"/api/group\", () => {});\n",
     );
+    dir
+}
+
+fn provide_blind_be_tree() -> TempDir {
+    let dir = TempDir::new("zzop-engine-xlf-provide-blind-be");
+    // 🔴 This fixture used to be ONE ordinary `app.get("/health", ...)` — a single route, extracted
+    // perfectly — and it qualified as "provide-blind" only because the S2 floor could not tell
+    // "few routes" from "few routes because that is all there is" (2026-09-06, review ledger V24).
+    //
+    // That is worth stating plainly, because it is the strongest evidence the old floor was wrong: a
+    // SEVERITY decision was riding on the false positive. Any run containing a healthy two-route
+    // micro-BE was downgrading `cross-layer/unprovided-mutation-call` from Warning to Info, on the
+    // theory that its provider might be hiding in a blind tree — when nothing was hidden at all.
+    //
+    // The fixture now models what its name claims: routes registered on a receiver the extractor does
+    // not resolve, so they are lexically visible and structurally invisible. Nine of them, extracted
+    // zero. Change this only in the direction of MORE blindness, never back toward a tree that merely
+    // has few routes.
+    let mut text =
+        String::from("import express from \"express\";\nconst registry: any = mount();\n");
+    for i in 0..9 {
+        text.push_str(&format!("registry.get(\"/thing{i}\", () => {{}});\n"));
+    }
+    dir.write("src/app.ts", &text);
     dir
 }
 
@@ -1375,5 +1403,45 @@ fn excluding_one_provider_drops_its_copy_and_redacts_it_from_the_siblings() {
     assert!(
         rendered.contains("be2"),
         "the SOURCE id is not a path and stays — the finding still says two trees provide this: {rendered}"
+    );
+}
+
+/// 🔴 A healthy tree must not make the whole run timid (2026-09-06, review ledger V49).
+///
+/// Same shape as the stays-Warning pin above, except the run also contains a micro-BE that imports
+/// express and serves two routes — both of them extracted. Under the absolute floor that tree counted
+/// as provide-blind, so `unprovided-mutation-call` came out Info and named a "provider-side blind spot"
+/// that did not exist. Nothing about the FE consume changed; a bystander changed the verdict.
+///
+/// This is the run-wide half of V24's fix, and the half that mattered more: the prose false positive was
+/// visible to a reader, this one was not.
+#[test]
+fn a_healthy_micro_be_in_the_run_does_not_downgrade_unprovided_mutation_call() {
+    let fe = unprovided_write_fe_tree();
+    let be = write_only_be_tree();
+    let bystander = healthy_micro_be_tree();
+    let trees = vec![
+        (fe.path().to_path_buf(), config("fe")),
+        (be.path().to_path_buf(), config("be")),
+        (bystander.path().to_path_buf(), config("micro-be")),
+    ];
+    let out = analyze_trees(&trees);
+
+    let unprovided = find(
+        &out.cross_layer_findings,
+        "cross-layer/unprovided-mutation-call",
+    );
+    assert_eq!(unprovided.len(), 1, "{:?}", unprovided);
+    assert_eq!(
+        unprovided[0].severity,
+        zzop_core::Severity::Warning,
+        "a fully-extracted two-route tree is not a blind spot: {:?}",
+        unprovided[0]
+    );
+    let data = unprovided[0].data.as_ref().unwrap();
+    assert_eq!(
+        data["provideBlindSourceCount"], 0,
+        "the bystander must not be counted blind: {:?}",
+        unprovided[0]
     );
 }

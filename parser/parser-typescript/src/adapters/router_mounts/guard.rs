@@ -222,7 +222,7 @@ fn callee_dotted(call: &CallExpr) -> Option<String> {
 /// deliberately never judged — it names WHERE the function lives, not what it does, so
 /// `admin.list`/`auth.handlers` must not read as guards.
 ///
-/// The lowercasing is the SHARED transform: `zzop_engine::NORMALIZED_VOCABULARY_KEYS` registers this
+/// The lowercasing is the SHARED transform: `zzop_core::vocab_norm::NORMALIZED_VOCABULARY_KEYS` registers this
 /// producer's three vocabulary keys against the same function, so the config front end can warn about a
 /// declared entry that could never match here. A local twin would make that agreement a convention.
 fn name_tail(dotted: &str) -> String {

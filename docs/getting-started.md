@@ -30,9 +30,9 @@ in two ways:
   TEXT and therefore discovers no config — its own description calls that a declared limit of the lane;
   CLI `zzop analyze-envelope <file>` names a file and applies the `vocabulary` block of a config found
   beside it. Every vocabulary-dependent verdict (guard names above all) can differ between the two.
-- **Some lanes are CLI-only, with no MCP tool twin:** `manifest`, `diff`, `facts`, `coverage`, `graph`, `explain`
-  and `init`. Which lanes those are, and why each one is unpaired, is answered in one place —
-  [CLI-only lanes](modules/mcp.md#cli-only-lanes-manifest--diff--explain--facts--coverage--graph--init) — not by
+- **Some lanes are CLI-only, with no MCP tool twin:** `manifest`, `diff`, `facts`, `graph`, `explain`
+  and `init`. (`coverage` left this list on 2026-09-04 and is now the `check_coverage` tool.) Which lanes those are, and why each one is unpaired, is answered in one place —
+  [CLI-only lanes](modules/mcp.md#cli-only-lanes-manifest--diff--explain--facts--graph--init) — not by
   this sentence. (The lanes are also recorded as a machine-readable contract in
   [surface-parity.json](contracts/surface-parity.json)'s `_cliOnlyLanes`, whose keys are that list —
   `explain` included, declared there so the parity guard can subtract its implementation from the MCP
@@ -62,6 +62,7 @@ zzop analyze . --severity critical --limit 10   # narrow the findings LIST (coun
 zzop analyze --config ./ci/zzop.config.jsonc    # a config that does not sit at the tree root
 zzop analyze . --profile-rules                  # which rules cost what (cold cache only — the report says why)
 zzop analyze . --fail-on critical               # CI gate: exit 3 if any critical finding exists, 0 if none
+zzop analyze . --baseline zzop-baseline.json    # CI gate, ratchet: record what is there, then fail only on what is added
 zzop analyze --help     # that one subcommand's line, on stdout, exit 0 — `zzop help` prints them all
 ```
 
@@ -71,6 +72,28 @@ a third code, because `1` already means zzop could not answer and a CI log has t
 apart from a real finding. The gate reads the COUNTS, not the printed list, so `--severity`/`--limit`
 narrow what you read without narrowing what you gate on. It is refused on `cross` rather than quietly
 passing: that reply has no per-tree severity census, so gate each tree with its own `analyze --fail-on`.
+
+**Adopting on a repository that already has findings.** `--fail-on` asks whether anything at a band is
+present, which on real code is usually *yes* on day one — test fixtures, test certificates, a cache's
+own documented `clear()`. Switching those rules off is the wrong fix: it silences the real case along
+with the false one. `--baseline <file>` is the ratchet instead. Point it at a file that does not exist
+and it RECORDS what this tree already has and passes; commit that file, and every later run fails
+(exit **3**) only on rules that find **more** than it records, naming each one as `rule: was -> now`:
+
+```sh
+zzop analyze . --baseline zzop-baseline.json   # first run: records, exits 0
+git add zzop-baseline.json
+zzop analyze . --baseline zzop-baseline.json   # every run after: exits 3 only on what is new
+```
+
+Counts are per RULE over the whole run, not per file and not per line, so the file survives edits that
+move code around. What it cannot see is a finding moving between files under one rule, or a fix and a
+regression that cancel out — the ordinary limit of a ratchet, and the reason it reports every increase
+rather than trying to be cleverer. Delete the file and re-run to re-record; a run that finds FEWER than
+the baseline says so on stderr, so the file does not quietly stay looser than the tree needs.
+
+`--baseline` and `--fail-on` are **refused together**: they ask different questions and there is one
+exit code between them, so zzop asks which one you meant instead of picking.
 
 **That first run writes one thing into your repo:** a `.zzop/cache/` directory (the default `cacheDir`),
 holding the per-file analysis cache. Set `"cacheDir": null` in your config to turn caching off and write
@@ -140,7 +163,9 @@ The next run says so, per pack. A pack you switched off keeps its row in `packsL
 `filesInScopeIfEnabled` in place of `filesInScope`, and drops `zeroAdmissionRules`. That is the
 difference between **“this pack ran and found nothing”** and **“this pack never ran”**, which the reply
 could not express before 2026-08-26: a switched-off `security` pack looked exactly like a clean one.
-`packsLoadedMeaning`, beside the array, defines each key.
+`packsLoadedMeaning`, beside the array, says what that difference is; the full definition of each key
+is the same on every run, so it ships once in the `reply-legends` contract document that key points at
+(`zzop contract reply-legends`, or MCP resource `zzop://contract/reply-legends`).
 
 If what you want is one subject area rather than "everything except", say it the other way round —
 `packs.only` is the same gate read as an allowlist, so you name what you want instead of enumerating
@@ -316,10 +341,13 @@ what were then five matcher kinds, and that "five" itself rotted next (the roste
 enum in [contracts/rule-pack.schema.json](contracts/rule-pack.schema.json) — count it there, not here);
 `symbol-scan` findings have no line to anchor a comment against and honor no marker (no shipped rule uses
 that matcher today, and `zzop explain <rule-id>` says so per rule). A comment carrying that marker on the
-finding's own line, or the line directly above it, silences that one finding; every finding's rendered
-`message` states the exact marker, because the engine appends that sentence rather than each pack
-authoring its own copy (`zzop explain <rule-id>` prints the RAW pack text, which is why the marker shows
-up there on its own `suppress marker:` line instead of inside the message). Which comment leader is
+finding's own line, or the line directly above it, silences that one finding. **Ask
+`zzop explain <rule-id>` for the marker** — it prints it on its own `suppress marker:` line, which is
+the one place that always answers. The finding's own `message` used to answer too, because the engine
+appended that sentence rather than each pack authoring its own copy; since a finding whose text its rule
+already owns now carries a pointer and a `messageBy` field instead (see
+[modules/facade.md](modules/facade.md#the-third-lane--messageby-the-one-that-points-out-of-the-reply)),
+that sentence is usually reached through `explain` rather than read off the finding. Which comment leader is
 recognized depends on the matcher AND on the file, and the two axes are asked separately. By matcher: one
 that scans a file in its own language reads `//`; one whose anchor line can come from any language at
 once — an HTTP route, a call site, a literal — reads `//` **or** `#` instead, and never `--`, because no
@@ -350,7 +378,9 @@ Mode B adapter overlays are unaffected: they merge onto a natively-parsed tree w
 disk, so both channels stay live. A marker this rule doesn't
 honor no longer fails silently: whether it's a typo or a marker borrowed from another rule, a comment
 shaped like a marker is called out in the finding's message, which names both the token you wrote and the
-marker this rule actually honors. Example (the
+marker this rule actually honors. **This message always arrives in full** — it quotes a token read out of
+your own source, which no rule id could rebuild, so it is one of the cases the `messageBy` lane never
+touches. Example (the
 `sql/nplus1` rule's marker is `zzop-nplus1-ok`):
 
 ```ts
@@ -379,18 +409,29 @@ from a rule id:
   (`@generated`, `auto-generated`, `code generated by`, "this file was generated", …). A bare
   "DO NOT EDIT" deliberately does NOT count — the marker must name generation.
 
-**(b) Config-level (per project, in `zzop.config.jsonc`).** Turn a rule off, override its severity, or
-drop it for matching file paths. Keys are matched by exact rule id: a DSL rule's id is the full
-`"{pack}/{rule}"` string (e.g. `sql/nplus1`, `sql/race-condition-toctou`), while a native analysis id
-is used as-is (e.g. `dead-candidates` — and note some native ids contain a slash of their own, like
-`cross-layer/unconsumed-endpoint`; that slash is part of the native id, not a pack prefix):
+**(b) Config-level (per project, in `zzop.config.jsonc`).** Turn a rule off, turn a shipped-off one
+on, override its severity, or drop it for matching file paths. Keys are matched by exact rule id: a
+DSL rule's id is the full `"{pack}/{rule}"` string (e.g. `sql/nplus1`, `sql/race-condition-toctou`),
+while a native analysis id is used as-is (e.g. `dead-candidates` — and note some native ids contain a
+slash of their own, like `cross-layer/unconsumed-endpoint`; that slash is part of the native id, not a
+pack prefix):
 
 ```jsonc
 "rules": {
   "sql/count-in-loop": "off",
+  "unreachable": "info",
   "dead-candidates": { "exclude": ["**/app/**/{page,layout,route}.tsx"] }
 }
 ```
+
+**Three analyses ship OFF, and this is where you turn one on**: `unimported-export`,
+`dead-candidates` and `unreachable`. They are unused-code hygiene rather than defect claims — across
+the dogfood corpus they were 61.7% of every finding, and a first run whose top half is hygiene buries
+the findings that claim a defect. Naming the id is the whole gesture, in either spelling above: a
+severity (`"unreachable": "info"`) or the object form (`"dead-candidates": { "exclude": [...] }`,
+which turns it on and scopes it in one line). Nothing is removed from the build, and every run lists
+what it skipped under `nativeAnalyses.shippedOff` — separate from `nativeAnalyses.disabled`, which is
+only ever what *your* config chose.
 
 (There is no severity-threshold key to reach for here. The gate is the `--fail-on <severity>` FLAG —
 see "Reading the output" above, which also says why the `failOn` CONFIG key was removed rather than

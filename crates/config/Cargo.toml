@@ -22,13 +22,19 @@ serde_json = { workspace = true }
 # owns the store, rather than a matching literal in each. No cache code runs here; this front-end still
 # only ever produces request JSON.
 zzop-cache = { path = "../cache" }
-# For `zzop_engine::VocabularyConfig::built_in()` only — the mapper's `vocabulary` default. Same one-value-
-# one-definition reasoning as `zzop-cache` above, applied to the convention vocabulary: the engine (and the
-# rule crates it re-exports from) owns what zzop assumes a project calls its guards, API segments and
-# source roots, so this front end READS those symbols to build the injected default instead of restating
-# them. A restated copy here would be a second answer to the same question, and the starter template's
-# "writing this file changes nothing" contract would silently stop holding. No analysis runs here; this
-# front end still only ever produces request JSON.
+# The convention-vocabulary NORMALIZATION table this front end warns against lives in the kernel
+# (`zzop_core::vocab_norm`), beside the transforms the consuming rules call — so the warning and the
+# comparison cannot drift apart. That is the whole shipped need, and it is one function.
+zzop-core = { path = "../core" }
+
+[dev-dependencies]
+# TESTS ONLY, and that is the point of this section existing (2026-09-08, review ledger V122). This
+# front end used to depend on the whole engine because ONE shipped line read a table that lived there;
+# the table moved to the kernel and the shipped edge went with it. What is left is test-only: the
+# template tests build `VocabularyConfig::built_in()` and read `rule_sightlines()`, and one test runs a
+# real `analyze_trees` end to end. A dev-dependency does not enter this crate's shipped closure, so
+# `zzop-config` no longer drags swc and eight parser crates behind it while its own manifest says it
+# never analyzes anything.
 zzop-engine = { path = "../engine" }
 
 # Inherit the workspace lint policy (root Cargo.toml [workspace.lints.clippy]) — every member does,

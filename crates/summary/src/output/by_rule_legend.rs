@@ -12,7 +12,7 @@
 //! side, unlabelled, that is a 27.65x distortion presented as one column.
 //!
 //! It has bitten a skilled reader at least twice with the honest number ALREADY on the wire: an
-//! external auditor reported `go/goroutine-in-loop` as having MISSED a site whose finding had been
+//! external auditor reported `reliability/goroutine-in-loop` as having MISSED a site whose finding had been
 //! folded into its method's first trigger line (`data.triggerLines: 2` said so at that very anchor),
 //! and a second auditor read a rule leaderboard as a ranking of affected places. The fold is
 //! deliberate and documented (`docs/rules/dsl-reference.md`'s finding-shape table: "one finding per

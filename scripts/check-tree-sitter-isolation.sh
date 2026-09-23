@@ -77,12 +77,12 @@ assert_workspace_members_scanned "tree-sitter isolation guard" "${RS_GLOBS[@]}"
 echo "tree-sitter isolation guard: checking Cargo.toml dependency declarations..."
 # `(-[a-z0-9]+)*` (not `?`): grammar crate names can be multi-segment (`tree-sitter-c-sharp`) — a
 # single-suffix pattern would let such a dependency slip past the guard (opus review F3).
-DEP_PATTERN='^\s*(tree-sitter(-[a-z0-9]+)*)\s*='
+DEP_PATTERN='^\s*(tree-sitter(-[a-z0-9]+)*)\s*=|^\s*package\s*=\s*"tree-sitter(-[a-z0-9]+)*"'
 # The enumeration call is kept OUTSIDE the `|| true` below on purpose: tracked_files_matching's own
 # failure must still trip `set -e` and abort loud (see its header comment); only the root-Cargo.toml
 # exclusion and the per-crate allowlist loop below are safe to swallow via `|| true`.
 cargo_matches=$(tracked_files_matching "$DEP_PATTERN" "${CARGO_GLOBS[@]}")
-cargo_files=$(grep -v -x 'Cargo.toml' <<< "$cargo_matches" || true)
+cargo_files=$(grep -v -x 'Cargo.toml' < <(printf '%s\n' "$cargo_matches") || true)
 
 for dir in "${ALLOWLIST[@]}"; do
   cargo_files=$(echo "$cargo_files" | grep -v -x "$dir/Cargo.toml" || true)
@@ -93,12 +93,12 @@ if [ -n "$cargo_files" ]; then
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     grep -nP "$DEP_PATTERN" "$f" | sed "s|^|  ${f#./}:|"
-  done <<< "$cargo_files"
+  done < <(printf '%s\n' "$cargo_files")
   violations=1
 fi
 
 echo "tree-sitter isolation guard: checking .rs source usage..."
-USE_PATTERN='\btree_sitter::[A-Za-z_]|use\s+tree_sitter(::|;|\s)'
+USE_PATTERN='\btree_sitter::[A-Za-z_]|use\s+tree_sitter(::|;|\s)|extern\s+crate\s+tree_sitter'
 rs_files=$(tracked_files_matching "$USE_PATTERN" "${RS_GLOBS[@]}")
 
 for dir in "${ALLOWLIST[@]}"; do
@@ -110,7 +110,7 @@ if [ -n "$rs_files" ]; then
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     grep -nP "$USE_PATTERN" "$f" | sed "s|^|  ${f#./}:|"
-  done <<< "$rs_files"
+  done < <(printf '%s\n' "$rs_files")
   violations=1
 fi
 

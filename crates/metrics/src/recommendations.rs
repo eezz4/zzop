@@ -42,8 +42,7 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
-use crate::roi::RecId;
-use zzop_core::{FileNode, Severity};
+use zzop_core::FileNode;
 
 mod enrich;
 mod evidence;
@@ -61,7 +60,7 @@ use self::rules::{
     rule_bug_prone, rule_circular, rule_fat_fan_out, rule_hidden_coupling, rule_high_churn_per_loc,
     rule_versioning_candidate,
 };
-use self::types::RawItem;
+use self::types::{RawItem, RuleOutput};
 
 pub fn build_recommendations(
     input: &BuildRecInput,
@@ -71,7 +70,7 @@ pub fn build_recommendations(
         input.nodes.iter().map(|n| (n.path.as_str(), n)).collect();
     let critical_by_path = critical_findings_by_path(input.findings);
 
-    let mut raw: Vec<(RecId, Severity, Vec<RawItem>)> = Vec::new();
+    let mut raw: Vec<RuleOutput> = Vec::new();
     raw.extend(rule_bug_prone(input.nodes, gates));
     raw.extend(rule_circular(input.circular));
     raw.extend(rule_high_churn_per_loc(input.nodes, gates));
@@ -80,8 +79,10 @@ pub fn build_recommendations(
     raw.extend(rule_versioning_candidate(input.nodes, gates));
 
     let mut recs: Vec<Recommendation> = Vec::new();
-    for (rule_id, severity, items) in raw {
-        let filtered: Vec<RawItem> = items
+    for out in raw {
+        let (rule_id, severity) = (out.id, out.severity);
+        let filtered: Vec<RawItem> = out
+            .items
             .into_iter()
             .filter(|it| !is_filtered(&it.path, input))
             .collect();
@@ -97,11 +98,15 @@ pub fn build_recommendations(
             })
             .collect();
         enriched.sort_by(|a, b| b.roi.partial_cmp(&a.roi).unwrap_or(Ordering::Equal));
-        recs.push(Recommendation {
-            id: rule_id,
+        // The rule's own cap is carried through unchanged. Deliberately NOT adjusted by the
+        // `is_filtered` pass above: that pass drops rows the CONFIG asked to drop, which is not a
+        // withheld fact, and folding the two would make one number answer two questions.
+        recs.push(Recommendation::new(
+            rule_id,
             severity,
-            items: enriched,
-        });
+            enriched,
+            out.items_truncated,
+        ));
     }
     escalate_critical_bug_evidence(recs, &critical_by_path)
 }

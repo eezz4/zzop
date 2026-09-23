@@ -37,7 +37,7 @@ pub use store::AnalysisCache;
 /// `dispatch.skip_dirs` from the declared `vocabulary.skipDirs`, which is an empty list when undeclared).
 /// The structural protection lives in `zzop-engine`'s `pipeline::walking::walk_files`, on two independent
 /// axes, and is sealed by BEHAVIOUR (analyze twice, assert the file count did not move) in
-/// `crates/engine/tests/analyze_self_output_exclusion.rs`:
+/// `crates/engine/tests/integration/analyze_self_output_exclusion.rs`:
 /// 1. **this constant is a RESERVED NAMESPACE** — a directory named `.zzop` is pruned wherever it appears,
 ///    ahead of anything configurable, so no caller can disarm it. Same standing `git` gives `.git`.
 /// 2. **this run's own `cache_dir`** is pruned by resolved DIRECTORY, whatever it is named — so a cache
@@ -83,7 +83,7 @@ mod dir_tests {
     /// which the config front-end's wholesale `dispatch.skip_dirs` overwrite made an undeclared
     /// `vocabulary.skipDirs` disarm the skip-list entry, and the analyzed file count compounded every run.
     /// That defect is now closed structurally in `walk_files` and sealed by BEHAVIOUR (run twice, assert
-    /// the file count is stable) in `crates/engine/tests/analyze_self_output_exclusion.rs` — which is
+    /// the file count is stable) in `crates/engine/tests/integration/analyze_self_output_exclusion.rs` — which is
     /// where a change to this area has to stay green, not here.
     #[test]
     fn the_default_cache_dir_lives_under_the_tool_dir() {

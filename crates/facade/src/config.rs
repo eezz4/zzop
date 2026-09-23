@@ -207,6 +207,11 @@ pub(crate) fn base_engine_config(
             severity_overrides: severity_overrides.clone(),
             suppressions: suppressions.to_vec(),
             global_excludes: global_excludes.to_vec(),
+            // Filled HERE because this is where a REQUEST becomes a run: what a product ships off is
+            // a property of the product, and every shipped surface (CLI, MCP, an embedder calling the
+            // facade) funnels through this one constructor. A library caller who builds an
+            // `EngineConfig` directly is stating their own config and gets every analysis.
+            default_off: zzop_engine::shipped_off_native_ids(),
         },
         ..EngineConfig::default()
     }

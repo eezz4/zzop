@@ -21,24 +21,51 @@
 //! this repo's most reliable way to manufacture a stale one. `meaning` points at them instead.
 //! `declaredImportsByExt` is likewise pointed at, never restated, for the same reason.
 //!
-//! # Why a share filter, and why TWO shares
-//! An extension earns a row only as a principal filetype: at least [`census::PRINCIPAL_SHARE_PCT`] of the
-//! tree's files AND of its lines (the line leg with one exclusion, two paragraphs down — read both
-//! before quoting either). Neither share alone works, and the failure is measurable in both
-//! directions — on gogs `.png` is 33.9% of the FILES and 6.6% of the lines (a file-share filter opens
-//! every reply with an image row), while `.ini` is 12.7% of the LINES and 1.3% of the files (a
-//! line-share filter reports the locale bundle). A filetype that is a principal share of BOTH is source
-//! the tree is actually written in; that is a measurement, not an extension vocabulary, so nothing here
-//! needs a language table to go stale. The parsed-but-unresolved kind is gated on the structural
-//! population instead — it can only fire on files a parser already claimed.
+//! # Why a share filter, and why ONE share — the FILE share
+//! An extension earns a row only as a principal filetype: at least [`census::PRINCIPAL_SHARE_PCT`] of
+//! the tree's FILES. That is a measurement, not an extension vocabulary, so nothing here needs a
+//! language table to go stale. The parsed-but-unresolved kind is gated on the structural population
+//! instead — it can only fire on files a parser already claimed.
 //!
-//! The line leg is asked of the extension's TOTAL. A largest-file exclusion was tried here on
-//! 2026-08-20 to kill the `package-lock.json` shape and reverted the same day: measured against two
-//! trees with identical unread payload, it answered differently on whether the lines sat in one file
-//! or ten, which is an ERASING change resting on an INFERENCE. The noise it targeted is real but is
-//! now disclosed instead — every such row carries `kind: "data-config"`, and this cell says such a
-//! row is not a verdict. [`census::is_principal_population`] owns the reasoning and the reopening
-//! condition.
+//! ## The LINE leg this cell shipped until 2026-09-01, and the measurement that removed it
+//! There were two legs — the same share of the tree's files AND of its lines — and the pair was
+//! argued in both directions at once on gogs: `.png` is 33.9% of the FILES and 6.6% of the lines (so
+//! not the file axis alone), `.ini` is 12.7% of the LINES and 1.3% of the files (so not the line axis
+//! alone). Only the second of those defends a leg that survives, and it defends THIS one. The first
+//! argued for the line leg, and it stopped being that leg's work on 2026-08-20, when
+//! `extraction_can_lose_facts` landed below the share test and excluded images, fonts, prose, media
+//! and archives outright — `.png` has been dead twice over ever since, and a leg whose only case is
+//! carried by something else is not paying for the rows it costs.
+//!
+//! What it cost is measured. On 9 public trees the two-leg test returned `[]` for the two largest
+//! unread SOURCE populations in the corpus — immich `.svelte` (415 files, 12.1% of files) and nocodb
+//! `.vue` (962 files, 21.2%) — both `structural: 0`, both named by `zzop coverage`'s
+//! `unreadExtensions`, which asks the same question on the file share alone. They failed the LINE leg
+//! against denominators made of what nobody writes: immich's line census is topped by `.ttf` at
+//! 22.57% (19 files) and `.png` at 17.68%, nocodb's by a vendored `.sql` dump at 56.35% (27 files).
+//! The premise the two legs rested on is inverted by that measurement — the noise this cell fears
+//! (lock files, vendored dumps, generated bundles, fonts, `.pdb`) concentrates in LINES and not in
+//! FILES, so the line leg was the leg letting noise in and the file leg the one keeping it out.
+//! Removing it added exactly those two rows across the 9 trees and nothing else; `total`,
+//! `bySeverity` and `byRule` did not move on any of them.
+//!
+//! Two alternatives were measured and are not coming back. Making the legs OR rather than AND adds
+//! four trees' worth of `.json` plus mall's `.pdb` and `.pdm` — one-file populations that are pure
+//! line-axis noise. Narrowing the line DENOMINATOR to extensions that can lose facts is a no-op:
+//! that test is the complement of a closed hand-written list, so an unlisted vendored `.sql` or
+//! `.pdb` stays in the denominator, and the 9 replies came back byte-identical.
+//!
+//! ## A largest-file exclusion was tried on that leg on 2026-08-20 and reverted the same day
+//! Kept here because it is the reason a `package-lock.json`-shaped row is DISCLOSED rather than
+//! erased, which is still this cell's policy and is now the whole of it. The exclusion killed the
+//! lock shape (`corpus/oss/be-express` `.json`: 13 files, 10,229 lines, the lock alone 96.8%) and
+//! also killed a real one: two trees with identical unread payload — 10 MyBatis mappers, ~2,990 lines
+//! of `${}`-interpolated SQL — answered differently purely on whether the XML sat in one file or ten,
+//! while `zzop coverage` kept reporting the concentrated one. An ERASING change resting on an
+//! INFERENCE, in the direction that leaves the reader no trace. Every such row carries
+//! `kind: "data-config"` instead, and this cell says such a row is a place to look rather than a
+//! verdict. `coverage_gaps_tests.rs` pins that pair; with the line leg gone, line CONCENTRATION is
+//! not a signal this cell can reach for at all, which is the strongest form of that answer.
 //!
 //! Everything below the bar stays where the full answer has always been: `zzop coverage <path>`, whose
 //! per-extension table this module's rows are pinned against (`coverage_gaps_tests.rs`).
@@ -50,11 +77,21 @@
 //! keeps this crate's "nothing below the facade" layering (see `Cargo.toml`) intact without either
 //! value being retyped. The subject sets are still deliberately different, and not because of
 //! layering: this cell's membership rule is the DEP GRAPH (`inDepGraph == 0`), which covers the
-//! parsed-but-unresolved kind that a parser-capability list structurally cannot — so where they
-//! overlap they can still disagree at the margin. `meaning` says so on the wire rather than letting a
-//! reader discover it by diffing two subcommands. What they must NOT disagree on is which filetypes are
-//! even eligible, so both the share floor and the eligibility test are the engine's own, borrowed
-//! through `zzop-facade`'s re-export rather than re-stated here.
+//! parsed-but-unresolved kind that a parser-capability list structurally cannot. `meaning` says so on
+//! the wire rather than letting a reader discover it by diffing two subcommands. What they must NOT
+//! disagree on is which filetypes are even eligible, so both the share floor and the eligibility test
+//! are the engine's own, borrowed through `zzop-facade`'s re-export rather than re-stated here.
+//!
+//! Dropping the line leg closed the one gap that was left. Until 2026-09-01 the two surfaces also
+//! disagreed about the SHARE — that one gated on file share alone, this one on file share and line
+//! share — and the disagreement was disclosed on the wire because it could not be defended, which is
+//! how a `.vue` population of 962 files could be named there and absent here in the same reply's
+//! neighbourhood. The no-parser halves now ask the identical question: `structural == 0`, the engine's
+//! `extraction_can_lose_facts`, and at least `MIN_UNCOVERED_EXTENSION_SHARE_PCT` of the tree's walked
+//! files. (`unread::extensions` floors the share to an integer before comparing and this predicate
+//! cross-multiplies; for an integer floor those agree on every input.) What remains is not a margin
+//! but a stated difference in SUBJECT — this list additionally carries extensions that parsed and
+//! resolved nothing, which a parser-capability list has no way to hold.
 //!
 //! # Why the eligibility test is not `is_non_source_extension` (2026-08-20, reversed the same day)
 //! It was, for one review cycle, and that is the sharper version of the same mistake: `zzop-engine`
@@ -99,8 +136,17 @@ use std::collections::HashSet;
 use serde_json::{json, Map, Value};
 
 mod census;
+mod meaning;
 
-use census::{by_extension, is_principal, is_principal_population};
+use census::{by_extension, is_principal, withheld_by_share};
+
+/// The FULL vocabulary sentence, for the reply-legends contract document. The reply itself now carries
+/// the short note (`crate::output::legends::coverage_gaps_note`) plus a pointer at that document
+/// instead of these 4,416 bytes, which were byte-identical on every corpus tree measured. One owner,
+/// two views — `meaning`'s own doc records what the last second copy of a value in it cost.
+pub(super) fn full_meaning() -> String {
+    meaning::meaning()
+}
 
 /// Builds the reply's `coverageGaps` object from an `AnalyzeOutputView`-shaped output.
 ///
@@ -127,7 +173,6 @@ pub(super) fn coverage_gaps(output_view: &Value) -> Value {
         .pointer("/coverage/declaredImportsByExt")
         .and_then(Value::as_object);
     let total_files: u64 = by_ext.values().map(|c| c.files as u64).sum();
-    let total_lines: u64 = by_ext.values().map(|c| c.lines).sum();
     let total_structural: u64 = by_ext.values().map(|c| c.structural as u64).sum();
     let in_dep_graph: u64 = by_ext.values().map(|c| c.in_dep_graph as u64).sum();
 
@@ -138,14 +183,16 @@ pub(super) fn coverage_gaps(output_view: &Value) -> Value {
                 return false;
             }
             if c.structural == 0 {
-                // The no-parser kind: judged against the tree, on both shares (see the module doc) AND
-                // on whether a dispatch-`None` here CAN have cost anything. The share test alone does
-                // not generalize — it was argued from gogs' `.png` (33.9% of files, 6.6% of lines) and
-                // `.ini` (12.7% of lines, 1.3% of files), both of which two shares do stop, but `.md`
-                // is large in BOTH dimensions in ordinary trees. The classifier is the engine's,
-                // reached through `zzop_facade`'s re-export because this crate must not depend on
-                // `zzop-engine`; borrowing it is what keeps this cell and `unreadExtensions` from
-                // disagreeing.
+                // The no-parser kind: judged against the tree on its FILE share AND on whether a
+                // dispatch-`None` here CAN have cost anything. The share test alone does not
+                // generalize — `.md` is a principal share of an ordinary tree's files and there is
+                // nothing structural to lose in it — which is what the second condition, not a second
+                // share, is for. A LINE share sat here as a third condition until 2026-09-01; the
+                // module doc holds what it cost and why its own argument had already moved out from
+                // under it. The classifier is the engine's, reached through `zzop_facade`'s re-export
+                // because this crate must not depend on `zzop-engine`; borrowing it is what keeps
+                // this cell and `unreadExtensions` from disagreeing, and with the line share gone
+                // these two conditions ARE that cell's two, over the same denominator.
                 //
                 // It is `extraction_can_lose_facts`, NOT `is_non_source_extension`, and the difference
                 // is the whole point: those are two questions and this cell asks the second one.
@@ -157,9 +204,24 @@ pub(super) fn coverage_gaps(output_view: &Value) -> Value {
                 // surfaces. The locale complaint was real too, so the answer is not to revert: the row
                 // comes back carrying `kind`, which says a data/config filetype's cost depends on what
                 // the files hold and that this build did not read them to find out.
+                // THE FLOOR STAYS ON THE ROWS, AND WHAT IT WITHHELD IS NAMED IN `basis` (2026-09-04).
+                //
+                // The floor cannot separate signal from noise — one project's 114 `.xml` MyBatis
+                // mappers clear it at 15.8% and are named, while another app's mappers at 7.7%,
+                // holding every SQL statement that app has, are deleted. Same filetype, same content,
+                // opposite answer. But dropping the floor was measured wrong in the other direction
+                // within the hour: a twelve-file fixture with ONE `.jsonc` emitted a row, which is
+                // exactly the locale noise the floor was built for and which `coverage_gaps_tests`
+                // pins against.
+                //
+                // Both are true because they are about different channels. The ROW list is a
+                // shortlist — it earns its floor. The `basis` sentence is the companion that exists so
+                // an empty list cannot read as a verdict, and it was the one lying: it said what was
+                // crossed and never that anything had been held back. So the floor keeps deciding
+                // ROWS, and `basis` now names its exclusions. Nothing is deleted from the reply; a
+                // shortlist stays a shortlist.
                 zzop_facade::extraction_can_lose_facts(ext)
                     && is_principal(c.files as u64, total_files)
-                    && is_principal_population(c, total_lines)
             } else {
                 // The parsed-but-unresolved kind: judged against the STRUCTURAL population, and only
                 // for an extension the engine measured a declared import on — without that, a resolved
@@ -177,65 +239,42 @@ pub(super) fn coverage_gaps(output_view: &Value) -> Value {
         })
         .collect();
 
+    let withheld = withheld_by_share(&by_ext, total_files);
+
     let mut out = Map::new();
     out.insert("extensions".to_string(), Value::Array(extensions));
+    let held_back = if withheld.is_empty() {
+        String::new()
+    } else {
+        format!(
+            ". HELD BACK from the rows above by the {floor}%-of-files shortlist bar, though this build \
+             judges each able to have lost facts: {}. Their absence from `extensions` is a size \
+             judgement, never a measurement that they cost nothing — this build did not read them",
+            withheld
+                .iter()
+                .map(|(ext, files)| format!("{ext} ({files} file(s))"))
+                .collect::<Vec<_>>()
+                .join(", "),
+            floor = zzop_facade::MIN_UNCOVERED_EXTENSION_SHARE_PCT,
+        )
+    };
     out.insert(
         "basis".to_string(),
         json!(format!(
             "{} extension(s) crossed; {in_dep_graph} file(s) contribute at least one resolved import \
-             edge",
+             edge{held_back}",
             by_ext.len()
         )),
     );
-    out.insert("meaning".to_string(), json!(MEANING));
+    // FOLDED, not the full vocabulary (2026-09-01): the short note that carries what a row's zero can
+    // and cannot mean, plus a pointer at the reply-legends document for the rest. The rows and `basis`
+    // above are THIS RUN's measurement and are untouched — see `crate::output::legends` for the rule,
+    // and for the three neighbouring legends it deliberately leaves inline.
+    out.insert(
+        "meaning".to_string(),
+        json!(crate::output::legends::folded_string(
+            "coverageGaps.meaning"
+        )),
+    );
     Value::Object(out)
 }
-
-/// The vocabulary rides INSIDE the object it describes — the same device `ruleTimings` and
-/// `architecture.painMeaning` use, and for the same reason: a consumer that reads the rows cannot fail
-/// to also have read what they omit. Every number it names lives somewhere else in THIS reply and is
-/// pointed at rather than copied.
-const MEANING: &str = "Extensions contributing ZERO resolved import edges while being a principal \
-    filetype here (>=10% of this tree's files AND >=10% of its lines; a parsed extension is judged \
-    against >=10% of the files with a structural projection instead). The LINE leg is a raw share, and \
-    deliberately so: a largest-file exclusion was tried on it and reverted \
-    the same day, because it erased a real row whenever one member of the extension dominated it, \
-    which is exactly the MyBatis shape this cell exists for. The accepted cost is the other direction \
-    of the same fact — one outsized member (a lock file, a generated bundle) can carry its filetype \
-    over the line floor on its own. Read a row as a place to look rather than as a verdict; line \
-    distribution is not evidence about whether anything read the files. Each row's kind field says \
-    what a zero here can and cannot mean, and the two are not interchangeable. \
-    Kind \"source\": a language this tree is written in that no frontend read. \
-    Kind \"data-config\": a structured data or configuration filetype \
-    (json/yaml/xml/toml/ini/properties/csv/lock/html) — nobody writes a language parser for those, so \
-    the \"no native parser\" warnings deliberately never mention them, but they DO routinely declare \
-    facts this engine's io channels carry: SQL inside MyBatis .xml mappers, services in a k8s \
-    manifest, endpoints in an OpenAPI document. Whether this row cost you anything depends entirely \
-    on what those files hold and THIS BUILD DID NOT READ THEM, so it is listed rather than judged — a \
-    900-statement mapper directory and an i18n locales bundle are the same row until you look. \
-    (Filetypes with no STRUCTURAL projection — prose, stylesheets, images, fonts, media, archives — \
-    are excluded from this list entirely rather than shown as a cleared row. Structural, not total: a \
-    `.md` page under a VitePress-style docs root can carry `import` lines inside a `<script setup>` \
-    block, and since 2026-08-20 those ARE read — as dep-graph in-edges only, its symbols and io \
-    unprojected, which is why the filetype still sits on the excluded side.) `structural: 0` has TWO \
-    causes and they take opposite remedies, so check which before acting: no parser claimed the \
-    extension (an adapter overlay is the on-ramp), or a parser claimed the files and bailed on them. \
-    Neither `coverage.degraded` nor the `degraded` list tells those apart — both count every walked \
-    file that got no structural projection, including files no frontend was ever going to read (an \
-    oversized `.png` degrades and loses nothing by it), so on many trees the whole list is the FIRST \
-    case. The CAUSE split rides in `warnings`, in the degraded-file self-report, which counts only \
-    files a frontend actually dispatched to plus unreadable ones — so a degraded list with no such \
-    warning beside it is itself the answer 'nothing claimed these', not a hole in the report. Either \
-    way those files are absent from the resolved dependency graph — \
-    the substrate every unimported/unreachable-export verdict, blast radius and fan-in/out is \
-    computed over; read those findings as being about the REMAINING files, never about these. \
-    `structural` above 0 with no edge means the files DID parse and their specifiers resolved to \
-    nothing in-tree; the declared side is `coverage.declaredImportsByExt`. An empty list means the \
-    cross ran and found nothing — `basis` says what was crossed, so it never means 'not measured'. \
-    This is a share filter over extension counts, not a language judgment, and not the whole table — \
-    the aggregate coverage surface carries every extension plus the capability crosses, which gate on \
-    file share alone rather than on line share too, so the two lists can differ at \
-    the margin. The cross-layer JOIN is a separate axis whose counts already ride this reply \
-    (`coverage.ioProvides` / `ioConsumesKeyed` / `ioConsumesUnresolved` / `joinContributionZero`): a \
-    near-zero provider count on a tree that serves routes makes an unprovided-consume finding a \
-    statement about extraction, not about the code.";

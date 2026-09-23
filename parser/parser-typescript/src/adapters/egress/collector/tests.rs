@@ -18,7 +18,7 @@ fn captures_internal_axios_string_literal() {
 }
 
 // retry_configured (`egress-retry-v1`) is covered end-to-end — parser tag through cross-layer join —
-// in `crates/engine/tests/analyze_cross_layer_retry_write.rs` (axios-retry file gate, `pRetry(...)`
+// in `crates/engine/tests/integration/analyze_cross_layer_retry_write.rs` (axios-retry file gate, `pRetry(...)`
 // wrapper, read-verb and non-retry negatives). The inline assertion above pins the common untagged
 // case (a plain GET with no retry context).
 

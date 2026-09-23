@@ -57,7 +57,9 @@ mod test_paths;
 use serde::{Deserialize, Serialize};
 
 pub use compilable::uncompilable_vocabulary_warnings;
-pub use normalizers::{normalizer_for, NormalizedKey, NORMALIZED_VOCABULARY_KEYS};
+// `normalizers` is a test-only module now: the table it used to hold lives in
+// `zzop_core::vocab_norm`, and what stays here is the check that its keys are real
+// `VocabularyConfig` fields (see that module's doc, review ledger V122).
 pub(crate) use resolved::ResolvedVocabulary;
 pub(crate) use test_paths::extra_test_path_tail;
 
@@ -131,6 +133,23 @@ pub struct VocabularyConfig {
     /// mechanism and why it cannot be closed cheaply are at
     /// `zzop_core::dsl::fragments::is_shared_test_path_vocabulary`.
     pub extra_test_path_patterns: Vec<String>,
+    /// The names this project gives its own secrets, judged by `security/hardcoded-secret` as a NAMED
+    /// BINDING (`API_KEY = "…"`). Whole replacement and absence-means-no-judgment, like every key here
+    /// except the one above it — see `RulePackDef::rewrite_secret_names` for the failure-direction test
+    /// that puts this key on the normal side of that line.
+    ///
+    /// 🔴 NOT `secret_param_names`, and the difference is the whole reason this key exists. That one is
+    /// a QUERY PARAMETER vocabulary (its template comment says so) read by
+    /// `cross-layer/secret-in-url`, where a bare `key` in a querystring is a real signal. Reusing it
+    /// here was proposed by backlog U103 and REFUTED by measurement on 2026-09-15: every name it
+    /// carries beyond this rule's own seven produced no credential on the 17-tree corpus, and bare
+    /// `key` alone produced 46 findings of which exactly one was real. One name was serving two
+    /// questions; the table and the recount command are in `zzop_core::dsl::secret_names`.
+    ///
+    /// `built_in()` ships `zzop_core::dsl::secret_names::BUILT_IN_NAMES` — the rule's own vocabulary,
+    /// so a `zzop init` project is judged exactly as it is today and only a hand-edited config changes
+    /// the answer.
+    pub secret_names: Vec<String>,
     /// The zero-argument accessor this project calls to reach its ORM client — the anchor of the
     /// `getPrisma().<model>.<method>()` shape the `db-table` consume recognizer keys off
     /// (`zzop_parser_typescript::PRISMA_CLIENT_GETTER`). CACHED IR lane.
@@ -228,11 +247,30 @@ pub struct VocabularyConfig {
     /// as routers (`crate::io::DEFAULT_ROUTER_NAMES`). CACHED IR lane — it decides which call sites become
     /// route provides, so it rides the parser fingerprint.
     pub router_names: Vec<String>,
+    /// The identifiers this project gives its PREFIX-FREE root route builder in C# minimal-API
+    /// registrations — the `WebApplication`/`IEndpointRouteBuilder` value a `MapGet` is registered on
+    /// directly (`zzop_parser_csharp::DEFAULT_ROOT_ROUTE_BUILDER_VARIABLE_NAMES`). The C# sibling of
+    /// [`Self::router_names`], and an EXTRACTION vocabulary like it: an undeclared name is not a route
+    /// this run reports.
+    ///
+    /// It is not the place for a route-GROUP variable (`var api = app.MapGroup("/api")`), which the
+    /// adapter resolves structurally — naming one here would key its routes at the root and lose the
+    /// group's prefix. `csharp`-prefixed for the reason `pythonGuard*`/`javaSourceRoot` are: the
+    /// judgment is one language's, and a name declared here reaches no other parser.
+    pub csharp_root_route_builder_variable_names: Vec<String>,
     /// Directory names this project treats as shared/cross-cutting infrastructure rather than a layer, so
     /// they are exempt from upward-import and sibling-cross violations
     /// (`zzop_metrics::DEFAULT_HIERARCHY_SHARED_DIRS`). A DIFFERENT axis from [`FeatureSlicedDesignVocab::shared`] despite
     /// the overlapping words — see that field.
     pub hierarchy_shared_dirs: Vec<String>,
+    /// Top-level directory names this project never wants offered as a strangler extraction target —
+    /// its test, fixture, build and docs dirs (`zzop_metrics::DEFAULT_SEAM_NOISE_DIRS`). A DISPLAY
+    /// filter rather than a judgment vocabulary, and it takes the same no-fallback rule anyway: an
+    /// absent declaration filters nothing, so `tests/` and `node_modules/` rank as the best seams.
+    /// That is loud on purpose — the same reason [`Self::workspace_skip_dirs`]'s absence is — because
+    /// obvious junk in the output is a signal a reader acts on, where a silently applied default would
+    /// make the filter look like a property of the tree instead of a thing the project declared.
+    pub seam_noise_dirs: Vec<String>,
     /// This project's Feature-Sliced Design layout. Nested rather than flattened into four sibling keys
     /// because the four answer ONE question ("what is your FSD layout?") and are meaningless apart: an
     /// `entry` list only means something relative to `slice_containers` and `shared`. The `vocabulary`

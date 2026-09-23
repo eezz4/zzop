@@ -2,9 +2,12 @@
 //! run-global blindness-class registry through.
 //!
 //! # What it does, and why it is allowed to
-//! The facade emits the whole registry on every output: 17 classes of prose, ~10.6KB, BYTE-IDENTICAL on
+//! The facade emits the whole registry on every output: every class of prose, ~10.6KB, BYTE-IDENTICAL on
 //! every run (`zzop_engine::blindness_registry()` is a pure accessor over immutable rows, and the facade's view function takes no
-//! run argument). Measured on zzop's own tree it was 10.6 of 16.6KB of the `analyze` reply, and ~70% of
+//! run argument). The class COUNT is not stated here and that is deliberate: this doc said "17 classes"
+//! while the registry held 18 (2026-09-12, ledger V168), and the count has exactly one owner that
+//! cannot go stale — the registry itself, which prints it at the top of
+//! `zzop contract disclosure-classes`. Measured on zzop's own tree it was 10.6 of 16.6KB of the `analyze` reply, and ~70% of
 //! a small tree's — a ~2,500-token fixed tax on every tool call for this output's primary reader, an AI
 //! agent, 100% repeated from the second call onward. It was also the ONE list this crate forwarded
 //! uncapped while capping even `degraded`.

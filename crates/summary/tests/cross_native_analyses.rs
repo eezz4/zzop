@@ -28,7 +28,7 @@ fn default_filters() -> zzop_summary::FindingFilters {
     zzop_summary::FindingFilters::new(None, None, None).expect("no-filter view always constructs")
 }
 
-/// A configured tree. `rules_override` replaces the template's own empty `"rules": {}` object, so the
+/// A configured tree. `rules_override` replaces the template's own `"rules"` object WHOLE, so the
 /// gate the canary exercises is spelled the way a user spells it and cannot drift from the template.
 fn tmp_tree(name: &str, rules_override: Option<&str>) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("zzop-na-{name}-{}", std::process::id()));
@@ -36,13 +36,25 @@ fn tmp_tree(name: &str, rules_override: Option<&str>) -> std::path::PathBuf {
     fs::create_dir_all(&dir).unwrap();
     let mut config = zzop_config::template::CONFIG_TEMPLATE_JSONC.to_string();
     if let Some(rules) = rules_override {
-        let anchor = "\"rules\": {},";
+        // Replace the template's `"rules"` OBJECT, not a fixed spelling of it. It carried `{}` until
+        // 2026-09-02, when three hygiene analyses became default-off there; a substitution pinned to
+        // the empty spelling would have stopped matching and left this canary disabling nothing,
+        // which is the failure the assertions below exist to catch. Both ends are asserted so a
+        // reshaped template fails loudly here rather than quietly passing.
+        let start = config
+            .find("\"rules\": {")
+            .expect("the config template no longer carries a `\"rules\": {` object to substitute");
+        let end = config[start..]
+            .find("},")
+            .map(|i| start + i + 2)
+            .expect("the template's `\"rules\"` object has no `},` terminator — reshaped how?");
         assert!(
-            config.contains(anchor),
-            "the config template no longer carries a bare `{anchor}` to substitute — the canary below \
-             would silently stop disabling anything, which is the failure it exists to catch"
+            end - start < 400,
+            "the `\"rules\"` object spans {} bytes, which is not an object this substitution should \
+             be swallowing whole — the terminator search almost certainly ran past it",
+            end - start
         );
-        config = config.replace(anchor, rules);
+        config.replace_range(start..end, rules);
     }
     fs::write(dir.join("zzop.config.jsonc"), config).unwrap();
     dir

@@ -82,8 +82,22 @@ FOREIGN_LETTER_EXEMPTIONS=(
 # The `.claude/`-reference scan's own exemption list, same shape and same rules. Kept separate from
 # the list above because the two scans ask different questions and a path that must skip one has no
 # reason to skip the other.
+# 🔴 This was one entry — the prefix `scripts/` — until 2026-09-13 (review ledger V188). Measured:
+# EVERY file this scan matches lives under `scripts/` (7 of 7), so the blanket erased 100% of the
+# scan's own population and it could never fire. The stated reason ("guard machinery must NAME the
+# pattern it excludes") was true of four of those files and false of the other three, which carried
+# real reader-facing pointers into an unpublished tree — exactly what this scan exists to catch.
+#
+# So the exemption is now per FILE, each one a case where the path appears because the file's job is
+# to exclude that path. `assert_exemption_is_live` below fails a stale entry, so a file that stops
+# naming `.claude/` cannot leave its excuse behind for whatever takes the same name next. Narrow and
+# noisy beats broad and silent: a prefix that covers the whole population is not an exemption, it is
+# a disabled check.
 CLAUDE_REF_EXEMPTIONS=(
-  "scripts/|guard machinery must NAME the very pattern it excludes — this file's own grep lines, and the max-file-lines / isolation scope filters. That is not a reader-facing \"see .claude/...\" pointer. The non-Latin scan above still covers scripts/, which is where the real risk in this directory lives."
+  "scripts/check-english-source.sh|this guard's own grep lines must spell the pattern they search for."
+  "scripts/check-deploy-facts-prose.sh|names \".claude/\" as one of the directories its scan excludes."
+  "scripts/check-max-file-lines.sh|the scope filter itself — the exclusion regex has to contain the path."
+  "scripts/lib/tracked-grep.sh|the shared exclusion helper; anchoring \".claude/\" correctly IS its subject."
 )
 
 # ## Both directions of every exemption (working-agreements 5.5)
@@ -138,7 +152,7 @@ source_scanned=0
 while IFS= read -r _p; do
   [ -n "$_p" ] || continue
   source_scanned=$((source_scanned + 1))
-done <<< "$subject_paths"
+done < <(printf '%s\n' "$subject_paths")
 
 if [ "$source_scanned" -eq 0 ]; then
   echo "English-only source guard: FAILED -- enumerated ZERO source files. SUBJECT_PATHSPEC matched"
@@ -175,7 +189,7 @@ while IFS= read -r f; do
     continue
   fi
   files="${files}${f}"$'\n'
-done <<< "$raw_foreign"
+done < <(printf '%s\n' "$raw_foreign")
 files="$(printf '%s' "$files")"
 
 if [ -n "$files" ]; then
@@ -215,7 +229,7 @@ while IFS= read -r f; do
   [ -n "$f" ] || continue
   is_exempt "$f" "${CLAUDE_REF_EXEMPTIONS[@]}" && continue
   claude_ref_files="${claude_ref_files}${f}"$'\n'
-done <<< "$claude_ref_matches"
+done < <(printf '%s\n' "$claude_ref_matches")
 claude_ref_files="$(printf '%s' "$claude_ref_files")"
 
 if [ -n "$claude_ref_files" ]; then

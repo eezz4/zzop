@@ -34,6 +34,8 @@ pub(super) const ROWS: &[BlindnessClass] = &[
         // heuristic in between. It is NOT a claim that every generic-looking path gets one — the
         // anchoring and the case-sensitivity are both named above precisely so the status is read
         // against the table as SPELLED rather than against the idea of genericness.
+        //
+        // FIRING PIN: crates/engine/tests/integration/analyze_multi_tree.rs::analyze_trees_surfaces_ambiguous_external_and_low_confidence_buckets
         status: DisclosureStatus::Asserted,
     },
     BlindnessClass {

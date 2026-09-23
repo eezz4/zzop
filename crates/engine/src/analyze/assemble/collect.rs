@@ -4,7 +4,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use zzop_core::{Finding, ImportMap, IoConsume, IoProvide, ReExport};
+use zzop_core::{Finding, IoConsume, IoProvide};
 
 use crate::pipeline::FileArtifact;
 use crate::EngineConfig;
@@ -13,10 +13,12 @@ use super::helpers::is_prescan_ext;
 
 mod candidates;
 mod census;
+mod dep_slot;
 mod scans;
 mod types;
 
 use candidates::{record_unparsed_extension, stage_package_import_candidate, LangGates};
+use dep_slot::DepSlot;
 pub(super) use types::Collected;
 pub(in crate::analyze) use types::DegradedFile;
 
@@ -57,19 +59,15 @@ pub(super) fn collect(
     let mut per_file_findings: Vec<Finding> = Vec::new();
     let mut all_symbols = Vec::new();
     let mut loc_by_path: HashMap<String, u32> = HashMap::new();
-    let mut ts_import_pairs: Vec<(String, ImportMap)> = Vec::new();
-    let mut ts_re_export_pairs: Vec<(String, Vec<ReExport>)> = Vec::new();
-    let mut ts_dynamic_import_pairs: Vec<(String, Vec<String>)> = Vec::new();
-    let mut ts_asset_ref_pairs: Vec<(String, Vec<String>)> = Vec::new();
-    let mut ts_paths: HashSet<String> = HashSet::new();
+    // The seven dep-graph substrates travel together because they are gated together — see
+    // `dep_slot` for why that gate, and not a language, is the seam.
+    let mut dep = DepSlot::default();
     let mut degraded: Vec<DegradedFile> = Vec::new();
     let mut minified: Vec<String> = Vec::new();
     let mut suppress_markers: Vec<zzop_core::dsl::SuppressMarkerSite> = Vec::new();
     let mut parser_dispatched: usize = 0;
     let mut io_provides: Vec<IoProvide> = Vec::new();
     let mut io_consumes: Vec<IoConsume> = Vec::new();
-    let mut dead_export_names_by_file: HashMap<String, crate::dead_exports::DeadExportNames> =
-        HashMap::new();
     let mut prisma_rels: Vec<String> = Vec::new();
     let mut java_rels: Vec<String> = Vec::new();
     let mut csharp_rels: Vec<String> = Vec::new();
@@ -103,12 +101,12 @@ pub(super) fn collect(
     // Import pre-scan substrate — see `Collected::prescan_rels`'s doc.
     let mut prescan_rels: Vec<String> = Vec::new();
 
-    for artifact in artifacts {
+    for mut artifact in artifacts {
         loc_by_path.insert(artifact.rel.clone(), artifact.loc);
         if artifact.minified_or_generated {
             minified.push(artifact.rel.clone());
         }
-        suppress_markers.extend(artifact.suppress_markers);
+        suppress_markers.extend(std::mem::take(&mut artifact.suppress_markers));
         // Computed once per artifact (was two separate `dispatch(...)` calls in the `else if` chain below,
         // plus now a third use for the unparsed-extension check) — `dispatch` is a pure path/extension
         // match, so caching it in a local is a free correctness-neutral simplification, not a behavior
@@ -146,7 +144,7 @@ pub(super) fn collect(
         if dispatch_lang.is_none() && is_prescan_ext(&artifact.rel) {
             prescan_rels.push(artifact.rel.clone());
         }
-        if let Some(imports) = artifact.imports {
+        if let Some(imports) = artifact.imports.take() {
             // F5 census staging — see `candidates::stage_package_import_candidate`'s doc.
             let gates = LangGates::for_rel(&artifact.rel);
             for binding in imports.values() {
@@ -167,24 +165,7 @@ pub(super) fn collect(
                     &mut package_import_files,
                 );
             }
-            ts_paths.insert(artifact.rel.clone());
-            if !artifact.re_exports.is_empty() {
-                ts_re_export_pairs.push((artifact.rel.clone(), artifact.re_exports));
-            }
-            if !artifact.dynamic_imports.is_empty() {
-                ts_dynamic_import_pairs.push((artifact.rel.clone(), artifact.dynamic_imports));
-            }
-            if !artifact.asset_refs.is_empty() {
-                ts_asset_ref_pairs.push((artifact.rel.clone(), artifact.asset_refs));
-            }
-            ts_import_pairs.push((artifact.rel.clone(), imports));
-            dead_export_names_by_file.insert(
-                artifact.rel.clone(),
-                crate::dead_exports::DeadExportNames {
-                    used: artifact.used_names.clone(),
-                    signature: artifact.exported_signature_names.clone(),
-                },
-            );
+            dep.absorb(&mut artifact, imports);
         }
         if let Some(io) = artifact.io {
             io_provides.extend(io.provides);
@@ -233,13 +214,13 @@ pub(super) fn collect(
     // not pollute `package_import_files` (S2/S4's tripwires, `cross-layer/untraced-client-import-no-visible-consume`).
     census::drain_python_candidates(
         python_package_import_candidates,
-        &ts_paths,
+        &dep.ts_paths,
         &config.vocabulary.resolve().python_package_roots,
         &mut package_import_files,
     );
     census::drain_rust_candidates(
         rust_package_import_candidates,
-        &ts_paths,
+        &dep.ts_paths,
         &rust_workspace,
         &mut package_import_files,
     );
@@ -259,6 +240,18 @@ pub(super) fn collect(
         &mut package_import_files,
     );
 
+    // Unpacked rather than renamed: `Collected`'s field names are read by four later phases, and
+    // moving a seam is not a reason to move a name.
+    let DepSlot {
+        ts_paths,
+        ts_import_pairs,
+        ts_re_export_pairs,
+        ts_dynamic_import_pairs,
+        ts_asset_ref_pairs,
+        ts_call_graph_pairs,
+        dead_export_names_by_file,
+    } = dep;
+
     Collected {
         file_count,
         parser_dispatched,
@@ -268,6 +261,7 @@ pub(super) fn collect(
         ts_import_pairs,
         ts_re_export_pairs,
         ts_dynamic_import_pairs,
+        ts_call_graph_pairs,
         ts_asset_ref_pairs,
         ts_paths,
         degraded,

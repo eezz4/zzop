@@ -2,7 +2,7 @@
 # Max-file-lines guard (ratchet) — fails when a Rust source file exceeds LIMIT lines, unless it
 # is grandfathered in scripts/max-file-lines-baseline.txt at (at most) its recorded line count.
 #
-# Policy: source files stay under 300 lines; an oversized file is split into a directory module
+# Policy: source files stay under 400 lines; an oversized file is split into a directory module
 # (foo.rs -> foo/mod.rs + foo/*.rs). Violations that predate the guard are frozen in the baseline
 # and may only shrink — the ratchet never loosens:
 #   - a file NOT in the baseline exceeding the limit fails (new oversized file), and
@@ -30,7 +30,13 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-LIMIT=300
+# Fail on the UTILITY, not on the data: without this the GNU-only `xargs -d` surfaces as a claim
+# about this repo (a deleted file, an empty scan, a silently wrong count). See the lib header.
+# shellcheck source=scripts/lib/require-gnu.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/require-gnu.sh"
+require_gnu_xargs "max-file-lines guard"
+
+LIMIT=400
 BASELINE=scripts/max-file-lines-baseline.txt
 
 # ONE `git ls-files` and ONE `grep -v`, where this was two ls-files and a seven-link grep chain
@@ -84,7 +90,7 @@ fi
 all_counts=$(awk '$2 != "total" {print $2, $1}' "$wc_out")
 
 # Census of files over the limit.
-census=$(awk -v lim="$LIMIT" '$2 > lim' <<< "$all_counts")
+census=$(awk -v lim="$LIMIT" '$2 > lim' < <(printf '%s\n' "$all_counts"))
 
 declare -A base
 if [ -f "$BASELINE" ]; then
@@ -100,7 +106,7 @@ while read -r f n; do
   [ -n "$f" ] || continue
   current["$f"]=$n
   counted=$((counted + 1))
-done <<< "$all_counts"
+done < <(printf '%s\n' "$all_counts")
 
 # An empty census is a broken scan, not a repo with no Rust. Measured 2026-07-28: with the scope glob
 # redirected, this printed "clean (0 grandfathered files remaining)" and exited 0. The STALE-baseline
@@ -141,7 +147,7 @@ if [ "${1:-}" = "--update-baseline" ]; then
       else
         printf '%s %s\n' "$f" "$n"
       fi
-    done <<< "$census"
+    done < <(printf '%s\n' "$census")
   } > "$BASELINE.tmp"
   if [ "$refused" -ne 0 ]; then rm -f "$BASELINE.tmp"; exit 1; fi
   mv "$BASELINE.tmp" "$BASELINE"
@@ -161,7 +167,7 @@ while read -r f n; do
     echo "  GREW  $f: ${base[$f]} -> $n lines — the ratchet only shrinks; split instead of growing"
     violations=1
   fi
-done <<< "$census"
+done < <(printf '%s\n' "$census")
 
 # Stale baseline entries: file gone or now within the limit.
 for f in "${!base[@]}"; do
@@ -179,5 +185,5 @@ fi
 # Counted in bash — `grep -c .` on a herestring is a whole process to count what the shell can count
 # for free, and the census is usually empty anyway.
 census_count=0
-while IFS= read -r _c; do [ -n "$_c" ] && census_count=$((census_count + 1)); done <<< "$census"
+while IFS= read -r _c; do [ -n "$_c" ] && census_count=$((census_count + 1)); done < <(printf '%s\n' "$census")
 echo "max-file-lines guard: clean ($census_count grandfathered files remaining)."

@@ -177,6 +177,7 @@ fn non_source_extensions_pin() {
         ("txt", N),
         ("rst", N),
         ("adoc", N),
+        ("rtf", N),
         // data/config
         ("json", D),
         ("jsonc", D),
@@ -190,6 +191,7 @@ fn non_source_extensions_pin() {
         ("ini", D),
         ("properties", D),
         ("lock", D),
+        ("po", D),
         // styles
         ("css", N),
         ("scss", N),
@@ -235,9 +237,39 @@ fn non_source_extensions_pin() {
         ("node", N),
         ("jar", N),
         ("map", N),
+        // compiled/generated artifacts — a parser frontend for these is not a thing anyone writes
+        ("pyc", N),
+        ("mo", N),
+        ("egg", N),
+        ("arrow", N),
+        ("snap", D),
+        // packaging outputs
+        ("deb", N),
+        ("rpm", N),
+        // archives (siblings of zip/gz/tar above)
+        ("bz2", N),
+        ("xz", N),
+        ("lzma", N),
+        ("tgz", N),
+        // binary data/geo/db formats
+        ("dbf", N),
+        ("shp", N),
+        ("shx", N),
+        ("mmdb", N),
+        ("tif", N),
+        ("tiff", N),
+        ("graffle", N),
+        // logs and editor/backup residue
+        ("log", N),
+        ("backup", N),
+        // go module manifests — the `lock` family, structured data rather than a language
+        ("sum", D),
+        ("mod", D),
+        ("work", D),
         // misc
         ("pem", N),
         ("crt", N),
+        ("cert", N),
     ];
     assert_eq!(
             NON_SOURCE_EXTENSIONS, EXPECTED,
@@ -316,6 +348,60 @@ fn extension_content_kind_covers_the_table_and_the_source_case() {
     assert_eq!(extension_content_kind("ts"), "source");
     assert_eq!(extension_content_kind("XML"), "data-config");
     assert_eq!(extension_content_kind("PNG"), "no-facts-to-lose");
+}
+
+/// 🔴 The residual must be the WEAKEST token, not the strongest (2026-09-06, review ledger V23).
+///
+/// `"source"` names a remedy the consuming surface publishes as "bring a parser adapter". While the
+/// residual was spelled `"source"`, a coverage reply sent readers to write one for `.gitignore`,
+/// `.env`, `.npmignore` — and for `local`, which is not a filetype at all, only the tail of
+/// `.env.local`. A vocabulary whose DEFAULT is its loudest claim fails toward alarm every time its
+/// table has a gap, and a hand-kept table always has one.
+#[test]
+fn an_unclassified_extension_is_not_called_source() {
+    for ext in [
+        "gitignore",
+        "env",
+        "npmignore",
+        "local",
+        "editorconfig",
+        "gitattributes",
+    ] {
+        assert_eq!(
+            extension_content_kind(ext),
+            "unclassified",
+            "{ext} is not a language this build knows anything about"
+        );
+    }
+}
+
+/// The other direction, and the reason the residual could not simply be renamed: a dialect this build
+/// recognizes but cannot parse IS source, and "bring an adapter" is the right thing to tell someone
+/// about it. That contract is pinned on the reply surface too
+/// (`query_coverage::tests::unread_entries_are_ext_ordered_...`), which is what caught the first
+/// attempt at this fix.
+#[test]
+fn a_recognized_dialect_with_no_parser_is_still_source() {
+    for ext in ["vue", "svelte", "php", "rb", "kt", "sh"] {
+        assert_eq!(
+            extension_content_kind(ext),
+            "source",
+            "{ext} is a language; an adapter is the honest remedy"
+        );
+    }
+}
+
+/// The source signal comes from two places and neither may quietly become a copy of the other: the
+/// parser table answers for what this build reads, [`SOURCE_DIALECT_EXTENSIONS`] for what it only
+/// recognizes. An extension in BOTH would mean the hand-kept list had grown a shadow of the table.
+#[test]
+fn the_dialect_list_never_shadows_the_parser_table() {
+    for ext in super::non_source::SOURCE_DIALECT_EXTENSIONS {
+        assert!(
+            crate::dispatch::language_for_extension(ext).is_none(),
+            "{ext} is already dispatched to a parser -- the dialect list must not restate the table"
+        );
+    }
 }
 
 #[test]
@@ -434,4 +520,88 @@ fn every_language_round_trips_through_its_config_spelling() {
         None,
         "spellings are exact, not case-folded"
     );
+}
+
+// ---------------------------------------------------------------------------------------------
+// ONE glob dialect (review ledger V98). `glob_overrides` used to run a second, narrower translator
+// than the `exclude`/`suppressions` key in the same config — two user-writable glob keys that meant
+// different things. Measured before the fold: 7 of 12 cases disagreed. These pin the three shapes that
+// changed, so the dialects cannot drift apart again without a red test.
+// ---------------------------------------------------------------------------------------------
+
+/// The sharpest one, and a defect rather than a dialect choice: the old translator never escaped `?`,
+/// so `file?.ts` compiled to `^file?\.ts$` and the `?` acted as a regex QUANTIFIER — it matched
+/// `fil.ts` and missed `file1.ts`, precisely inverting what a glob `?` means.
+#[test]
+fn a_question_mark_is_one_character_not_a_quantifier() {
+    let config = DispatchConfig {
+        glob_overrides: vec![("src/file?.ts".to_string(), Language::Prisma)],
+        ..cfg()
+    };
+    assert_eq!(dispatch("src/file1.ts", &config), Some(Language::Prisma));
+    assert_eq!(
+        dispatch("src/fil.ts", &config),
+        Some(Language::TypeScript),
+        "the old translator matched THIS one and not file1.ts"
+    );
+}
+
+/// `{a,b}` alternates. The old translator escaped the braces, so the pattern only matched a path with
+/// literal brace characters in it — something no real repository has.
+#[test]
+fn a_brace_group_alternates() {
+    let config = DispatchConfig {
+        glob_overrides: vec![(
+            "src/{legacy,vendor}/schema.ts".to_string(),
+            Language::Prisma,
+        )],
+        ..cfg()
+    };
+    assert_eq!(
+        dispatch("src/legacy/schema.ts", &config),
+        Some(Language::Prisma)
+    );
+    assert_eq!(
+        dispatch("src/vendor/schema.ts", &config),
+        Some(Language::Prisma)
+    );
+    assert_eq!(
+        dispatch("src/fresh/schema.ts", &config),
+        Some(Language::TypeScript)
+    );
+}
+
+/// `**/` matches zero directories, so a root-level file is covered. The old translator required at
+/// least one directory, which meant `**/schema.prisma` silently skipped the one at the tree root.
+#[test]
+fn a_leading_double_star_matches_zero_directories() {
+    let config = DispatchConfig {
+        glob_overrides: vec![("**/schema.ts".to_string(), Language::Prisma)],
+        ..cfg()
+    };
+    assert_eq!(dispatch("schema.ts", &config), Some(Language::Prisma));
+    assert_eq!(dispatch("db/schema.ts", &config), Some(Language::Prisma));
+}
+
+/// The two keys a user can write globs into must answer the same question the same way. This is the
+/// invariant the whole fold exists for — asserted directly against core's matcher, not inferred.
+#[test]
+fn the_dispatch_key_and_the_exclude_key_share_one_dialect() {
+    for (glob, path) in [
+        ("src/file?.ts", "src/file1.ts"),
+        ("src/{a,b}/x.ts", "src/a/x.ts"),
+        ("**/x.ts", "x.ts"),
+        ("legacy/**", "legacy/a/b.ts"),
+        ("src/*.ts", "src/nested/a.ts"),
+    ] {
+        let config = DispatchConfig {
+            glob_overrides: vec![(glob.to_string(), Language::Prisma)],
+            ..cfg()
+        };
+        assert_eq!(
+            dispatch(path, &config) == Some(Language::Prisma),
+            zzop_core::glob_matches(glob, path),
+            "dispatch and zzop_core::glob_matches disagree on ({glob}, {path})"
+        );
+    }
 }

@@ -113,8 +113,8 @@
   // naming five packs that do not exist.
   "packs": {
     "disabled": [
-      "browser", "db", "egress", "go", "http", "perf",
-      "react", "redis", "reliability", "security", "sql"
+      "browser", "db", "egress", "http", "redis",
+      "reliability", "security", "sql"
     ]
   }
 }

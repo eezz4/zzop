@@ -81,8 +81,17 @@ pub(in crate::analyze) fn collect_git(
             (collection.stats, collection.commits, true)
         }
         Err(e) => {
+            // This warning fires on EXACTLY the condition that makes `architecture` disappear, which is
+            // why the consequence is stated here rather than in a legend. `architecture_summary`
+            // returns `Option` and the shaper omits the key outright, so there is no field left to hang
+            // a `*Meaning` on — an absence cannot carry its own explanation. Before this, the only place
+            // that said so was the analyze_repo MCP tool description, which is not read by a CLI caller
+            // and would have been deleted by the description fold (review ledger V152).
             warnings.push(format!(
-                "git collection skipped for {}: {e}",
+                "git collection skipped for {}: {e}. The reply's `architecture` object is \
+therefore ABSENT, not null — the health/recommendation/critical-file computation reads git signals, \
+so there is no object to carry a null. Read its absence as NOT MEASURED; nothing here says the tree \
+is healthy.",
                 root.display()
             ));
             (GitStats::default(), Vec::new(), false)

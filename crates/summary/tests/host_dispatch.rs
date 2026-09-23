@@ -52,6 +52,38 @@ fn check_endpoint(
 
 struct TempDir(PathBuf);
 
+/// The starter document with its `"rules"` object emptied.
+///
+/// Fixtures here seed the real template so each test stays about its own subject. Since 2026-09-02
+/// that document turns three hygiene analyses off by default, which is a REQUESTED override — and
+/// two tests in this file assert that `ruleOverridesApplied` is ABSENT when nothing was requested.
+/// Seeding the template unmodified made that premise false and those tests fail on a fixture detail
+/// rather than on their subject. Blanking the object here keeps "no overrides requested" true of the
+/// fixture, which is what those assertions are actually about; a test that wants the shipped
+/// defaults writes the template itself.
+fn template_requesting_no_rule_overrides() -> String {
+    let t = zzop_config::template::CONFIG_TEMPLATE_JSONC;
+    let start = t
+        .find("\"rules\": {")
+        .expect("the starter template no longer carries a `\"rules\": {` object");
+    let end = t[start..]
+        .find("},")
+        .map(|i| start + i + 2)
+        .expect("the template's `\"rules\"` object has no `},` terminator");
+    assert!(
+        end - start < 400,
+        "the `\"rules\"` object spans {} bytes — the terminator search ran past it",
+        end - start
+    );
+    let mut out = t.to_string();
+    out.replace_range(start..end, "\"rules\": {},");
+    assert!(
+        !out.contains("\"unimported-export\": \"off\""),
+        "blanking the rules object left a default-off entry behind"
+    );
+    out
+}
+
 impl TempDir {
     fn new(prefix: &str) -> Self {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -69,7 +101,7 @@ impl TempDir {
         // writes over this one, since `write` runs after `new`.
         dir.write(
             zzop_config::DEFAULT_CONFIG_FILENAME,
-            zzop_config::template::CONFIG_TEMPLATE_JSONC,
+            &template_requesting_no_rule_overrides(),
         );
         dir
     }
@@ -556,7 +588,7 @@ fn cross_repo_paths_mode_discloses_unanalyzed_sibling_directories() {
     for tree in ["fe", "be"] {
         parent.write(
             &format!("{tree}/{}", zzop_config::DEFAULT_CONFIG_FILENAME),
-            zzop_config::template::CONFIG_TEMPLATE_JSONC,
+            &template_requesting_no_rule_overrides(),
         );
     }
     for name in ["e2e", "docs-site"] {
@@ -1068,4 +1100,90 @@ fn a_run_with_no_cache_carries_no_cache_key() {
         "with caching off there is no provenance question to answer, so there is no key — a null one \
          would read as \"a cache ran and served nothing\": {out}"
     );
+}
+
+/// The file query's findings list is UNCAPPED by design — a single file is bounded — which is exactly
+/// why it is the lane where a repeated rule message costs the most. Until 2026-09-13 it was also the
+/// only findings lane the prose fold never reached.
+///
+/// 📏 Measured (external review round 20, ledger V223) on the real corpus: `zzop file
+/// docs_src/app_testing/app_b_an_py310/test_main.py corpus/frameworks/fastapi` was 84,189 bytes, of
+/// which 70,260 were `list[].message` — six findings of one rule each carrying the same 11,710-byte
+/// text. 58,550 bytes, 70% of the reply, were five redundant copies of one essay. After the fold:
+/// 15,807 bytes.
+///
+/// The pin is AGREEMENT WITH `analyze`, not a byte count and not a copy of any wording: the same
+/// finding, on the same file, must be shaped the same way whichever surface answered. A byte-count pin
+/// would have to be re-tuned whenever a rule's prose is edited, which is how a ratchet becomes a number
+/// people bump without reading; an agreement pin stays true across every such edit and also catches the
+/// opposite regression, where `analyze` changes and this lane does not follow.
+#[test]
+fn check_file_folds_repeated_rule_prose_exactly_as_analyze_does() {
+    let dir = TempDir::new("zzop-summary-file-fold");
+    // Three literals that genuinely fire `security/hardcoded-secret` — a fixture whose planted value
+    // is NOT detected would pin the fold against an empty findings list and prove nothing.
+    dir.write(
+        "conf.ts",
+        "export const a = \"sk-9f3Kq2mZx7Lp0WvB4tRn\";\n\
+         export const b = \"sk-4tYw8nQ1pR6vX3mL0zJd\";\n\
+         export const c = \"sk-7hJ2nB5xQ8wR1vT4yM6z\";\n",
+    );
+    dir.write(zzop_config::DEFAULT_CONFIG_FILENAME, "{}\n");
+    let root = dir.path().display().to_string();
+
+    let file_out = zzop_summary::file_summary("conf.ts", None, Some(&root), &[], None)
+        .expect("the file query should succeed");
+    let f: serde_json::Value = serde_json::from_str(&file_out).unwrap();
+    let a: serde_json::Value =
+        serde_json::from_str(&analyze(&root).expect("analyze should succeed")).unwrap();
+
+    // The shaping a finding carries, as DATA: which pointer lane claimed it, and the key it points
+    // with. Never the sentence — that is wording, and `rule_prose`'s own contract says the field is
+    // what a consumer reads.
+    let shape = |v: &serde_json::Value| -> Vec<(String, String, String)> {
+        v.as_array()
+            .map(|xs| {
+                let mut rows: Vec<(String, String, String)> = xs
+                    .iter()
+                    .map(|x| {
+                        let s =
+                            |k: &str| x.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        (s("ruleId"), s("messageBy"), s("messageRef"))
+                    })
+                    .collect();
+                rows.sort();
+                rows
+            })
+            .unwrap_or_default()
+    };
+
+    let from_file = shape(&f["findings"]["list"]);
+    let from_analyze = shape(&a["findings"]["shown"]);
+    assert!(
+        from_file.len() >= 3,
+        "the fixture must produce several findings of one rule or this pins nothing: {from_file:?}"
+    );
+    assert_eq!(
+        from_file, from_analyze,
+        "the same findings are shaped differently by `file` and `analyze`"
+    );
+
+    // Whichever lane claimed them, the reply must carry that lane's legend — a pointer whose legend
+    // did not travel with it is an address into nothing.
+    for (key, legend) in [
+        ("ruleMessages", "ruleMessagesMeaning"),
+        ("ruleMessageTemplates", "ruleMessageTemplatesMeaning"),
+    ] {
+        assert_eq!(
+            f["findings"].get(key).is_some(),
+            f["findings"].get(legend).is_some(),
+            "`{key}` and `{legend}` must be present together in the file reply: {f}"
+        );
+    }
+    if from_file.iter().any(|(_, by, _)| by == "ruleId") {
+        assert!(
+            f["findings"].get("messageByIdMeaning").is_some(),
+            "a by-id pointer rides with no `messageByIdMeaning` legend: {f}"
+        );
+    }
 }

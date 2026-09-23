@@ -1,4 +1,4 @@
-use crate::{scan, TempDir};
+use crate::{assert_landing_precedes_imperative, sanitizer_subtraction_landing, scan, TempDir};
 
 // --- vue-v-html ---
 
@@ -67,6 +67,38 @@ fn vue_v_html_ok_marker_suppresses_the_finding() {
             .all(|f| f.rule_id != "browser/vue-v-html"),
         "{:?}",
         out.findings
+    );
+}
+
+/// §33/§37 LANDING pin. This rule's axis-A verdict is a template row in
+/// `rules/dsl/message_order_verdicts.rs` (`ORDER_CLAIMS`, "if the bound value is influenced by user
+/// input" before "Prefer `{{ }}` text interpolation"); this pin is the other axis, on a DELIVERED
+/// finding, and the two do not displace each other.
+///
+/// The cost is the sharper of the two arms here. `v-html` is the directive a Vue app reaches for
+/// precisely when the value IS markup — a CMS body, an editor's output — so swapping it for `{{ }}`
+/// puts the tags on the page as characters, and reaching for DOMPurify instead deletes by allow-list.
+/// The order asserted is landing before verb; the invalidation probe is to move the constant to the
+/// tail, where every token is still spelled once and only ORDER has changed.
+#[test]
+fn vue_v_html_landing_precedes_the_imperative() {
+    let dir = TempDir::new("zzop-browser");
+    dir.write(
+        "Article.vue",
+        "<template>\n  <div v-html=\"renderedHtml\"></div>\n</template>\n<script setup>\nconst renderedHtml = article.body;\n</script>\n",
+    );
+    let out = scan(&dir);
+    let hits: Vec<_> = out
+        .findings
+        .iter()
+        .filter(|f| f.rule_id == "browser/vue-v-html")
+        .collect();
+    assert_eq!(hits.len(), 1, "{:?}", out.findings);
+    assert_landing_precedes_imperative(
+        "vue-v-html",
+        &hits[0].message,
+        sanitizer_subtraction_landing(),
+        "Prefer `{{ }}` text interpolation",
     );
 }
 

@@ -36,327 +36,186 @@ Work on `main` past the top row below, so an id or a file named here may not be 
 be installable while the table below still ends at its predecessor, and an installed `zzop version`
 reading higher than the top row is the documented state rather than a gap in this file.
 
-**`zzop coverage`'s recognizer channel vocabulary gained a fourth spelling, and three rows changed
-which one they carry.** `io.provides:db-table` used to name the db kind on BOTH sides of the join;
-it now names table/model **declarations** only, and `io.consumes:db-table` names queries against a
-table. Consequences on the wire, in `trees[].ioChannels.zeroExtraction[].channel` and in
-`frameworkRecognizers[].emits`: `prisma client`, TypeScript's `raw sql` and Rust's `raw sql` now emit
-`io.consumes:db-table` where they emitted `io.provides:db-table`; `typeorm`, `django`, `sqlalchemy`
-and `gorm` gained a second row for the consume side they always filled. A consumer that groups by the
-`io.provides:db-table` string will see three recognizers leave that bucket. Only three channels are
-measured as `zeroExtraction` rows (`io.provides`, `io.consumes`, `io.provides:db-table`) — that set
-is unchanged, and no row count moved on the 9-tree corpus. What moved is which recognizers a row
-NAMES: measured on immich, the `(io.provides:db-table, ts)` row went from `["prisma client", "raw
-sql", "typeorm"]` to `["typeorm"]`. The old list was false in a direction that inverts the row's
-meaning — that tree holds 77 `CREATE TABLE` statements across 24 `.ts` files and extracted 0, so
-"this build has a `.ts` raw-SQL table recognizer and it found nothing" reads as "the tree declares no
-tables in TypeScript" when the truth is that this build does not read `CREATE TABLE` inside `.ts` at
-all. `findings.*` and `--fail-on` exit codes are untouched.
+**A DSL finding's `message` no longer repeats prose that its rule already owns.** A finding whose
+text is exactly what its rule alone would have produced — that rule's declared `message` plus the two
+sentences the engine appends — now carries a short pointer and a new `messageBy` field instead, and the
+full text is reached by the finding's own `ruleId`: `zzop explain <ruleId>` on the CLI, or the
+`zzop://rule/{id}` resource template on MCP. **Detect the lane by the `messageBy` field, never by the
+sentence** — the field names the resolver and is the contract; the sentence is wording, which
+[VERSIONING.md](VERSIONING.md) keeps outside the compatibility surface. Both serve the same bytes from the same function, and
+that function now also prints the disable knob, which used to ride only on the finding. Measured through the CLI on
+`cases/trees/api-be` at the default window (`zzop analyze cases/trees/api-be | wc -c`):
+**127,937 → 62,110 bytes, -51.5%**. 46 of the 50 shown findings carry the field; the 4 that keep their
+prose are native. The MCP lane measures differently because its envelope carries JSON-RPC framing —
+take the number from whichever surface you actually read.
 
-**`react/setstate-after-async-unguarded` moved from `warning` to `info`.** If you gate on
-`--fail-on warning`, findings from this rule no longer contribute to exit `3`; they still appear in the
-reply and still count in `findings.total`. The rule's own message had, for several releases, carried a
-sentence disqualifying its own dominant finding shape — "a plain event handler is mounted by
-construction whenever it fires, so a `setX(...)` inside one is an accepted false positive here" — which
-is a gate described rather than implemented. Measured over a 9-tree corpus, 34 of its 49 findings sat in
-an event handler rather than in a `useEffect` callback. The gate itself is NOT in this release: the
-matcher cannot ask whether a line sits inside a hook callback, because projected function bodies are
-anonymous line spans with no record of which call receives a function as its argument. The severity is
-therefore the disclosure made machine-readable, and it moves back to `warning` if and when that gate is
-built. The rule's message also stopped naming the "state update on an unmounted component" console
-warning as its headline symptom without qualification: React removed that warning in 18.0.0.
+**This is a break if you were reading the prose out of `message`.** The field is still a string and
+still present, so nothing that checks its type or its presence moves — but a consumer that grepped a
+sentence out of it, or rendered it as the explanation, now gets the pointer. Read the full text by id
+instead. *Four classes are unaffected and keep every byte inline*: native analyses (they have no
+declared message to restore from); findings whose text was rewritten to name a suppression comment
+the rule does not honour (that token comes from your source and is in no other field); **any rule
+this binary does not carry** — a pack in `zzop/rules/` or `packs.extraDirs` keeps its prose, because
+the two resolvers above answer only for compiled-in rules and pointing at them would name a door
+that replies "unknown rule id"; and any rule whose whole message is cheaper than the pointer. **No finding is removed and no count moves** —
+`total`, `bySeverity` and `byRule` never read `message` — and `truncated` is still the only key that
+means rows were left out. The reply discloses this itself in `findings.messageByIdMeaning`, which
+rides only when some finding carries the pointer. `zzop_engine::analyze_tree`, the Rust library entry
+point, is unchanged and still returns the full prose.
 
-**`zzop analyze --fail-on <severity>` is new, and it introduces exit code `3`.** Given the flag, a run
-whose `findings.bySeverity` holds anything at or above the threshold exits `3` after printing the
-whole reply on stdout, with one counts-and-threshold line on stderr. Without the flag nothing
-changes: the exit code still answers only "did zzop run", so a tree full of criticals exits `0`. `3`
-rather than `1` on purpose — `1` already means zzop could not answer, and a CI log has to tell a
-broken config apart from a real finding. `cross --fail-on` is REFUSED (exit 2) rather than accepted
-and never fired: that reply carries no per-tree severity census, so the gate would silently cover the
-cross-layer half alone. Verify against your own build rather than this sentence:
-`zzop analyze <tree> --fail-on critical; echo $?`.
+**Six rules moved `warning` → `info`, and one of them lost a second band.** `circular`,
+`schema/god-model`, `schema/nullable-fk`, `schema/model-churn`,
+`cross-layer/db-table-name-in-multiple-sources` and `cross-layer/external-host-in-multiple-sources`
+report a SHAPE rather than claim a defect, and each already said so in its own shipped text: `circular`
+ends by naming a legitimate way to keep the cycle ("if this cycle is an intentional, reviewed
+pattern"), `god-model` calls its 15-field line "a convention, not a measurement", `nullable-fk` opens
+by calling the optional side a choice the schema made, and the two join rules concede the coincidence
+they report may be expected in the reader's stack. Measured over three fixed corpus trees, this class
+held **12 of the 150 first-screen rows — and all 12 were `circular`**; on the cross-repo reply
+`db-table-name-in-multiple-sources` held **6 of 50**. After the move those first screens carry **zero**
+rows from the class, and each is byte-identical to the same run with the rules demoted by config.
+**No finding is removed and no count moves**: `findings.total` and `findings.byRule` are unchanged on
+all four measurements. What changes is `bySeverity` (on one tree `warning` 418 → 306) and therefore
+what `--fail-on warning` breaks on — gate on `--fail-on info`, or re-raise the ones you trust with
+`severityOverrides`.
 
-**`zzop analyze --rule <id>` can now exit 2 where it used to exit 0.** A filter this run can PROVE
-could not match is refused on stderr instead of being accepted silently. Three lanes: a bare id
-naming neither a bundled DSL rule nor a native analysis (refused at argv time); a `<pack>/<rule>` id
-whose pack is absent from the reply's own `packsLoaded`; and — new, and the one a pipeline is most
-likely to be carrying today — a `<pack>/<rule>` id whose pack IS in `packsLoaded` and which that
-pack's own `ruleIds` does not contain, i.e. a typo inside a pack that loaded. Both post-run lanes are
-decided from the reply ahead of the `--fail-on` gate, so 2 outranks 3. Nothing that passes a real id
-changes — and a bare DSL id, which used to filter NOTHING because every DSL finding's `ruleId` is
-`<pack>/<rule>`, now resolves to its full form and works. If a pipeline passes a rule id that never
-matched, it turns red; that is the point, since the old answer was byte-indistinguishable from
-"nothing to report". Check yours the same way: `zzop analyze <tree> --rule <the id you pass>; echo $?`.
+`schema/model-churn` additionally **lost its `critical` tier**, which escalated past an injected churn
+count of 10. The rule's own message calls that line "a round number with no measurement behind
+it" and tells the reader to judge the raw `data.count` instead; a line the code itself calls
+unmeasurable must not hand out the loudest band. The count and the reporting line (5) are untouched,
+and the rule remains silent by construction in every native run — nothing injects that attribute.
 
-Both entries above are recorded even though *The compatibility surface* does not name EXIT CODES
-among its four surfaces — it neither covers them nor lists them under *Explicitly NOT part of the
-compatibility surface*. That gap is real and unsettled; until it is settled, an exit-code change that
-can turn a green pipeline red is written down rather than left for you to discover, which is what
-this file is for.
 
-**A repeated finding message is now stored once per reply, and two reply keys are new.** In a reply
-where two or more findings in `shown` carry the exact same `message` text, that text moves to a
-`ruleMessages` object sitting beside the `shown` list it came from, keyed by the rule id (a rule with
-more than one repeated text gets `<ruleId>#2`, `#3`, ... for the later ones), and each of those
-findings gains a `messageRef` holding its key. A `ruleMessagesMeaning` sentence rides once alongside.
-`message` itself is still a non-empty string on every finding — never empty, never a bare id — but on
-a folded finding it is a short pointer rather than the prescription, so **a consumer that reads
-`message` and ignores `messageRef` will print the pointer where the prescription belongs.** The rule
-is: read `ruleMessages[finding.messageRef]` when `messageRef` is present, `finding.message` directly
-when it is absent. The object is a SIBLING of the `shown` list rather than a fixed path, because one
-shaper feeds both the `findings` and the `crossLayerFindings` blocks.
+**`--rule` now refuses the seven ids that gate a pass instead of reporting one.** `schema-structural`,
+`schema-usage`, `seams`, `scores`, `health`, `recommendations` and `criticality` are real ids — config
+`rules.disabled` speaks them, and disabling one switches its whole pass off — but no finding is ever
+keyed by them, so a view filtered to one came back `shown: 0` with no warning beside a full census.
+Measured on `cases/trees/api-be`: all seven returned an empty list over 92 findings, exit 0, empty
+stderr. That is the same "a filter reading as a clean result" the unknown-`--rule` warning already
+existed to end; it was checking whether the id is REGISTERED, which these are.
 
-Folding is conditional, not universal: it is applied only where storing the text once removes more
-bytes than the pointer, the `messageRef` field and the table itself cost to add. A repeated message
-left inline is a size decision and never a sign that anything was left out — `truncated` remains the
-only key that ever means that. Measured on cal.com, the `analyze` reply goes 3,186,439 -> 1,697,723
-bytes; on a small or rule-filtered reply the fold usually does not fire at all.
+The reply now carries a warning naming the id, saying the empty list is the filter, and pointing at the
+id space that does carry findings — `schema/<label>` for the two family gates, the score surfaces for
+the other five. **No exit code changes and no finding moves**; `--fail-on` is untouched, since it reads
+`findings.bySeverity` and never the filtered list. A filter naming a rule that simply found nothing —
+`--rule schema/god-model` on a clean tree — stays silent, which is the case this must not break.
 
-All three keys are additive and absent rather than empty when they do not apply, so a consumer that
-never learns them keeps working on every reply where nothing folded — and, on replies where
-something did, keeps working only if it already tolerated `message` wording changing between
-versions, which VERSIONING.md places outside the compatibility surface.
-**`analyze` and `coverage` gained reply fields.** `analyze` carries `coverageGaps` (always present —
-`{basis, extensions, meaning}`: the principal filetypes whose code reached no resolved import edge,
-with each row carrying `{ext, files, kind, structural}`, plus the `basis` sentence that makes an
-empty list readable as measured rather than unasked and a `meaning` sentence that says what a zero
-can and cannot mean). `analyze`'s `architecture` object gained `topRecommendationMeaning` beside the
-`painMeaning`/`criticalTopMeaning` it already shipped — the sentence saying that
-`topRecommendation.severity` is a PRIORITY BAND computed from structure alone, so a `critical` band
-next to a `bySeverity` holding no critical is the normal case rather than a contradiction. Every
-`packsLoaded` entry gained `ruleIds`, unconditionally present: the LIST behind the `rules` COUNT, so
-a consumer validating a rule filter can answer "is there such a rule here" instead of guessing from
-the pack prefix (this is what the third `--rule` lane above is decided from). `coverage` carries
-`ioChannels` (one row per io kind this build's rules read, PRESENT EVEN AT ZERO, plus a
-`zeroExtraction` cross of extractor capability against the tree's own filetype mix) and
-`unreadExtensions`, whose rows are `{ext, kind, sharePct}`. `blindSpotBasis` keeps its name and its
-type; its sentence now states what the cross EXCLUDED, not only what it included. Read the shapes off
-your own build rather than off this paragraph:
-```sh
-zzop analyze <tree> | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
-  const r=JSON.parse(s), k=o=>Object.keys(o||{}).join(" ");
-  console.log("packsLoaded[]            ", k(r.packsLoaded[0]));
-  console.log("coverageGaps             ", k(r.coverageGaps));
-  console.log("coverageGaps.extensions[]", k((r.coverageGaps||{}).extensions?.[0]));
-  console.log("architecture             ", k(r.architecture)); })'
-```
 
-**Not everything in that paragraph is additive, and the non-additive half changes numbers you may
-already have captured.** Two value changes, both in the direction of reporting MORE:
+**Three analyses now ship OFF, and turning one on takes no new vocabulary.** `unimported-export`,
+`dead-candidates` and `unreachable` are unused-code hygiene rather than defect claims; measured across
+the dogfood corpus those three alone were **61.7% of every finding a run reported**, and the knip tool
+produces the same list for a JS/TS project as its whole job. A first run whose top half is hygiene
+buries the findings that claim a defect, and every evaluator who read one of those runs ended up
+writing an allowlist by hand. **To turn one on, name it in `rules` with a severity** —
+`"dead-candidates": "info"` — which is the same gesture that changes any other rule's band.
 
-- **`coverageGaps` and `unreadExtensions` list extensions they used to omit.** Eligibility moved off
-  the "would anyone write a parser adapter for this filetype?" list and onto a separate question,
-  "was anything LOST by having no structural projection here?" — so structured data and configuration
-  filetypes (`.xml`, `.json`, `.yaml`, lockfiles, …) now qualify and arrive labelled `kind:
-  "data-config"`, while prose/image/binary filetypes still do not. This is why the rows carry `kind`
-  at all: a `data-config` zero and a source-language zero take different remedies. A consumer that
-  treated a non-empty list as "a parser is missing" must now read `kind` first. Recount with the
-  `node` line above; the two answers differ on any tree carrying a data/config filetype above the
-  principal floor.
-- **`coverage`'s `extensions[]` rows flip `structural`/`lexicalOnly` for io-only parsers.** A file
-  whose parser projects io facts and nothing else — `.sql` and `.prisma` — was counted `lexicalOnly`,
-  whose own legend promises no parser projected any symbol, import or io fact from it. Those rows now
-  read `structural`: measured on a three-`.ts`-plus-one-`.sql` tree, that `.sql` row is
-  `{"structural":1,"lexicalOnly":0}`. The old answer for the same shape is quoted, with the field
-  measurement that forced the change, in the regression test that now pins it
-  (`a_file_whose_parser_projects_io_only_is_structural_not_lexical`, `crates/facade/src/query_coverage/tests.rs`).
-  Re-read your own trees with `zzop coverage <tree>` rather than trusting a captured copy.
+Nothing is removed from the build, and the reply says which analyses were not evaluated: a new
+`nativeAnalyses.shippedOff` list, beside the `disabled` one it is deliberately NOT folded into. The
+two mean the same non-evaluation under different authorship, and the split is the point — `disabled`
+is what your config chose.
 
-Additive fields alone are a MINOR change under [VERSIONING.md](VERSIONING.md)'s *The compatibility
-surface*, so no promise moves for those — recorded anyway for the one consumer shape they break: a
-schema validator pinned with `additionalProperties: false` against a captured reply will reject these
-runs. The two value changes above move no field name or type either, but they DO move the contents of
-a reply, so a golden-file test over `coverageGaps`, `unreadExtensions` or `coverage.extensions` needs
-re-baselining. Nothing else in this window has touched a covered surface, and nothing in one was
-removed or repurposed.
+**This replaces the starter-configuration version of the same change, earlier in this same unreleased
+window, and the reason is measured.** A starter config is written by `zzop init` into a NEW tree, so
+its reach into a tree that already has a `zzop.config.jsonc` is zero: the six dogfood trees kept
+reporting all 2,570 of those findings after it landed. Writing them as `"off"` also attributed the
+project's opinion to the reader, who would find three ids under `ruleOverridesApplied.disabled` and
+`nativeAnalyses.disabled` that they never wrote. The starter config's `rules` block is now empty and
+its comment explains the default instead of restating it.
 
-**`security/open-redirect` no longer fires when a validating helper produces the redirect's WHOLE
-target, so a run that used to fail `--fail-on warning` can now pass it.** Same direction,
-and written down for the same reason, as the two `duplicate-route` entries below: this turns a RED
-pipeline green. Unlike those, the finding is not demoted — it is GONE, so a consumer counting rows
-sees the drop directly.
+**Breaking for a config that inherited the default.** A run that wants any of the three must now name
+it; a run that already disabled them by id is unchanged, and so is a library caller building an
+`EngineConfig` directly, which still gets every registered analysis. This repo's own detection corpus
+is one of the callers that had to opt in (`cases/zzop.config.jsonc`).
 
-The rule prescribed "validate the target against an allow-list" and then could not read one. cal.com
-routes its redirect targets through an origin allowlist (`packages/lib/getSafeRedirectUrl.ts` — a
-non-listed origin is discarded and replaced with `WEBAPP_URL`) at 37 of its redirect sites, and every
-one of them still reported. A prescription that cannot turn its own finding green is what this change
-removes. A call whose name carries a safety word (`safe`/`sanitize`/`allowlist`) AND a target word
-(`Url`/`Uri`/`Redirect`/`Link`) now clears the finding — but only where it decides the whole target:
-it must open the redirect's argument AND nothing that could move the origin may follow it. The value
-may continue into `??`/`||` fallbacks that are themselves calls or quoted literals, and the helper
-may be interpolated at the START of a template literal whose remaining text begins with `?` or `#`,
-since a query string and a fragment both terminate a URL's authority. It is read inside the redirect
-call's OWN parentheses — the anchor line plus the continuation lines those parens hold open, capped
-at 8 — because 36 of those 37 have the helper on a CONTINUATION line, where a formatter put it. A
-veto that read the anchor line alone would have cleared 1 of the rule's 34 corpus findings.
+**A guard holds the six documents that enumerate the set.** Which analyses do not run is invisible in a
+reply's `findings` — a shipped-off analysis produces no key, exactly like one that ran clean — so prose
+is the only channel that says so, and a stale copy does not read as stale: it reads as *"this id runs by
+default"* and sends a reader to debug a rule that never ran. `scripts/check-shipped-off-sync.sh` reads
+the engine's own set and requires each document's claiming paragraph to name exactly it, in both
+directions, so a REMOVAL from the set fails too.
 
-The fallback arm admits a fallback by SHAPE, not by safety, and the rule message now says so: a
-`??`/`||` fallback is trusted because it is a call, so `getSafeRedirectUrl(base) ?? String(req.query.next)`
-is cleared and is an open redirect. 36 of the 37 mitigated sites use that arm and none of them puts a
-request read in a fallback, so the arm stays and the cost is disclosed rather than erased.
+The starter document also moved out of a Rust string literal into
+`crates/config/src/config-template.jsonc`, embedded with `include_str!`.
 
-Measured on calcom/cal.com: 28 -> 15. The controls did not move — expressjs/express 4, nocodb 2, and
-the sibling `browser/location-assign-dynamic` unchanged tree-wide. Of the 28, 16 anchors go quiet, 3 findings RE-ANCHOR onto a
-second, unmitigated `redirect(` in the same function, and 12 are untouched. The 15 that survive are
-the point of the number: `packages/app-store/stripepayment/api/paymentCallback.ts:90` still fires, and it is
-the genuine one — its `callbackUrl` reaches `res.redirect` through a zod `.parse()` whose
-`.transform()` only prefixes a base URL onto RELATIVE targets and passes an ABSOLUTE `http(s)://`
-one through unchanged. Schema parses are deliberately absent from the vocabulary for exactly that
-reason, and a regression test pins it
-(`a_zod_parsed_query_url_that_passes_absolute_urls_through_is_still_flagged`,
-`rules/dsl/security/open_redirect_veto.rs`).
+**`truncated.severitiesNotShown` now says how many RULES a silenced band hid, not only how many rows.**
+When the cap removes a severity outright, `counts` gave the row count and three sample rows. That reads
+as a handful of noisy rules and is often wrong: on this repo's own `cases/trees/api-be` fixture the cut
+silences 30 `info` rows drawn from **19 distinct rules**, and the three samples name three of them. The
+new `ruleCounts` is exact, is filled from the same walk as `counts` and `firstOmitted` so the three can
+never describe different sets, and matters because the rule — not the row — is what you act on:
+`--rule`, a `rules` entry and a `zzop-<id>-ok` marker are all keyed by it. Additive; nothing else in the
+reply moved, and the cut itself is unchanged.
 
-**What it does NOT claim.** A helper standing beside a raw request value rather than replacing it
-still fires, in both directions and in both spellings — `getSafeRedirectUrl(base) + req.query.q` and
-`` `${getSafeRedirectUrl(base)}${req.query.next}` `` are open redirects (with `q = "@evil.com"` the
-browser reads the allowlisted prefix as userinfo and the authority becomes `evil.com`), and the veto
-is written so that it does not reach them. Out of reach, and so still firing, by construction: a
-validator applied on a PRECEDING statement or decided by a wrapper, one written below a comment
-inside the argument list, one whose value does not close within 8 lines, and a line carrying two
-`redirect(` calls — that last declines the veto outright rather than guessing which call it belongs
-to. The rule's message names all of them, so a surviving finding says why it survived. One FALSE
-VETO is stated rather than fixed: `sanitizeUrl` (`@braintree/sanitize-url`) carries both halves of
-the vocabulary while doing an XSS job — it strips `javascript:`/`data:` protocols and passes an
-absolute `https://evil.com` through — so it clears a redirect it should not, and the rule's message
-says so. The vocabulary is a built-in default, not a config key: a DSL matcher's patterns compile
-from the pack JSON before any config resolves, so `vocabulary.*` is unreadable from here, and the
-debt is recorded on the `convention` axis of `scripts/dsl-inline-census.txt`.
+**27 rules moved from `warning` to `info`, and `--fail-on warning` will go quieter because of it.**
+The band is supposed to say how strong a rule's own evidence is. These 27 already said, in their own
+shipped messages, that their evidence is two independently matched halves with nothing linking them —
+*"the two halves are matched independently within one function body and nothing establishes that they
+belong to the SAME call"*. A rule that spells out a disqualifying condition it cannot detect is
+describing a gate it did not build, and the place for that fact is the severity, not the prose. Each
+of the 27 now says so in its message and names the specific link it cannot prove.
 
-Recount for your own tree: `zzop analyze <tree> --rule security/open-redirect --limit 50`.
+**12 of the 27 are `security/` rules** — `taint-flow`, `path-traversal` and `java-path-traversal`,
+`ssrf-user-url`, `open-redirect`, `mass-assignment`, `html-response-from-request`,
+`stacktrace-to-response`, `unsafe-deserialization`, and the three command-injection spellings
+(`cmd-injection`, `command-and-interpolation`, `command-interpolated-string`). The other fifteen, named too, because a count is not a migration note: `db/external-call-and-tx`,
+`db/find-then-create-no-unique`, `db/empty-catch-and-write`, `db/multi-write-no-tx`,
+`db/non-atomic-counter-update`, `db/check-then-act-in-loop`, `db/manual-tx-no-rollback`,
+`db/tx-and-empty-catch`, `db/tx-and-db-call-in-loop`, `redis/lock-get-then-set`,
+`redis/counter-get-set`, `sql/race-condition-toctou`, `sql/raw-sql-check-then-write`,
+`egress/get-and-body`, and `reliability/promise-all-and-writes`. **Nothing was removed and no finding count
+changed**: the same findings report, under a band that now describes their evidence instead of their
+topic. If a pipeline gated on these, gate on `--fail-on info`, or raise back the ones you trust with
+`severityOverrides`. A rule returns to `warning` when the link it names actually gets built.
 
-`method-scan` gains a `trigger_call_exclude_pattern` field on the rule-pack contract
-([docs/contracts/rule-pack.schema.json](docs/contracts/rule-pack.schema.json),
-[docs/rules/dsl-reference.md](docs/rules/dsl-reference.md)) — additive, so no promise moves, and an
-existing third-party pack is unaffected.
+**Rules that were NOT moved, so the change is not "co-occurrence goes quiet".** Seven rules disclose a
+limit and keep `warning`, because their finding is ONE structurally matched shape and the disclaimer is
+about taint or about the scope of a veto, not about a missing link: `security/sql-format-interpolation`
+and `security/sql-interpolated-statement` (the literal IS the statement), `security/weak-password-hash`
+(the digest is parser-witnessed), `security/bcrypt-cost-too-low`, `security/cors-reflected-origin-credentials`,
+`db/pagination-no-orderby` and `reliability/reqwest-no-timeout`. Ten more that say *"not merely
+co-occurring — verified against the parser's projected loop spans"* were never candidates: that
+sentence says the gate EXISTS.
 
-**`duplicate-route` now reports a version-split pair at `info` instead of `warning`, so a run that
-used to fail `--fail-on warning` can now pass it.** Same direction, and written down for the same
-reason, as the deployment-unit entry below it: this turns a RED pipeline green. Nothing is dropped —
-the finding is still raised, still names both sites, and now names the two version scopes it
-straddles in a new `data.routeVersions`.
+**A guard now ties the published severity to the shipped one.** `docs/rules/catalog.md` kept saying
+`warning` for all 27 with every guard and the whole test suite green — the catalog was compared to the
+site and the site to the catalog, and nothing compared either to the packs. `scripts/check-catalog-severity-sync.sh`
+closes that.
 
-The pair it covers is one the rule could not see at all. A framework may version an API by HEADER
-rather than by URL — NestJS's `VersioningType.CUSTOM` is the measured case — and then two controllers
-that answer at different versions share one `METHOD /path` key, which the rule read as a collision.
-Its prescription made that worse than a false positive: it led with "merge the handlers or remove the
-duplicate", and on a header-versioned API deleting the older controller breaks every client pinned to
-that version while merging is not expressible, because the two handlers take different request bodies
-by design. Where both sites declare a version scope and the two DIFFER, the finding is now demoted and
-the merge imperative is gone from its lead.
+**Three packs that shipped one rule each were merged into `reliability`, so three rule ids changed**
+(`go/goroutine-in-loop`, `perf/api-in-loop`, `react/setstate-after-async-unguarded` are now
+`reliability/goroutine-in-loop`, `reliability/api-in-loop`,
+`reliability/setstate-after-async-unguarded`). Nothing was removed and no rule changed what it
+detects: the three JSON objects moved file, and the bundle went from 11 packs to 8 while the rule
+count stayed at 118. A pack whose whole content is one rule tells a reader nothing the rule id did
+not already say, and each charged a `packs.only`/`packs.disabled` name, a catalog section and a site
+section for that. `reliability` was already the pack for work started and not finished
+(`fs-in-loop-serial`, `stream-open-no-close-in-loop`, `interval-no-clear`) and was already
+multi-language (`reqwest-no-timeout` is Rust), so the axis it merges onto is CONCERN, not language.
+**If you carry one of the old ids** in `rules`, `suppressions`, `--fail-on`, or a `zzop-<id>-ok`
+marker, re-spell it: the rename rows are in [VERSIONING.md](VERSIONING.md). `packs.only: ["go"]`,
+`["perf"]` or `["react"]` now names no loaded pack and switches off every DSL rule — the run warns,
+but the warning is the only thing telling you, so it is worth grepping your config for those three
+words. Suppression markers are derived from the rule id and are therefore affected too.
 
-Measured on calcom/cal.com: all 15 findings move `warning` -> `info`, and a tree whose only warnings
-were version-split pairs flips exit 3 -> 0. The controls did not move — nocodb 9, eShop 13, immich 11,
-mall 7, expressjs/express 23, koel 0 — and nocodb's one genuine shadow
-(`packages/nocodb/src/controllers/extensions.controller.ts:52`, two `@Get` paths that normalize to the
-same key inside one unversioned controller) stays at `warning`.
+**`security/shell-exec-interpolation` reports `warning` rather than `critical`.** Its two
+cross-language siblings, Java `security/cmd-injection` and Rust `security/command-and-interpolation`,
+already did. The gap rested on `exec`/`execSync` handing their whole command string to a shell, which
+is true and is why the argv rewrite is the fix — but it is a property of the API rather than evidence
+about the call, and this family's band is decided by reachability, which this rule states in its own
+message that it does not test. Measured across a 58-tree census, its fourteen `critical` findings
+included zero whose interpolated segment was request-derived. The finding, its text and its matcher
+are otherwise unchanged, and the message's closing paragraph now argues for the band it actually has.
+A `--fail-on critical` gate that this rule alone was tripping will stop tripping; `--fail-on warning`
+is unaffected.
+**The `N file(s) with extension .<ext> have no native parser` warnings are now ordered by unread file count, largest first.** They came out in extension-name order, which ranked this run's blind spots by how they are spelled: measured on the dogfood corpus, nocodb's `.vue` line (962 unread files) was the 42nd of 49 `warnings` entries, below eight extensions of 1-10 files each; koel's `.php` (1412) sat 10th, one line under a single `.psd`; immich's `.svelte` (415) sat 25th of 38. Ties break on the extension name, so the order is total and two runs over one tree stay byte-identical. The closing `No native parser exists for N extension(s) in this tree (…)` summary samples the same order, so the five extensions it names are now the five largest rather than the five alphabetically first — that sentence is the one line whose text changes. Nothing is added, dropped, shortened or re-worded otherwise: the set of warnings and every other line's bytes are unchanged, as are `total`, `bySeverity`, `byRule` and every finding. A consumer that reads these entries by index rather than by content will see different strings at those indices. The sibling `coverageGaps.extensions` table keeps its extension-ascending order.
 
-**What it does NOT claim.** zzop carries the version expression as written, not as resolved — the
-values are identifiers behind two hops of `as unknown as` casts across workspace packages, and
-resolving them is a guess this rule declines to make. So two different version TEXTS are not proof
-that the two scopes are disjoint, and the message says so rather than telling you the split is safe.
-A method-level `@Version()` override is still unread; the class scope is what gets stamped.
-
-Recount for your own tree: `zzop analyze <tree> --rule duplicate-route --limit 50` and group the
-`shown[].severity` field; the demoted rows carry `data.routeVersions`.
-
-`IoProvide` gains an optional `routeVersion` on the envelope input contract
-([docs/NORMALIZED_AST.md](docs/NORMALIZED_AST.md)) — additive, so no promise moves, and recorded here
-for the same consumer shape as the additive fields above: a schema validator pinned with
-`additionalProperties: false` against a captured reply will reject these runs.
-
-**`duplicate-route` now reports a cross-deployment-unit pair at `info` instead of `warning`, so a
-run that used to fail `--fail-on warning` can now pass it.** This is the mirror of the entry above and
-is written down for the same reason — except that this direction turns a RED pipeline green, which is
-the failure this project cares about more. Nothing is dropped: the finding is still raised, still
-names both sites, and now names the two deployment units it straddles.
-
-The pair it covers is one the rule states it cannot check. Its own message has always said the
-shadowing it warns about only happens "IF both registrations end up on the same router in the same
-running process", and a directory is not a deployment unit. Where two sites resolve to different
-deployment manifests (`pom.xml`, `*.csproj`, `composer.json`, `package.json`, `go.mod`, …), that
-condition is measured to be false rather than merely unproven, and a gate wants evidence. Measured on
-macrozheng/mall — four `@SpringBootApplication` classes on four ports with no pom dependency between
-them — all 7 findings move to `info` and the tree's `warning` census drops 26 -> 19; on dotnet/eShop
-one of 13 moves. A tree whose only warnings were cross-unit pairs flips exit 3 -> 0.
-
-Recount for your own tree: `zzop analyze <tree> --rule duplicate-route --limit 50` and group the
-`shown[].severity` field; the straddling rows carry `data.manifestBoundaries`.
-
-**`dead-candidates` no longer reports files a build config names as an entry point**, and `.md` pages
-now contribute dependency-graph in-edges. Both narrow an existing finding set rather than changing a
-field: entry paths written as quoted literals inside a config this run already recognized as a config
-(`vite.config.ts`, `vite.config.sw.js`, `.vitepress/config.mts` and the like) are read instead of
-discarded, and an `import` inside a `<script>` block in a Markdown page — VitePress compiles each page
-to a Vue SFC — counts as the edge it is. Measured on koel `3f5213d4`: 7 findings down to the 1 true
-positive on a fresh clone (the audit run reported 2, the extra being `public/sw.js`, a build artifact a
-clone does not carry — the reacquisition recipe now names this tree and that difference). Exact finding
-sets are not a compatibility surface (see [VERSIONING.md](VERSIONING.md)), so this is recorded as a
-heads-up for pinned baselines, not as a break.
-
-Two limits on the Markdown half are worth knowing before you read a diff of your own docs tree. A
-fenced code block is NOT an edge — a ```` ```vue ```` example is stripped before the scan, because the
-same value seeds the `unreachable` entry set and an entry seeds a forward closure, so one documentation
-sample would otherwise silence every file it transitively reaches. And a page whose prose mentions
-`` `<script>` `` above a real block loses that block's imports rather than gaining wrong ones: the
-extract is lexical and pairs the first opening tag with the first closing one. Neither can invent an
-edge; both can withhold one.
-
-**Seven false-positive classes measured on three outside repositories are gone, and one Prisma
-projection defect behind them is fixed.** Three engineers who had never seen this tool set up their
-own environments on `meilisearch/meilisearch`, `calcom/cal.com` and `apache/superset`, read the
-findings against the real code, and said which ones they would actually act on. Everything below
-narrows a finding set; none of it changes a field or a rule id.
-
-| tree | findings | what stopped firing |
-|---|---|---|
-| meilisearch `577f7af` | 22 -> 19 | `security/hardcoded-secret` 3 -> 0 |
-| calcom/cal.com `176037d` | 2683 -> 2613 | `schema/unreferenced-field-name` 65 -> 28, `schema/unreferenced-model-name` 44 -> 15, `schema/missing-timestamps` 56 -> 53 |
-| apache/superset `e7dccd4` (frontend) | 536 -> 528 | `sql/truncate-in-app-code` 4 -> 0 (all four were `critical`), `browser/location-assign-dynamic` 8 -> 6, `dead-candidates` 19 -> 17 |
-| apache/superset (backend) | 24 -> 23 | `sql/destructive-migration` 3 -> 2 |
-
-The control populations do not move: the 17-tree corpus join is byte-identical, and
-`corpus/frameworks/django` — which carries real `'TRUNCATE TABLE "BACKENDS_PERSON";'` and
-`"DELETE FROM \`backends_person\`;"` literals — is unchanged at 305 findings with an identical
-per-rule census.
-
-The individual changes, and what each was measured against:
-
-- **A quoted two-word English phrase is no longer a SQL statement.** `sql/truncate-in-app-code` and
-  `sql/delete-no-where` accepted a case-insensitive keyword, so `t('Truncate Metric')` and
-  `t('Delete from list')` matched — the first at `critical`, which means `--fail-on critical` broke a
-  build on a checkbox label. The keyword must now be spelled in UNIFORM case (`TRUNCATE`/`truncate`).
-  Across the corpus plus superset, 117 lines matched the old pattern: the 12 with a mixed-case keyword
-  were all prose, the 105 with a uniform-case one were all SQL. A real statement written
-  `"Truncate table users"` is now missed; there were zero such lines in the 117.
-- **An arrow parameter named `location` is no longer a navigation sink.** `browser/location-assign-dynamic`
-  excluded `=` after the assignment but not `>`, so `location => {` read as `location = >`.
-- **`$VAR` and `${VAR}` count as placeholders.** `security/hardcoded-secret` excluded a bare
-  `"LLM_API_KEY"` but reported `"$LLM_API_KEY"`, which is the spelling an OpenAPI example uses.
-- **A Prisma model reached through its client delegate is referenced.** Prisma lowercases the first
-  letter to build its accessor, so `model UserPassword` is used as `prisma.userPassword` and the
-  declared name appears nowhere in correct code. `schema/unreferenced-model-name` now accepts the
-  derived camelCase spelling.
-- **A Prisma relation navigator is never an unreferenced field.** It is the required opposite side of a
-  `@relation`, so removing it — which the finding advised — makes `prisma validate` fail outright.
-  `schema/unreferenced-field-name` skips a field whose declared type names another model in the schema;
-  a genuinely dead scalar column in the same model still reports.
-- **`@default(now())` finally counts as a creation timestamp.** It always should have — the catalog said
-  so and the rule's code tried to honour it — but the Prisma attribute projection stopped at the first
-  `)`, so `@default(now())` reached the rule as the argument `now(`. Attribute arguments now survive one
-  level of nesting, which also repairs `@default(uuid())`, `@default(cuid())` and
-  `@default(autoincrement())` for any future consumer.
-- **A file directly inside a dot-directory is tool-owned whatever its stem.** `.storybook/main.mjs` was
-  reported as a dead file because the exemption required the stem `config`; Storybook writes `main`,
-  `preview` and `manager`. Measured before widening over 13,509 js/ts-family files: 10 files newly
-  exempt, every one inside a `.storybook/`. The depth-1 boundary is what carries the claim, so a nested
-  `docs/.vitepress/theme/index.ts` is still ordinary source.
-
-Everything else in the window: `git log <the top row's tag>..main --oneline`.
+**A `--fail-on` build that breaks now says WHERE.** Additive field: `findings.truncated.severitiesNotShown.firstOmitted`, an object keyed by the severities the cap removed from `shown` outright, each holding that band's first cut rows as `ruleId`/`file`/`line` in the same order `shown` uses. It is a bounded sample (at most 3 a severity; the sibling `counts` stays exact) and carries no `message`. The gap it closes was measurable at the exit code: on a large tree `zzop analyze --limit 1000 --fail-on critical` exited 3 naming `6 critical` while the 1000-row reply it had just printed carried none of them, because ordering puts test and build surface behind shipped code and the cap took the whole band. `zzop analyze --fail-on` now prints those sites on stderr whenever the reply's own list holds none of the rows it gated on, and names the caller's own `--rule`/`--severity` filter when that is what kept them out. Nothing else moved: ordering, the cap, `total`, `bySeverity` and `byRule` are unchanged, and the gate still decides on `bySeverity` alone.
 
 ## Released
 
 | Version | Date | Commit | What the release said it was |
 |---|---|---|---|
+| `v0.34.0` | 2026-08-31 | `4c504978` | the reply stops repeating itself, and the rules start saying what your fix costs |
 | `v0.33.0` | 2026-08-15 | `73951a2` | fix(site): x-showcase row filter so site-render-check passes |
 | `v0.32.0` | 2026-08-15 | `dd52eae` | the co-change picture stops dropping edges silently, and the site now shows zzop run over everything X open-sourced |
 | `v0.31.0` | 2026-08-14 | `10adb51` | subtree git history, wildcard routes, and accessor/overload spans |

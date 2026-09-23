@@ -152,6 +152,20 @@ pub fn unprovided_consume_findings(
     // ANT wildcard routes never enter `provided_keys` above as usable exact keys, so they are collected
     // separately and asked as a PATTERN below — the same partition the multi-tree linker performs, via
     // the same shared predicate, so the two axes cannot answer differently (module doc "Structural gates").
+    // The SAME partition for the other key shape that can never match exactly: a route whose method is
+    // unknown (`"? /path"`). The multi-tree linker drops a consume whose path one of these serves
+    // (`cross_layer_findings::partition`), and until 2026-09-06 this single-tree lane did not — measured
+    // on cal.com: 40 verb-unknown provides, 174 http consumes with no exact provide, of which 5 were
+    // calls to a path THIS TREE serves under `?`. All five shipped as findings whose `injectionStub`
+    // told the reader to declare a route the tool had already extracted from their own repo. Billing a
+    // user for the tool's own blind spot is what this veto ends; where a reader is meant to meet these
+    // routes is the `Route-range gap` warning and `cross-layer/unknown-verb-route`.
+    let verb_unknown_paths: std::collections::BTreeSet<&str> = io_provides
+        .iter()
+        .filter(|p| p.kind == "http")
+        .filter_map(|p| zzop_core::unknown_verb_route_path(&p.key))
+        .collect();
+
     let wildcard_route_keys: Vec<&str> = io_provides
         .iter()
         .filter(|p| p.kind == "http" && zzop_core::wildcard_route_path(&p.key).is_some())
@@ -196,6 +210,12 @@ pub fn unprovided_consume_findings(
             .any(|r| zzop_core::wildcard_route_covers(r, key_str))
         {
             continue; // an ANT catch-all in THIS tree serves this call — module doc "Structural gates"
+        }
+        if key_str
+            .split_once(' ')
+            .is_some_and(|(_, path)| verb_unknown_paths.contains(path))
+        {
+            continue; // this tree serves that path under an UNKNOWN method — see the set above
         }
         if !zzop_core::key_carries_route_identity(key_str) {
             continue; // all-`{}` path names no route — the linker's own gate, same predicate; module doc

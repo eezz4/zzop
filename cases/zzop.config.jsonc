@@ -69,12 +69,30 @@
     // Whole-file precision axis: every file in this tree is a negative control listed in EXPECTED.jsonc's
     // `benign` array, where ANY finding is a false positive. See trees/decoy/README.md — in particular why
     // each decoy has to sit on a path its target rule's `file_pattern` actually admits.
-    { "root": "trees/decoy", "sourceId": "decoy" }
+    { "root": "trees/decoy", "sourceId": "decoy" },
+    // EXTENSION axis: the same bytes at every extension of a syntax family, plus a real `.sql`
+    // migration. Until 2026-09-09 this corpus held not one `.jsx`, `.mts`, `.cts`, `.mjs`, `.cjs`,
+    // `.js`, `.pyi` or `.sql` file, so the gate scored 258/258 both with the rule-reach hole open
+    // (V133/V137) and closed — a population it does not contain is one it cannot score.
+    { "root": "trees/ext-closure", "sourceId": "extclose" }
   ],
   // `unprovided-consume` is a native rule that fires on every external fetch with no matching provide;
   // it co-fires across the per-rule DSL modules (which use throwaway example URLs) as noise. Disabled
   // here — it gets dedicated coverage later with a real consume/provide setup (see the plan).
-  "rules": { "unprovided-consume": "off" },
+  //
+  // THE THREE `"info"` ENTRIES ARE OPT-INS, not overrides. Since 2026-09-03 the engine ships
+  // `unimported-export`/`dead-candidates`/`unreachable` OFF, and naming an id with a severity is the
+  // gesture that turns one on. `EXPECTED.jsonc` pins verdicts from all three (`island/deadA.ts`,
+  // `web/rules/dead.orphan.tsx`, ...), so a detection benchmark that inherited the product default
+  // would be measuring a product decision instead of the extraction it exists to measure — and it
+  // would report the loss as a recall regression, which is the wrong sentence entirely. `"info"` is
+  // each rule's own shipped band, so opting in changes nothing else about the run.
+  "rules": {
+    "unprovided-consume": "off",
+    "unimported-export": "info",
+    "dead-candidates": "info",
+    "unreachable": "info"
+  },
 
   // `"failOn": "off"` sat here until 2026-07-28 under a comment about git signals that described
   // something else entirely. It was dead twice over: the key is REMOVED from zzop's vocabulary (no
@@ -106,6 +124,12 @@
     // workspace packages. Build output and tool state are named by you, not by any tool.
     "skipDirs": ["node_modules", "dist", "build", ".next", ".git", "target", ".yarn", ".zzop", "zzop-reports", ".zzop-cache"],
     "workspaceSkipDirs": ["node_modules", ".git"],
+    // Top-level directories never offered as a strangler extraction target. zzop ranks folders by how
+    // cheaply they could be pulled out; a test or build dir always scores well (it is self-contained by
+    // nature) and is never the answer you wanted. Leave this out and "tests", "node_modules" and "dist"
+    // come back as your best seams -- loudly wrong rather than quietly wrong, which is the point: no key
+    // in this block is applied behind your back.
+    "seamNoiseDirs": ["tests", "test", "e2e", "__tests__", "__test__", "spec", "playwright", "cypress", "fixtures", "mocks", "__mocks__", "stories", "docs", "doc", "examples", "example", "node_modules", "dist", "build"],
     // Extra paths that hold TEST code, ADDED to the language conventions zzop already knows: the Go
     // "_test.go" suffix, Python "test_x.py"/"x_test.py", C# "XTests.cs" and "My.Tests/", Java
     // "FooTest.java"/"TestFoo.java", the JS/TS ".test."/".spec." infix, and the directories
@@ -175,6 +199,10 @@
     // default and there cannot be one — only you know which of your functions carries that promise — so
     // the rule stays silent until you fill this in. The sink list IS defaulted (these are stdlib names,
     // not names you pick); narrow it if one of them means something else in your tree.
+    // 🔴 READ THAT AS A PAIR: the filled list below does NOTHING while the line above is null. It is
+    // shipped filled so that the day you name your anchor, the sinks are already right — not because
+    // anything is running today. A list with fourteen entries beside a null gate reads like a live
+    // setting, and that reading was measured to be the wrong one (ledger V235).
     // The value below is deliberately empty rather than a placeholder pattern: there is no zzop-chosen
     // default here, so the template says so in the value itself instead of writing something that looks
     // like an answer.
@@ -201,6 +229,16 @@
     // which routes are fetched from outside every analyzed tree (so "no consumer here" proves nothing).
     "secretParamNames": ["token","access_token","accesstoken","apikey","api_key","api-key","api_token","apitoken","key","secret","client_secret","password","auth","signature","jwt"],
 
+    // The names YOUR code gives a secret when it BINDS one (`API_KEY = "..."`), judged by
+    // security/hardcoded-secret. Deliberately a different list from secretParamNames above, and the
+    // difference is measured rather than stylistic: that one is about a QUERY PARAMETER, where a bare
+    // "key" really is a signal, and feeding it to this rule instead was tried on a 17-tree corpus and
+    // produced 46 extra findings of which exactly one was a credential. Adding a name here is cheap and
+    // adding the wrong one is not, so start from what your code actually spells.
+    // Delete this key and the rule makes NO name judgment at all — the same contract every vocabulary
+    // key here has, and for this one it means the rule goes quiet rather than noisy.
+    "secretNames": ["secret_key","secretkey","secret-key","api_key","apikey","api-key","secret","passwd","password","token"],
+
     // Declared response-DTO field names that count as sensitive (cross-layer/sensitive-response-field),
     // in three matching axes: substrings of the normalized name, whole-name exacts, and suffixes.
     // NORMALIZATION CONTRACT — different from secretParamNames above, where "api_key"/"api-key" are
@@ -216,6 +254,20 @@
     // The identifiers you give your own router values. A call on one of these is read as a route.
     // TypeScript/JavaScript files only.
     "routerNames": ["apiRoutes"],
+
+    // The identifiers you give the ROOT route builder in C# minimal-API registrations — the
+    // WebApplication / IEndpointRouteBuilder variable a MapGet is registered on directly, which
+    // carries no path prefix of its own. C# files only. Its sibling axis, route GROUPS
+    // (var api = app.MapGroup("/api")), is resolved from your source and needs no declaration —
+    // do NOT name a group variable here, or its routes lose the group's prefix.
+    // CHECK THIS ONE IF YOU WRITE C#: "app" is only zzop's guess at what you call it, and a project
+    // that spells it "builder" or "endpoints" gets NO minimal-API routes and no warning. Counted on
+    // the ASP.NET Core repo with
+    //     grep -rEoh --include=*.cs '[A-Za-z_][A-Za-z0-9_]*\.Map(Get|Post|Put|Delete|Patch)\('
+    //       | sed -E 's/^[^A-Za-z_]*//; s/\.Map.*//' | sort | uniq -c | sort -rn
+    // there are 2001 registration sites over 43 distinct receiver names, of which "app" is 998 — so
+    // the shipped default is under half of one real .NET codebase.
+    "csharpRootRouteBuilderVariableNames": ["app"],
 
     // Directories that are shared infrastructure rather than a layer, so importing them upward is not a
     // layering violation. Separate from `vocabulary.featureSlicedDesign.shared` below on purpose: this one exempts, that

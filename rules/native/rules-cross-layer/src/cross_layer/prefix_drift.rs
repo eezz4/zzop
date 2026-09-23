@@ -20,6 +20,7 @@ use std::collections::BTreeMap;
 
 use zzop_core::{disable_hint, Finding, Severity};
 
+use super::landing::CALLER_BREAKAGE_LANDING;
 use super::route_near_miss::PrefixNearMissRecord;
 
 /// Minimum prefix near-misses sharing one (consume-source, provide-source, prefix, direction) before the
@@ -101,9 +102,13 @@ pub fn prefix_drift_findings(records: &[PrefixNearMissRecord]) -> PrefixDriftOut
              `{provide_source}` route once you account for {article} path prefix (`{prefix}`) — one likely \
              base-path mismatch (a global route prefix like NestJS `setGlobalPrefix`, a gateway/proxy \
              rewrite, or an axios/fetch baseURL that includes `{prefix}`), not {n} independent route drifts. \
-             Align the base path once ({verb} `{prefix}` on one side). This replaces the per-route \
-             `cross-layer/route-near-miss` findings for these calls; affected routes: {}. Verify manually — \
-             a helper/wrapper can make the runtime request differ from the call site. {}",
+             Verify manually — \
+             a helper/wrapper can make the runtime request differ from the call site, and if that prefix is \
+             added by a gateway or proxy rather than by this code then neither side is wrong and there is \
+             nothing to align. {CALLER_BREAKAGE_LANDING} IF ONE SIDE IS WRONG: align the base path once \
+             ({verb} `{prefix}` on that side) — on the serving side that moves all {n} of these routes in \
+             the same edit. This replaces the per-route `cross-layer/route-near-miss` findings for these \
+             calls; affected routes: {}. {}",
             routes.join(", "),
             disable_hint("cross-layer/prefix-drift"),
         );

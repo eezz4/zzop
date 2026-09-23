@@ -72,7 +72,23 @@ cd "$(git rev-parse --show-toplevel)"
 # The trigger set, spelled once. `cases/` is in it because the answer key and its fixture trees live
 # there: c7c52b3 changed ONLY cases/EXPECTED.jsonc, and under a rules-and-parser-only trigger the
 # commit that repairs the key would be the one commit that never verifies the repair.
-TRIGGER_RE='^(rules|parser|cases)/'
+# The subject is every path on the road from bytes to a `Finding`, not a folder list that happens to
+# hold rules. `crates/engine/src` is the pipeline and every projection; `crates/core/src` is the IR and
+# the io key the join is built on. Both were OUTSIDE this needle until 2026-09-06, when an external
+# review measured what that cost: 45 commits had accumulated with no machine scoring them, and the
+# stack-overflow abort fixed in `bb17c0d7` came in through exactly that gap -- its class belongs to the
+# parser property tests, which live in `cargo test` and had not run since 2026-08-31.
+#
+# Deliberately NOT the whole of `crates/`: `summary`/`facade` shape the reply and `metrics` computes
+# scores, neither of which can add or remove a finding, and arming a 200-290s gate on a doc-comment
+# edit is how a gate gets skipped by habit.
+#
+# The pattern itself moved to scripts/lib/detection-trigger.sh the day a SECOND reader appeared:
+# scripts/detection-gate-staleness.sh counts how many commits have touched one of these paths since
+# the gate last recorded a verdict, and that count is only about THIS trigger while the two share one
+# spelling. The reasoning above stays here, where it is read; only the bytes moved.
+. ./scripts/lib/detection-trigger.sh
+TRIGGER_RE="$DETECTION_TRIGGER_RE"
 SKIP_VAR=ZZOP_SKIP_DETECTION_GATE
 
 # `|| true` is load-bearing and not hygiene: grep exits 1 on no match, which is an ORDINARY outcome
@@ -81,14 +97,14 @@ SKIP_VAR=ZZOP_SKIP_DETECTION_GATE
 touched="$(git diff --cached --name-only | grep -E "$TRIGGER_RE" || true)"
 
 if [ -z "$touched" ]; then
-  echo "pre-commit: detection gate not armed (no staged path under rules/, parser/ or cases/)."
+  echo "pre-commit: detection gate not armed (nothing staged under rules/, parser/, cases/ or crates/{engine,core}/src/)."
   exit 0
 fi
 
 n="$(printf '%s\n' "$touched" | grep -c . || true)"
 
 echo
-echo "pre-commit: detection gate ARMED -- $n staged path(s) under rules/, parser/ or cases/:"
+echo "pre-commit: detection gate ARMED -- $n staged path(s) that can change what the analyzer finds:"
 # `awk` rather than `head`: under `set -o pipefail` a `head` that closes the pipe early can SIGPIPE its
 # producer, and this repo has already lost one guard verdict that way (see check-shell-pipe-sigpipe.sh).
 # awk reads every line and prints the first eight, so there is no early close.

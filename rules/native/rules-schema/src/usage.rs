@@ -1,6 +1,6 @@
 //! Prisma schema-usage analysis — usage-evidence collectors (per-file field-usage tokens) plus the usage-aware cross-check layered on top of the structural analyzer in `structural.rs`.
 //! `SchemaUsage` (the usage-evidence IR a producer assembles) lives in `zzop-core`; every function that consumes or produces it lives here. `analyze_schema_with_usage` wraps `structural::analyze_schema`
-//! rather than modifying it, layering cross-check/churn issues and risk points on top. `structural::severity_points` is private to `structural.rs`, so it's duplicated here — keep the two in sync.
+//! rather than modifying it, layering cross-check/churn issues and risk points on top. Risk points come from `structural::severity_points` directly — it is `pub(crate)`, and the copy that used to sit here (justified by a comment claiming it was private) was deleted on 2026-09-07.
 //!
 //! `identifier_counts` evidence comes from a per-file fact carried through `zzop_engine`'s fused per-file pass: [`field_usage_tokens`] (this module) is the direct per-file substrate, called once per file
 //! with the text that pass already has in hand (no filesystem re-walk). Store-binding and migration-churn are environment facts about a specific project's architecture (a store-binding convention, a
@@ -10,7 +10,7 @@
 
 use zzop_core::{AttributeStore, SchemaModel, SchemaUsage, Severity};
 
-use crate::structural::{analyze_schema, SchemaAnalysis, SchemaIssue};
+use crate::structural::{analyze_schema, severity_points, SchemaAnalysis, SchemaIssue};
 
 /// Attribute key a producer/overlay sets on a model `Symbol` to assert a store/repository binding exists
 /// (suppresses unreferenced-model-name). The retrofit of the removed native store-binding recognizer onto the generic
@@ -175,23 +175,28 @@ pub fn cross_check_schema(
     issues
 }
 
-/// The churn ladder: report at or above `CHURN_WARNING_THRESHOLD`, escalate to critical at or above
-/// `CHURN_CRITICAL_THRESHOLD`. **BOTH ARE CONVENTIONS, AND NEITHER CAN BE MEASURED FROM HERE** — that
-/// second half is the whole reason this comment exists rather than a number with a story.
+/// The churn line: report at or above `CHURN_REPORT_THRESHOLD`, in one band. **IT IS A CONVENTION AND
+/// CANNOT BE MEASURED FROM HERE** — that second half is the whole reason this comment exists rather
+/// than a number with a story.
+///
+/// There WAS a second line here (escalate to `critical` at 10), removed 2026-09-06 with the product
+/// decision that moved this rule out of the bands a first screen is built from. Keeping it would have
+/// left the loudest band in the tool being handed out by the threshold this very comment calls
+/// unmeasurable — and the rule's own message tells the reader to judge the raw `data.count` against
+/// their migration history instead, which the removal does not touch.
 ///
 /// `apply_churn_rule` reads its count off an INJECTED attribute (`MODEL_CHURN_ATTR`), and no native
 /// analysis in this repo produces one (see this module's header for why that recognizer was removed).
 /// So the rule is silent by construction in every native run: measured 2026-08-29 across all nine
-/// corpus trees, `schema/model-churn` reports **0** findings, and moving either constant by one in
-/// either direction moves nothing — 0 at 4/9, 0 at 5/10, 0 at 6/11. There is no population to
-/// calibrate against, which means 5 and 10 cannot be justified by measurement and cannot be tuned by
-/// it either. They are round numbers, and the rule's message now says so to whoever does have data.
+/// corpus trees, `schema/model-churn` reports **0** findings, and moving the line by one in either
+/// direction moves nothing — 0 at 4, 0 at 5, 0 at 6. There is no population to calibrate against,
+/// which means 5 cannot be justified by measurement and cannot be tuned by it either. It is a round
+/// number, and the rule's message says so to whoever does have data.
 ///
-/// The trigger for replacing them with a measurement is a Mode-B producer injecting real churn counts:
-/// at that point the distribution exists, and the first person holding one should set this ladder from
-/// it rather than inherit these two.
-const CHURN_WARNING_THRESHOLD: u32 = 5;
-const CHURN_CRITICAL_THRESHOLD: u32 = 10;
+/// The trigger for replacing it with a measurement is a Mode-B producer injecting real churn counts:
+/// at that point the distribution exists, and the first person holding one should set this line from
+/// it rather than inherit this one.
+const CHURN_REPORT_THRESHOLD: u32 = 5;
 
 /// model-churn rule (spelled `schema-churn` until 2026-08-02 — the id now carries the attribute's own name instead of repeating the pack name; old id in VERSIONING.md) — detects design instability from accumulated migration churn on a model. Churn count
 /// per model is read off the generic entity-attribute channel (`MODEL_CHURN_ATTR` on the model's `Symbol`);
@@ -203,32 +208,22 @@ pub fn apply_churn_rule(models: &[SchemaModel], attrs: &AttributeStore) -> Vec<S
             .symbol_attr(&model.name, None, MODEL_CHURN_ATTR)
             .and_then(|v| v.as_u64())
             .unwrap_or(0) as u32;
-        if count < CHURN_WARNING_THRESHOLD {
+        if count < CHURN_REPORT_THRESHOLD {
             continue;
         }
-        let severity = if count >= CHURN_CRITICAL_THRESHOLD {
-            Severity::Critical
-        } else {
-            Severity::Warning
-        };
+        // Ships `info`, one band (2026-09-06). The message disowns this line in its own words -- "a
+        // round number with no measurement behind it", "judge it against your own history rather than
+        // against that line" -- so no tier here can carry a band that demands action. What the reader
+        // judges is untouched: `data.count` still carries the raw count.
         issues.push(SchemaIssue {
             rule: "model-churn".to_string(),
-            severity,
+            severity: Severity::Info,
             model: model.name.clone(),
             field: None,
             params: Some(serde_json::json!({ "count": count })),
         });
     }
     issues
-}
-
-/// Mirrors `structural::severity_points`, which is private to `structural.rs` (see module doc).
-fn severity_points(s: Severity) -> i64 {
-    match s {
-        Severity::Critical => 5,
-        Severity::Warning => 2,
-        Severity::Info => 1,
-    }
 }
 
 /// Usage-aware schema analysis: schema-IR (+ optional usage) -> `SchemaAnalysis` with a `model_risk` rollup. Always runs the structural rules; when `usage` is present, also runs `cross_check_schema` and

@@ -49,11 +49,97 @@ pub fn enabled_native_rules_reading(gate: &RuleConfig, channel: RuleIoChannel) -
         .collect()
 }
 
+/// Every registered native id that no finding can carry, sorted — the set the registry deliberately
+/// does NOT separate, published so a consumer can stop treating "registered" as "reportable".
+///
+/// # The two classes, and why the id space they sit in is the wrong question to ask
+/// `RuleRegistry` holds the ids the CONFIG gates. That is a strictly larger set than the ids a finding
+/// can carry, in two ways, and `NativeAnalyses::registered`'s doc has named both since 2026-08-29:
+/// `zzop_metrics` registers ids that gate SCORE computations and emit no finding at all, and
+/// `zzop_rules_schema` registers two FAMILY gates whose passes report under the finer `schema/<label>`
+/// ids. Both classes are read from their owning crate here — the metrics half from a fresh registry
+/// (the same source `every_registered_rule_id_is_declared_except_the_metrics_score_gates` reads, so
+/// the two cannot be edited into disagreement), the schema half from that crate's own
+/// [`zzop_rules_schema::SCHEMA_FAMILY_GATES`] — rather than spelled again in this file.
+///
+/// # What this is FOR, stated because the name does not say it
+/// A caller asking "could `--rule <id>` ever have matched?" must test membership in the reportable
+/// ids, and the registry was the set within reach. So the answer was yes for these seven, the refusal
+/// stayed silent, and the reply came back `shown: 0` with a full census behind it — a filter reading
+/// as a clean result, which is the one outcome `unmatchable_rule_filter` was built to prevent.
+///
+/// It is NOT a claim that these ids do nothing: they gate real work, they belong in `RuleConfig`, and
+/// disabling one switches its whole pass off. The claim is narrower and is the only one a caller may
+/// draw from it — no `findings` entry is ever keyed by them.
+pub fn ids_that_carry_no_finding() -> Vec<String> {
+    let mut metrics = zzop_core::RuleRegistry::new();
+    zzop_metrics::register_native_analyses(&mut metrics);
+    let mut out: Vec<String> = metrics.ids().to_vec();
+    out.extend(
+        zzop_rules_schema::SCHEMA_FAMILY_GATES
+            .iter()
+            .map(|id| (*id).to_string()),
+    );
+    out.sort();
+    out.dedup();
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::BTreeSet;
     use zzop_core::rule_channels::reads;
+
+    /// The floor under [`ids_that_carry_no_finding`], and it has to bite from BOTH sides or it is a
+    /// list that agrees with itself.
+    ///
+    /// Above: every id it names is really registered — a renamed gate cannot leave a ghost here.
+    /// Below: the set is non-empty and a PROPER subset, so a derivation that collapsed to "everything"
+    /// (which would silence the `--rule` refusal for every id, the failure direction that costs a
+    /// reader the most) fails rather than passes.
+    #[test]
+    fn ids_that_carry_no_finding_are_registered_and_a_proper_subset() {
+        let all: BTreeSet<String> = registry_ids().into_iter().collect();
+        let none: Vec<String> = ids_that_carry_no_finding();
+        assert!(
+            !none.is_empty(),
+            "empty means the two classes stopped being readable from their owning crates — the \
+             refusal this feeds would go silent again with nothing to show for it"
+        );
+        for id in &none {
+            assert!(
+                all.contains(id),
+                "`{id}` is named as carrying no finding but is not registered at all — a rename left \
+                 a ghost, and the refusal would then reject an id this build never had"
+            );
+        }
+        assert!(
+            none.len() < all.len(),
+            "every registered id was judged unreportable — the `--rule` refusal would fire on \
+             everything"
+        );
+    }
+
+    /// The claim itself, checked against the ids findings ACTUALLY carry rather than against another
+    /// list: no schema issue id (the finer ids the umbrella passes report under) may appear in the
+    /// set, or the refusal would reject a filter that does match. This is the direction that would
+    /// break a working command line, so it is pinned separately from the membership test above.
+    #[test]
+    fn no_reportable_schema_issue_id_is_called_unreportable() {
+        let none: BTreeSet<String> = ids_that_carry_no_finding().into_iter().collect();
+        let reportable = zzop_rules_schema::SCHEMA_STRUCTURAL_ISSUE_LABELS
+            .iter()
+            .chain(zzop_rules_schema::SCHEMA_USAGE_ISSUE_LABELS.iter())
+            .map(|label| zzop_rules_schema::schema_issue_rule_id(label));
+        for id in reportable {
+            assert!(
+                !none.contains(&id),
+                "`{id}` is a rule id findings really carry, yet it was judged unreportable — \
+                 `--rule {id}` would be refused on a run that can match it"
+            );
+        }
+    }
 
     fn registry_ids() -> Vec<String> {
         let mut registry = zzop_core::RuleRegistry::new();

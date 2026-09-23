@@ -228,8 +228,9 @@ fn a_rust_format_with_a_literal_password_and_an_interpolated_host_is_still_flagg
 //
 // This arm's veto rests on a WEAKER claim than the four beside it, and the difference is the reason the
 // message states them separately. `${...}`, `{{...}}`, `process.env` and Rust's brace placeholders all
-// mean the value is filled in somewhere else; a printf verb does not, because printf ARGUMENTS sit on
-// the same line by construction:
+// mean the value is filled in somewhere else; a printf verb does not, because a printf ARGUMENT is
+// part of the same call and can be a literal — usually on this very line, and on a wrapped call one
+// line down, where this arm is not looking either way:
 //
 //     dsn := fmt.Sprintf("postgres://%s:%s@%s/db", user, "S3cr3tPw9!", host)
 //
@@ -255,6 +256,44 @@ fn go_sprintf_percent_verb_connection_string_is_not_flagged() {
         "{:?}",
         out.findings
     );
+}
+
+/// The GAP the comment above declares, measured instead of asserted (2026-09-04). That veto's own
+/// paragraph says a literal sitting in the printf ARGUMENTS is silenced here and recovered by nothing
+/// downstream, and names four sibling rules with the reason each misses it. The sentence shipped on a
+/// reviewer's word; this is the check. It asserts the SILENCE of all five rules on a line that really
+/// does carry a credential, so the day a sibling widens to cover this shape the pin goes red and the
+/// paragraph has to be rewritten instead of quietly becoming false — which is the failure mode any
+/// documented blind spot has, since prose about an absence never breaks on its own.
+///
+/// Re-derived from the declarations rather than trusted: `hardcoded-password` is `(?i)\.java$` and
+/// never opens this file; `hardcoded-secret` needs one of its name keywords, then a separator, then
+/// the literal, and a positional argument supplies no name; `high-entropy-secret` reads a
+/// string-literal-WITH-BINDING-NAME node, which a call argument is not; `jwt-sign-literal-secret`
+/// misses twice over, on `jwt.sign` and on a file_pattern carrying no `go`.
+#[test]
+fn a_literal_password_in_the_printf_arguments_is_silent_in_every_rule_of_this_pack() {
+    let dir = TempDir::new("zzop-be-sec-printf-arg");
+    dir.write(
+        "src/db.go",
+        "func dsn(user, host string) string {\n\treturn fmt.Sprintf(\"postgres://%s:%s@%s/db\", user, \"S3cr3tPw9!\", host)\n}\n",
+    );
+    let out = scan(&dir);
+    for rule in [
+        "conn-string-credentials",
+        "hardcoded-password",
+        "hardcoded-secret",
+        "high-entropy-secret",
+        "jwt-sign-literal-secret",
+    ] {
+        assert!(
+            hits(&out, rule).is_empty(),
+            "`{rule}` now reports the printf-argument shape. That is GOOD NEWS and a red test: the \
+             veto comment above still claims nothing downstream recovers this credential, and it is \
+             now wrong. Rewrite that paragraph, then narrow this pin to the rules still silent: {:?}",
+            out.findings
+        );
+    }
 }
 
 #[test]

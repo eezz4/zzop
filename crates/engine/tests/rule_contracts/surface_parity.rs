@@ -193,6 +193,88 @@ fn facade_pinned_key_sets() -> (BTreeSet<String>, BTreeSet<String>) {
     (single_keys, multi_keys)
 }
 
+/// EVERY LANE IN `_cliOnlyLanes` REALLY HAS NO MCP TOOL — the claim the exclusion above rests on, and
+/// the one nothing checked (2026-09-15, ledger V226).
+///
+/// # What the exclusion trusts
+/// [`cli_only_lane_sources`] subtracts a lane's `.rs` files from the MCP-lane scan, on the strength of
+/// the registry SAYING that lane is CLI-only. That is the right subtraction while the claim holds. It
+/// is a silent widening the moment it stops: give one of these lanes an MCP twin and forget to remove
+/// its entry, and the guard goes on skipping exactly the files that just gained a wire — a leak of an
+/// `omit` field from those files would then be unseeable, which is the registry's founding bug class
+/// arriving through the door the registry itself opened.
+///
+/// Nothing forced the ordering. The claim lived in JSON and the truth lived in `tools/list`, and no
+/// test compared them. This is that comparison, and it is why `zzop graph` can be given a twin safely:
+/// the twin cannot land while the lane still declares itself CLI-only.
+///
+/// # The mapping, and why it is a SUFFIX rule rather than a table
+/// A lane is `zzop <sub>` and an MCP tool is `<verb>_<noun>`; there is no shared spelling to join on,
+/// and a hand table would be the third place this fact lives. What IS reliable is the tool-definition
+/// source: a twin for `zzop <sub>` cannot exist without `<sub>` appearing in the tool's own
+/// description or name somewhere in `definitions.rs`. So this asks the weaker, checkable question —
+/// does any shipped tool NAME contain the subcommand's own word — and a false positive is cheap
+/// (delete the lane entry, which is what should happen anyway).
+#[test]
+fn every_cli_only_lane_really_has_no_mcp_tool() {
+    let registry = load_registry();
+    let lanes: Vec<String> = registry["_cliOnlyLanes"]
+        .as_object()
+        .expect("`_cliOnlyLanes` is an object")
+        .keys()
+        .filter(|k| !k.starts_with('_'))
+        .cloned()
+        .collect();
+    assert!(
+        lanes.len() >= 4,
+        "the registry declares {} CLI-only lane(s) — that is not the shipped set, and every \
+         subtraction this file makes is scoped by it",
+        lanes.len()
+    );
+
+    // The shipped tool names, read from the definition source rather than from a list here.
+    let defs =
+        std::fs::read_to_string(workspace_root().join("packages/mcp/src/tools/definitions.rs"))
+            .expect("the MCP tool definitions must be readable");
+    let tool_names: Vec<String> = defs
+        .match_indices("\"name\": \"")
+        .filter_map(|(i, m)| {
+            let rest = &defs[i + m.len()..];
+            rest.find('"').map(|e| rest[..e].to_string())
+        })
+        .filter(|n| n.contains('_'))
+        .collect();
+    assert!(
+        tool_names.len() >= 6,
+        "found {} MCP tool name(s) in definitions.rs — the needle has stopped matching, so the \
+         comparison below would pass by finding nothing: {tool_names:?}",
+        tool_names.len()
+    );
+
+    let mut contradicted: Vec<String> = Vec::new();
+    for lane in &lanes {
+        let sub = lane.strip_prefix("zzop ").unwrap_or(lane);
+        if let Some(tool) = tool_names.iter().find(|t| t.contains(sub)) {
+            contradicted.push(format!("{lane} (tool `{tool}`)"));
+        }
+    }
+    assert!(
+        contradicted.is_empty(),
+        "these lanes are declared CLI-only and a shipped MCP tool names them: {contradicted:?}\n\
+         A lane's entry is what excludes its sources from the MCP-lane scan above, so leaving the \
+         entry in place after giving the lane a twin makes that twin's files invisible to this file's \
+         leak check. Remove the `_cliOnlyLanes` entry in the SAME commit that adds the tool."
+    );
+
+    // CANARY: the match has to be able to fire, or "no lane is contradicted" is a statement about a
+    // predicate that never runs. `analyze` is a real tool word and is deliberately NOT a CLI-only lane.
+    assert!(
+        tool_names.iter().any(|t| t.contains("analyze")),
+        "the tool-name needle found no `analyze` tool, so the `contains` test above proves nothing: \
+         {tool_names:?}"
+    );
+}
+
 /// Canonicalized `.rs` paths the registry declares as the implementation of a CLI-only lane
 /// (`_cliOnlyLanes[<lane>].sources`) — the files TEST 3 subtracts from the MCP lane.
 ///

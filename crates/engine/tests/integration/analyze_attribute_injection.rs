@@ -264,7 +264,7 @@ fn bound_model_symbol_injection_suppresses_dead_model() {
 }
 
 #[test]
-fn model_churn_symbol_injection_fires_model_churn_critical() {
+fn model_churn_symbol_injection_fires_model_churn() {
     let dir = TempDir::new("zzop-attr-injection-model-churn");
     dir.write(
         "prisma/schema.prisma",
@@ -293,7 +293,9 @@ fn model_churn_symbol_injection_fires_model_churn_critical() {
         baseline.findings
     );
 
-    // Injected `model-churn` count of 12 (>= the critical threshold of 10) on the `Wobbly` Symbol.
+    // Injected `model-churn` count of 12 on the `Wobbly` Symbol — well past the escalation line this
+    // rule carried until 2026-09-06, which is exactly why the assertion below pins ONE band: the tier
+    // was removed because a threshold the code calls unmeasurable cannot hand out the loudest band.
     let mut cfg = config();
     cfg.adapter_overlays = vec![overlay_with_attrs(
         "auth-overlay-adapter/1",
@@ -309,7 +311,7 @@ fn model_churn_symbol_injection_fires_model_churn_critical() {
     let out = analyze_tree(dir.path(), &cfg);
     let churn = hits(&out, "schema/model-churn");
     assert_eq!(churn.len(), 1, "{:?}", out.findings);
-    assert_eq!(churn[0].severity, zzop_core::Severity::Critical);
+    assert_eq!(churn[0].severity, zzop_core::Severity::Info);
     assert_eq!(
         churn[0].data.as_ref().unwrap()["model"].as_str(),
         Some("Wobbly")

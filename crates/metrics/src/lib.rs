@@ -2,8 +2,12 @@
 //! whole-tree aggregate computations that produce SCORES (not findings) from `zzop-core`'s IR types
 //! (`FileNode`/`DepGraph`/`CommitFileSet`/`Severity`). Depends only on `zzop-core` by design: metrics
 //! computes scores from core's IR, never the other way around.
-//! `zzop-engine` is the sole caller, assembling this crate's outputs into `AnalyzeOutput`'s score
-//! fields; rule crates never depend on this one (metrics scores are not findings).
+//! THREE crates depend on this one — `zzop-engine` (assembles the outputs into `AnalyzeOutput`'s
+//! score fields), `zzop-facade` (`config::declared` builds a `FeatureSlicedDesignMatcher` from the
+//! request's vocabulary) and `zzop-summary` (`SCORE_MEANINGS`, `roi::RecId`). ⚠ This line said
+//! "`zzop-engine` is the sole caller" until 2026-09-07 (review ledger V92 ⑷); recount with
+//! `grep -rln zzop-metrics --include=Cargo.toml crates packages rules`. What has NOT changed is the
+//! direction: rule crates never depend on this one (metrics scores are not findings).
 
 pub mod aggregates;
 pub mod commit_tags;
@@ -83,7 +87,7 @@ pub use report_excludes::{apply_excludes_to_scores, path_excluded};
 pub use roi::{compute_roi, RecId, RoiResult};
 
 pub use scores::compute::{compute_scores, ScoresInput};
-pub use scores::config::ScoresConfig;
+pub use scores::config::{PopulationFilter, ScoresConfig};
 pub use scores::meanings::{score_meaning, SCORE_MEANINGS};
 // The convention-vocabulary defaults this crate owns, re-exported so `zzop_engine::VocabularyConfig`
 // can name the symbol instead of re-spelling the values (one definition per vocabulary — the rule
@@ -95,4 +99,6 @@ pub use scores::config::{
 };
 pub use scores::types::Scores;
 
-pub use seams::{compute_seams, SeamCandidate, SEAMS_LIMIT, SEAMS_MIN_FILES};
+pub use seams::{
+    compute_seams, SeamCandidate, DEFAULT_SEAM_NOISE_DIRS, SEAMS_LIMIT, SEAMS_MIN_FILES,
+};

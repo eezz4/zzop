@@ -23,13 +23,14 @@
 
 pub mod analysis;
 pub mod args;
+pub mod baseline;
 pub mod fail_on;
 pub mod help;
 pub mod run;
 
 pub use args::{parse_trees_args, reject_flag_like_args};
 pub use help::print_help;
-pub use run::{run_diff, run_explain, run_file_validate, run_graph, run_init};
+pub use run::{run_diff, run_explain, run_file_validate, run_graph, run_init, run_map};
 
 /// Reads a file argument or exits 1 (a runtime failure, never a usage error — the argument was
 /// well-formed, the file just isn't readable). Shared by every file-taking subcommand.
@@ -63,6 +64,23 @@ pub fn print_or_exit(result: Result<String, String>) -> ! {
             // its own before the flattened ConfigError text.
             if e.contains(zzop_summary::contracts::MISSING_CONFIG_MARKER) {
                 eprintln!("Run `zzop init` in that tree to write the starter config.");
+            }
+            // Same ruling, the refusal it was never applied to. A multi-tree config's refusal named
+            // the join in prose and no host spelled it, so `zzop cross <that dir>` (the literal
+            // transcription) exits 2 and `zzop analyze <tree root>` exits 1 — the declared roots
+            // carry no config of their own. Both halves now have a runnable line.
+            // The same ruling's third refusal (2026-09-23): paths mode, where one of the directories
+            // carries a config that declares its own tree set. "CONFIG MODE" is a concept, not a
+            // spelling — this is the spelling.
+            if e.contains(zzop_summary::contracts::PATHS_MODE_CONFIG_MARKER) {
+                eprintln!(
+                    "Pass that config with `--config` instead of the path list — e.g. `zzop cross --config <that config>`."
+                );
+            }
+            if e.contains(zzop_summary::contracts::MULTI_TREE_MARKER) {
+                eprintln!(
+                    "Run `zzop cross --config <that config>` to analyze those trees together, or `zzop analyze --config <a config declaring one tree>` for a single one."
+                );
             }
             std::process::exit(1);
         }

@@ -8,12 +8,21 @@
 //! - **Read-only verb** — only the QUERY hooks (`useQuery`/`useInfiniteQuery`/`useSuspenseQuery`) are
 //!   matched, and every one is a READ, so the verb is unambiguously `GET` (a write goes through
 //!   `useMutation`, whose explicit `mutationFn` axios call is already extracted by `match_http_call`).
-//! - **`/`-leading key shape** — only a query key that is (or, for `useQuery([key, …])`, whose first
-//!   element is) a `/`-leading string/template literal is treated as a URL; any other key shape (a bare
-//!   label `['todos']`, a computed value) is left alone. A `/`-leading key whose file's queryFn does NOT
-//!   forward it as a URL almost always yields just one spurious UNPROVIDED consume (a disclosed non-join);
-//!   only if that key text happens to equal a real backend provide path does it fabricate an edge — a
-//!   narrow residual, since a `/`-leading key that IS a live endpoint path is the idiom this recognizes.
+//! - **Path-shaped key** — only a query key that is (or, for `useQuery([key, …])`, whose first
+//!   element is) a path-shaped literal is treated as a URL; any other key shape (a bare label
+//!   `['todos']`, a computed value) is left alone. A path-shaped key whose file's queryFn does NOT
+//!   forward it as a URL almost always yields just one spurious UNPROVIDED consume (a disclosed
+//!   non-join); only if that key text happens to equal a real backend provide path does it fabricate
+//!   an edge — a narrow residual, since a path-shaped key that IS a live endpoint path is the idiom
+//!   this recognizes.
+//!
+//!   ⚠ **Path-shaped is NOT `/`-leading, and this bullet said it was from the birth commit until
+//!   2026-09-07** (review ledger V92 ⑵). A plain STRING must lead with `/`, to tell it apart from a
+//!   label key. A TEMPLATE needs a `/` ANYWHERE — ```articles/${slug}/comments``` counts, no leading
+//!   slash — because a react-query label key is never a slash-bearing template. The gate itself was
+//!   always right (see `is_url_shaped_key`); the header and the function's old name
+//!   (`is_slash_leading_url`) both described only the string arm, and a context document then cited
+//!   that wrong sentence to explain a real finding as having come from the axios lane instead.
 
 use swc_core::ecma::ast::{CallExpr, Callee, Expr, Lit, Module, ModuleDecl, ModuleItem};
 
@@ -58,7 +67,7 @@ pub(super) fn match_react_query_call(call: &CallExpr, enabled: bool) -> Option<H
         Expr::Array(arr) => unwrap_expr(&arr.elems.first()?.as_ref()?.expr),
         other => other,
     };
-    if !is_slash_leading_url(key_expr) {
+    if !is_url_shaped_key(key_expr) {
         return None;
     }
     Some(HttpCall {
@@ -78,7 +87,7 @@ pub(super) fn match_react_query_call(call: &CallExpr, enabled: bool) -> Option<H
 /// of its quasis contains a `/` — a `/`-bearing interpolated template (`` `/profiles/${u}` `` OR the
 /// relative `` `articles/${slug}/comments/${id}` ``) is unambiguously a path (a react-query label key is
 /// never a slash-bearing template), so a leading slash is not required there.
-fn is_slash_leading_url(e: &Expr) -> bool {
+fn is_url_shaped_key(e: &Expr) -> bool {
     match e {
         Expr::Lit(Lit::Str(s)) => s.value.as_str().unwrap_or_default().starts_with('/'),
         Expr::Tpl(t) => t

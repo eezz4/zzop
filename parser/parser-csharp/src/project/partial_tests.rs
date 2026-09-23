@@ -4,6 +4,12 @@
 
 use super::*;
 
+/// The project entry point under zzop's own suggested vocabulary — the same shadowing helper `tests.rs`
+/// carries, because a sibling test module cannot see that one.
+fn extract_csharp_http_provides_project(files: &[(String, String)]) -> CSharpProjectProvidesReport {
+    super::extract_csharp_http_provides_project(files, &crate::CSharpRouteVocab::built_in())
+}
+
 fn keys(report: &CSharpProjectProvidesReport) -> Vec<String> {
     let mut v: Vec<String> = report.provides.iter().map(|p| p.key.clone()).collect();
     v.sort();

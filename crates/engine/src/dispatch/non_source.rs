@@ -113,6 +113,7 @@ pub(super) const NON_SOURCE_EXTENSIONS: &[(&str, NonSourceKind)] = &[
     ("txt", NonSourceKind::NoFactsToLose),
     ("rst", NonSourceKind::NoFactsToLose),
     ("adoc", NonSourceKind::NoFactsToLose),
+    ("rtf", NonSourceKind::NoFactsToLose),
     // data/config
     ("json", NonSourceKind::DataConfig),
     ("jsonc", NonSourceKind::DataConfig),
@@ -126,6 +127,8 @@ pub(super) const NON_SOURCE_EXTENSIONS: &[(&str, NonSourceKind)] = &[
     ("ini", NonSourceKind::DataConfig),
     ("properties", NonSourceKind::DataConfig),
     ("lock", NonSourceKind::DataConfig),
+    // gettext catalogs — translation DATA, and the corpus's single largest unread population
+    ("po", NonSourceKind::DataConfig),
     // styles
     ("css", NonSourceKind::NoFactsToLose),
     ("scss", NonSourceKind::NoFactsToLose),
@@ -171,9 +174,39 @@ pub(super) const NON_SOURCE_EXTENSIONS: &[(&str, NonSourceKind)] = &[
     ("node", NonSourceKind::NoFactsToLose),
     ("jar", NonSourceKind::NoFactsToLose),
     ("map", NonSourceKind::NoFactsToLose),
+    // compiled/generated artifacts — a parser frontend for these is not a thing anyone writes
+    ("pyc", NonSourceKind::NoFactsToLose),
+    ("mo", NonSourceKind::NoFactsToLose),
+    ("egg", NonSourceKind::NoFactsToLose),
+    ("arrow", NonSourceKind::NoFactsToLose),
+    ("snap", NonSourceKind::DataConfig),
+    // packaging outputs
+    ("deb", NonSourceKind::NoFactsToLose),
+    ("rpm", NonSourceKind::NoFactsToLose),
+    // archives (siblings of zip/gz/tar above)
+    ("bz2", NonSourceKind::NoFactsToLose),
+    ("xz", NonSourceKind::NoFactsToLose),
+    ("lzma", NonSourceKind::NoFactsToLose),
+    ("tgz", NonSourceKind::NoFactsToLose),
+    // binary data/geo/db formats
+    ("dbf", NonSourceKind::NoFactsToLose),
+    ("shp", NonSourceKind::NoFactsToLose),
+    ("shx", NonSourceKind::NoFactsToLose),
+    ("mmdb", NonSourceKind::NoFactsToLose),
+    ("tif", NonSourceKind::NoFactsToLose),
+    ("tiff", NonSourceKind::NoFactsToLose),
+    ("graffle", NonSourceKind::NoFactsToLose),
+    // logs and editor/backup residue
+    ("log", NonSourceKind::NoFactsToLose),
+    ("backup", NonSourceKind::NoFactsToLose),
+    // go module manifests — the `lock` family, structured data rather than a language
+    ("sum", NonSourceKind::DataConfig),
+    ("mod", NonSourceKind::DataConfig),
+    ("work", NonSourceKind::DataConfig),
     // misc
     ("pem", NonSourceKind::NoFactsToLose),
     ("crt", NonSourceKind::NoFactsToLose),
+    ("cert", NonSourceKind::NoFactsToLose),
 ];
 
 /// This extension's [`NonSourceKind`], or `None` when the extension is not in [`NON_SOURCE_EXTENSIONS`]
@@ -215,19 +248,84 @@ pub fn extraction_can_lose_facts(ext: &str) -> bool {
     non_source_kind(ext) != Some(NonSourceKind::NoFactsToLose)
 }
 
-/// The wire spelling every surface that publishes an extension's content class must use, so the
-/// vocabulary has ONE owner instead of one per reply shaper. Three tokens, closed set:
-/// `"source"` (not in [`NON_SOURCE_EXTENSIONS`] at all — a language a frontend could read),
-/// `"data-config"` ([`NonSourceKind::DataConfig`]) and `"no-facts-to-lose"`
-/// ([`NonSourceKind::NoFactsToLose`]).
+/// Filetypes this build recognizes as SOURCE while having no parser for them — the population whose
+/// honest remedy really is "bring an adapter".
 ///
-/// A surface filtering on [`extraction_can_lose_facts`] only ever emits the first two — the third is
-/// spelled here anyway so the token set is complete at its definition rather than at each call site,
-/// and so a test can name what was filtered out.
+/// This exists because the alternative was to infer source-ness from a GAP: anything missing from
+/// [`NON_SOURCE_EXTENSIONS`] used to be called source, so a table that had not yet heard of
+/// `.gitignore` published it as a missing parser (2026-09-06, review ledger V23). Reading source-ness
+/// off a positive list instead means a gap now produces `"unclassified"`, which is what a gap actually
+/// is.
+///
+/// **Incomplete by construction, and its silence proves nothing** — the same stance
+/// `framework_silence`'s server-framework vocabulary takes about itself. A dialect missing here is
+/// reported as `"unclassified"`, which is weaker than the truth but never wrong; adding a name is an
+/// improvement to the NAMING, never a fix for a class of blindness. What must NOT happen is the reverse
+/// drift — putting a non-source filetype here to quiet a row — because that re-creates the exact false
+/// remedy this list was built to stop.
+///
+/// Extensions this build DOES parse are not here: they come from
+/// [`crate::dispatch::language_for_extension`], which is the table itself rather than a copy of it.
+pub(crate) const SOURCE_DIALECT_EXTENSIONS: &[&str] = &[
+    // Component/template dialects that compile to a language this build parses.
+    "vue", "svelte", "astro", "marko", "riot",
+    // General-purpose languages with no frontend here yet.
+    "rb", "php", "kt", "kts", "swift", "scala", "groovy", "clj", "cljs", "cljc", "ex", "exs", "erl",
+    "hs", "ml", "fs", "fsx", "dart", "lua", "r", "jl", "nim", "zig", "vb", "pas", "d",
+    // C family.
+    "c", "h", "cpp", "cxx", "cc", "hpp", "hh", "hxx", "m", "mm", "objc",
+    // Shell and other executable scripts.
+    "sh", "bash", "zsh", "fish", "ps1", "psm1", "bat", "cmd", "awk", "pl", "pm", "tcl",
+];
+
+/// Whether `ext` names a source dialect this build has no parser for. Lowercase-insensitive, same as
+/// every other predicate in this module.
+fn is_source_dialect(ext: &str) -> bool {
+    let lower = ext.to_ascii_lowercase();
+    SOURCE_DIALECT_EXTENSIONS.contains(&lower.as_str())
+}
+
+/// The wire spelling every surface that publishes an extension's content class must use, so the
+/// vocabulary has ONE owner instead of one per reply shaper. FOUR tokens, closed set:
+/// `"source"` (this build parses it — [`crate::dispatch::language_for_extension`] — or recognizes it as
+/// a dialect it cannot parse yet — [`SOURCE_DIALECT_EXTENSIONS`]),
+/// `"data-config"` ([`NonSourceKind::DataConfig`]), `"no-facts-to-lose"`
+/// ([`NonSourceKind::NoFactsToLose`]), and `"unclassified"` — everything else.
+///
+/// A surface filtering on [`extraction_can_lose_facts`] never emits `"no-facts-to-lose"`; the token is
+/// spelled here anyway so the set is complete at its definition rather than at each call site, and so a
+/// test can name what was filtered out.
+///
+/// ## 🔴 Why the residual stopped being `"source"` (2026-09-06, review ledger V23)
+///
+/// It used to be: anything not in [`NON_SOURCE_EXTENSIONS`] was called `"source"`, described as "a
+/// language a frontend could read". That made the DEFAULT the strongest claim in the vocabulary, and a
+/// table with a gap in it failed toward alarm. 📏 Measured on a tree holding `.gitignore`, `.env`,
+/// `.npmignore` and `.env.local`, the coverage reply published all four as `kind: "source"` — including
+/// `local`, which is not a filetype at all, only the tail of a dotted name.
+///
+/// That is not a cosmetic mislabel, because this token names a REMEDY: the consuming surface documents
+/// `source` as "an adapter or parser is missing". Nobody should be sent to write a `.gitignore` parser.
+///
+/// 🔵 And the repo had already decided this question in the other direction, one channel over.
+/// `analyze::diagnostics::capability`'s "bring an adapter" warning excludes extensionless files
+/// outright, because they are "ambiguous by construction: often config/docs, no reliable language
+/// signal". Two surfaces were answering one question, and only this one was guessing.
+///
+/// So `"source"` is now ASSERTED — from the parser table, plus a named list of dialects this build knows
+/// it cannot parse — instead of being assumed from a gap, and the residual admits what it is. The cost
+/// is that the source list is hand-kept and will lag a dialect nobody has added yet; that lag reports
+/// `"unclassified"`, which is weaker than the truth and never false, and the per-extension "no native
+/// parser" warning still names the extension with sample paths and the adapter on-ramp either way.
 pub fn extension_content_kind(ext: &str) -> &'static str {
     match non_source_kind(ext) {
-        None => "source",
         Some(NonSourceKind::DataConfig) => "data-config",
         Some(NonSourceKind::NoFactsToLose) => "no-facts-to-lose",
+        None if crate::dispatch::language_for_extension(&ext.to_ascii_lowercase()).is_some()
+            || is_source_dialect(ext) =>
+        {
+            "source"
+        }
+        None => "unclassified",
     }
 }

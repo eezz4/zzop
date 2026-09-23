@@ -3,12 +3,18 @@
 //! the same "the tool has never heard of its own output" failure the `schema/<label>` lane fixes, one
 //! namespace over. Two of them, both reached by a reader copying an `id` out of real JSON:
 //! - `disclosure[].id` / `disclosure[].group` — the coverage-disclosure registry
-//!   (`zzop_engine::blindness_registry`), 17 ids in 4 groups today. Since the 2026-07-29 fold a run
+//!   (`zzop_engine::blindness_registry`), 18 ids in 4 groups today (recount:
+//!   `grep -rho 'id: "[a-z0-9-]*"' crates/engine/src/disclosure/registry/*.rs | sort -u | wc -l`). Since the 2026-07-29 fold a run
 //!   reply carries the registry's COUNTS rather than each class's row, so a reader most often arrives
 //!   here holding an id copied out of `zzop contract disclosure-classes` (or an older reply) — which is
 //!   why this lane now prints the class's own summary instead of pointing back at the reply for it;
 //! - `architecture.topRecommendation.id` (and `recommendations[].id` in the facade output view) — a
-//!   `zzop_metrics::roi::RecId`, 8 ids today.
+//!   `zzop_metrics::roi::RecId`, 7 ids today (recount: the variants of `pub enum RecId` in
+//!   `crates/metrics/src/roi.rs`).
+//!
+//! ⚠ Both counts were one out until 2026-09-07 (review ledger V92 ⑶) — 17 when there were 18, and 8
+//! when `KnowledgeSilo`'s removal had left 7. Each now carries the command that recounts it, because a
+//! bare number in a comment is the one thing here that no test can hold.
 //!
 //! Both are lookup FAILURES like every other non-rule lane here (`Err`, stderr, exit 1): there is no DSL
 //! rule to render. They exist to say WHAT the id is and where its real answer already lives, instead of
@@ -49,9 +55,12 @@ fn disclosure_class(query: &str) -> Option<String> {
          one way zzop's own output can be silently misread. Every `zzop analyze` reply carries how many \
          such classes there are and how many are NOT fully detected (`disclosure.classes` and the \
          per-status counts); the full text of all of them is one lookup away, at \
-         `zzop contract disclosure-classes`. This class reads: {}\nIt is not a finding: it has no \
-         severity, no suppression marker, and no `rules: {{ \"<id>\": \"off\" }}` toggle. `zzop explain` \
-         only reads the compiled-in DSL pack data — see `zzop contract rule-catalog` for the rule ids.",
+         `zzop contract disclosure-classes` on the CLI or the `zzop://contract/disclosure-classes` \
+         resource over MCP. This class reads: {}\nIt is not a finding: it has no \
+         severity, no suppression marker, and no `rules: {{ \"<id>\": \"off\" }}` toggle. This lookup \
+         only reads the compiled-in DSL pack data — the rule ids are in the rule catalog: \
+         `zzop contract rule-catalog` on the CLI, or the `zzop://contract/rule-catalog` resource over \
+         MCP.",
         class.group,
         class.status.as_str(),
         class.summary
@@ -72,8 +81,10 @@ fn disclosure_group(query: &str) -> Option<String> {
     Some(format!(
         "{query:?} is a coverage-disclosure GROUP, not a rule id — it is the taxonomy bucket over {} \
          disclosure classes, counted in every `zzop analyze` reply's `disclosure` block and spelled out \
-         in full by `zzop contract disclosure-classes`: {}. Explain one of those \
-         for what it means; `zzop contract rule-catalog` has the rule ids.",
+         in full by `zzop contract disclosure-classes` on the CLI, or the \
+         `zzop://contract/disclosure-classes` resource over MCP: {}. Explain one of those for what it \
+         means; the rule ids are in the rule catalog (`zzop contract rule-catalog`, or the \
+         `zzop://contract/rule-catalog` resource over MCP).",
         ids.len(),
         ids.join(", ")
     ))

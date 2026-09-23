@@ -114,6 +114,24 @@ pub(super) fn config_channel_reports(i: &DiagnosticsInput) -> Vec<String> {
         ));
     }
 
+    // The allowlist's WORKING case. Every other member of this family reports a config entry that did
+    // NOTHING; this one reports an entry that did EXACTLY what it says and less than the reader thinks,
+    // which is why it is gated on success rather than on a typo. The template already documents the
+    // boundary ("Both are about PACKS: the native analyses ... are not packs"), and documenting it was
+    // not enough — the reply asserted all eight packs loaded on a run the reader believed was
+    // security-only (review ledger V232).
+    if i.only_packs_active {
+        out.push(
+            "the pack allowlist (`packs.only`) is active and gates DSL PACKS ONLY — the native \
+             analyses are not packs, so every one of them still ran and their findings are in this \
+             reply. Read `findings.byRule`: an id with no `<pack>/` prefix came from a native \
+             analysis this allowlist never named. To narrow those too, switch them off by id in \
+             `rules` (embedders: `disabledRules`); `packsLoaded` below lists the packs that LOADED, \
+             which the allowlist does not change."
+                .to_string(),
+        );
+    }
+
     out
 }
 

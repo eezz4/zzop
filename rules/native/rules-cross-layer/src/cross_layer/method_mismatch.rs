@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use zzop_core::io::TaggedConsume;
 use zzop_core::{disable_hint, Finding, Severity};
 
+use super::landing::METHOD_CHANGE_LANDING;
 use super::{split_key, HttpProvideSite};
 
 pub fn method_mismatch_findings(
@@ -63,10 +64,12 @@ pub fn method_mismatch_findings(
             "consume `{method} {path}` (source `{}`) has no matching provide, but `{path}` IS provided with a \
              different method ({}) — e.g. at {}:{} (source `{}`, method `{first_method}`). This looks like a \
              method typo/drift between caller and route registration rather than a missing route entirely. \
-             Verify the intended HTTP method on either side and fix the mismatched one. The consume-side \
+             The consume-side \
              method reflects what static extraction read at the call site — if the call goes through a \
              helper/wrapper (multipart, a custom fetch wrapper, ...), verify the literal method manually \
-             before changing either side. {} if this path legitimately supports multiple methods registered \
+             before changing either side. {METHOD_CHANGE_LANDING} THEN FIX THE SIDE THAT IS WRONG: change the \
+             caller's method, or the route registration's. {} if this path legitimately supports \
+             multiple methods registered \
              as separate routes and the caller's method is simply not one of them yet.",
             c.source,
             other_methods.join(", "),

@@ -15,7 +15,10 @@
 //! - Overlay files are read HERE (tree-root-relative), read/parse failures become warnings that skip
 //!   the overlay, never errors.
 //! - Unknown keys at every scoped level warn (never reject) with the `config-surface.json`
-//!   vocabulary (`crate::CONFIG_SURFACE_JSON`).
+//!   vocabulary (`crate::CONFIG_SURFACE_JSON`). The one class that DOES reject is a key that moved
+//!   spelling — see `mapper::topology` and its `the_old_flat_topology_keys_are_refused…` test. "Unknown"
+//!   and "moved" are different populations and `VERSIONING.md` says so; this line covers only the
+//!   first.
 //! - The `withDefaults` layer folds in here for native hosts: bundled packs are injected as inline
 //!   `packDefs` (`crate::BUNDLED_PACK_SOURCES`), and `git: {}` is injected when the config has no
 //!   `git` key, so zero-config still collects git signals (30-day default) exactly like the JS CLI.
@@ -75,6 +78,19 @@ pub struct MappedRequest {
     pub method: Method,
     pub request: serde_json::Value,
     pub warnings: Vec<String>,
+    /// The `vocabulary` keys the AUTHOR wrote, before [`options`] strips the front-end-only ones.
+    ///
+    /// # Why this has to leave the mapper separately (2026-09-15, ledger V249)
+    /// `request` is what the ENGINE reads, and `build_vocabulary` deliberately withholds keys the
+    /// front end consumes itself — forwarding them would put a key in the request that no engine
+    /// surface reads, which that function's own doc refuses by name. So the request is the wrong
+    /// place to ask "what did the author declare", and a host that asked it there got a wrong answer:
+    /// `zzop coverage`'s `vocabularyDeclared` reported `workspaceSkipDirs` as SILENT on every tree,
+    /// including the config `zzop init` had just written with that key in it.
+    ///
+    /// This carries the question's real answer on the side, where only the crate that read the file
+    /// can produce it. Unsorted and undeduped on purpose — it is the author's own key set.
+    pub declared_vocabulary: Vec<String>,
 }
 
 /// Maps a parsed config object (post-JSONC, post-`trees:"auto"`-expansion) to a facade request.
@@ -273,5 +289,12 @@ pub fn config_to_request(
         method,
         request,
         warnings,
+        // Read off the CONFIG, never off the request built above — see the field's doc for why those
+        // two are not the same list and what read the wrong one.
+        declared_vocabulary: config
+            .get("vocabulary")
+            .and_then(serde_json::Value::as_object)
+            .map(|m| m.keys().cloned().collect())
+            .unwrap_or_default(),
     })
 }

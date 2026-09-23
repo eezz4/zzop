@@ -234,6 +234,7 @@ pub(super) struct NativeAnalysesView<'a> {
     registered: usize,
     disabled: &'a [String],
     reported_in_cross_layer_findings: &'a [String],
+    shipped_off: &'a [String],
 }
 
 impl<'a> From<&'a zzop_engine::NativeAnalyses> for NativeAnalysesView<'a> {
@@ -242,6 +243,7 @@ impl<'a> From<&'a zzop_engine::NativeAnalyses> for NativeAnalysesView<'a> {
             registered: n.registered,
             disabled: &n.disabled,
             reported_in_cross_layer_findings: &n.reported_in_cross_layer_findings,
+            shipped_off: &n.shipped_off,
         }
     }
 }

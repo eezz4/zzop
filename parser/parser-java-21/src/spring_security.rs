@@ -127,6 +127,42 @@ impl SpringPostureBail {
             Self::AnyRequestAccessNotProvable(_) => "any-request-access-not-provable",
         }
     }
+
+    /// The WHICH behind the WHAT — the payload a carrying variant holds, empty for the variants that
+    /// carry none. [`Self::name`] answers "what family of shape stopped us" and several families have
+    /// many members: `lambda-body` alone covers `"if_statement"`, `"chain-not-on-parameter"`,
+    /// `"arguments"`, `"body"`, `"parameters"` and `"expression_statement"`, which take entirely
+    /// different work to support. A report that prints only the name sends its reader to open the config
+    /// and guess which one they hit — the guessing this enum was made to end (see the type's own doc:
+    /// "so a 'this config exists but we could not read it' self-report can say which shape stopped it").
+    ///
+    /// Added 2026-09-05, one commit after the self-report itself shipped printing the name alone. The
+    /// gap was found by reading this enum rather than by a failing test, which is the reason the pin on
+    /// the consuming warning now asserts a DETAIL-carrying bail reaches the reply: the name-only version
+    /// was green.
+    ///
+    /// `NonLiteralMatcher` renders both halves because its `bound_by` is the actionable one — it names
+    /// the enhanced-for iterable that supplies the matcher, which is how a reader learns the exception
+    /// list lives outside the source at all.
+    pub fn detail(&self) -> String {
+        match self {
+            Self::NotAConfig
+            | Self::WebSecurityIgnoring
+            | Self::ChainScoper
+            | Self::MultipleChains
+            | Self::MixedDsl
+            | Self::NotSecureByDefault => String::new(),
+            Self::LambdaBody(d)
+            | Self::ConfigurerPermitAll(d)
+            | Self::SiblingScope(d)
+            | Self::UnrecognizedClause(d)
+            | Self::AnyRequestAccessNotProvable(d) => d.clone(),
+            Self::NonLiteralMatcher { arg, bound_by } => match bound_by {
+                Some(b) => format!("{arg} (bound by {b})"),
+                None => arg.clone(),
+            },
+        }
+    }
 }
 
 impl SpringSecurityPosture {

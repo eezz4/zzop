@@ -54,6 +54,29 @@ pub fn optional_string_array(args: Option<&Value>, name: &str) -> Result<Vec<Str
     }
 }
 
+/// Extracts an optional whole-number argument with a MINIMUM: absent/`null` -> `Ok(None)`; present but
+/// not a JSON integer, or below `min`, is a named error.
+///
+/// `as_i64` rather than `as_u64` on purpose — a negative value must reach the message as the number the
+/// caller sent (`got -1`), not vanish into the same `None` an absent key produces. A float that merely
+/// looks whole (`2.0`) is rejected for the same reason `limit` rejects it: `as_i64` succeeds only on
+/// integer literal syntax, so "I sent a number" and "I sent an integer" stay distinguishable.
+pub fn optional_integer(
+    args: Option<&Value>,
+    name: &str,
+    min: i64,
+) -> Result<Option<usize>, String> {
+    match args.and_then(|a| a.get(name)) {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => match v.as_i64() {
+            Some(n) if n >= min => Ok(Some(n as usize)),
+            _ => Err(format!(
+                "`{name}` must be a whole number of {min} or more (got {v})"
+            )),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

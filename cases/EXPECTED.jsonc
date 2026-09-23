@@ -141,6 +141,18 @@
   // silent for every other codebase — see VERSIONING.md). A negative control for a deleted rule pins
   // nothing, and the file's two unconsumed-endpoint labels were incidental duplicates of a class this
   // tree already covers on the sibling http fixtures.
+  // 2026-09-05 — the DECORATOR half of `http/protected-path-no-auth-evidence`, and the four keys are
+  // adjudicated by READING each route rather than by accepting a run. Line 24 is the only one of the
+  // four that does not carry the rule, and that absence is the whole subject: its controller is guarded
+  // by `@Authenticated()`, a HOUSE decorator, which reaches the rule as an `auth-guarded` attribute via
+  // `decorator_guarded` -> `mint_auth_guarded`. The other three carry decorators that LOOK like auth and
+  // gate nothing — a `@nestjs/swagger` documentation decorator (33), an opt-OUT marker (43), and policy
+  // metadata a guard consumes rather than a guard (52) — so all three must keep firing. A future
+  // widening that silences any of them is a false clear, and these three keys are what catches it.
+  "api/api/http.protected-path-no-auth-evidence-decorator.ts:24": ["cross-layer/unconsumed-endpoint"],
+  "api/api/http.protected-path-no-auth-evidence-decorator.ts:33": ["cross-layer/unconsumed-endpoint","http/protected-path-no-auth-evidence"],
+  "api/api/http.protected-path-no-auth-evidence-decorator.ts:43": ["cross-layer/unconsumed-endpoint","http/protected-path-no-auth-evidence"],
+  "api/api/http.protected-path-no-auth-evidence-decorator.ts:52": ["cross-layer/unconsumed-endpoint","http/protected-path-no-auth-evidence"],
   "api/api/http.protected-path-no-auth-evidence.ts:14": ["cross-layer/unconsumed-endpoint","http/protected-path-no-auth-evidence"],
   "api/api/http.protected-path-no-auth-evidence.ts:19": ["cross-layer/unconsumed-endpoint"],
   "api/api/http.protected-path-no-auth-evidence.ts:25": ["cross-layer/unconsumed-endpoint"],
@@ -307,7 +319,7 @@
   "api/services/be-security.weak-password-hash.ts:6": ["security/weak-password-hash","security/weak-crypto"],
   "api/services/be-security.weak-token-random.ts:5": ["security/weak-token-random"],
   "api/services/fullstack.ws-no-auth.ts:6": ["egress/ws-no-auth"],
-  "api/services/perf.api-in-loop.ts:6": ["perf/api-in-loop"],
+  "api/services/reliability.api-in-loop.ts:6": ["reliability/api-in-loop"],
   "api/services/security.taint-flow.ts:8": ["security/taint-flow"],
 
   // ==== THE METHOD-SCAN SPAN-BOUNDARY AXIS (trees/api-be/spans/, added 2026-08-08) ==================
@@ -802,7 +814,7 @@
   // Python twin at `services/login.py:13` has both on one line and carries both, which is what makes
   // the C# row's single entry a measurement rather than an omission.
   "testconv/Api/UserService.cs:20": ["security/weak-crypto"],
-  "testconv/services/handler.go:12": ["go/goroutine-in-loop"],
+  "testconv/services/handler.go:12": ["reliability/goroutine-in-loop"],
   "testconv/services/login.py:13": ["security/weak-crypto","security/weak-password-hash"],
   // ---- end test-conventions lane -------------------------------------------------------------------
   "trpc/router.ts:9": ["cross-layer/unconsumed-procedure"],
@@ -896,7 +908,71 @@
   // split fetch from aggregation (so it now probes method-scoping instead), rather than the firings being
   // labeled into truth. Recording it here because "a decoy fired, so relabel it" is the exact failure mode
   // this array has to resist.
+
+
+  // ── EXTENSION CLOSURE (2026-09-09, review ledger V147) ─────────────────────────────────────────
+  // Eight twins carrying BYTE-IDENTICAL plain JavaScript, one per member of the two same-syntax
+  // families the closure guard enforces (`ts -> tsx/mts/cts`, `js -> jsx/mjs/cjs`). They exist because
+  // this corpus could not tell a rule that reads a FAMILY from one that reads a MEMBER of it:
+  // `db/update-delete-no-where` skipped every `.jsx` file in a repository for weeks and this gate
+  // reported 258/258 the whole time, with the hole open and after it closed (V133), and again for
+  // `.mts` migrations (V137). A gate cannot score a population it does not contain.
+  //
+  // Identical bytes are the whole mechanism: a twin that fires for a reason its siblings do not share
+  // would prove nothing about the extension. Plain JavaScript for the same reason — `.jsx` cannot
+  // carry a type annotation, so the moment the body needs one the eight stop being twins.
+  //
+  // FOUR rows each, not one, and the extra three are not padding: `dead-candidates` and
+  // `unimported-export` are NATIVE analyses, and whether THEY reach every member of a family is the
+  // same question one layer down. The four fire at the same four lines in all eight files, which is
+  // the fact being pinned — a native analysis that started skipping `.cts` would break exactly two of
+  // these thirty-two rows and nothing else in the corpus would notice.
+  "extclose/services/twin.ts:1": ["dead-candidates"],
+  "extclose/services/twin.ts:3": ["unimported-export"],
+  "extclose/services/twin.ts:4": ["db/update-delete-no-where"],
+  "extclose/services/twin.ts:7": ["unimported-export"],
+  "extclose/services/twin.tsx:1": ["dead-candidates"],
+  "extclose/services/twin.tsx:3": ["unimported-export"],
+  "extclose/services/twin.tsx:4": ["db/update-delete-no-where"],
+  "extclose/services/twin.tsx:7": ["unimported-export"],
+  "extclose/services/twin.mts:1": ["dead-candidates"],
+  "extclose/services/twin.mts:3": ["unimported-export"],
+  "extclose/services/twin.mts:4": ["db/update-delete-no-where"],
+  "extclose/services/twin.mts:7": ["unimported-export"],
+  "extclose/services/twin.cts:1": ["dead-candidates"],
+  "extclose/services/twin.cts:3": ["unimported-export"],
+  "extclose/services/twin.cts:4": ["db/update-delete-no-where"],
+  "extclose/services/twin.cts:7": ["unimported-export"],
+  "extclose/services/twin.js:1": ["dead-candidates"],
+  "extclose/services/twin.js:3": ["unimported-export"],
+  "extclose/services/twin.js:4": ["db/update-delete-no-where"],
+  "extclose/services/twin.js:7": ["unimported-export"],
+  "extclose/services/twin.jsx:1": ["dead-candidates"],
+  "extclose/services/twin.jsx:3": ["unimported-export"],
+  "extclose/services/twin.jsx:4": ["db/update-delete-no-where"],
+  "extclose/services/twin.jsx:7": ["unimported-export"],
+  "extclose/services/twin.mjs:1": ["dead-candidates"],
+  "extclose/services/twin.mjs:3": ["unimported-export"],
+  "extclose/services/twin.mjs:4": ["db/update-delete-no-where"],
+  "extclose/services/twin.mjs:7": ["unimported-export"],
+  "extclose/services/twin.cjs:1": ["dead-candidates"],
+  "extclose/services/twin.cjs:3": ["unimported-export"],
+  "extclose/services/twin.cjs:4": ["db/update-delete-no-where"],
+  "extclose/services/twin.cjs:7": ["unimported-export"],
+  // And the SQL pack, scored on a `.sql` file for the FIRST time. `sql/destructive-migration` names
+  // `.sql` FIRST in its own `file_pattern` and had only ever been scored through
+  // `alembic/versions/*.py` and `migrations/*.rs`. Two lines because the arms that fire on raw SQL are
+  // the bare-keyword ones (DROP TABLE, TRUNCATE); the rule's DELETE arm requires the statement to be
+  // QUOTED — i.e. SQL embedded in code — which is a real boundary, and a `DELETE FROM orders;` line in
+  // this same file would be silent. Measured, not assumed: that was the first fixture tried here.
+  "extclose/migrations/0002_drop_legacy.sql:3": ["sql/destructive-migration"],
+  "extclose/migrations/0002_drop_legacy.sql:4": ["sql/destructive-migration"],
+
   "benign": [
+    // `py` does NOT close over `pyi` and that is a decision, not an oversight: a type stub holds no
+    // runtime code, so a runtime rule firing in one is wrong twice over. This is the control that
+    // makes `scripts/lib/rule-extension-closure.mjs`'s deliberate NON-closure falsifiable.
+    "extclose/services/orm_stub.pyi",
     "decoy/api/reliability.console-in-be.decoy.ts",
     "decoy/api/sql.nplus1.decoy.ts",
     "decoy/api/sql.race-condition-toctou.decoy.ts",

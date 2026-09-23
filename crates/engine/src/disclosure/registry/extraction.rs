@@ -114,6 +114,9 @@ pub(super) const ROWS: &[BlindnessClass] = &[
         // in which an unresolved call site can be silently missed. What the class does not claim is
         // that the JUDGMENT about that count reaches every surface — the majority self-report is
         // lane-bound, which is now said in the summary instead of implied by "past a threshold".
+        //
+        // FIRING PIN: crates/engine/tests/integration/analyze_coverage_census.rs::unresolved_only_tree_is_still_join_contribution_zero
+        // FIRING PIN: crates/engine/tests/integration/analyze_coverage_census.rs::no_io_tree_has_zero_counts_and_is_join_contribution_zero
         status: DisclosureStatus::Asserted,
     },
     BlindnessClass {

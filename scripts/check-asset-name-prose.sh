@@ -201,7 +201,7 @@ if [ -n "$candidate_files" ]; then
       echo "   platforms: ${platforms[*]}, windows platform(s):$windows_platforms)" >&2
       fail=1
     done <<< "$matches"
-  done <<< "$candidate_files"
+  done < <(printf '%s\n' "$candidate_files")
 fi
 
 if [ "$fail" -ne 0 ]; then

@@ -1,4 +1,7 @@
-use crate::{assert_disqualifier_clause_precedes_imperative, scan, TempDir};
+use crate::{
+    assert_disqualifier_clause_precedes_imperative, assert_landing_precedes_imperative,
+    sanitizer_subtraction_landing, scan, TempDir,
+};
 
 // --- jquery-html-sink ---
 
@@ -172,6 +175,35 @@ fn jquery_html_sink_message_puts_the_known_imprecision_before_the_use_text_imper
         "jquery-html-sink",
         &hits[0].message,
         "Known imprecision: a DOM-element/jQuery-object argument",
+        "Use `.text()` for plain text",
+    );
+}
+
+/// §33/§37 LANDING pin — the other axis on the same verb. The pin above covers the reader whose
+/// argument was never an HTML string; this one covers the reader whose argument IS one and who is
+/// right to act. `.text()` sets the text of the matched set, so markup arrives as characters, and
+/// `DOMPurify` — the message's own alternative — deletes by allow-list. Neither raises.
+///
+/// The invalidation probe is to move `sanitizer_subtraction_landing()` to the tail: every token stays
+/// present and spelled once, and this goes red on ORDER while the pin above stays green.
+#[test]
+fn jquery_html_sink_landing_precedes_the_imperative() {
+    let dir = TempDir::new("zzop-browser");
+    dir.write(
+        "widget.js",
+        "import $ from 'jquery';\nexport function render(userHtml) {\n  $('#box').html(userHtml);\n}\n",
+    );
+    let out = scan(&dir);
+    let hits: Vec<_> = out
+        .findings
+        .iter()
+        .filter(|f| f.rule_id == "browser/jquery-html-sink")
+        .collect();
+    assert_eq!(hits.len(), 1, "{:?}", out.findings);
+    assert_landing_precedes_imperative(
+        "jquery-html-sink",
+        &hits[0].message,
+        sanitizer_subtraction_landing(),
         "Use `.text()` for plain text",
     );
 }

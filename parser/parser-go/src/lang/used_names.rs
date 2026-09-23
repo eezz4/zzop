@@ -43,17 +43,35 @@ pub fn parse_local_identifier_refs(text: &str) -> BTreeSet<String> {
     };
     let mut refs = BTreeSet::new();
     let mut cursor = tree.walk();
-    walk(&mut cursor, text, &mut refs);
+    walk(&mut cursor, text, &mut refs, None);
     refs
 }
 
-fn walk(cursor: &mut TreeCursor, src: &str, out: &mut BTreeSet<String>) {
+/// The parent NODE is threaded DOWN rather than looked up, and that is a performance contract
+/// rather than a style choice (review ledger V131, inherited from V116).
+///
+/// 📏 The two `is_declared_*` predicates below used to ask `node.parent()` once per identifier.
+/// `ts_node_parent` is O(DEPTH) — tree-sitter finds a parent by descending from the root — so the
+/// sum over a file is depth x identifiers. Measured on one file with 20,000 identifiers at depth
+/// 4,000: **41.8 s** here against **7.2 s** for the C# frontend, which had already been fixed. At
+/// 200,000 identifiers this frontend passed 300 s and was killed; C# finished in 62.5 s.
+///
+/// 🔵 Go carries the NODE where C# and Java carry only the kind, and the difference is real:
+/// [`is_short_var_decl_left`] has to read the GRANDparent and compare node ids, which a kind cannot
+/// answer. That one lookup stays O(depth) — but it now runs only for an identifier whose parent is
+/// an `expression_list`, instead of for every identifier in the file.
+fn walk<'a>(
+    cursor: &mut TreeCursor<'a>,
+    src: &str,
+    out: &mut BTreeSet<String>,
+    parent: Option<Node<'a>>,
+) {
     loop {
         let node = cursor.node();
         if !node.is_error() && !node.is_missing() {
-            visit(node, cursor.field_name(), src, out);
+            visit(node, cursor.field_name(), parent, src, out);
             if cursor.goto_first_child() {
-                walk(cursor, src, out);
+                walk(cursor, src, out, Some(node));
                 cursor.goto_parent();
             }
         }
@@ -63,12 +81,18 @@ fn walk(cursor: &mut TreeCursor, src: &str, out: &mut BTreeSet<String>) {
     }
 }
 
-fn visit(node: Node, field: Option<&str>, src: &str, out: &mut BTreeSet<String>) {
+fn visit(
+    node: Node,
+    field: Option<&str>,
+    parent: Option<Node>,
+    src: &str,
+    out: &mut BTreeSet<String>,
+) {
     match node.kind() {
-        "identifier" if !is_declared_var_name(node, field) => {
+        "identifier" if !is_declared_var_name(parent, field) => {
             out.insert(node_text(node, src).to_string());
         }
-        "type_identifier" if !is_declared_type_name(node, field) => {
+        "type_identifier" if !is_declared_type_name(parent, field) => {
             out.insert(node_text(node, src).to_string());
         }
         "selector_expression" => {
@@ -92,8 +116,8 @@ const DECLARES_NAME_FIELD: &[&str] = &[
 
 /// See module doc's "excluded declaration positions": a `name`-field declaration, or the LHS of a
 /// `short_var_declaration`.
-fn is_declared_var_name(node: Node, field: Option<&str>) -> bool {
-    let Some(parent) = node.parent() else {
+fn is_declared_var_name(parent: Option<Node>, field: Option<&str>) -> bool {
+    let Some(parent) = parent else {
         return false;
     };
     if field == Some("name") && DECLARES_NAME_FIELD.contains(&parent.kind()) {
@@ -122,8 +146,8 @@ fn is_short_var_decl_left(parent: Node) -> bool {
         .is_some_and(|left| left.id() == parent.id())
 }
 
-fn is_declared_type_name(node: Node, field: Option<&str>) -> bool {
-    let Some(parent) = node.parent() else {
+fn is_declared_type_name(parent: Option<Node>, field: Option<&str>) -> bool {
+    let Some(parent) = parent else {
         return false;
     };
     field == Some("name") && matches!(parent.kind(), "type_spec" | "type_alias")

@@ -21,6 +21,7 @@ mod unmatched_suppression_tests;
 #[cfg(test)]
 mod unparsed_extension_tests;
 
+pub(super) use capability::spring_posture_bail_warnings;
 pub(super) use capability::{git_not_requested_warning, unparsed_extension_warning};
 pub(crate) use capability::{uncompilable_rule_warnings, zero_packs_warning};
 pub(crate) use config_filters::{

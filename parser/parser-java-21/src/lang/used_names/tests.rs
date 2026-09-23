@@ -56,3 +56,54 @@ fn parse_failure_yields_an_empty_set() {
 fn empty_file_yields_an_empty_set() {
     assert!(parse_local_identifier_refs("").is_empty());
 }
+
+/// 📏 The cost of collecting identifiers must not scale with how DEEP they sit — review ledger V131,
+/// and the reason [`super::walk`] threads the parent down instead of calling `node.parent()`.
+///
+/// This asserts a RATIO, not a wall-clock budget, and that is deliberate: both halves are measured
+/// seconds apart in one process, so machine load, CPU scaling and a debug-vs-release build all divide
+/// out. The ratio is not a proxy for the property — it IS the property. A per-node `node.parent()` is
+/// O(depth), which is invisible in a shallow file and quadratic in a deep one, so only a comparison
+/// between two DEPTHS at the same identifier count can see it.
+///
+/// 📏 Before the fix, one file with 20,000 identifiers at depth 4,000 took 35.8 s through `zzop analyze`
+/// against 7.2 s for the already-fixed C# frontend; at 200,000 identifiers it passed 300 s and was
+/// killed. The bound below sits far above what depth-independent code does.
+#[test]
+fn identifier_collection_does_not_get_slower_with_nesting_depth() {
+    use std::time::Instant;
+
+    const N: usize = 4_000;
+    const DEPTH: usize = 2_000;
+    const MAX_RATIO: u32 = 5;
+
+    let args = std::iter::repeat_n("b", N).collect::<Vec<_>>().join(",");
+    let deep = format!(
+        "class A {{ void f(boolean b) {{ var x = {}g({}); }} }}",
+        "!".repeat(DEPTH),
+        args
+    );
+    let shallow = format!("class A {{ void f(boolean b) {{ var x = g({}); }} }}", args);
+
+    let elapsed = |src: &str| {
+        let t = Instant::now();
+        let out = parse_local_identifier_refs(src);
+        assert!(out.contains("b"), "input did not parse into references");
+        t.elapsed().as_micros().max(1)
+    };
+
+    std::thread::Builder::new()
+        .stack_size(64 * 1024 * 1024)
+        .spawn(move || {
+            let d = elapsed(&deep);
+            let f = elapsed(&shallow);
+            assert!(
+                d <= f * u128::from(MAX_RATIO),
+                "identifiers at depth {DEPTH} cost {d}us against {f}us shallow at {N} identifiers                  ({:.1}x, bound {MAX_RATIO}x) — a per-node parent lookup is back",
+                d as f64 / f as f64
+            );
+        })
+        .expect("spawn")
+        .join()
+        .expect("the walk itself must not recurse into trouble");
+}

@@ -167,11 +167,17 @@ impl AnalysisCache {
     /// How many entries the housekeeping pass deleted during [`Self::open`] — 0 on the overwhelmingly
     /// common path where the cache was already under budget.
     ///
-    /// Exposed because eviction is otherwise a SILENT state change: the next run pays a re-analysis
+    /// Kept as its own accessor because eviction is otherwise a SILENT state change: the next run pays a re-analysis
     /// cost for every dropped entry, and without this the user has no way to learn why it got slower.
     /// A caller that wants the ready-made disclosure sentence should use [`Self::eviction_warning`]
     /// rather than re-deriving one from this number.
-    pub fn evicted_entries(&self) -> usize {
+    /// `#[cfg(test)]`, and that is the honest shape (2026-09-07, review ledger V75). It was `pub`, and
+    /// narrowing it made the compiler say the sharper thing: NOTHING in a non-test build calls it. The
+    /// production channel is [`Self::eviction_warning`], which reads `self.evicted` directly — so this
+    /// accessor exists to let a test assert the exact COUNT rather than parse it back out of a sentence,
+    /// which is the message-string coupling this repo keeps out of its tests.
+    #[cfg(test)]
+    pub(crate) fn evicted_entries(&self) -> usize {
         self.evicted
     }
 

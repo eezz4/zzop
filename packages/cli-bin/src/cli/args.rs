@@ -2,6 +2,46 @@
 //! answers "is this argument list well-formed?" and exits 2 when it is not; nothing here prints a result
 //! or calls the shared library.
 
+/// Refuses a VALUE-TAKING flag given more than once, for every argv lifter in this module's siblings.
+///
+/// # The defect this closes (2026-09-12)
+/// Every lifter in this binary stores its knob as `slot = Some(value)`, so a repeated flag kept the LAST
+/// value and discarded the earlier ones with exit 0 and an empty stderr. Measured on
+/// `cases/trees/api-be` before the fix: `--rule db/update-delete-no-where --rule
+/// http/protected-path-no-auth-evidence --limit 200` printed the 4 rows of the SECOND rule and none of
+/// the first's 3, with `findings.truncated` absent — so nothing in the reply said a row had been
+/// withheld, and the caller who asked about two rules was answered about one. `--severity critical
+/// --severity info` widened the view to all 92 rows, and `--limit 1 --limit 200` ignored the 1.
+///
+/// The worst shape was a TYPO in the discarded position: `--rule totally/bogus-rule --rule
+/// db/update-delete-no-where` exited 0 with an empty stderr, because
+/// [`super::fail_on`]'s unmatchable-filter refusal only ever sees the surviving value. A binary whose
+/// whole argv layer exists to refuse "you called it wrong" was accepting the one argv that cannot mean
+/// what it says.
+///
+/// # Why REFUSED and not accumulated
+/// Accumulating would be a new capability, not a bug fix: `zzop_summary::FindingFilters` holds ONE
+/// `rule`/`severity`, and the MCP tool arguments these flags parse into are single-valued too, so a
+/// multi-valued CLI would be a second filtering vocabulary behind one of the two hosts — the exact
+/// split this module's doc refuses. Whether a multi-rule filter should exist is a product question and
+/// is left open; this only stops the silent half.
+///
+/// # Exit code
+/// `2`, whose MEANING (the invocation was refused) is untouched — the argv that earns it grows, the way
+/// it grew for a bare DSL id (2026-08-20) and for an unmatchable qualified id (2026-09-02) in this same
+/// file. No `0`/`1`/`3` run changes.
+pub fn refuse_repeated_flag(already_set: bool, flag: &str, usage: &str) {
+    if !already_set {
+        return;
+    }
+    eprintln!(
+        "{usage} ({flag} was given more than once. This binary keeps ONE value per flag, so the \
+         earlier {flag} would be silently discarded and the reply would answer a narrower question \
+         than you asked — pass {flag} exactly once.)"
+    );
+    std::process::exit(2);
+}
+
 /// The findings-view knobs every analysis subcommand takes: `--severity <critical|warning|info>`,
 /// `--rule <id>`, `--limit <n>`. Lifted out of argv HERE (the same "pull the flags, hand the rest to the
 /// positional parser" shape [`super::run::run_graph`] uses for `--scope`/`--top`), then handed to the
@@ -10,9 +50,11 @@
 /// arguments parse into, so a CLI run and a tool call filter identically by construction.
 ///
 /// Returns `(argv with the three flags removed, filters)`. Every mistake is an argument-shape error
-/// (exit 2), never a silently-ignored option: a missing or dash-shaped value, an unknown severity, and
-/// an out-of-range/non-integer limit all exit 2 with the subcommand's usage line — the validation
-/// vocabulary itself comes from the shared constructor, so the two hosts reject the same values.
+/// (exit 2), never a silently-ignored option: a missing or dash-shaped value, an unknown severity, an
+/// out-of-range/non-integer limit, and — since 2026-09-12 — a REPEATED flag all exit 2 with the
+/// subcommand's usage line. The validation vocabulary itself comes from the shared constructor, so the
+/// two hosts reject the same values; the repeat refusal is CLI-only because argv is the only one of the
+/// two wires on which a knob can be spelled twice ([`refuse_repeated_flag`] carries the measurement).
 pub fn extract_finding_filters(
     args: &[String],
     usage: &str,
@@ -28,10 +70,22 @@ pub fn extract_finding_filters(
                 std::process::exit(2);
             };
             match flag {
-                "--severity" => severity = Some(value.clone()),
-                "--rule" => rule = Some(resolve_rule_filter(value, usage)),
+                "--severity" => {
+                    refuse_repeated_flag(severity.is_some(), flag, usage);
+                    severity = Some(value.clone());
+                }
+                "--rule" => {
+                    // Checked BEFORE `resolve_rule_filter`, which exits 2 on its own for a bare id: a
+                    // second `--rule` is wrong whatever it spells, and resolving it first would report
+                    // the value's shape while staying silent about the flag that was thrown away.
+                    refuse_repeated_flag(rule.is_some(), flag, usage);
+                    rule = Some(resolve_rule_filter(value, usage));
+                }
                 _ => match value.parse::<usize>() {
-                    Ok(n) => limit = Some(n),
+                    Ok(n) => {
+                        refuse_repeated_flag(limit.is_some(), flag, usage);
+                        limit = Some(n);
+                    }
                     Err(_) => {
                         eprintln!("{usage} (--limit needs a non-negative integer, got {value:?})");
                         std::process::exit(2);

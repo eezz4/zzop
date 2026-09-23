@@ -155,7 +155,7 @@ fn property_alternation_members(rule_id: &str, pattern: &str) -> Vec<String> {
 }
 
 /// Policy pin (T2 — the boundary admits no shared symbol): the TypeScript parser's
-/// `PROMISE_CONTINUATION_METHODS` and the continuation arm of `react/setstate-after-async-unguarded`'s
+/// `PROMISE_CONTINUATION_METHODS` and the continuation arm of `reliability/setstate-after-async-unguarded`'s
 /// `async-boundary` pattern are ONE policy — "which member calls take a callback that runs on the RESUMED
 /// continuation" — spelled twice only because a JSON pack cannot reference a Rust crate's constant.
 ///
@@ -177,10 +177,10 @@ fn property_alternation_members(rule_id: &str, pattern: &str) -> Vec<String> {
 /// Order is not pinned: alternation order and slice order are equally meaningless to their consumers
 /// (a regex alternation and a `.contains()` lookup), so both sides are sorted before comparison.
 #[test]
-fn the_promise_continuation_vocabulary_is_identical_in_the_parser_and_the_react_pack() {
+fn the_promise_continuation_vocabulary_is_identical_in_the_parser_and_the_reliability_pack() {
     let packs = load_all_packs();
-    let react = find_pack(&packs, "react");
-    let rule = find_rule(react, "setstate-after-async-unguarded");
+    let reliability = find_pack(&packs, "reliability");
+    let rule = find_rule(reliability, "setstate-after-async-unguarded");
     let boundary = method_scan_pattern_by_label(rule, "async-boundary");
 
     let mut from_pack = property_alternation_members(&rule.id, boundary);
@@ -193,7 +193,7 @@ fn the_promise_continuation_vocabulary_is_identical_in_the_parser_and_the_react_
 
     assert_eq!(
         from_pack, from_parser,
-        "the promise-continuation vocabulary has forked: react/setstate-after-async-unguarded's \
+        "the promise-continuation vocabulary has forked: reliability/setstate-after-async-unguarded's \
          `async-boundary` pattern accepts {from_pack:?} as continuation boundaries while the TypeScript \
          parser's PROMISE_CONTINUATION_METHODS merges {from_parser:?} — a token the rule accepts but the \
          parser does not merge leaves the continuation callback in its own function span, so \
@@ -220,7 +220,7 @@ const ORDER_GATE_RESIDUAL: &str = "A trigger line that sits inside NO parser-pro
 /// into NO function span reads as "no gate on this line", never as "no pair", so the floor drops to 0 and
 /// every earlier ordering match in the scanned symbol span is readmitted — the pre-gate scope. It degrades
 /// per LINE, not per file: a file WITH spans still has lines outside all of them (a class-property
-/// initializer, a top-level statement), which `rules/dsl/react/setstate_after_async_unguarded.rs`'s
+/// initializer, a top-level statement), which `rules/dsl/reliability/setstate_after_async_unguarded.rs`'s
 /// `a_class_property_setter_outside_every_function_span_keeps_the_pre_gate_pairing` pins as live, intended
 /// behavior.
 ///

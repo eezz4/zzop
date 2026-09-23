@@ -87,7 +87,17 @@ fn a_too_new_schema_version_is_a_named_issue() {
 
 #[test]
 fn a_non_compiling_regex_is_a_named_issue() {
-    let broken = BUNDLED_SECURITY_PACK.replacen(r#""(?i)\\.(ts|tsx)$""#, r#""(?i)\\.(ts|tsx$""#, 1);
+    // The literal is a `file_pattern` that really exists in the bundled pack; the copy drops its
+    // closing paren so the regex cannot compile. It tracked `(ts|tsx)` until 2026-09-09, when the
+    // rule-extension closure widened every TypeScript-family pattern (review ledger V133) and this
+    // replace stopped hitting. The assertion below is what caught it — a `replacen` that misses
+    // returns the input unchanged, so without that check this test would have gone on passing while
+    // testing nothing at all.
+    let broken = BUNDLED_SECURITY_PACK.replacen(
+        r#""(?i)\\.(ts|tsx|mts|cts)$""#,
+        r#""(?i)\\.(ts|tsx|mts|cts$""#,
+        1,
+    );
     assert_ne!(broken, BUNDLED_SECURITY_PACK, "the replace must have hit");
     let v = report(&broken);
     assert_eq!(v["valid"], false, "got: {v}");

@@ -121,19 +121,28 @@ pub(super) fn basis(
         // directly beside the clause that exists to refuse exactly that reading — so the two never ride
         // together. (Reproduced 2026-08-20 on a tree of 5 `.md` + 2 `.json`: the sentence asserted every
         // principal source filetype WAS read structurally on a run that read nothing.) An unparsed
-        // extension under the principal floor lands here too, so the clause says what it covers.
+        // extension under the principal floor lands here too, so the clause says what it covers —
+        // by NAMING the floor since 2026-09-04, because "nothing above THAT SHARE" put the only
+        // limit on an all-clear in a word (`PRINCIPAL`) and a pronoun whose antecedent lived in a
+        // sibling legend. A reader quoting this sentence alone got a completeness claim with its
+        // qualifier detached, which is the same defect `coverageGaps`' `basis` was repaired for.
         if structural_ext_count == 0 {
             return json!(crossed);
         }
         return json!(format!(
-            "{crossed}; every PRINCIPAL source filetype in this tree WAS read structurally, so \
-             nothing above that share was held back from the cross"
+            "{crossed}; every source filetype holding at least {floor}% of this tree's files WAS \
+             read structurally, so none of THOSE was held back from the cross. A filetype under \
+             {floor}% was never weighed for this sentence at all — its absence from \
+             `unreadExtensions` is a size bar, not a finding that no parser was missing",
+            floor = zzop_engine::MIN_UNCOVERED_EXTENSION_SHARE_PCT
         ));
     }
     json!(format!(
-        "{crossed}. {unread_count} principal filetype(s) of this tree were EXCLUDED from that cross \
-         because no structural parser read them — they are named in `unreadExtensions`, and this \
-         list, empty or not, says nothing about their files"
+        "{crossed}. {unread_count} filetype(s) holding at least {floor}% of this tree's files each \
+         were EXCLUDED from that cross because no structural parser read them — they are named in \
+         `unreadExtensions`, and that list says nothing about their files. A filetype under \
+         {floor}% is not counted here either way",
+        floor = zzop_engine::MIN_UNCOVERED_EXTENSION_SHARE_PCT
     ))
 }
 

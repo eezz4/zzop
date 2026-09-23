@@ -152,6 +152,37 @@ pub fn expand_auto_trees(
         "trees: \"auto\" expanded to {} tree(s) from {source}: {tree_desc}.",
         trees.len()
     ));
+    // 🔴 WHAT AUTO LEFT OUT, and why this warning is the most important one this function emits
+    // (2026-09-13, external review round 20, ledger V215).
+    //
+    // `trees: "auto"` covers WORKSPACE PACKAGES. On a repo whose workspace manifest describes only
+    // part of it — a JS/TS workspace beside a backend in another language, which is the ordinary
+    // shape of a real monorepo — everything outside those packages is simply not analyzed. Nothing
+    // said so. Measured on grafana: 26 trees, 3,056 of 23,043 tracked files (13.3%), `warnings: []`,
+    // and the string `pkg/` absent from the entire reply. The Go backend, `public/app` and `apps/`
+    // were gone.
+    //
+    // That silence is worse than a smaller answer, because the JOIN then runs over the survivors and
+    // reports what it cannot see: three `cross-layer/unprovided-mutation-call` warnings whose
+    // provider was in the dropped set. An agent acting on one would add a route that already exists.
+    //
+    // TOP-LEVEL ENTRIES, not a file count, and that is deliberate: a count needs a full walk of a tree
+    // this function has no business walking, while the readdir below is one syscall per root entry and
+    // names something the reader can act on. Under-reporting is impossible in the direction that
+    // matters — a directory listed here really is in no tree.
+    let uncovered = uncovered_top_level(base_dir, &dirs, &skip_dirs);
+    if !uncovered.is_empty() {
+        warnings.push(format!(
+            "trees: \"auto\" covers workspace packages only, and {} top-level entr{} of this repo \
+             belong to no tree: {}. Nothing under them is analyzed, and the cross-layer join will \
+             report consumes as unprovided when their provider lives there. Add them to \"trees\" \
+             explicitly if they are part of the same system.",
+            uncovered.len(),
+            if uncovered.len() == 1 { "y" } else { "ies" },
+            uncovered.join(", ")
+        ));
+    }
+
     if trees.len() == 1 {
         warnings.push(
             "trees: \"auto\" resolved only one workspace package — the cross-layer join needs >= 2 trees with distinct sourceIds to fire, so this run behaves like a single-tree analysis."
@@ -166,6 +197,50 @@ pub fn expand_auto_trees(
     map.insert("trees".to_string(), Value::Array(trees_json));
 
     Ok((Value::Object(map), warnings))
+}
+
+/// Top-level entries of `base_dir` that lie inside no expanded tree — the population `trees: "auto"`
+/// silently omits. Directories only: a stray file at the repo root carries no analyzable subtree, and
+/// listing `README.md` beside `pkg` would bury the signal this exists to give.
+///
+/// Skipped: dotted entries (`.git`, `.github`) and the caller's own `vocabulary.workspaceSkipDirs`.
+///
+/// 🔵 There is deliberately NO second, private list here. The first draft carried an `ALWAYS_SKIP` of
+/// `node_modules`/`target`/`vendor`, and `check-convention-vocab-declarable.sh` refused it — correctly:
+/// a vocabulary the census calls a convention is a name the PROJECT picks, so the engine must not hold
+/// it as a built-in guess. The user already declares that list, the starter config ships
+/// `["node_modules", ".git"]` in it, and one owner for "directories I do not care about" is the whole
+/// point. A project that clears the key and then sees `node_modules` named here is being told the
+/// truth about its own declaration.
+///
+/// A tree root of `.` covers everything, which is why the containment test is a path-prefix check
+/// rather than equality: `packages/ui` covers nothing at top level, `packages` does.
+fn uncovered_top_level(base_dir: &Path, dirs: &[String], skip_dirs: &[String]) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(base_dir) else {
+        return Vec::new(); // unreadable root is the caller's problem, reported elsewhere
+    };
+    let mut out: Vec<String> = Vec::new();
+    for entry in entries.flatten() {
+        if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
+        if name.starts_with('.') || skip_dirs.iter().any(|s| s == &name) {
+            continue;
+        }
+        // Covered when some tree root IS this entry, or lives under it, or is the repo root itself.
+        let covered = dirs.iter().any(|d| {
+            let d = d.trim_start_matches("./");
+            d == "." || d == name || d.starts_with(&format!("{name}/"))
+        });
+        if !covered {
+            out.push(name);
+        }
+    }
+    out.sort();
+    out
 }
 
 /// The manifest precedence shared by [`expand_auto_trees`] and [`single_tree_workspace_warning`]:

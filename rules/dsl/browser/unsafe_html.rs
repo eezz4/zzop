@@ -1,4 +1,7 @@
-use crate::{assert_disqualifier_clause_precedes_imperative, scan, TempDir};
+use crate::{
+    assert_disqualifier_clause_precedes_imperative, assert_landing_precedes_imperative,
+    sanitizer_subtraction_landing, scan, TempDir,
+};
 
 // --- unsafe-html-sink ---
 
@@ -741,10 +744,15 @@ fn a_plain_unsanitized_call_value_still_fires() {
 /// The IMPERATIVE moved past ALL THREE residuals rather than Residual 1 moving forward. Two reasons.
 /// Residuals 2 and 3 are disqualifiers by the same criterion ("every one of those shapes still fires",
 /// "therefore fires"), so putting the verb after the last of them is the stronger claim, not just the
-/// cheaper one. And the residuals are numbered and introduced by "the rest were the standing residuals
-/// below" — lifting number 1 out of a numbered list breaks both the numbering and its introduction. The
-/// imperative is self-contained (no pronoun, its own examples) and now sits in front of the suppression
-/// marker. 4659 chars before and after, character multiset identical.
+/// cheaper one. And the residuals are numbered and introduced by "What the veto does NOT reach is the
+/// standing residuals below" — lifting number 1 out of a numbered list breaks both the numbering and
+/// its introduction. The imperative is self-contained (no pronoun, its own examples) and now sits in
+/// front of the suppression marker. 4659 chars before and after, character multiset identical.
+///
+/// That introduction used to read "the rest were the standing residuals below", trailing two corpus
+/// censuses of the veto's yield. The censuses were cut as rule-development history; the sentence had
+/// to be reworded because "the rest" pointed at them. The numbered list it introduces is unchanged,
+/// and so is everything this test asserts.
 #[test]
 fn unsafe_html_sink_message_puts_the_vocabulary_residual_before_the_use_textcontent_imperative() {
     let dir = TempDir::new("zzop-browser");
@@ -767,5 +775,53 @@ fn unsafe_html_sink_message_puts_the_vocabulary_residual_before_the_use_textcont
         &hits[0].message,
         "Residual 1 — VOCABULARY: sanitizer-NAMED is not sanitizer-PROVEN",
         "Use `textContent` for plain text",
+    );
+}
+
+/// §33/§37 LANDING pin. A SECOND claim about the same imperative, on the other axis: the pin above
+/// says the reader meets the sentence that can make this finding WRONG before the remedy, and this one
+/// says they meet what the remedy COSTS when the finding is right. The auditor story above is the
+/// disqualifier half; this half is the reader who has a real sink, does exactly what they were told,
+/// and ships a page whose embed is gone.
+///
+/// The landing lands between the two, which is the order convention: disqualifier, then landing, then
+/// verb. The invalidation probe is to move `sanitizer_subtraction_landing()` to the tail — every token
+/// stays present and spelled once, and this goes red on ORDER while the pin above stays green.
+#[test]
+fn unsafe_html_sink_landing_precedes_the_imperative() {
+    let dir = TempDir::new("zzop-browser");
+    dir.write(
+        "render.ts",
+        "declare const el: HTMLElement;\ndeclare const userInput: string;\nexport function render() {\n  el.innerHTML = userInput;\n}\n",
+    );
+    let out = scan(&dir);
+    let hits: Vec<_> = out
+        .findings
+        .iter()
+        .filter(|f| f.rule_id == "browser/unsafe-html-sink")
+        .collect();
+    assert_eq!(hits.len(), 1, "{:?}", out.findings);
+    assert_landing_precedes_imperative(
+        "unsafe-html-sink",
+        &hits[0].message,
+        sanitizer_subtraction_landing(),
+        "Use `textContent` for plain text",
+    );
+    // The disqualifier still precedes the landing — the three-way order is the claim, and asserting
+    // only the two pairs would let the landing drift in front of the residuals.
+    let at_residual = hits[0]
+        .message
+        .find("Residual 1 — VOCABULARY")
+        .expect("residual 1 present");
+    let at_landing = hits[0]
+        .message
+        .find(sanitizer_subtraction_landing())
+        .expect("landing present");
+    assert!(
+        at_residual < at_landing,
+        "unsafe-html-sink: the landing (byte {at_landing}) moved AHEAD of the residual that \
+         disqualifies this finding (byte {at_residual}) — the order is disqualifier, landing, verb. \
+         In: {}",
+        hits[0].message
     );
 }

@@ -9,7 +9,7 @@
 //
 // Four probes of the rule's stated boundary, all of which a co-occurrence matcher would fail:
 //   1. a console write in a function that ALSO contains a loop, but outside it — the exact 11/11
-//      false-positive shape a field audit found in perf/api-in-loop before loop spans replaced token
+//      false-positive shape a field audit found in reliability/api-in-loop before loop spans replaced token
 //      co-occurrence, and the reason this rule exists on the call-site channel at all;
 //   2. a console call named only in a comment and in a string literal INSIDE a loop body — never a site,
 //      so the containment question is never asked;

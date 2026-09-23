@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# commit-msg -- the "Subtraction considered:" gate.
+#
+# WHAT IT STOPS: adding without first asking whether removing would do. The subject is the missing
+# QUESTION, not the ratio -- fixing a defect honestly often adds lines, and that is not a violation.
+#
+# THE RULE, inline, because this file ships and a maintainer reading it here should not need a
+# second document: this project's founding doctrine is Saint-Exupery's -- perfection is reached
+# not when there is nothing left to add but when there is nothing left to take away. The practical
+# form is a question asked BEFORE building: would removing something solve this instead? The
+# trigger is a new moving part -- a new file, a new guard, a new config key, a new rule -- not
+# every commit. This file is the wiring for the half of that population git can see.
+#
+# MEASURED population this gate covers (2026-09-23, applied retroactively to the unreleased delta):
+#     commits that add a tracked file   77 / 192  (40%)
+#     tracked files added              150
+#   Recount: git log origin/main..HEAD --diff-filter=A --format='%h' --name-only | grep -cE '^[a-f0-9]{7,}$'
+#
+# WHAT THIS GATE STRUCTURALLY CANNOT SEE -- written down rather than left silent:
+#   This repository keeps its maintainer notes in a directory git is told to ignore, so tooling built
+#   there never reaches the index and this hook never fires for it. The case that PRODUCED this
+#   ruling was exactly there: a 166-line instrument was built to police a hand-written counter,
+#   without anyone asking "what if the counter went away instead?" -- and the instrument itself then
+#   proved the counter was redundant, because each entry already carried a unique commit sha. The
+#   gate for that population is the maintainer's own review record, not this hook. Two populations,
+#   two gates; not one gate leaking.
+#
+# WHY IT CHECKS PRESENCE AND NOT CONTENT: the ruling's author named the failure mode when choosing it
+# -- a required line becomes a ritual once it is tedious. Checking content would breed a sentence
+# written to pass. If these lines start coming back empty, that is a signal to revisit the ruling,
+# not to tighten this hook.
+
+set -euo pipefail
+
+MSG_FILE="${1:?commit-msg: no message file argument}"
+MARKER='Subtraction considered:'
+
+# Nothing added means this gate has no subject (bug fixes, doc typos, refreshed numbers).
+# `|| true` is load-bearing: an empty result is the NORMAL case here (most commits add nothing),
+# and under `set -e` a non-zero exit on the assignment would kill this hook BEFORE the floor below
+# can say so -- a mute exit 1 that rejects every commit while printing nothing. check-shell-mute-floor
+# is the guard that names this class.
+ADDED="$(git diff --cached --diff-filter=A --name-only || true)"
+if [ -z "$ADDED" ]; then
+  exit 0
+fi
+
+# Comment lines are not the message -- a template hint must not satisfy the gate.
+# NOT `| grep -q`: under `set -o pipefail` a -q match exits early, SIGPIPEs the producer, and the
+# pipeline then reports failure even though the marker WAS found -- on a message long enough that the
+# producer has not finished. A small canary never sees it; check-shell-pipe-sigpipe does.
+if grep -v '^#' "$MSG_FILE" | grep -F "$MARKER" >/dev/null; then
+  exit 0
+fi
+
+COUNT="$(printf '%s\n' "$ADDED" | grep -c . || true)"
+{
+  echo "commit-msg: this commit adds ${COUNT} tracked file(s) and the message has no '${MARKER}' line."
+  echo
+  printf '%s\n' "$ADDED" | sed 's/^/    + /'
+  echo
+  echo "  Write the subtraction you considered before you added. Two lines is enough:"
+  echo
+  echo "    Subtraction considered: <what removing would have looked like>"
+  echo "      -> <what that would have cost>"
+  echo "    Chose to add, because <reason>."
+  echo
+  echo "  \"Nothing to remove\" is a valid answer -- recording that the question was ASKED is the whole point."
+  echo "  Why: perfection is when there is nothing left to take away -- so ask before you add."
+} >&2
+exit 1

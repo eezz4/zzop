@@ -4,14 +4,19 @@
 //! `call_sites` and `string_literals` submodules are their siblings for the two named (non-span)
 //! channels, each with its own per-language table and degrade note.
 
+mod call_graph;
 mod call_sites;
 mod oversized;
+mod recursion;
 mod spans;
 mod string_literals;
 
 pub(in crate::pipeline) use oversized::is_oversized;
+pub(in crate::pipeline) use recursion::exceeds_recursion_caps;
+pub(crate) use recursion::{text_exceeds_recursion_caps, RecursionNeedle};
 
 use zzop_core::{ImportMap, IoFacts, RulePackDef};
+use zzop_parser_typescript::parse_export_aliases;
 
 use crate::dispatch::Language;
 use crate::EngineConfig;
@@ -43,7 +48,29 @@ pub(super) fn compute_fresh_artifact(
     packs: &[&RulePackDef],
 ) -> FileArtifact {
     if is_oversized(bytes, config) {
-        return oversized::oversized_artifact(rel, text, language, config, packs);
+        return oversized::lexical_only_artifact(
+            rel,
+            text,
+            language,
+            config,
+            vocab,
+            packs,
+            DegradeCause::Oversized,
+        );
+    }
+
+    // Ordered AFTER the size cap on purpose: both refuse before any parser runs, and a file that trips
+    // both is an oversized file first — that is the lever its owner can actually change.
+    if let Some(needle) = exceeds_recursion_caps(text, language, rel) {
+        return oversized::lexical_only_artifact(
+            rel,
+            text,
+            language,
+            config,
+            vocab,
+            packs,
+            DegradeCause::PastRecursionCap(needle),
+        );
     }
 
     // Prisma is the one language whose io PROJECTION is computed by the same call that produces its
@@ -179,6 +206,13 @@ pub(super) fn compute_fresh_artifact(
     // Siblings of the span projections, same `!degraded` AST gate — each module doc owns its table.
     let call_sites = call_sites::project(language, degraded, rel, text);
     let string_literals = string_literals::project(language, degraded, rel, text);
+    // The call-graph pass used to gather this itself, on its own read + re-parse of every dispatched
+    // source. It runs here because the parse memo is warm here and nowhere else — see the module doc.
+    let call_graph = call_graph::project(language, degraded, rel, text, vocab);
+    // `unimported-export`'s last two per-file inputs — they replace a second read+parse of the whole tree (review ledger V110).
+    let export_aliases = ts_only(is_ts_fresh, rel, text, parse_export_aliases);
+    let has_generated_banner =
+        crate::generated_banner::has_generated_banner(rel, text, &vocab.generated_file_markers);
     // Store-binding and field-usage-token facts are both raw-text regex scans, never an AST parse, so — like the removed `scan_store_map`/`scan_field_usage` filesystem walks they replace — they run unconditionally on `rel`/`text` here regardless of `language`/`degraded`; each gates its own applicability internally (the store-file convention, the `.ts`/`.tsx` extension, respectively).
     let field_usage_tokens = sorted_field_usage_tokens(rel, text);
     let (mut findings, rule_timings, minified_or_generated) = eval_packs(
@@ -233,6 +267,9 @@ pub(super) fn compute_fresh_artifact(
         test_spans: spans.test_spans,
         call_sites,
         string_literals,
+        call_graph,
+        export_aliases,
+        has_generated_banner,
     }
 }
 

@@ -206,7 +206,7 @@ fn a_bare_tail_shared_by_two_namespaces_is_reported_ambiguous() {
 
 /// An io-scan marker is read off the anchor line's source TEXT, and envelope mode supplies a constant
 /// `None` anchor-line callback (`envelope::ingest`) — so the marker this command prints is inert there,
-/// and `crates/engine/tests/analyze_io_scan_tree.rs` already pins that inertness end to end. Seals that
+/// and `crates/engine/tests/integration/analyze_io_scan_tree.rs` already pins that inertness end to end. Seals that
 /// `explain` states the run-mode condition instead of handing a reader a comment that silently does
 /// nothing in an envelope-fed pipeline. The other kinds must NOT carry the condition (it is false for
 /// them — their marker is read from the file they scanned), which the second half checks.
@@ -272,4 +272,45 @@ fn an_output_id_is_answered_after_every_rule_lane_misses() {
         .expect_err("a disclosure class is not a rule");
     assert!(err.contains("coverage-DISCLOSURE class id"), "got: {err}");
     assert!(!err.contains("unknown rule id"), "got: {err}");
+}
+
+/// 🔴 Every error this lookup can produce is printed by BOTH the CLI and the MCP server, so a pointer
+/// written in one surface's vocabulary is an instruction the other surface's reader cannot follow.
+///
+/// Measured (external review round 20, ledger V219): `resources/read` on
+/// `zzop://rule/mutating-route-no-auth` answered `-32602` with *"See `zzop contract rule-catalog`"* —
+/// a shell command, handed to a client that has no shell.
+///
+/// This is a CONTRACT over every error lane rather than a pin on one string: an error that tells the
+/// reader where to go must name a route the reader can actually take, whichever surface they are on.
+/// Pinning the one measured message would have left the next lane free to reintroduce it.
+#[test]
+fn no_error_points_at_a_cli_command_without_also_naming_the_mcp_route() {
+    let packs = fabricated_packs();
+    let natives = [
+        "circular".to_string(),
+        "cross-layer/duplicate-route".to_string(),
+    ];
+    // One query per error lane this lookup has.
+    let queries = [
+        "shared",                // ambiguous across two bundled packs
+        "code-hygiene",          // names a whole pack
+        "circular",              // a native analysis id
+        "duplicate-route",       // the bare form of a namespaced native id
+        "no-such-rule-anywhere", // unknown outright
+        "stale-cache",           // a disclosure class id
+    ];
+    for query in queries {
+        let Err(err) = explain_over(&packs, &natives, query, Corpus::Bundled) else {
+            continue; // this lane resolved rather than erroring — not this test's subject
+        };
+        if !err.contains("`zzop ") {
+            continue; // names no CLI command at all, so there is nothing to balance
+        }
+        assert!(
+            err.contains("zzop://"),
+            "the error for {query:?} names a CLI command but no MCP route, so an MCP client is told \
+             to run something it cannot run: {err}"
+        );
+    }
 }

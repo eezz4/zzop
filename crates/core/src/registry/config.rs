@@ -1,11 +1,20 @@
 //! Config-driven gating — the `RuleConfig` shape plus the suppression / disabled-rule /
 //! severity-override matching semantics every rule layer is gated through. See the `registry`
 //! module doc for the overall design call.
+//!
+//! The PATH-matching half lives in [`path_filter`] and is re-exported from here, so a caller still
+//! reaches everything through `zzop_core::registry::config`. The seam is the question each half
+//! answers: this file decides whether a rule is EVALUATED (ids only), `path_filter` decides whether a
+//! produced finding is REPORTED (paths only). Neither calls the other.
 
-use std::collections::{BTreeMap, HashMap};
-use std::sync::{Mutex, OnceLock};
+mod path_filter;
 
-use regex::Regex;
+pub use path_filter::{
+    glob_matches, global_exclude_matches_path, is_suppressed, suppression_matches_path,
+};
+
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::{finding::Finding, Severity};
@@ -87,8 +96,8 @@ pub struct RuleConfig {
     pub disabled_rules: Vec<String>,
     /// DSL pack ALLOWLIST — when non-empty, a pack whose id is absent from it does not run. The opt-IN
     /// half of the pack axis, and the reason it exists: `disabled_rules` can only express "everything
-    /// except these", so a caller who wants one pack out of the dozen bundled ones had to enumerate the
-    /// other eleven and re-edit that list every time a pack ships. EMPTY MEANS NO ALLOWLIST (every
+    /// except these", so a caller who wants ONE bundled pack had to enumerate every
+    /// other one and re-edit that list every time the bundle changed size. EMPTY MEANS NO ALLOWLIST (every
     /// loaded pack runs), never "allow nothing" — the absent-is-not-a-claim direction every optional
     /// filter in this struct takes.
     ///
@@ -106,6 +115,23 @@ pub struct RuleConfig {
     /// `apply_severity_override`, on the finding — not through the registry. `BTreeMap` (not `HashMap`)
     /// so config round-trips (serialize/compare/hash) are deterministic.
     pub severity_overrides: BTreeMap<String, Severity>,
+    /// Ids that SHIP OFF: registered, gated, and not evaluated unless this config names them.
+    ///
+    /// The third state in an id's life, and it exists because the other two could not express it.
+    /// `disabled_rules` says "the user switched this off" and an absent id says "it ran"; a rule the
+    /// PROJECT ships off is neither, and folding it into `disabled_rules` would make every disclosure
+    /// that reads that list attribute the choice to the user.
+    ///
+    /// TURNING ONE ON TAKES NO NEW VOCABULARY. `rules: { "<id>": "warn" }` already routes to
+    /// `severity_overrides`, and naming an id with a severity is the user saying they want it — so
+    /// [`is_enabled`] reads that map as the opt-in. A new `"on"` value would be a second spelling of a
+    /// gesture the surface already has. The object form (`{ "exclude": [...] }`, no severity) counts too
+    /// and lands in `suppressions` instead; [`names_rule`] holds both, and why one alone is not enough.
+    ///
+    /// EMPTY IS THE DEFAULT and means "nothing ships off" — the kernel holds no id, ever. The list is
+    /// filled by the composing layer from the owning rules crates (see `zzop_engine::register_all_native`
+    /// and `zzop_rules_graph::DEFAULT_OFF`), which is the same split every other native-id table takes.
+    pub default_off: Vec<String>,
     /// Finding-level accept-list. See `is_suppressed`.
     pub suppressions: Vec<Suppression>,
     /// Config-wide finding-level filter applied to EVERY rule at once (the top-level `"exclude"` config
@@ -115,146 +141,9 @@ pub struct RuleConfig {
     pub global_excludes: Vec<GlobalExclude>,
 }
 
-/// Shared substring-vs-glob path-filter semantics: `glob` takes precedence over `path` when both are set;
-/// a filter with neither matches every file; an unparseable glob fails safe (matches nothing). Both
-/// `suppression_matches_path` and `global_exclude_matches_path` are thin wrappers over this so the two
-/// filter shapes (`Suppression`, `GlobalExclude`) never diverge in matching behavior.
-fn path_filter_matches(glob: &Option<String>, path: &Option<String>, file: &str) -> bool {
-    if let Some(glob) = glob {
-        return glob_matches(glob, file);
-    }
-    match path {
-        None => true,
-        Some(path) => file.contains(path.as_str()),
-    }
-}
-
-/// True if a finding for `rule` (optionally in `file`) is suppressed by `config.global_excludes` (a
-/// rule-agnostic match drops the finding regardless of `rule`) OR `config.suppressions`: an entry matches
-/// when its `rule` equals `rule` AND its path filter matches (`suppression_matches_path`). A
-/// path/glob-qualified entry never matches a fileless finding. Multiple entries are OR-ed.
-pub fn is_suppressed(config: &RuleConfig, rule: &str, file: Option<&str>) -> bool {
-    if let Some(f) = file {
-        if config
-            .global_excludes
-            .iter()
-            .any(|entry| global_exclude_matches_path(entry, f))
-        {
-            return true;
-        }
-    }
-    config.suppressions.iter().any(|entry| {
-        if entry.rule != rule {
-            return false;
-        }
-        match file {
-            Some(f) => suppression_matches_path(entry, f),
-            // A path/glob-qualified entry never matches a fileless finding; only a filter-less entry does.
-            None => entry.glob.is_none() && entry.path.is_none(),
-        }
-    })
-}
-
-/// True when `suppression`'s path filter matches `file` (glob takes precedence over the substring
-/// `path`; a suppression with neither filter matches every file). Shares the exact semantics
-/// `is_suppressed` applies, exposed so a caller can detect a path/glob filter that matches no scanned
-/// file (a likely typo — see the engine's unmatched-suppression warning).
-pub fn suppression_matches_path(suppression: &Suppression, file: &str) -> bool {
-    path_filter_matches(&suppression.glob, &suppression.path, file)
-}
-
-/// True when `exclude`'s path filter matches `file`. Same substring-vs-glob semantics as
-/// `suppression_matches_path`, over a `GlobalExclude` instead of a `Suppression` — exposed so a caller can
-/// detect a top-level `exclude` entry that matches no scanned file (the engine's unmatched-exclude
-/// warning, mirroring `unmatched_suppression_warnings`).
-///
-/// One deliberate divergence from `Suppression`: a FILTER-LESS entry (`path`/`glob` both `None`) matches
-/// NOTHING here, whereas a filter-less `Suppression` matches everything for its one rule. A filter-less
-/// global exclude would silently drop EVERY finding of EVERY rule — a whole-run blast radius no one can
-/// mean (the CLI never emits one; only a malformed raw addon request can). Treating it as match-nothing
-/// also routes it into the unmatched-exclude warning instead of a silent total suppression.
-pub fn global_exclude_matches_path(exclude: &GlobalExclude, file: &str) -> bool {
-    if exclude.glob.is_none() && exclude.path.is_none() {
-        return false;
-    }
-    path_filter_matches(&exclude.glob, &exclude.path, file)
-}
-
-/// Whether `file` matches shell-style `glob` (full-path anchored). Compiled globs are memoized — a config
-/// has a handful of distinct patterns but `is_suppressed` runs per finding, so recompiling per call would
-/// be wasteful. An unparseable pattern is cached as `None` and matches nothing.
-///
-/// The cache is process-lifetime and never evicted. That's bounded for a one-shot CLI/`analyze` call (a
-/// config carries only a few globs); a long-lived addon host that analyzes many distinct configs over its
-/// lifetime would accumulate distinct glob keys without bound — swap in an LRU/per-call cache if that ever
-/// becomes a real embedding.
-fn glob_matches(glob: &str, file: &str) -> bool {
-    static CACHE: OnceLock<Mutex<HashMap<String, Option<Regex>>>> = OnceLock::new();
-    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut map = cache.lock().unwrap_or_else(|e| e.into_inner());
-    let compiled = map
-        .entry(glob.to_string())
-        .or_insert_with(|| Regex::new(&glob_to_regex(glob)).ok());
-    compiled.as_ref().is_some_and(|re| re.is_match(file))
-}
-
-/// Translate a shell-style path glob to an anchored regex source. `**` spans `/` (a `**/` or `/**`
-/// boundary also matches zero directories); `*` and `?` stay within a single path segment; `{a,b}`
-/// alternates (nesting not supported); every other character is matched literally.
-fn glob_to_regex(glob: &str) -> String {
-    let bytes = glob.as_bytes();
-    let mut re = String::from("^");
-    let mut brace_depth: u32 = 0;
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'*' => {
-                if i + 1 < bytes.len() && bytes[i + 1] == b'*' {
-                    // `**` — spans path separators.
-                    i += 1;
-                    if bytes.get(i + 1) == Some(&b'/') {
-                        // `**/` — also match zero leading directories.
-                        re.push_str("(?:.*/)?");
-                        i += 1;
-                    } else if re.ends_with('/') {
-                        // `/**` at end — also match zero trailing directories.
-                        re.truncate(re.len() - 1);
-                        re.push_str("(?:/.*)?");
-                    } else {
-                        re.push_str(".*");
-                    }
-                } else {
-                    // `*` — within a single segment.
-                    re.push_str("[^/]*");
-                }
-            }
-            b'?' => re.push_str("[^/]"),
-            b'{' => {
-                brace_depth += 1;
-                re.push_str("(?:");
-            }
-            b'}' => {
-                brace_depth = brace_depth.saturating_sub(1);
-                re.push(')');
-            }
-            b',' if brace_depth > 0 => re.push('|'),
-            // Escape every regex metacharacter so the remaining glob text is matched literally.
-            c => {
-                let ch = c as char;
-                if "\\.+()|[]^$".contains(ch) {
-                    re.push('\\');
-                }
-                re.push(ch);
-            }
-        }
-        i += 1;
-    }
-    re.push('$');
-    re
-}
-
-/// True if `rule_id` is NOT in `config.disabled_rules` — exact string match, no prefix/glob semantics (see
-/// `disabled_rules`'s own doc). Applies uniformly to a bare native-analysis id, a whole DSL pack id, or a
+/// True if `rule_id` is NOT in `config.disabled_rules`, AND — for an id in `config.default_off` — this
+/// config NAMED it. Exact string match, no prefix/glob semantics (see `disabled_rules`'s own doc).
+/// Applies uniformly to a bare native-analysis id, a whole DSL pack id, or a
 /// full `"<pack>/<rule>"` id — this function does not distinguish layers, it only compares strings. All
 /// three id shapes are honored end to end: pack ids and `"<pack>/<rule>"` ids are both enforced
 /// by `zzop_engine::pipeline::run_file_pass` before a pack ever reaches per-file evaluation (a disabled pack
@@ -262,7 +151,38 @@ fn glob_to_regex(glob: &str) -> String {
 /// while bare native ids are enforced at their own call sites (e.g. `register_native_analyses`'s ids
 /// checked directly against `is_enabled` before the corresponding analysis runs).
 pub fn is_enabled(config: &RuleConfig, rule_id: &str) -> bool {
-    !config.disabled_rules.iter().any(|d| d == rule_id)
+    if config.disabled_rules.iter().any(|d| d == rule_id) {
+        return false;
+    }
+    // An id that ships off runs only when this config named it. Placed HERE rather than at the three
+    // orchestrator call sites that gate the shipped-off analyses today, because every gate in the
+    // codebase already goes through this function: a fourth call site added later inherits the rule
+    // instead of having to remember it, which is the failure this repo keeps paying for elsewhere.
+    if config.default_off.iter().any(|d| d == rule_id) {
+        return names_rule(config, rule_id);
+    }
+    true
+}
+
+/// Whether this config NAMED `rule_id` in a way that asks for it to run — the opt-in half of the
+/// shipped-off gate, and deliberately BOTH spellings the `rules` surface already has.
+///
+/// The surface maps one config key to two engine lists depending on the value's shape:
+/// `"<id>": "info"` becomes a `severity_overrides` entry, while `"<id>": { "exclude": [...] }` with no
+/// `severity` becomes only `suppressions` entries (`zzop_config::mapper::options::rules_map`). Reading
+/// the severity map alone would therefore have made the second spelling a SILENT NO-OP: a user who wrote
+/// out which paths a shipped-off rule should skip would get no findings at all, with nothing in the reply
+/// saying the rule they had just configured never ran — and `docs/getting-started.md` uses exactly that
+/// spelling, on exactly one of these ids, as its worked example.
+///
+/// Excluding paths from a rule is asking for the rule on every OTHER path; nobody writes an exclusion for
+/// an analysis they do not want. So a suppression keyed to the id counts as naming it, and the two
+/// spellings mean the same thing here, which is the only reading under which the surface stays one
+/// surface. `global_excludes` deliberately does not count — it names no id, so it cannot be a statement
+/// about one.
+fn names_rule(config: &RuleConfig, rule_id: &str) -> bool {
+    config.severity_overrides.contains_key(rule_id)
+        || config.suppressions.iter().any(|s| s.rule == rule_id)
 }
 
 /// The gate every PACK-level call site uses: [`is_enabled`] plus [`RuleConfig::only_packs`]. Split from

@@ -1,8 +1,13 @@
 //! THE PER-REPLY PROSE FOLD — one copy of each repeated message text WORTH storing once, with every
 //! finding that shares it pointing at that copy from inside the same document.
 //!
-//! Three files: this one holds the contract (the field, the legend) and the fold itself, [`cost`]
-//! holds the byte arithmetic that decides what folds, and `tests` holds the pins.
+//! Four files: this one holds the contract (the fields, the legends) and the EXACT fold itself,
+//! [`template`] holds the second half — the fold for the rules whose prose carries a per-finding
+//! value, which is what keying on the whole message structurally cannot reach — [`cost`] holds the
+//! byte arithmetic that decides what folds in either half, and `tests` holds the pins.
+//!
+//! The two halves run in that order and only that order ([`fold`]), and a finding takes an address
+//! from exactly one of them.
 //!
 //! # The waste this removes
 //! A rule's `message` is its prescription, its disqualifying clause and its landing. That prose is
@@ -32,11 +37,15 @@
 //! (the repo's JS measurement harness reads this reply too) and left the frozen half doing nothing.
 //!
 //! # Why the pointer text is relative
-//! The sentence names `ruleMessages` as a SIBLING of the `shown` list it sits in, not an absolute
-//! path. One shaper feeds two lanes — `findings` (analyze / analyze-envelope) and
-//! `crossLayerFindings` (cross) — so an absolute path would be right on one lane and a lie on the
-//! other, and a shaper that must be TOLD which lane it feeds grows a parameter whose only job is to
-//! be spelled correctly twice.
+//! The sentence names `ruleMessages` as a SIBLING of the findings list it sits in, not an absolute
+//! path. The lanes do not share a block name — `findings.shown` (analyze / analyze-envelope),
+//! `crossLayerFindings.shown` (cross), `findings.list` (the file query) — so an absolute path would
+//! be right on one lane and a lie on the rest, and a shaper that must be TOLD which lane it feeds
+//! grows a parameter whose only job is to be spelled correctly once per lane.
+//!
+//! 🔵 That relativity is why the file query could adopt this fold (2026-09-13, ledger V223) by
+//! calling [`fold`] on its own list and publishing beside it — no new parameter, no second pointer
+//! wording. The lane list above is prose and will go stale; `fold`'s callers are the truth.
 //!
 //! # Why the gate is NET BYTES and not "did this repeat?"
 //! Repetition is the opportunity, not the payoff. Folding a text pays a pointer sentence (~175
@@ -91,8 +100,9 @@ pub(super) const RULE_MESSAGES_MEANING: &str =
      keyed by the rule id that produced it (a rule storing more than one distinct text gets \
      `<ruleId>#2`, `#3`, ... for its later ones). A finding whose text lives here carries \
      `messageRef` holding its key: resolve it against the `ruleMessages` object sitting BESIDE the \
-     `shown` list that finding came from — a sibling, not a fixed path, because one shaper feeds \
-     both the `findings` and the `crossLayerFindings` blocks. Read `finding.message` directly when \
+     findings list that finding came from — a sibling, not a fixed path, because the same fold is \
+     applied to every findings list this tool ships, whatever its block is called. Read \
+     `finding.message` directly when \
      `messageRef` is absent. A repeated text can also be absent from here: folding is applied only \
      where it removes more bytes than the pointer, the `messageRef` field and this table cost to \
      add, so a repeated message left inline is a size decision and never a sign that anything is \
@@ -101,11 +111,85 @@ pub(super) const RULE_MESSAGES_MEANING: &str =
      request. This is deduplication within one reply, never truncation: `truncated` remains the \
      only key that ever means something was left out.";
 
+/// The per-finding field carrying the residues of a TEMPLATE-folded message: the bytes that differ
+/// between this rule's findings, in order, to be spliced into the gaps of
+/// `ruleMessageTemplates[ruleId]`. Absent on any other finding — its presence IS the signal, the same
+/// contract [`MESSAGE_REF`] keeps, and no finding ever carries both.
+pub(super) const TEMPLATE_PARTS: &str = "templateParts";
+
+/// [`TEMPLATE_PARTS`] for the cross-language seam pin in `wire_contract_tests`, so the JS side's
+/// spelling is checked against this constant instead of against a second hand-typed literal.
+#[cfg(test)]
+pub(crate) fn template_parts_key() -> &'static str {
+    TEMPLATE_PARTS
+}
+
+/// The legend for `ruleMessageTemplates`, written to the same contract as [`RULE_MESSAGES_MEANING`].
+/// It states the splice rule in full because that rule IS the wire format: a reader holding only
+/// this reply must be able to rebuild every message from it without knowing what a zzop rule is.
+pub(super) const RULE_MESSAGE_TEMPLATES_MEANING: &str =
+    "Rules that write a finding's own subject into their prose — a table name, a symbol, a cycle \
+     path — emit a different message every time, so the `ruleMessages` table above cannot hold \
+     them. What those messages SHARE is stored here instead, keyed by rule id: an array of the \
+     literal text segments common to every one of that rule's findings in this reply. A finding \
+     whose text is stored this way carries `templateParts`, an array of the bytes that differ. \
+     Rebuild the message by interleaving the two, SEGMENT FIRST: \
+     `segments[0] + parts[0] + segments[1] + parts[1] + ...`, ending on the last segment \
+     (`parts` is always exactly one shorter than `segments`). A segment may be an empty string at \
+     either end, which is how a message that begins or ends with per-finding text is carried. Look \
+     the template up by the finding's own `ruleId`; there is no separate key field and no `#N` \
+     suffix, because one template serves a rule and a rule whose messages do not all fit one is \
+     left inline instead. Read `finding.message` directly when neither `templateParts` nor \
+     `messageRef` is present. The rebuilt text is byte-identical to what that finding used to carry \
+     inline — no sentence was shortened, dropped or reworded, and every byte is reachable without a \
+     second request. This is deduplication within one reply, never truncation: `truncated` remains \
+     the only key that ever means something was left out.";
+
+mod by_id;
+// Private on purpose: nothing outside this module needs the by-id lane's names. Only these two are
+// reached from shipped code here — the pass, and the legend `publish` pairs with its marker. The
+// lane's own wire spellings are used inside `by_id` and by the tests, which name them by path.
+use by_id::{point_at_rule_id, MESSAGE_BY_ID_MEANING};
 mod cost;
+mod template;
 #[cfg(test)]
 mod tests;
 
 use cost::{net_gain, one_time_bytes, pointer_sentence};
+
+/// What one shaped findings block gained from the fold: the two sibling tables it must publish, each
+/// absent when nothing of its kind was worth folding. A struct rather than a tuple because the caller
+/// emits them under different names and a swapped pair would be silently wrong.
+pub(crate) struct Folded {
+    messages: Option<serde_json::Value>,
+    templates: Option<serde_json::Value>,
+    /// Whether any shown finding arrived carrying the by-id pointer. Not produced by this module —
+    /// `zzop-facade` wrote it before the shaper ever saw the finding — but published here because this is
+    /// where a `message` and the legend explaining it are paired, and a third marker landing without
+    /// its legend is the failure [`Folded::publish`] exists to make impossible.
+    by_id: bool,
+}
+
+impl Folded {
+    /// Writes whichever tables fired onto a shaped block, each beside its own legend.
+    ///
+    /// Here rather than at the call site so the four wire names are spelled ONCE, in the module that
+    /// owns them, and so adding a third table cannot land with its legend left behind: the pairing is
+    /// this function's whole body.
+    pub(crate) fn publish(self, out: &mut serde_json::Value) {
+        if let Some(table) = self.messages {
+            out["ruleMessages"] = table;
+            out["ruleMessagesMeaning"] = RULE_MESSAGES_MEANING.into();
+        }
+        if let Some(table) = self.templates {
+            out["ruleMessageTemplates"] = table;
+            out["ruleMessageTemplatesMeaning"] = RULE_MESSAGE_TEMPLATES_MEANING.into();
+        }
+        if self.by_id {
+            out["messageByIdMeaning"] = MESSAGE_BY_ID_MEANING.into();
+        }
+    }
+}
 
 /// Folds every message text that more than one finding in `shown` carries AND that folding makes
 /// the reply smaller — see the module header for why those are two conditions and not one.
@@ -117,7 +201,23 @@ use cost::{net_gain, one_time_bytes, pointer_sentence};
 /// Deterministic in the way byte-identical output needs: keys are assigned in the order the texts
 /// first appear in `shown`, which the caller has already sorted by its three published ordering keys
 /// before calling here.
-pub(super) fn fold(shown: &mut [serde_json::Value]) -> Option<serde_json::Value> {
+/// Both halves of the fold, in the only order they compose: whole texts first, then TEMPLATES over
+/// what is still inline. Reversed, a template would swallow a rule's identical repeats under the
+/// costlier of the two encodings, and a finding could end up holding two addresses for one text.
+pub(crate) fn fold(shown: &mut [serde_json::Value]) -> Folded {
+    // FIRST, on the prose the facade handed over: the two folds below price `message`, and pricing a
+    // pointer they were about to replace would be the wrong arithmetic on the wrong text.
+    let by_id = point_at_rule_id(shown);
+    let messages = fold_exact(shown);
+    let templates = template::fold(shown);
+    Folded {
+        messages,
+        templates,
+        by_id,
+    }
+}
+
+fn fold_exact(shown: &mut [serde_json::Value]) -> Option<serde_json::Value> {
     let text_of = |f: &serde_json::Value| -> Option<(String, String)> {
         Some((
             f.get("ruleId").and_then(|v| v.as_str())?.to_string(),

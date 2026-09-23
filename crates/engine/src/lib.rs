@@ -84,12 +84,14 @@ pub use recognizers::framework_recognizers;
 // The capability x measured cross, shared by the coverage reply cell and the analyze warning that
 // delivers the same fact — see `recognizers::zero_extraction` for why one owner and two callers.
 pub use recognizers::zero_extraction;
-pub use rule_channels::{enabled_native_rules_reading, native_rule_channels};
+pub use rule_channels::{
+    enabled_native_rules_reading, ids_that_carry_no_finding, native_rule_channels,
+};
 pub use sightlines::rule_sightlines;
 pub use trees::{
     analyze_trees, MultiAnalyzeOutput, PackageImportSummary, MIN_PARALLEL_IMPL_SIGNALS,
 };
-pub use vocabulary::{normalizer_for, NormalizedKey, VocabularyConfig, NORMALIZED_VOCABULARY_KEYS};
+pub use vocabulary::VocabularyConfig;
 
 /// Composes every crate's own `register_native_analyses` into one `RuleRegistry` — the engine aggregator
 /// half of the extensibility contract (`rules/README.md`'s "Adding a rule" section). The kernel
@@ -100,6 +102,25 @@ pub fn register_all_native(registry: &mut RuleRegistry) {
     zzop_rules_cross_layer::register_native_analyses(registry);
     zzop_rules_schema::register_native_analyses(registry);
     zzop_metrics::register_native_analyses(registry);
+}
+
+/// Every native analysis id this build SHIPS OFF, composed across the owning crates the same way
+/// [`register_all_native`] composes their registration — one place that knows the whole set, and no
+/// crate that does not own an id ever names one.
+///
+/// A FUNCTION rather than a `const` slice on purpose: a second crate contributing ids later is then a
+/// one-line change here instead of a type change at every reader. Today only `zzop_rules_graph` has
+/// any, and its own `DEFAULT_OFF` doc carries the measurement that put them there.
+///
+/// This composes the SET; it does not apply it. Application is `zzop_core::registry::is_enabled`,
+/// reading `RuleConfig::default_off`, which the surface that builds a request fills from here — so a
+/// library caller who constructs an `EngineConfig` by hand gets every analysis, which is the right
+/// default for a caller stating their own config rather than accepting a product one.
+pub fn shipped_off_native_ids() -> Vec<String> {
+    zzop_rules_graph::DEFAULT_OFF
+        .iter()
+        .map(|id| (*id).to_string())
+        .collect()
 }
 
 /// A size cap above which a file skips structural parsing entirely and falls back to a lexical count

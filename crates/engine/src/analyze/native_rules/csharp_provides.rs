@@ -39,6 +39,10 @@ use zzop_core::IoProvide;
 pub(in crate::analyze) fn run_csharp_provides_project_pass(
     root: &std::path::Path,
     csharp_rels: &[String],
+    // The run's declared C# route vocabulary — the SAME resolved value the per-file pass read. This pass
+    // REPLACES that pass's `http` provides wholesale, so handing it a different vocabulary would make the
+    // replacement silently lose (or invent) root-level minimal-API routes.
+    vocab: &crate::vocabulary::ResolvedVocabulary<'_>,
     io_provides: &mut Vec<IoProvide>,
     // Where the pass's own SKIPS go. The report has counted them since it shipped and nothing read them:
     // nothing in the workspace read them at all (the one example binary that prints counters reads the
@@ -58,7 +62,8 @@ pub(in crate::analyze) fn run_csharp_provides_project_pass(
     if files.is_empty() {
         return;
     }
-    let report = zzop_parser_csharp::extract_csharp_http_provides_project(&files);
+    let report =
+        zzop_parser_csharp::extract_csharp_http_provides_project(&files, &vocab.csharp_routes());
     io_provides.retain(|p| !(p.kind == "http" && csharp_set.contains(p.file.as_str())));
     if let Some(w) = skip_warning(&report) {
         warnings.push(w);

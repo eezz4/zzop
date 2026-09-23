@@ -1,5 +1,27 @@
 //! The recommendation rules — each maps `FileNode`s / coupling / cycles to `RawItem`s under a rule
 //! id and severity, gated by `RecommendationGates` and capped per rule.
+//!
+//! # Every cap here says what it dropped
+//! The six caps below were bare `Vec::truncate` / `Iterator::take` calls until 2026-09-04 — which is
+//! the defect [`crate::scores::detail_cap`] names in as many words (*"That is a SILENT cap"*) and had
+//! already repaired for the ten `scores/*` modules. That module's doc then ENUMERATES the lanes that do
+//! disclose — `findings`, `suggestionsTruncated`/`edgesTruncated`/`degradedTruncated`, the graph `%%`
+//! census, `scores/*` — and this lane was not among them. So one reply shipped two honesty contracts at
+//! once: `godFile.files` came back with `filesTruncated` beside it while `recommendations[].items` came
+//! back with nothing, and "these are the 15 cycles" and "these are 15 of four hundred" were the same
+//! bytes. Found by a census of user-approved decisions against this repo's own disclosure philosophy.
+//!
+//! Each rule now returns [`RuleOutput`], carrying the count to `Recommendation::items_truncated`.
+//!
+//! # What the number means, and what it deliberately does not
+//! It is taken AT THE CAP, which is both what makes it honest and what bounds it: it counts *rows this
+//! rule's cap dropped*, never *rows missing from the reply*. Two later stages narrow the list further
+//! and are not folded in — `is_filtered` drops config-excluded paths (so an excluded path can still
+//! consume a cap slot, a pre-existing ordering this change does not touch), and
+//! `escalate_critical_bug_evidence` MOVES items between groups rather than dropping them. One scalar
+//! cannot mean all three, and the cap's own count is the one a reader cannot reconstruct from the
+//! reply: the other two leave their evidence in `config.exclude` and in the escalated item's
+//! `escalatedFrom`.
 
 use std::cmp::Ordering;
 use std::collections::HashSet;
@@ -10,7 +32,7 @@ use crate::coupling::CouplingMap;
 use crate::roi::RecId;
 use zzop_core::{DepGraph, FileNode, Lifecycle, Severity};
 
-use super::types::{RawItem, RecommendationGates};
+use super::types::{RawItem, RecommendationGates, RuleOutput};
 
 // --- constants ---
 
@@ -21,19 +43,32 @@ const MAX_FAT_FANOUT: usize = 15;
 const MAX_HIDDEN_COUPLING: usize = 15;
 const MAX_VERSIONING_CANDIDATE: usize = 10;
 
+/// Rows a cap is about to drop, counted before the truncation that makes them uncountable.
+///
+/// A free function rather than [`crate::scores::detail_cap::cap_and_count_dropped`] because the six
+/// call sites do not share ONE shape: four truncate a `Vec` in place, one caps an iterator with `take`
+/// (nothing is ever in a `Vec` to truncate), and one truncates a `Vec` it built itself. The scores lane
+/// helper owns the truncation AND the count together, which is right there — every one of its call
+/// sites is `cap_and_count_dropped(&mut v, N)`. Forcing the `take` site into that shape would mean
+/// materializing the full list only to throw it away, so this lane shares the CONVENTION (a count
+/// beside the list, always serialized) rather than the function.
+fn drop_count(before_cap: usize, cap: usize) -> u32 {
+    // Saturating, like the scores lane's: an absurd input must not report a SMALL remainder, which
+    // would be the same lie in a new costume.
+    u32::try_from(before_cap.saturating_sub(cap)).unwrap_or(u32::MAX)
+}
+
 pub(super) fn tag_count(n: &FileNode, tag: &str) -> u32 {
     n.tag_counts.get(tag).copied().unwrap_or(0)
 }
 
-pub(super) fn rule_bug_prone(
-    nodes: &[FileNode],
-    g: &RecommendationGates,
-) -> Vec<(RecId, Severity, Vec<RawItem>)> {
+pub(super) fn rule_bug_prone(nodes: &[FileNode], g: &RecommendationGates) -> Vec<RuleOutput> {
     let mut filtered: Vec<&FileNode> = nodes
         .iter()
         .filter(|n| tag_count(n, "FIX") >= g.bug_prone_fix)
         .collect();
     filtered.sort_by_key(|n| std::cmp::Reverse(tag_count(n, "FIX")));
+    let truncated = drop_count(filtered.len(), MAX_BUG_PRONE);
     filtered.truncate(MAX_BUG_PRONE);
     let items: Vec<RawItem> = filtered
         .into_iter()
@@ -49,11 +84,16 @@ pub(super) fn rule_bug_prone(
     if items.is_empty() {
         vec![]
     } else {
-        vec![(RecId::BugProne, Severity::Critical, items)]
+        vec![RuleOutput::new(
+            RecId::BugProne,
+            Severity::Critical,
+            items,
+            truncated,
+        )]
     }
 }
 
-pub(super) fn rule_circular(circular: &[Vec<String>]) -> Vec<(RecId, Severity, Vec<RawItem>)> {
+pub(super) fn rule_circular(circular: &[Vec<String>]) -> Vec<RuleOutput> {
     if circular.is_empty() {
         return vec![];
     }
@@ -69,19 +109,27 @@ pub(super) fn rule_circular(circular: &[Vec<String>]) -> Vec<(RecId, Severity, V
             })
         })
         .collect();
-    vec![(RecId::Circular, Severity::Critical, items)]
+    // Counted off the INPUT, not off `items`: the `take` runs before `filter_map`, so a cycle the
+    // cap dropped never reaches the closure that could have counted it.
+    vec![RuleOutput::new(
+        RecId::Circular,
+        Severity::Critical,
+        items,
+        drop_count(circular.len(), MAX_CIRCULAR),
+    )]
 }
 
 pub(super) fn rule_high_churn_per_loc(
     nodes: &[FileNode],
     g: &RecommendationGates,
-) -> Vec<(RecId, Severity, Vec<RawItem>)> {
+) -> Vec<RuleOutput> {
     let ratio = |n: &FileNode| n.churn as f64 / n.loc as f64;
     let mut filtered: Vec<&FileNode> = nodes
         .iter()
         .filter(|n| n.loc > g.hot_churn_min_loc && ratio(n) > g.hot_churn_ratio)
         .collect();
     filtered.sort_by(|a, b| ratio(b).partial_cmp(&ratio(a)).unwrap_or(Ordering::Equal));
+    let truncated = drop_count(filtered.len(), MAX_HOT_CHURN);
     filtered.truncate(MAX_HOT_CHURN);
     let items: Vec<RawItem> = filtered
         .into_iter()
@@ -93,14 +141,16 @@ pub(super) fn rule_high_churn_per_loc(
     if items.is_empty() {
         vec![]
     } else {
-        vec![(RecId::HotChurn, Severity::Warning, items)]
+        vec![RuleOutput::new(
+            RecId::HotChurn,
+            Severity::Warning,
+            items,
+            truncated,
+        )]
     }
 }
 
-pub(super) fn rule_fat_fan_out(
-    nodes: &[FileNode],
-    g: &RecommendationGates,
-) -> Vec<(RecId, Severity, Vec<RawItem>)> {
+pub(super) fn rule_fat_fan_out(nodes: &[FileNode], g: &RecommendationGates) -> Vec<RuleOutput> {
     // Barrel/Page/App.tsx assembly points naturally have high fanOut — exclude from warnings.
     // Public API violations are covered separately by the publicApi score.
     let barrel_re = Regex::new(r"(?:^|/)index\.(?:ts|tsx|js|jsx|mjs|cjs)$").unwrap();
@@ -116,6 +166,7 @@ pub(super) fn rule_fat_fan_out(
         })
         .collect();
     filtered.sort_by_key(|n| std::cmp::Reverse(n.fan_out));
+    let truncated = drop_count(filtered.len(), MAX_FAT_FANOUT);
     filtered.truncate(MAX_FAT_FANOUT);
     let items: Vec<RawItem> = filtered
         .into_iter()
@@ -127,7 +178,12 @@ pub(super) fn rule_fat_fan_out(
     if items.is_empty() {
         vec![]
     } else {
-        vec![(RecId::FatFanout, Severity::Warning, items)]
+        vec![RuleOutput::new(
+            RecId::FatFanout,
+            Severity::Warning,
+            items,
+            truncated,
+        )]
     }
 }
 
@@ -142,7 +198,7 @@ pub(super) fn rule_hidden_coupling(
     coupling: &CouplingMap,
     dep: &DepGraph,
     g: &RecommendationGates,
-) -> Vec<(RecId, Severity, Vec<RawItem>)> {
+) -> Vec<RuleOutput> {
     let mut seen: HashSet<String> = HashSet::new();
     let mut items: Vec<RawItem> = Vec::new();
     for (a, partners) in coupling {
@@ -169,15 +225,21 @@ pub(super) fn rule_hidden_coupling(
     if items.is_empty() {
         return vec![];
     }
+    let truncated = drop_count(items.len(), MAX_HIDDEN_COUPLING);
     items.truncate(MAX_HIDDEN_COUPLING);
-    vec![(RecId::HiddenCoupling, Severity::Warning, items)]
+    vec![RuleOutput::new(
+        RecId::HiddenCoupling,
+        Severity::Warning,
+        items,
+        truncated,
+    )]
 }
 
 /// volatile + many callers + repeated FIX -> in-place refactor hits legacy users; suggest parallel V2.
 pub(super) fn rule_versioning_candidate(
     nodes: &[FileNode],
     g: &RecommendationGates,
-) -> Vec<(RecId, Severity, Vec<RawItem>)> {
+) -> Vec<RuleOutput> {
     let mut filtered: Vec<&FileNode> = nodes
         .iter()
         .filter(|n| {
@@ -187,6 +249,7 @@ pub(super) fn rule_versioning_candidate(
         })
         .collect();
     filtered.sort_by_key(|n| std::cmp::Reverse(tag_count(n, "FIX")));
+    let truncated = drop_count(filtered.len(), MAX_VERSIONING_CANDIDATE);
     filtered.truncate(MAX_VERSIONING_CANDIDATE);
     let items: Vec<RawItem> = filtered
         .into_iter()
@@ -202,6 +265,11 @@ pub(super) fn rule_versioning_candidate(
     if items.is_empty() {
         vec![]
     } else {
-        vec![(RecId::VersioningCandidate, Severity::Warning, items)]
+        vec![RuleOutput::new(
+            RecId::VersioningCandidate,
+            Severity::Warning,
+            items,
+            truncated,
+        )]
     }
 }

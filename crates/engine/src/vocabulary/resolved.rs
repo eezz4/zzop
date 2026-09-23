@@ -83,6 +83,7 @@ pub(crate) struct ResolvedVocabulary<'a> {
     pub(crate) api_version_segment_pattern: Option<&'a str>,
     pub(crate) externally_fetched_paths: Vec<&'a str>,
     pub(crate) schema_usage_skip_fields: Vec<&'a str>,
+    pub(crate) csharp_root_route_builder_variable_names: Vec<&'a str>,
 }
 
 impl ResolvedVocabulary<'_> {
@@ -112,6 +113,16 @@ impl ResolvedVocabulary<'_> {
             anonymous_veto_substrings: &self.python_guard_anonymous_veto_substrings,
             report_veto_prefixes: &self.python_guard_report_veto_prefixes,
             report_veto_suffixes: &self.python_guard_report_veto_suffixes,
+        }
+    }
+
+    /// The C# route recognizer's one declared list — which bare receivers are the prefix-free root
+    /// route builder. Empty is a real answer here, not a fallback trigger: with nothing declared no
+    /// bare receiver is the root, so a root-level `app.MapGet(...)` is skipped rather than keyed at a
+    /// guessed path, exactly as this struct's "declared or not made" rule requires everywhere else.
+    pub(crate) fn csharp_routes(&self) -> zzop_parser_csharp::CSharpRouteVocab<'_> {
+        zzop_parser_csharp::CSharpRouteVocab {
+            root_route_builder_variable_names: &self.csharp_root_route_builder_variable_names,
         }
     }
 
@@ -187,6 +198,9 @@ impl VocabularyConfig {
             api_version_segment_pattern: declared(&self.api_version_segment_pattern),
             externally_fetched_paths: declared_list(&self.externally_fetched_paths),
             schema_usage_skip_fields: declared_list(&self.schema_usage_skip_fields),
+            csharp_root_route_builder_variable_names: declared_list(
+                &self.csharp_root_route_builder_variable_names,
+            ),
         }
     }
 }

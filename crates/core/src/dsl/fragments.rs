@@ -81,22 +81,33 @@ pub(crate) const TEST_PATH_FRAGMENT_PREFIX: &str = "test-paths";
 /// created for an internal bookkeeping need. The value comparison has neither problem and answers the
 /// same question: is what this rule excludes the shared vocabulary, or something of its own?
 ///
-/// ## Residual, stated plainly, with the one shipped instance named
+/// ## Residual, stated plainly — and the count is NOT stated here
 /// A pack-local `test-paths-*` fragment is NOT recognized here, and cannot be: `expand_fragments`
 /// clears `RulePackDef::fragments` once it has substituted, so by the time a run reaches this the
-/// pack-local body is a string with no name attached and no way back to one. Exactly ONE bundled rule is
-/// in that position today — `reliability/sync-fs-in-handler`, whose `${test-paths-stories-scripts}` is
-/// the shared stories body plus a `scripts?|tools|bin` arm. It keeps every built-in language convention
-/// (that is what `tests_fragments::superset` pins), and it alone does not pick up a project's
-/// `vocabulary.extraTestPathPatterns` tail.
+/// pack-local body is a string with no name attached and no way back to one. Such a rule keeps every
+/// built-in language convention (that is what `tests_fragments::superset` pins) and does not pick up a
+/// project's `vocabulary.extraTestPathPatterns` tail.
 ///
-/// An under-reach, never a wrong exclusion: the failure is that ONE info-level rule still judges a
-/// directory the project declared as test surface, not that anything is silently skipped. Both
-/// `superset` and `tests_fragments::name_census` are triage moments where a new such fragment has to be
-/// looked at, so the set cannot grow unnoticed. Closing it properly means carrying the resolved NAME
-/// forward from expansion, and the cheap encoding of that — a `bool` on `RuleDef` — is what the section
-/// above rejects; the honest fix is a fragment mechanism that can express "base plus one arm" by
-/// reference, which is the same missing feature `superset`'s header opens with.
+/// 🔴 WHICH rules are in that position is `tests_fragments::name_census`'s to say, never this
+/// paragraph's. It used to read "Exactly ONE bundled rule is in that position today", naming
+/// `reliability/sync-fs-in-handler` — and it stayed that way after `security/secret-env-in-fe` joined
+/// on 2026-08-25, which the census row for `test-paths-stories-next-server` records IN WRITING as the
+/// "second instance". The count had two owners and the one with no test went stale; worse, the same
+/// sentence called the residual "ONE INFO-LEVEL rule" and both of them are `warning`, so the severity
+/// that made the under-reach sound cheap was never measured either (review ledger V235).
+/// Recount, in one line:
+/// `python3 -c "import json,glob;print([(p,k) for p in glob.glob('rules/dsl/**/*.json',recursive=True)
+/// for k in (json.load(open(p)).get('fragments') or {}) if k.startswith('test-paths')])"`
+///
+/// The DIRECTION is what this paragraph is actually for, and it does not depend on the count: an
+/// under-reach, never a wrong exclusion. Such a rule still judges a directory the project declared as
+/// test surface; nothing is silently skipped. Both `superset` and `name_census` are triage moments
+/// where a new such fragment has to be looked at, so the set cannot grow unnoticed — which is exactly
+/// how the second instance came to be recorded there while this sentence went on naming one. Closing it
+/// properly means carrying the resolved NAME forward from expansion, and the cheap encoding of that — a
+/// `bool` on `RuleDef` — is what the section above rejects; the honest fix is a fragment mechanism that
+/// can express "base plus one arm" by reference, which is the same missing feature `superset`'s header
+/// opens with.
 pub(crate) fn is_shared_test_path_vocabulary(value: &str) -> bool {
     shared_fragments()
         .iter()

@@ -1,4 +1,4 @@
-//! `cross-layer/external-host-in-multiple-sources` (warning) — the same external host is called directly from
+//! `cross-layer/external-host-in-multiple-sources` (info) — the same external host is called directly from
 //! 2+ distinct source trees. Each tree likely built its own client for the same third-party integration —
 //! duplicated auth/retry/failure-mode handling — so a vendor-side change (base URL, auth scheme) has to be
 //! applied in multiple places instead of one. Anchored at the first site; the fix is to centralize behind
@@ -104,7 +104,10 @@ pub fn external_duplicated_integration_findings(
             );
             out.push(Finding {
                 rule_id: "cross-layer/external-host-in-multiple-sources".to_string(),
-                severity: Severity::Warning,
+                // Ships `info` (2026-09-06, same class as `circular`): calling one external host from
+                // two trees is a fact about the topology, and whether it ought to be one shared client
+                // is the reader's architectural taste, not something this rule can be wrong about.
+                severity: Severity::Info,
                 file: first.file.to_string(),
                 line: first.line,
                 message,
@@ -175,7 +178,7 @@ mod tests {
         assert_eq!(out[0].line, 5);
         for f in &out {
             assert_eq!(f.rule_id, "cross-layer/external-host-in-multiple-sources");
-            assert_eq!(f.severity, Severity::Warning);
+            assert_eq!(f.severity, Severity::Info);
             assert!(f.message.contains("api.vendor.com"), "{}", f.message);
             assert!(f.message.contains("disabledRules"), "{}", f.message);
             let data = f.data.as_ref().unwrap();

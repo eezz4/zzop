@@ -29,11 +29,16 @@ use super::global_prefix::prepend_global_prefix;
 /// exists to surface. Two distinct situations both land on `hits == 0`, and are told apart by whether the
 /// entry's `dir` matched ANY provide at all (regardless of who won that match):
 /// - **stale/wrong-dir/no-http-provides** — the entry's `dir` matched 0 provides by path. Could be a stale
-///   mount, a wrong `dir`, or a tree that emits no http provides at all.
+///   mount, a wrong `dir`, a tree that emits no http provides at all, or a declaration that belongs on a
+///   DIFFERENT TREE — that last cause is named because the mirrored `clientBase` tripwire
+///   (`config_client_base`) has always named it and this one did not, and misplacing a mount is the
+///   easier of the two mistakes to make (review ledger V95). The empty-`dir` spelling additionally names
+///   `mountedAt`, since that is the key a user actually types for it — the engine only ever sees the
+///   `mounts` entry `zzop_facade::config::mounts` folds it into.
 /// - **shadowed** — the entry's `dir` matched >=1 provide, but every one of those matches was won by a
 ///   DIFFERENT, longer-`dir` (or equal-`dir`, earlier) entry (see "Winner selection" above). The entry
 ///   itself is redundant, not stale — a different message names this so the reader isn't told three false
-///   causes ("stale mount, wrong dir, or the tree emits no http provides") when the real cause is none of
+///   causes (stale mount / wrong `dir` / wrong tree / no http provides) when the real cause is none of
 ///   those.
 ///
 /// ## Placement (load-bearing — see `zzop_engine::analyze::mod`'s call site)
@@ -126,8 +131,28 @@ pub(crate) fn apply_config_mounts(
             continue;
         }
         if v.matched == 0 {
+            // The mirror of `config_client_base`'s zero-effect warning, which has always ended with
+            // "or the declaration belongs on a different tree". This one did not, and it is the half a
+            // user is MORE likely to misplace: `clientBase` obviously belongs to the caller, while
+            // "where is this service mounted" reads like a property of the run rather than of one tree.
+            // Added 2026-09-07 (review ledger V95) — a pair of mirrored warnings where only one names
+            // the most common cause is worse than neither naming it, because the asymmetry reads as
+            // meaning.
+            //
+            // The empty-dir case also names `mountedAt`. The engine only ever sees `mounts` entries
+            // (`zzop_facade::config::mounts` folds `mountedAt` in as the implicit `dir: ""` entry), so a
+            // user who wrote `mountedAt` was being answered in a vocabulary they never typed.
+            let wrong_tree = if v.dir.is_empty() {
+                " — a stale mount, or one that belongs on a different tree. (An empty \"dir\" is the \
+                 shape `mountedAt` takes; an explicit `mounts` entry with an empty \"dir\" is \
+                 identical here.)"
+            } else {
+                " — a stale mount, a wrong \"dir\", or a declaration that belongs on a different tree."
+            };
             warnings.push(format!(
-                "topology mount \"{}\" (dir \"{}\") had no effect: 0 http provides matched — stale mount, wrong dir, or the tree emits no http provides",
+                "topology mount \"{}\" (dir \"{}\") had no effect: 0 http provides matched{wrong_tree} \
+                 If this tree emits no http provides at all, that is the reason and the mount has \
+                 nothing to act on.",
                 v.at, v.dir
             ));
         } else {

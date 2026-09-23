@@ -244,7 +244,7 @@ fn custom_commit_type_patterns_override_the_default_table() {
 }
 
 fn parse_iso_ms_for_test(s: &str) -> i64 {
-    crate::iso_date::parse_iso_to_ms(s).unwrap()
+    zzop_core::clock::parse_iso_to_ms(s).unwrap()
 }
 
 // ---------------------------------------------------------------------------------------

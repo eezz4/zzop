@@ -488,7 +488,10 @@ fn temporal_as_string_hit() {
 
 #[test]
 fn analyze_schema_sums_model_risk() {
-    // one warning (nullable-fk) = 2 points on model "Item".
+    // Two `info` issues on model "Item" = 2 points: `nullable-fk` (the optional declared relation) and
+    // `missing-timestamps` (no createdAt/updatedAt on the model). Both were 1 point apiece only after
+    // 2026-09-06 — `nullable-fk` was a `warning` worth 2 and carried this sum alone. The assertion is
+    // `>=`, so it survived the change; the arithmetic under it did not, which is why it is spelled out.
     let a = analyze_schema(vec![model(
         "Item",
         vec![
@@ -499,5 +502,5 @@ fn analyze_schema_sums_model_risk() {
         vec![cols(&["ownerId"])], // covered -> no fk-no-index; nullable-fk still fires
         vec![],
     )]);
-    assert!(a.model_risk["Item"] >= 2);
+    assert_eq!(a.model_risk["Item"], 2);
 }

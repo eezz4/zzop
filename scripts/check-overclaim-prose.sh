@@ -252,7 +252,7 @@ fi
 files=()
 while IFS= read -r f; do
   [ -n "$f" ] && files+=("$f")
-done <<< "$candidate_files"
+done < <(printf '%s\n' "$candidate_files")
 
 matches=""
 if [ "${#files[@]}" -gt 0 ]; then

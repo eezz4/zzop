@@ -10,6 +10,7 @@
 use super::args::{
     extract_finding_filters, extract_run_knobs, parse_trees_args, reject_flag_like_args,
 };
+use super::baseline::{extract_baseline, gate_against_baseline, refuse_baseline_with_fail_on};
 use super::fail_on::{extract_fail_on, gate_or_exit, refuse_fail_on};
 use super::{print_or_exit, read_or_exit};
 
@@ -20,10 +21,14 @@ use super::{print_or_exit, read_or_exit};
 /// mutually exclusive and the shared handler enforces that too — this parser only refuses the shapes
 /// that would be SILENTLY narrowed here (a trailing path after `--config` would be dropped).
 pub fn run_analyze(args: &[String]) -> ! {
-    const USAGE: &str = "usage: zzop analyze <path> | analyze --config <zzop.config.jsonc> [--severity <critical|warning|info>] [--rule <id>] [--limit <n>] [--fail-on <critical|warning|info>]";
+    const USAGE: &str = "usage: zzop analyze <path> | analyze --config <zzop.config.jsonc> [--severity <critical|warning|info>] [--rule <id>] [--limit <n>] [--fail-on <critical|warning|info> | --baseline <file>]";
     let (rest, knobs) = extract_run_knobs(args);
     let (rest, fail_on) = extract_fail_on(&rest, USAGE);
+    let (rest, baseline) = extract_baseline(&rest, USAGE);
     let (rest, filters) = extract_finding_filters(&rest, USAGE);
+    // Refused BEFORE the run, not after: two gates over one exit code is a question only the caller can
+    // answer, and spending a full analysis before saying so wastes the thing they were timing.
+    refuse_baseline_with_fail_on(baseline.as_deref(), fail_on.as_deref(), USAGE);
     let (path, config_path) = match rest.get(2).map(String::as_str) {
         Some("--config") => {
             let Some(cp) = rest.get(3) else {
@@ -57,7 +62,10 @@ pub fn run_analyze(args: &[String]) -> ! {
     // ERROR still takes the shared error path, so "zzop could not answer" keeps exit 1 and never
     // reaches the gate's own exit code.
     match zzop_summary::analyze_summary_with(path, config_path, &filters, knobs) {
-        Ok(text) => gate_or_exit(&text, fail_on.as_deref(), filters.rule.as_deref()),
+        Ok(text) => match baseline.as_deref() {
+            Some(path) => gate_against_baseline(&text, path),
+            None => gate_or_exit(&text, fail_on.as_deref(), filters.rule.as_deref()),
+        },
         Err(e) => print_or_exit(Err(e)),
     }
 }

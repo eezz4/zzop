@@ -49,6 +49,13 @@ pub struct CriticalFile {
     pub silent: bool,
 }
 
+/// The critical-file list, highest WEIGHT first, PLUS how many rows `limit` dropped.
+///
+/// A pair rather than a bare `Vec` since 2026-09-04: the count is only knowable at the truncation, and
+/// a list that cannot say whether it is complete makes "this tree has 20 critical files" and "you are
+/// seeing 20 of four hundred" the same bytes. `0` means complete. Two elements of unlike types, so the
+/// positional-confusion argument that made `zzop_metrics::recommendations::RuleOutput` a struct does not
+/// apply here.
 pub fn compute_criticality(
     nodes: &[FileNode],
     dep: &DepGraph,
@@ -56,7 +63,7 @@ pub fn compute_criticality(
     min_blast_radius: usize,
     silent_change_max: u32,
     limit: usize,
-) -> Vec<CriticalFile> {
+) -> (Vec<CriticalFile>, u32) {
     let dependents = build_dependents(dep); // imported -> set of direct importers
     let mut out: Vec<CriticalFile> = Vec::new();
     for n in nodes {
@@ -91,8 +98,13 @@ pub fn compute_criticality(
             .then_with(|| b.blast_radius.cmp(&a.blast_radius))
             .then_with(|| a.path.cmp(&b.path))
     });
+    // The cap counts what it drops, like every other capped list in this reply. It did not until
+    // 2026-09-04: `architecture.criticalTop`'s legend publishes the THREE it shows, and nothing said
+    // the list behind it stopped at 20 -- so a reader who drilled through took 20 rows for the whole
+    // set. `crate::scores::detail_cap` had already named this exact defect and repaired the score lane.
+    let truncated = u32::try_from(out.len().saturating_sub(limit)).unwrap_or(u32::MAX);
     out.truncate(limit);
-    out
+    (out, truncated)
 }
 
 /// Reverse the import graph: imported file -> set of files that import it directly.

@@ -74,11 +74,19 @@ pub(super) fn escalate_critical_bug_evidence(
                 .unwrap_or(Ordering::Equal)
                 .then_with(|| a.path.cmp(&b.path))
         });
-        recs.push(Recommendation {
-            id: RecId::UrgentBugRisk,
-            severity: Severity::Critical,
-            items: urgent_items,
-        });
+        // `items_truncated` is ZERO because this group HAS no cap: it is assembled from rows that
+        // already survived their home rule's cap, so there is no truncation of its own to report. The
+        // honest residual, stated here rather than discovered: a critical file that its home rule
+        // capped away never reaches this loop, so it cannot escalate either — the count that would
+        // carry that fact is on the home rule's row, which is where a reader has to look. And a group
+        // whose every item escalated is dropped by the `retain` above, taking its own count with it;
+        // that is the same trade the `retain` already made for the items themselves.
+        recs.push(Recommendation::new(
+            RecId::UrgentBugRisk,
+            Severity::Critical,
+            urgent_items,
+            0,
+        ));
     }
 
     recs.sort_by_key(|r| (severity_rank(r.severity), urgency_rank(r.id)));

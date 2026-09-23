@@ -59,3 +59,77 @@ pub fn majority_unresolved_http_sources(
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{is_majority_unresolved, majority_unresolved_http_sources, MIN_TOTAL_CONSUMES};
+
+    /// 🔴 Review ledger V85. This module had NO tests, and a mutation census found the gap: changing
+    /// `unresolved * 2 >= total` to `>` survived the whole workspace suite green. The mutation moves
+    /// exactly the trees that sit ON the line — 3/6, 4/8, 5/10 — and nothing else, which is why every
+    /// existing test (written at 3/5 and below-majority) stayed silent about it.
+    ///
+    /// What that mutation would ship: a tree with exactly half its http consumes unresolved stops
+    /// counting as blind. `unresolved-consume-ratio` goes quiet about it, and every write endpoint on
+    /// the OTHER side of the join climbs from `info` to `warning` carrying the sentence "no blindness
+    /// was WITNESSED" — about a tree the join can only half see. Three rules share this predicate
+    /// (this module's header names them), so one equals sign moves all three.
+    #[test]
+    fn exactly_half_unresolved_counts_as_majority_because_the_doc_says_ge_one_half() {
+        assert!(
+            is_majority_unresolved(3, 6),
+            "3/6 is the boundary the doc pins at one half"
+        );
+        assert!(is_majority_unresolved(4, 8));
+        assert!(is_majority_unresolved(5, 10));
+        assert!(
+            !is_majority_unresolved(2, 6),
+            "below the line stays below it"
+        );
+        assert!(!is_majority_unresolved(3, 8));
+        assert!(
+            is_majority_unresolved(4, 6),
+            "above the line is unambiguous"
+        );
+    }
+
+    /// The floor and the ratio are two conditions and a source must clear both. Pinned together so a
+    /// change to either cannot be read as a change to "blindness" as a whole.
+    #[test]
+    fn the_small_sample_floor_and_the_ratio_are_separate_conditions() {
+        let consume = |source: &str| zzop_core::io::TaggedConsume {
+            source: source.to_string(),
+            consume: zzop_core::IoConsume {
+                kind: "http".to_string(),
+                key: None,
+                file: "api.ts".to_string(),
+                line: 1,
+                raw: None,
+                method: None,
+                retry_configured: None,
+                body: None,
+                client: None,
+            },
+        };
+        // Exactly at the floor, exactly at the ratio: blind.
+        let at_floor: Vec<_> = (0..MIN_TOTAL_CONSUMES.div_ceil(2))
+            .map(|_| consume("fe"))
+            .collect();
+        let blind =
+            majority_unresolved_http_sources(&at_floor, &[("fe".to_string(), MIN_TOTAL_CONSUMES)]);
+        assert!(
+            blind.contains("fe"),
+            "at the floor with half unresolved, the source is blind"
+        );
+
+        // One consume below the floor: the ratio no longer gets asked, however bad it is.
+        let below = majority_unresolved_http_sources(
+            &at_floor,
+            &[("fe".to_string(), MIN_TOTAL_CONSUMES - 1)],
+        );
+        assert!(
+            below.is_empty(),
+            "below the sample floor a ratio claim is refused — that is the floor's whole job"
+        );
+    }
+}

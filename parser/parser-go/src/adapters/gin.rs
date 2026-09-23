@@ -91,6 +91,13 @@ use super::{append_entries, bare_identifier, nth_arg, single_rhs_call, single_ta
 /// are ALREADY uppercase (`.GET`, not `.get`) so no case conversion is needed at the call site.
 pub const GIN_VERB_METHODS: &[&str] = HTTP_KEY_VERBS;
 
+/// gin's import specifier, the exact string this adapter import-gates on. One owner: it was spelled
+/// in `shapes::local_names` and again in `cross_file`, and `adapters::router_wrapper` needs to read it
+/// too — to DECLINE the files this adapter owns (its module doc's ownership boundary). Three hand-typed
+/// copies of the gate that decides which of two adapters reads a file is exactly the drift this repo
+/// keeps paying for.
+pub(crate) const GIN_SPECIFIER: &str = "github.com/gin-gonic/gin";
+
 // The cross-file half (call-site mounts, function-parameter receivers, `GIN_RECEIVER_TYPES`) lives
 // in `cross_file` — split for the 300-line cap, same module-doc contract.
 mod cross_file;
@@ -248,7 +255,15 @@ impl<'a> Collector<'a> {
         };
         // `.Any(path, h)` registers ONE handler for EVERY HTTP method (gin's catch-all — health/proxy/
         // fallthrough routes). Emit one Verb entry per `HTTP_KEY_VERBS` so the route is not invisible and
-        // `mutating-route-no-auth` still sees its PUT/DELETE/PATCH surface. Shares the `.GET`/`.POST`/...
+        // `mutating-route-no-auth` still sees its PUT/DELETE/PATCH surface.
+        //
+        // 🔵 EXPANDS here while two sibling lanes emit a single `UNKNOWN_VERB` sentinel for what looks
+        // like the same concept, and the difference is deliberate: `cross-layer-resolution.md`'s
+        // catch-all row draws the line at WHO GUARANTEES the semantics. gin documents `.Any` as every
+        // method, so this build knows. `adapters::net_http`'s verbless Go 1.22 pattern is pattern
+        // grammar rather than a catch-all API, and `adapters::router_wrapper` reads a project's OWN
+        // router type whose `Any` it has never been shown — neither carries that guarantee, so both
+        // answer "not statically known". Shares the `.GET`/`.POST`/...
         // shape exactly (path arg 0, handler arg 1); `.Handle(method, ...)`/`.Match([]string{...}, ...)`
         // (verb-from-argument shapes) stay out of v1 scope.
         let methods: Vec<String> = if method == "Any" {

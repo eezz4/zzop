@@ -130,6 +130,18 @@ pub fn unconsumed_mutation_endpoint_findings(
     unconsumed_provides: &[TaggedProvide],
     unresolved_consumes: &[TaggedConsume],
     blind_sources: &BTreeSet<String>,
+    // Sources the join saw NOTHING joinable from, while their own files went majority-unread by any
+    // structural parser — the OTHER shape of consume-side blindness, which the ratio predicate
+    // structurally cannot report (a ratio over zero consumes is not a majority). Kept separate from
+    // `blind_sources` so the confidence sentence can name the right mechanism: telling a reader a tree
+    // has "majority-unresolved consumes" when it has no consumes at all would be a false claim.
+    silent_blind_sources: &BTreeSet<String>,
+    // Sources that import an SDK-shaped or opaque HTTP client and expose almost no visible http
+    // consumes — `cross-layer/untraced-client-import-no-visible-consume`'s own witnesses. The THIRD
+    // shape of consume-side blindness, and it used to be computed beside this rule without reaching
+    // it: the reply then carried twelve `warning` write endpoints saying "no blindness was WITNESSED"
+    // next to that rule saying the join is blind for exactly their caller tree (review ledger V82).
+    untraced_blind_sources: &BTreeSet<String>,
     near_miss_targets: &BTreeMap<(String, String, u32), NearMissTargetRef>,
     trpc_participating_sources: &BTreeSet<String>,
 ) -> Vec<Finding> {
@@ -138,43 +150,11 @@ pub fn unconsumed_mutation_endpoint_findings(
         .filter(|c| c.consume.kind == "http")
         .count();
 
-    // Run-level, not per-provide: "is this run's consume side blind at all" is the question, since a blind
-    // source ANYWHERE in the run is a plausible unseen caller of ANY write route regardless of which tree
-    // provides it (see this rule's module doc's "Confidence downgrade" section).
-    let run_severity = if blind_sources.is_empty() {
-        Severity::Warning
-    } else {
-        Severity::Info
-    };
-    // Both branches speak. The empty branch used to be silent, which left warning severity reading as a
-    // proof of completeness ("no blindness detected => the caller set was resolved") — the exact
-    // class-extrapolation the non-empty branch exists to avoid. The check that did not fire is narrow, so
-    // its silence is named rather than inferred (`output-philosophy.md` §0).
-    let confidence_note = if blind_sources.is_empty() {
-        " Severity is warning because no source in this run tripped the consume-side blindness check — \
-         that check only asks whether a source's `http` consumes are majority-unresolved, so its not \
-         firing means no blindness was WITNESSED, not that the caller set was proven complete."
-            .to_string()
-    } else {
-        let named: Vec<String> = blind_sources
-            .iter()
-            .take(3)
-            .map(|s| format!("`{s}`"))
-            .collect();
-        let more = blind_sources.len() - named.len();
-        let more_note = if more > 0 {
-            format!(", and {more} more")
-        } else {
-            String::new()
-        };
-        format!(
-            " This run's consume side is partly blind — source(s) {}{more_note} have majority-unresolved \
-             `http` consumes (see `cross-layer/unresolved-consume-ratio`) — so severity here is reduced to \
-             info: \"unconsumed\" cannot be trusted as a confident zero, and this write endpoint may well be \
-             called through one of those unresolved URLs. Confirm before treating it as attack surface.",
-            named.join(", ")
-        )
-    };
+    // The band and the sentence that explains it — one concept, its own module (`band.rs`). Split out
+    // on 2026-09-07 when the third witness pushed this file past the 300-line cap; the seam is the one
+    // the three witnesses already formed, not an arbitrary cut.
+    let (run_severity, confidence_note) =
+        band::decide(blind_sources, silent_blind_sources, untraced_blind_sources);
 
     let mut out: Vec<Finding> = unconsumed_provides
         .iter()
@@ -256,6 +236,8 @@ pub fn unconsumed_mutation_endpoint_findings(
     out.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
     out
 }
+
+mod band;
 
 #[cfg(test)]
 mod tests;

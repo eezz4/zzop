@@ -280,6 +280,30 @@ fn every_flag_reference_in_shipped_source_names_a_real_cli_or_external_tool_flag
 ///   names the knob it reports on (`packs.only` / `packsOnly`) in the same clause. A wire value quoted
 ///   beside a config key, not a key; its sibling value `disabled` needs no entry because that string
 ///   really is one (`packs.disabled`).
+/// - `shippedOff`, `nativeAnalyses.shippedOff`, `reportedInCrossLayerFindings` — keys of the
+///   `nativeAnalyses` REPLY object, named in `crates/summary/src/output/legends.rs`'s folded note and
+///   `crates/summary/src/cross/native_analyses.rs`'s join legend. The co-location is not incidental
+///   here, which is why rewording cannot avoid it: each sentence exists to tell the reader what to do
+///   about the field IN `rules` ("not evaluated; name it with a severity to turn it on"), so the field
+///   name and the config knob are one instruction. Same class as `crossLayer.unresolvedConsumes` and
+///   `ir.io`. Their sibling key `disabled` needs no entry — it is a real one, like `packs.disabled`
+///   above.
+/// - `nativeAnalyses`, `kind` — `packages/mcp/src/tools/definitions.rs`'s `check_coverage` description
+///   (2026-09-04). `nativeAnalyses` is the PARENT of the three entries above and earns its place the
+///   same way: the clause naming the object exists to say one of its partitions is the CALLER's own
+///   doing, so the object name and the word "config" are one instruction. `kind` is the sharper case
+///   and the one worth reading before adding anything here — it is a field of an `unreadExtensions`
+///   row, and the only thing that puts it inside the window is one of its own VALUES, the wire string
+///   `"data-config"`, a literal that contains the substring this scan keys on while naming no config
+///   at all. Both would have been silenced instead by deleting the word "config" from an honest
+///   sentence, which is the repair this guard exists to make unattractive.
+/// - `analyze_repo` / `cross_repo` — `packages/mcp/src/tools.rs`s multi-tree prescription (2026-09-23),
+///   vouched through `mcpToolTokens` rather than `allowlistedTokens`: a tool name is this hosts own
+///   dialect rather than config-adjacent noise. They are the first tool NAMES in that list — everything
+///   before them is a tools/call argument name or a backticked reply field. The window is unavoidable
+///   for the same reason the `nativeAnalyses` familys is: when a config declares 2+ trees the
+///   single-tree lane refuses, and the sentence exists to say WHICH TOOL answers for that very config,
+///   so the tool and the config are one instruction and rewording cannot separate them.
 ///
 /// **What this proves**: every backtick-quoted, identifier/dotted-path-shaped token within 120 bytes of
 /// "config" on a code line of a scanned source file names a real config path/key, embedder field, or

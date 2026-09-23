@@ -57,7 +57,7 @@
 //! 9. **Bare-word anchoring** (`dangerous_bare_words_are_syntax_anchored_not_bare_prose_matches`) — no
 //!    shipped DSL rule's regex matches a keyword-shaped English word (`do`/`for`/`while`/`update`/`delete`/
 //!    `select`) as a bare `\bword\b` with no adjacent syntax anchor — the defect class that shipped live in
-//!    `perf/api-in-loop` (bare `\bdo\b` matched inside prose like `"logged in to do this"`) and
+//!    `reliability/api-in-loop` (bare `\bdo\b` matched inside prose like `"logged in to do this"`) and
 //!    `security/sql-string-concat` (bare `UPDATE` matched inside prose), both fixed in the same commit that
 //!    added this contract (a pragmatic textual-proximity proxy, not a regex semantics engine — see that
 //!    test's own doc for exactly what it can/cannot prove).
@@ -86,7 +86,7 @@
 //!     cross-checked against every shipped rule's matcher so a `file_pattern` can never silently admit an
 //!     environment whose required channel this engine does not project. A prior audit found this exact
 //!     fact had drifted from prose ("loop spans are TS-only") while the code moved on
-//!     (`parser/parser-go/src/lang/loop_spans.rs`, `go/goroutine-in-loop`). MINIMAL-EXISTENCE scope only
+//!     (`parser/parser-go/src/lang/loop_spans.rs`, `reliability/goroutine-in-loop`). MINIMAL-EXISTENCE scope only
 //!     — see that file's own module doc for the full claim boundary before reading a green run here as
 //!     anything more than "the wiring exists" / "the wiring is definitely absent".
 //! 13. **Kebab-case LABEL hygiene** (`dsl_pattern_labels_are_kebab_case`) — the second name layer packs
@@ -362,12 +362,16 @@ fn assert_flat_test_dir_fully_mod_registered(dir_rel: &str, floor: usize) {
     );
 }
 
-/// Contract 20 — the two census binaries stay STANDALONE top-level `tests/*.rs` files, each keeps
-/// its own written reason for that, and — since the 2026-08-09 fold — they are the ONLY top-level
-/// `.rs` files left. Both are process-wide-counter censuses (`zzop_git::spawn_log`,
-/// `zzop_parser_typescript::parse_count`): cargo runs each `tests/*.rs` as its own process, but tests
-/// WITHIN a binary share the process on parallel threads, so folding either file into a shared harness
-/// makes its counter equality silently meaningless — the count would include every neighbor's spawns.
+/// Contract 20 — every standalone top-level `tests/*.rs` binary is on ONE list, keeps its own
+/// written reason for being alone, and — since the 2026-08-09 fold — they are the ONLY top-level
+/// `.rs` files left. The reason always has the same SHAPE: something the test touches is
+/// process-wide, and cargo runs each `tests/*.rs` as its own process while tests WITHIN a binary
+/// share one on parallel threads. For the three censuses that thing is a counter
+/// (`zzop_git::spawn_log`, `zzop_parser_typescript::parse_count`) and a fold makes their equality
+/// silently meaningless — the count would include every neighbour's activity. For
+/// `deep_input_survival.rs` it is the STACK, and a fold is worse than meaningless: an overflow
+/// aborts instead of unwinding, so one regression takes the binary down and every neighbour's
+/// result with it.
 ///
 /// The strict top-level leg is the fold's completion guard in the OTHER direction: 73 binaries were
 /// folded into `tests/integration/` for one link instead of 73, and a new top-level `.rs` quietly
@@ -377,22 +381,44 @@ fn assert_flat_test_dir_fully_mod_registered(dir_rel: &str, floor: usize) {
 #[test]
 fn census_binaries_stay_standalone_and_say_why() {
     let tests_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
-    let allowed = ["analyze_parse_census.rs", "git_spawn_census.rs"];
+    // `analyze_parse_ceiling.rs` joined on 2026-09-07 (review ledger V22) and it earned the slot the
+    // hard way: it was first written NEXT TO the census pin, and that turned the pin red at `1 -> 5`.
+    // The parse counter is a process-global `AtomicU64` and cargo runs a binary's tests concurrently,
+    // so two tests that each reset-then-read the counter land inside each other's window. Same reason
+    // as its two neighbours, discovered by tripping over it rather than by reading this list.
+    // `deep_input_survival.rs` joined on 2026-09-08 (review ledger V114/V115) and it is the first
+    // entry whose process-wide thing is not a counter but the STACK. Its inputs sit past the nesting
+    // cap by design, so a regression in the gate is a stack overflow — which aborts rather than
+    // unwinds. Measured while writing it: with the gate disabled the run ends at
+    // `error: test failed` and the neighbours that had not finished never report at all. Alone,
+    // that blast radius is one file.
+    let allowed = [
+        "analyze_parse_ceiling.rs",
+        "analyze_parse_census.rs",
+        "deep_input_survival.rs",
+        "git_spawn_census.rs",
+    ];
     for name in allowed {
         let path = tests_dir.join(name);
         let text = fs::read_to_string(&path).unwrap_or_else(|e| {
             panic!(
-                "{} must exist as its OWN top-level test binary — its census counter is \
-                 process-wide, and a harness fold would make the counted number include every \
-                 neighbor test's activity: {e}",
+                "{} must exist as its OWN top-level test binary — something it measures or risks \
+                 is process-wide (a counter for the censuses, the stack for the survival suite), \
+                 and a harness fold would let every neighbor test into it: {e}",
                 path.display()
             )
         });
+        // Case-insensitive, and that is not politeness: the contract is that the reason is WRITTEN
+        // DOWN, which has nothing to do with capitalisation. The exact-case version failed the fourth
+        // entry on the day it was added, because its doc emphasised the word as PROCESS-WIDE — a guard
+        // that reads as a spelling rule teaches people to satisfy it rather than to write the reason.
+        let lower = text.to_lowercase();
         assert!(
-            text.contains("process-global") || text.contains("process-wide"),
+            lower.contains("process-global") || lower.contains("process-wide"),
             "{name} no longer says WHY it must stay a standalone binary (expected the words \
-             \"process-global\" or \"process-wide\" in its doc) — restore the reason before anything \
-             else; a lone file with no written reason is one refactor away from being folded."
+             \"process-global\" or \"process-wide\" in its doc, in any case) — restore the reason \
+             before anything else; a lone file with no written reason is one refactor away from \
+             being folded."
         );
     }
 
@@ -406,10 +432,10 @@ fn census_binaries_stay_standalone_and_say_why() {
     top_level.sort();
     assert_eq!(
         top_level, allowed,
-        "top-level crates/engine/tests/*.rs must be exactly the census pair. Every other test \
+        "top-level crates/engine/tests/*.rs must be exactly this allowlist. Every other test \
          belongs in a registered harness directory (tests/integration/, tests/rule_contracts/ — one \
          link each instead of one per file). If the new file genuinely needs its own process, add it \
-         to this allowlist WITH its reason written in the file, like the census pair."
+         to this allowlist WITH its reason written in the file, like the four already here."
     );
 }
 

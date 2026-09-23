@@ -38,11 +38,12 @@ const ALLSETTLED_WRAPPER_LANDING: &str = "IF ANY CODE CONSUMES THE RESOLVED ARRA
 /// the position pin, in a `fn` of its own.
 ///
 /// SEPARATE `fn` ON PURPOSE, and this is a trap worth naming. `delivered_pins` in
-/// `message_order_verdicts.rs` skips its inline-comparison scan for any block that already calls a
-/// shared helper (`if any_helper { continue; }`). This rule's axis-A verdict IS an inline comparison,
-/// in `writes_and_parsing.rs`; adding a landing helper call to that same `fn` would have made the
-/// block "helper-bearing", dropped the inline pin from the scan, and left the rule with no axis-A
-/// verdict at all — a green edit that silently deletes a declaration.
+/// `message_order_verdicts.rs` does not count an inline comparison in any block that already calls a
+/// shared helper. This rule's axis-A verdict IS an inline comparison, in `writes_and_parsing.rs`;
+/// adding a landing helper call to that same `fn` makes the block "helper-bearing" and drops the
+/// inline pin from the scan, leaving the rule with no axis-A verdict at all. That edit used to be a
+/// green one that silently deleted a declaration — `delivered_pins` now asserts against the shape,
+/// so it is red and names the function.
 #[test]
 fn promise_all_and_writes_landing_precedes_the_imperative() {
     let dir = TempDir::new("zzop-be-rel");

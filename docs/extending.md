@@ -40,6 +40,13 @@ Checked before the extension map, first match wins. Languages: `typescript`, `py
 `rust`, `go`, `csharp`, `sql`, `prisma`. Naming one this build does not have is a warning listing
 what it does have — never a silent skip.
 
+The glob is shell-style and full-path anchored, the same dialect the `exclude` and `suppressions` keys
+use: `*` and `?` stay inside one path segment, `**` crosses `/` (and a leading `**/` also matches zero
+directories, so `**/schema.sql` covers a root-level file), and `{a,b}` alternates. Before 0.35 this key
+ran a narrower translator of its own, on which `?` behaved as a regex quantifier, `{a,b}` matched literal
+braces, and `**/x` required at least one directory — if you wrote a glob around one of those quirks,
+re-check it.
+
 ## 3. zzop guesses your names wrong
 
 A rule that looks for an auth guard has to know what your project calls its auth guards. zzop ships

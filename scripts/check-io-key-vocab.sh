@@ -79,6 +79,64 @@ ssot=packages/mcp/src/tools/definitions.rs
 vocab="$(grep -oP 'cross-layer io key \(\K[^)]+' "$ssot" | head -n1 || true)"
 [ -n "$vocab" ] || { echo "check-io-key-vocab: SSOT anchor 'cross-layer io key (' not found in $ssot — re-anchor this guard." >&2; exit 1; }
 
+# ── Axis 0: the SSOT sentence must be the vocabulary the WIRE carries ─────────────────────────────
+#
+# Until 2026-09-06 this guard took a prose parenthetical as its whole authority and enforced it across
+# every tracked doc. Measured that day: the sentence said "http routes, env keys, DB tables, topics",
+# while the shipped extractors emit `http`, `db-table` and `trpc` and NOTHING emits an env or topic key
+# (`kind: "queue"` exists only inside tests.rs fixtures). So two of the four names were phantoms, the
+# one real kind the sentence omitted could be omitted by every doc for free, and a contributor who
+# wrote the truth got a red light telling them to put the phantoms back.
+#
+# A guard whose SSOT is a sentence can only ever enforce agreement, never correctness. This axis binds
+# the sentence to `RULE_READ_IO_KINDS` — the list the linker and the rules actually read — so the doc
+# fleet inherits a vocabulary the code can be held to.
+#
+# Deliberately NOT a kind->prose map: a map is a second SSOT and drifts the same way. The test is
+# structural instead — every hyphen-separated segment of a kind must appear somewhere in the sentence
+# (`db-table` needs both "db" and "table"), and the token COUNT must equal the kind count, which is the
+# half that catches a phantom. Prose stays free to say "tRPC procedures" rather than "trpc".
+kinds_src=crates/core/src/io/facts.rs
+set +e
+kinds_line="$(grep -oP 'RULE_READ_IO_KINDS: &\[&str\] = &\[\K[^]]+' "$kinds_src")"
+rc=$?
+set -e
+if [ "$rc" -ne 0 ] || [ -z "$kinds_line" ]; then
+  echo "check-io-key-vocab: could not read RULE_READ_IO_KINDS from $kinds_src (grep exit $rc)." >&2
+  echo "  That is not 'no kinds' — it is a broken extraction, and a vocabulary check with no" >&2
+  echo "  vocabulary to check against would pass silently. Re-anchor this guard." >&2
+  exit 1
+fi
+kinds="$(printf '%s' "$kinds_line" | tr -d '" ' | tr ',' ' ')"
+n_kinds="$(printf '%s' "$kinds" | awk '{print NF}')"
+n_tok="$(printf '%s' "$vocab" | awk -F, '{print NF}')"
+vocab_lc="${vocab,,}"
+missing_kind=""
+for k in $kinds; do
+  for seg in $(printf '%s' "$k" | tr '-' ' '); do
+    case "$vocab_lc" in
+      *"$seg"*) ;;
+      *) missing_kind="$missing_kind $k" ;;
+    esac
+  done
+done
+if [ -n "$missing_kind" ]; then
+  echo "check-io-key-vocab: the SSOT sentence names no token for io kind(s):$missing_kind" >&2
+  echo "  SSOT ($ssot): \"$vocab\"" >&2
+  echo "  Kinds the code reads ($kinds_src): $kinds" >&2
+  echo "  A kind the wire carries but the sentence omits can be omitted by every doc for free." >&2
+  exit 1
+fi
+if [ "$n_tok" -ne "$n_kinds" ]; then
+  echo "check-io-key-vocab: the SSOT sentence names $n_tok kind(s) and the code reads $n_kinds." >&2
+  echo "  SSOT ($ssot): \"$vocab\"" >&2
+  echo "  Kinds the code reads ($kinds_src): $kinds" >&2
+  echo "  An extra token is a kind this tool promises and cannot produce -- the defect that shipped" >&2
+  echo "  as 'env keys' and 'topics' until 2026-09-06. Add the kind, or drop the word." >&2
+  exit 1
+fi
+
+
 fail=0
 check_row() { # $1 = file, $2 = table-row anchor (PCRE)
   local file="$1" anchor="$2" row row_lc tok tok_lc

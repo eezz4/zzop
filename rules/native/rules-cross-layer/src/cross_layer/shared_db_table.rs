@@ -1,4 +1,4 @@
-//! `cross-layer/db-table-name-in-multiple-sources` (warning) — the same `db-table` key CONSUMED by 2+ distinct sources.
+//! `cross-layer/db-table-name-in-multiple-sources` (info) — the same `db-table` key CONSUMED by 2+ distinct sources.
 //! Consumes are the signal; provides don't matter here (unlike `duplicate_route`, which is about who
 //! PROVIDES a key) — a table is "shared" when multiple sources read/write it, regardless of which source
 //! declares its schema. Signal is pulled from three places — `edges` (kind `db-table`, consumer side),
@@ -104,7 +104,11 @@ pub fn shared_db_table_findings(cross_layer: &CrossLayerResult) -> Vec<Finding> 
             );
             out.push(Finding {
                 rule_id: "cross-layer/db-table-name-in-multiple-sources".to_string(),
-                severity: Severity::Warning,
+                // Ships `info` for the reason `circular` does (2026-09-06): the message itself ends by
+                // conceding that shared table names across independent databases may be expected in the
+                // reader's stack, so this reports a coincidence worth knowing rather than a defect. It
+                // was the only rule of that class reaching the join reply's first screen (6 of 50 rows).
+                severity: Severity::Info,
                 file: file.clone(),
                 line: *line,
                 message,

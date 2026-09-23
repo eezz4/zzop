@@ -267,6 +267,11 @@ pub fn handle_message(msg: &serde_json::Value) -> Option<serde_json::Value> {
         "tools/list" => ok(id, crate::tools::list()),
         "tools/call" => ok(id, crate::tools::call(msg.get("params"))),
         "resources/list" => ok(id, crate::resources::list()),
+        // Part of the `resources` capability this server already declares, in all three advertised
+        // revisions. It fell through to -32601 until 2026-09-13, which tells a conforming client the
+        // server HAS no templates rather than that nobody asked -- the same shape as answering `ping`
+        // with an error, one surface over.
+        "resources/templates/list" => ok(id, crate::resources::templates_list()),
         "resources/read" => match crate::resources::read(msg.get("params")) {
             Ok(result) => ok(id, result),
             Err(e) => serde_json::json!({

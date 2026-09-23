@@ -26,7 +26,7 @@
 //!   findings (`retain_non_subsumed`) — a replacement, not silent suppression: the aggregate enumerates
 //!   every folded route. Structurally derived, so it only fires when `route-near-miss` is enabled.
 //! - [`shared_db_table`]: `shared_db_table_findings` — the same `db-table` key consumed by 2+ distinct
-//!   source trees (`cross-layer/db-table-name-in-multiple-sources`, warning).
+//!   source trees (`cross-layer/db-table-name-in-multiple-sources`, info).
 //! - [`duplicate_route`]: `cross_layer_duplicate_route_findings` — the same `http` `(method, path)` key
 //!   PROVIDED by 2+ distinct source trees (`cross-layer/duplicate-route`, warning) — distinct from the
 //!   existing single-tree `zzop_rules_http::duplicate_route` rule (different id, different join scope: this one only
@@ -39,7 +39,7 @@
 //!   (`cross-layer/external-shadow-internal`, warning).
 //! - [`external_secret_in_url`]: a secret-named query parameter in an external URL (`cross-layer/external-secret-in-url`, warning).
 //! - [`external_duplicated_integration`]: the same external host called directly from 2+ distinct trees
-//!   (`cross-layer/external-host-in-multiple-sources`, warning).
+//!   (`cross-layer/external-host-in-multiple-sources`, info).
 //! - [`external_host_fanout`]: the same external host called directly from 3+ distinct files (`cross-layer/external-host-fanout`, info).
 //! - [`external_base_url_drift`]: the same external path consumed against 2+ different hosts
 //!   (`cross-layer/external-base-url-drift`, info).
@@ -152,6 +152,14 @@ pub mod unprovided_mutation_call;
 pub mod unresolved_consume_ratio;
 pub mod version_skew;
 
+// The §·27 landing clauses the route/path rules splice AHEAD of their own imperatives, in their own
+// module so the one spelling of each stays the one spelling: the position pins in `landing_tests` compare
+// an index against these constants, and a second copy of any of them would make that comparison
+// meaningless.
+mod landing;
+#[cfg(test)]
+mod landing_tests;
+
 // Split out for file size (see each module's own doc); the route/URL pair is re-exported below.
 mod external_url;
 mod trpc_mount;
@@ -178,7 +186,9 @@ pub use retrying_write_no_idempotency::{retrying_write_no_idempotency_findings, 
 pub use route_near_miss::{
     route_near_miss_findings, route_near_miss_results, NearMissTargetRef, RouteNearMissOutput,
 };
-pub use sdk_import_no_visible_consume::sdk_import_no_visible_consume_findings;
+pub use sdk_import_no_visible_consume::{
+    sdk_import_blind_sources, sdk_import_no_visible_consume_findings,
+};
 pub use sensitive_response_field::{
     sensitive_response_field_findings, ResponseProvideSite, SensitiveResponseVocab,
 };

@@ -1,7 +1,7 @@
 # zzop-mcp — the bundle you just unpacked
 
 This `.mcpb` ships `zzop-mcp`, a native (Node-free) MCP server for Claude Desktop that runs
-deterministic cross-repo contract analysis: which frontend calls hit which backend endpoints (and
+a deterministic repository oracle: inventory, dependency graph, per-file risk, and which frontend calls hit which backend endpoints (and
 which don't) — exact joins, disclosed blind spots, no guessing. This file is the bundle's own
 README; it ships inside every bundle because a bundle is installed and read offline, so every link
 here is an absolute URL on purpose.

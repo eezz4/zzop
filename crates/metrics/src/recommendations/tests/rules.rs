@@ -261,3 +261,38 @@ fn circular_note_joins_cycle_with_arrow_back_to_start() {
     );
     assert_eq!(circ.items[0].action_hint_key, ActionHintKey::Circular);
 }
+
+/// Every capped rule says what its cap dropped, and says `0` when it dropped nothing.
+///
+/// `circular` is the arm worth pinning by name: it caps with `Iterator::take`, so the dropped rows
+/// never enter a `Vec` that could be measured afterwards — the count has to come off the INPUT length,
+/// and a refactor that moved it to `items.len()` would silently report 0 forever while looking correct.
+///
+/// The zero arm is not filler. A silent cap and a cap whose count is always 0 are the same lie, and the
+/// second one passes any test that only checks the truncating case.
+#[test]
+fn each_capped_rule_reports_what_its_cap_dropped() {
+    // 15 is MAX_CIRCULAR; 16 cycles means exactly one is dropped.
+    let cycles: Vec<Vec<String>> = (0..16)
+        .map(|i| vec![format!("c{i}.ts"), format!("d{i}.ts")])
+        .collect();
+    let out = super::super::rules::rule_circular(&cycles);
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].items.len(), 15, "the cap still caps");
+    assert_eq!(
+        out[0].items_truncated, 1,
+        "counted off the INPUT — `take` drops cycles before the closure that builds `items` ever sees \
+         them, so a count taken from `items` would be 0 here and would stay 0 at any input size"
+    );
+
+    let under: Vec<Vec<String>> = (0..3)
+        .map(|i| vec![format!("c{i}.ts"), format!("d{i}.ts")])
+        .collect();
+    let out = super::super::rules::rule_circular(&under);
+    assert_eq!(out[0].items.len(), 3);
+    assert_eq!(
+        out[0].items_truncated, 0,
+        "a complete list must report 0 rather than omit the number — otherwise \"complete\" and \"this \
+         build has no disclosure\" are the same bytes, which is the defect being repaired"
+    );
+}

@@ -259,6 +259,14 @@ let result: serde_json::Value =
           </div>
         </details>
         <details class="cmd-fold">
+          <summary>{{summaryScores}}</summary>
+          <div class="design-notes__body">
+            <p>{{pScores1}}</p>
+            <p>{{pScores2}}</p>
+            <p>{{pScores3}}</p>
+          </div>
+        </details>
+        <details class="cmd-fold">
           <summary>{{summary97}}</summary>
           <div class="design-notes__body">
             <p>{{p98}}</p>
@@ -311,12 +319,6 @@ let result: serde_json::Value = serde_json::from_str(&amp;zzop_facade::analyze_t
           </div>
         </details>
         <div class="cmd-row"><span class="cmd-row__name"><code>nodes</code><span class="cmd-row__type">object[]</span></span><span class="cmd-row__desc">Per-file churn/fan-in/fan-out/risk metrics — fully populated only when <code>git</code> is set.</span></div>
-        <details class="cmd-fold">
-          <summary>{{summary111}}</summary>
-          <div class="design-notes__body">
-            <p>{{p112}}</p>
-          </div>
-        </details>
 
         <div class="cmd-band"><span class="cmd-band__label">rule verdicts</span></div>
         <details class="cmd-fold">
@@ -332,12 +334,6 @@ let result: serde_json::Value = serde_json::from_str(&amp;zzop_facade::analyze_t
           <div class="design-notes__body">
             <p>{{p116}}</p>
             <p>{{p117}}</p>
-          </div>
-        </details>
-        <details class="cmd-fold">
-          <summary>{{summary118}}</summary>
-          <div class="design-notes__body">
-            <p>{{p119}}</p>
           </div>
         </details>
         <details class="cmd-fold">
@@ -361,15 +357,15 @@ let result: serde_json::Value = serde_json::from_str(&amp;zzop_facade::analyze_t
           </div>
         </details>
         <details class="cmd-fold">
-          <summary>{{summary128}}</summary>
+          <summary>{{summaryCriticalTruncated}}</summary>
           <div class="design-notes__body">
-            <p>{{p129}}</p>
+            <p>{{pCriticalTruncated}}</p>
           </div>
         </details>
         <details class="cmd-fold">
-          <summary>{{summary130}}</summary>
+          <summary>{{summary128}}</summary>
           <div class="design-notes__body">
-            <p>{{p131}}</p>
+            <p>{{p129}}</p>
           </div>
         </details>
         <details class="cmd-fold">
@@ -451,8 +447,9 @@ let result: serde_json::Value = serde_json::from_str(&amp;zzop_facade::analyze_t
           <code>severity</code><span><code>"critical" | "warning" | "info"</code> — the finding's <em>effective</em> severity: the rule's default, as remapped by <code>severityOverrides</code>, and as de-escalated by the rules that lower their own confidence when the run is blind (see below).</span>
           <code>file</code><span>Path relative to <code>root</code>.</span>
           <code>line</code><span>1-based line number.</span>
-          <code>message</code><span>Human-facing cause/fix hint, copied verbatim from the rule definition — unless <code>messageRef</code> is present, in which case this is a short pointer and the text itself is the entry it names.</span>
+          <code>message</code><span>Human-facing cause/fix hint, copied verbatim from the rule definition — unless <code>messageRef</code> or <code>templateParts</code> is present, in which case this is a short pointer and the text itself is rebuilt from the sibling table that pointer names.</span>
 <code>messageRef</code><span><strong>Present only when the text was folded.</strong> A key into <code>ruleMessages</code>, the object sitting beside the <code>shown</code> list this finding came from — a sibling, not a fixed path, because one shaper feeds both <code>findings</code> and <code>crossLayerFindings</code>. A text carried by more than one finding is stored there once and pointed at, but only where doing so removes more bytes than the pointer and the table cost, so a repeated text can also be absent. Read <code>message</code> directly when <code>messageRef</code> is absent. The stored text is byte-identical to the inline one — nothing is shortened or dropped, and no second request is needed. <code>ruleMessagesMeaning</code> states the same contract on the wire.</span>
+          <code>templateParts</code><span><strong>Present only when the text was folded on its TEMPLATE.</strong> A rule that writes a finding's own subject into its prose — a table name, a symbol, a cycle path — emits a different string every time, so <code>ruleMessages</code> above cannot hold it. What those messages share is stored in a sibling <code>ruleMessageTemplates</code> instead, keyed by the <em>rule id</em>: an array of literal segments. This field holds the bytes that differ, in order. Rebuild by interleaving them, segment first, ending on the last segment — <code>templateParts</code> is always exactly one shorter than the template, and a segment may be empty at either end. There is no separate key field, because a finding already names its rule; a rule whose messages do not all fit one template is left inline instead. A finding never carries both this and <code>messageRef</code>. The rebuilt text is byte-identical to the inline one. <code>ruleMessageTemplatesMeaning</code> states the same contract on the wire.</span>
           <code>data</code><span>Matcher-specific JSON payload — opaque, rule-specific keys.</span>
         </div>
       </div>

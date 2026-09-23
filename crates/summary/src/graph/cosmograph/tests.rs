@@ -431,8 +431,10 @@ fn the_links_census_carries_no_git_window() {
     assert!(!line.contains("2026-01-01"), "{line}");
 }
 
-/// Cycle membership is the highest-severity structural fact this domain carries. The mermaid lane draws
-/// it as a thick arrow; a viewer has no arrow styles, so it has to survive as a COLUMN or it is lost.
+/// Cycle membership is the structural fact this domain carries that is hardest to read as text (see
+/// `dep`'s module doc -- it is about legibility, not about the rule's band, which is `info`). The mermaid
+/// lane draws it as a thick arrow; a viewer has no arrow styles, so it has to survive as a COLUMN or it
+/// is lost.
 #[test]
 fn cycle_membership_survives_into_both_tables() {
     let u = super::super::dep::collect(&one_tree());

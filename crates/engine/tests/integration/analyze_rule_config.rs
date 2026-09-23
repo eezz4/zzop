@@ -67,14 +67,14 @@ fn cycle_fixture() -> TempDir {
 fn severity_overrides_remap_a_finding_through_analyze_tree() {
     let dir = cycle_fixture();
 
-    // Baseline: `circular` fires at its default severity (`warning`).
+    // Baseline: `circular` fires at its default severity (`info` since 2026-09-06).
     let baseline = analyze_tree(dir.path(), &EngineConfig::default());
     let circular = baseline
         .findings
         .iter()
         .find(|f| f.rule_id == "circular")
         .expect("baseline run should produce a circular finding");
-    assert_eq!(circular.severity, Severity::Warning);
+    assert_eq!(circular.severity, Severity::Info);
 
     // With an override, the same finding must come back as `critical`.
     let mut overrides = BTreeMap::new();
@@ -131,6 +131,12 @@ fn suppressions_drop_a_finding_through_analyze_tree() {
     );
 }
 
+/// FIRING PIN for the `config-error` blindness class, positive end. That class is labelled `asserted`
+/// — a setting naming something this build does not have is reported as a diagnostic on every run —
+/// and until the registry pointed here nothing ran it: the meta test compared the label with a copy of
+/// itself. The negative control is `a_real_severity_override_id_does_not_trigger_the_unknown_id_warning`
+/// below, because a check that fires on every config would satisfy the positive half while telling a
+/// reader nothing.
 #[test]
 fn unknown_severity_override_id_surfaces_a_self_report_warning() {
     // A `severity_overrides` key that matches no known native-analysis id / "<pack>/<rule>" id silently

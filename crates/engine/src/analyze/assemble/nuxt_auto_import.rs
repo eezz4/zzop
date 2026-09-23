@@ -174,10 +174,12 @@ pub(super) fn scan(
     // reports `symbols.count = 0` for it.
     let mut by_name: HashMap<String, Vec<usize>> = HashMap::new();
     for (idx, (rel, _)) in candidates.iter().enumerate() {
-        let Ok(bytes) = std::fs::read(root.join(rel.as_str())) else {
-            continue; // deleted/permission race — no names, so no liveness claimed
+        // `read_for_parse`, not `fs::read`: these candidates come from `ts_paths`, and
+        // `pipeline::fresh::ts_slot` puts a file in there whether or not the gate refused it — so a
+        // refused file reached `parse_exported_names` below and took the process down (ledger V127).
+        let Some(text) = crate::analyze::read_for_parse(root, rel.as_str()) else {
+            continue; // unreadable, or past a recursion cap — no names, so no liveness claimed
         };
-        let text = String::from_utf8_lossy(&bytes);
         for name in zzop_parser_typescript::parse_exported_names(rel, &text) {
             if name == "default" {
                 continue; // not a bare identifier any auto-import call site can write

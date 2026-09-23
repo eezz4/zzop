@@ -53,10 +53,13 @@ pub(super) fn collect_prescan(
     let mut import_pairs = Vec::new();
     let mut rosters: Vec<(String, std::collections::BTreeSet<String>)> = Vec::new();
     for rel in prescan_rels {
-        let Ok(bytes) = std::fs::read(root.join(rel)) else {
+        // `read_for_parse`, not `fs::read`: this list is `prescan_rels`, built from dispatch-`None`
+        // files, which is the one population the recursion gate used to skip on purpose ("nothing will
+        // parse it") while this very line handed it to swc. See that function's doc for the
+        // reproduction (review ledger V127).
+        let Some(text) = crate::analyze::read_for_parse(root, rel) else {
             continue;
         };
-        let text = String::from_utf8_lossy(&bytes).into_owned();
         let imports = zzop_parser_typescript::extract_prescan_imports(rel, &text);
         if !imports.is_empty() {
             import_pairs.push((rel.clone(), imports));

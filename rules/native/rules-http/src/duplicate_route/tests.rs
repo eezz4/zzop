@@ -1,4 +1,4 @@
-//! Unit tests for `duplicate_route_findings`'s grouping logic (e2e coverage: `crates/engine/tests/pack_egress.rs`).
+//! Unit tests for `duplicate_route_findings`'s grouping logic (e2e coverage: `crates/engine/tests/integration/analyze_routes_hono.rs`).
 
 use super::*;
 

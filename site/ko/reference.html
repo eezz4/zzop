@@ -8,7 +8,7 @@
 <link rel="alternate" hreflang="en" href="https://eezz4.github.io/zzop/reference.html">
 <link rel="alternate" hreflang="ko" href="https://eezz4.github.io/zzop/ko/reference.html">
 <link rel="alternate" hreflang="x-default" href="https://eezz4.github.io/zzop/reference.html">
-<link rel="stylesheet" href="assets/site.css">
+<link rel="stylesheet" href="../assets/site.css">
 </head>
 <body>
 
@@ -97,7 +97,7 @@
       <p>이쪽의 봉인된 <code>verdict</code> 어휘(<code>analyzed</code> | <code>lexical-only</code> | <code>degraded</code> | <code>not-found</code>)가 답하는 것은 그 파일이 <strong>분석됐는가</strong>이지 건강한가가 아니다 — 빈 발견 목록은 첫 번째에서는 "깨끗하다"이고 다음 둘에서는 "구조 분석이 애초에 돌지 않았다"이다. <code>query_io_json</code> 과 마찬가지로 응답 자신의 <code>verdictMeaning</code> 필드가 돌려준 토큰의 정의를 싣고 다니므로, 어떤 문서도 그 정의의 두 번째 주인이 되지 않는다. <code>sourceId</code> 가 없으면 모든 트리를 뒤지고, 응답은 매치가 나온 트리를 이름 대며 나머지는 <code>otherTrees</code> 에 늘어놓는다 — 말없이 하나를 고르지 않는다. <code>not-found</code> 응답에는 워크된 경로 중 가장 가까운 것들이 <code>suggestions</code> 로 실린다. <code>path</code> 가 없는 질의와, 보고할 트리 정체성이 없는 단일 트리 <code>analyze_json</code> 출력에는 에러를 낸다. <code>zzop file</code> / <code>check_file</code> MCP 도구를 떠받친다.</p>
       <h3 id="op-query-coverage-json" class="cmd-detail"><code>query_coverage_json</code></h3>
       <p class="cmd-note"><code>(analysis_json: &amp;str) -&gt; Result&lt;String, String&gt;</code></p>
-      <p><code>analyze_trees_json</code> 출력 &rarr; <strong>총량 가시성</strong> 뷰: &ldquo;zzop 이 이 트리를 실제로 얼마나 보고 있나?&rdquo; 트리마다 디스패치별 확장자 표(구조 / lexical-only / degraded, 그리고 <code>inDepGraph</code>), <code>blindSpots</code> &mdash; 컴파일된 각 룰의 시선을 그 트리의 구조 확장자 구성과 교차시킨 <strong>능력</strong> 축 &mdash; 그 트리 자신의 엔진 경고를 그대로 전달한 것(프레임워크 침묵 자기보고가 여기 실린다), 커버리지 센서스, <code>ioChannels</code>(<code>extracted</code> — 룰이 읽는 io 종류마다 한 행씩, <strong>0 이어도 반드시 실린다</strong>: 종류를 구분하지 않는 <code>joinContributionZero</code> 처럼 채워진 채널이 빈 채널을 대신 보증하지 못하게 한다. <code>zeroExtraction</code> — 이 빌드가 인식기를 가진 (채널, 확장자) 중 추출이 0 으로 돌아온 것을 이름 붙인 <strong>능력×실측</strong> 교차: 이 실행이 구조적으로 읽은 것 중 주요 비중인 확장자만 실리고(그 아래는 목록에서 <strong>빠지는 것이지 통과한 것이 아니다</strong>), 프레임워크 이름을 알아보는 게 아니라 트리 자체를 모집단으로 삼는 <strong>커버리지 사실</strong>이다), 그리고 <code>joinVisibility</code> 를 개수로(provides, consumesKeyed, consumesUnresolved) 의미와 함께 낸다 — 파생 비율은 내지 않는다. 몫은 1 중 1 에서나 440 중 400 에서나 똑같이 읽히기 때문이다. <strong>단일 점수는 일부러 없다</strong>: zzop 이 당신 트리에서 한 번도 재지 못한 축은, 그 사실 없이 인용될 숫자에 접혀 들어가는 대신 <strong>재지 못했다는 필드</strong>에 실려 간다. MCP 도구 짝이 없는 <code>zzop coverage</code> 를 떠받친다.</p>
+      <p><code>analyze_trees_json</code> 출력 &rarr; <strong>총량 가시성</strong> 뷰: &ldquo;zzop 이 이 트리를 실제로 얼마나 보고 있나?&rdquo; 트리마다 디스패치별 확장자 표(구조 / lexical-only / degraded, 그리고 <code>inDepGraph</code>), <code>blindSpots</code> &mdash; 컴파일된 각 룰의 시선을 그 트리의 구조 확장자 구성과 교차시킨 <strong>능력</strong> 축 &mdash; 그 트리 자신의 엔진 경고를 그대로 전달한 것(프레임워크 침묵 자기보고가 여기 실린다), 커버리지 센서스, <code>ioChannels</code>(<code>extracted</code> — 룰이 읽는 io 종류마다 한 행씩, <strong>0 이어도 반드시 실린다</strong>: 종류를 구분하지 않는 <code>joinContributionZero</code> 처럼 채워진 채널이 빈 채널을 대신 보증하지 못하게 한다. <code>zeroExtraction</code> — 이 빌드가 인식기를 가진 (채널, 확장자) 중 추출이 0 으로 돌아온 것을 이름 붙인 <strong>능력×실측</strong> 교차: 이 실행이 구조적으로 읽은 것 중 주요 비중인 확장자만 실리고(그 아래는 목록에서 <strong>빠지는 것이지 통과한 것이 아니다</strong>), 프레임워크 이름을 알아보는 게 아니라 트리 자체를 모집단으로 삼는 <strong>커버리지 사실</strong>이다), 그리고 <code>joinVisibility</code> 를 개수로(provides, consumesKeyed, consumesUnresolved) 의미와 함께 낸다 — 파생 비율은 내지 않는다. 몫은 1 중 1 에서나 440 중 400 에서나 똑같이 읽히기 때문이다. <strong>단일 점수는 일부러 없다</strong>: zzop 이 당신 트리에서 한 번도 재지 못한 축은, 그 사실 없이 인용될 숫자에 접혀 들어가는 대신 <strong>재지 못했다는 필드</strong>에 실려 간다. <code>zzop coverage</code> 와 <code>check_coverage</code> MCP 도구를 떠받친다.</p>
 
       <span class="eyebrow eyebrow--sm cmd-details__label">Details — validate</span>
       <h3 id="op-validate-envelope-only-json" class="cmd-detail"><code>validate_envelope_only_json</code></h3>
@@ -275,6 +275,14 @@ let result: serde_json::Value =
           </div>
         </details>
         <details class="cmd-fold">
+          <summary><div class="cmd-row"><span class="cmd-row__name"><code>scores</code><span class="cmd-row__type">object &mdash; 기본값 <code>{}</code></span></span><span class="cmd-row__desc">구조 점수가 셀 수 있는 파일의 범위 — 점수만 움직이고 발견은 움직이지 않는다.<span class="cmd-row__more">계약</span></span></div></summary>
+          <div class="design-notes__body">
+            <p>모양: <code>{ excludeTestFilesFromFileMetrics?: boolean }</code>, 기본값 <code>false</code>. 구조 점수는 전부 "이 트리의 파일들" 위에서 잡은 비율이거나 평균이고, 그 모집단에는 기본적으로 당신의 테스트가 들어 있다 — 테스트가 소스보다 많은 레포는 출하되지 않는 코드에 대해 대체로 계산된 답을 받는다. 이 키를 켜면 공유 테스트 경로 관습(<code>zzop_core::is_test_file</code>)이 맞히는 경로가 전부 모집단에서 빠지고, 당신이 선언한 <code>vocabulary.extraTestPathPatterns</code> 가 그 범위를 넓힌다. 객체를 생략한 것은 <code>false</code> 와 같은 뜻이고, 그것이 지금까지 모든 점수가 써 온 모집단이므로 기존 호출자의 수치는 움직이지 않는다.</p>
+            <p><strong>점수만이다.</strong> 어떤 룰도 이 키를 읽지 않으므로 발견이 생기지도 사라지지도 않는다: <code>express</code> 코퍼스 트리에서 재 보니 <code>findings.total</code> 은 56 으로 그대로였고 <code>bySeverity</code>/<code>byRule</code> 은 바이트까지 같았으며, 그 사이 <code>architecture.pain</code> 은 30.0 에서 11.5 로 움직였다. 제외된 파일도 여전히 파싱되고, 간선을 모두 지닌 노드로 남고, 여전히 보고 대상이다 — 잃는 것은 점수의 <em>주어</em> 자격뿐이다.</p>
+            <p>그리고 <em>일부</em> 점수에만 닿는다: 파일에 키가 잡힌 열한 개 지표와 그 위의 <code>pain</code> 롤업까지다. 디렉터리 롤업에 키가 잡힌 넷(<code>cohesion</code>, <code>sdp</code>, <code>mainSequence</code>, <code>modularity</code>)에는 닿지 않고, 점수가 아닌 <code>criticalTop</code>/<code>topRecommendation</code> 에도 닿지 않는다. 그래서 테스트 파일을 뺀 <code>pain</code> 수치 옆에 테스트 모듈이 <code>criticalTop</code> 으로 이름이 실릴 수 있다 — 같은 <code>express</code> 실행에서 키를 끄고 켠 두 판의 <code>criticalTop</code> 세 칸은 바이트까지 같았고, 그 둘째 칸이 <code>test/support/utils.js</code> 였다. 이 키가 <code>pain</code> 의 기준을 다시 잡으므로, 응답은 그 실행의 모집단을 <code>painMeaning</code> 안에, <code>POPULATION:</code> 토큰으로 시작하는 절로 적는다. 두 <code>pain</code> 값은 그 문장이 양쪽에서 똑같이 읽힐 때에만 비교 가능하다.</p>
+          </div>
+        </details>
+        <details class="cmd-fold">
           <summary><div class="cmd-row"><span class="cmd-row__name"><code>parsers</code><span class="cmd-row__type">object &mdash; 기본값 <code>{}</code></span></span><span class="cmd-row__desc">파서 라우팅 — 글롭에 맞는 경로를 이름 댄 언어로 강제한다.<span class="cmd-row__more">계약</span></span></div></summary>
           <div class="design-notes__body">
             <p>모양: <code>{ globOverrides?: { glob: string, language: string }[] }</code>. 확장자 맵보다 <em>앞서</em> 순서대로 적용된다(첫 매치 승리). 확장자가 내용에 대해 거짓말을 하는 파일들을 위한 것이다: SQL 이 든 <code>.txt</code>, 실은 PHP 가 섞이지 않은 Java 인 벤더링된 <code>.inc</code>.</p>
@@ -327,12 +335,6 @@ let result: serde_json::Value = serde_json::from_str(&amp;zzop_facade::analyze_t
           </div>
         </details>
         <div class="cmd-row"><span class="cmd-row__name"><code>nodes</code><span class="cmd-row__type">object[]</span></span><span class="cmd-row__desc">Per-file churn/fan-in/fan-out/risk metrics — fully populated only when <code>git</code> is set.</span></div>
-        <details class="cmd-fold">
-          <summary><div class="cmd-row"><span class="cmd-row__name"><code>folders</code><span class="cmd-row__type">object</span></span><span class="cmd-row__desc"><code>nodes</code> 와 의존 그래프를 폴더 단위로 굴려 올린 것.<span class="cmd-row__more">계약</span></span></div></summary>
-          <div class="design-notes__body">
-            <p>git 이 관문이 아니다 — 빈 트리에서도 언제나 있다. 각 행이 세는 것은 <code>fileCount</code> 가 아니라 <code>nodeCount</code> 다: 노드는 의존 그래프 키이거나 git 이 건드린 경로일 때만 존재하므로, 이 행들을 더해도 최상위 <code>fileCount</code>(워크한 파일 수)가 나오지 않고, git 이 꺼져 있으면 lexical-only 파일은 어느 행에도 없다.</p>
-          </div>
-        </details>
 
         <div class="cmd-band"><span class="cmd-band__label">rule verdicts</span></div>
         <details class="cmd-fold">
@@ -348,12 +350,6 @@ let result: serde_json::Value = serde_json::from_str(&amp;zzop_facade::analyze_t
           <div class="design-notes__body">
             <p><strong>모든 점수는 자기가 채점한 모집단을 함께 싣는다</strong> — <code>featureSlicedDesign.layerClassifiedImports</code>, <code>cohesion.sliceCount</code>, <code>coupling.importerCount</code>, <code>godFile.total</code>, <code>busFactor.total</code>, <code>diamond.rootsExamined</code>, <code>mainSequence.classifiedFiles</code> 와 그 형제들. 모집단 <code>0</code> 은 건강 증명서가 아니라 <em>잰 적이 없다</em>는 신호다: 모든 공식이 빈 모집단에서 100 을 돌려주므로, "전부 판정했고 전부 통과했다"와 "판정할 수 있는 것을 하나도 찾지 못했다"를 가르는 것은 분모뿐이다.</p>
             <p>각각은 판정된 모집단의 분모이지 트리 총계가 아니다: 최상위 <code>exclude</code> 는 경로를 위반 목록에서도 분모에서도 빼고, <code>fileSizeCompliance</code>/<code>godFile</code> 은 소스 파일만 판정한다. <code>mainSequence.classifiedFiles</code> 는 현재 모든 빌드에서 <code>0</code> 이므로(파일을 추상/구상으로 분류하는 것이 아직 없다) 그 <code>instability</code>/<code>fileCount</code> 만 읽어라. 각 키가 무슨 뜻인지는 <code>scoreMeanings</code> 에 나란히 실려 온다.</p>
-          </div>
-        </details>
-        <details class="cmd-fold">
-          <summary><div class="cmd-row"><span class="cmd-row__name"><code>scoreMeanings</code><span class="cmd-row__type">object</span></span><span class="cmd-row__desc"><code>scores</code> 의 키마다 한 문장씩, 키는 똑같이.<span class="cmd-row__more">계약</span></span></div></summary>
-          <div class="design-notes__body">
-            <p><code>scores</code> 가 있을 때 정확히 함께 있고, 아니면 <code>null</code> 이 아니라 아예 없다. 점수 키 하나가 맨 약어이고 그 풀이가 사는 자리가 이 범례다: <code>sdp</code>(Stable Dependencies Principle). 둘이 더 그랬는데 그쪽은 대신 와이어에서 이름을 바꿨다: <code>sfc</code> &rarr; <code>fileSizeCompliance</code>, <code>fsd</code> &rarr; <code>featureSlicedDesign</code>. 네 번째였던 <code>lod</code>(Law of Demeter)는 2026-08 에 자기 점수와 함께 제거됐다 — 무엇도 잰 적이 없었다. 각 문장은 <em>낮은</em> 수가 무슨 뜻인지를 말한다. 모든 점수는 0&ndash;100 이고 높을수록 건강하다.</p>
           </div>
         </details>
         <details class="cmd-fold">
@@ -377,21 +373,21 @@ let result: serde_json::Value = serde_json::from_str(&amp;zzop_facade::analyze_t
           </div>
         </details>
         <details class="cmd-fold">
+          <summary><div class="cmd-row"><span class="cmd-row__name"><code>criticalTruncated</code><span class="cmd-row__type">number</span></span><span class="cmd-row__desc">위 목록의 상한(20)이 <strong>몇 행을 버렸나</strong>. <code>0</code> 이면 전량이고, <code>0</code> 도 항상 실린다.<span class="cmd-row__more">계약</span></span></div></summary>
+          <div class="design-notes__body">
+            <p>상한이 <strong>몇 행을 버렸는지</strong>는 그 상한과 같은 자리에서만 알 수 있고, 리플라이 어디에서도 되짚을 수 없다 — <code>architecture.criticalTop</code> 의 범례는 자기가 들어 올린 <em>세 개</em>만 말하므로, 배열까지 파고든 독자는 아무 문장도 이름 대지 않는 20행 벽을 만난다. <code>목록 길이 + 이 수</code> 가 전체를 복원한다.</p>
+          </div>
+        </details>
+        <details class="cmd-fold">
           <summary><div class="cmd-row"><span class="cmd-row__name"><code>seams</code><span class="cmd-row__type">object[]</span></span><span class="cmd-row__desc">가장 먼저 떼어내기 좋은 폴더 후보(경계를 넘는 결합이 적은 곳).<span class="cmd-row__more">계약</span></span></div></summary>
           <div class="design-notes__body">
             <p><code>files</code> 가 세는 것은 그 폴더의 <em>의존 그래프 키</em>이지 워크한 파일이 아니고, 잡음 폴더(테스트, dist, docs, &hellip;)는 통째로 건너뛴다. <code>temporalBoundary</code> 는 두 번 걸러진다 — 파일 2&ndash;25 개를 건드린 커밋만, 그리고 파일마다 상위 10 개 동시 변경 짝만 — 그래서 그것은 총계가 아니라 <strong>측정된 것 중 가장 강한</strong> 폴더 간 동시 변경이다.</p>
           </div>
         </details>
         <details class="cmd-fold">
-          <summary><div class="cmd-row"><span class="cmd-row__name"><code>layerCoChurn</code><span class="cmd-row__type">object[] | null</span></span><span class="cmd-row__desc">레이어를 가로지르는 커밋 동시 처닝 짝.<span class="cmd-row__more">계약</span></span></div></summary>
-          <div class="design-notes__body">
-            <p><code>git</code> 이 서 있지 않으면 <code>null</code>. git 은 살아 있는데 동시 변경 문턱을 넘는 짝이 없으면 (<code>null</code> 이 아니라) <code>[]</code>. <code>coChanges</code> 는 <em>부분집합</em> 총계다: 파일 2 개 미만이나 25 개 초과를 건드린 커밋은 잡음으로 건너뛰므로, "거른 뒤 동시 변경 N 회"로 읽어야지 "이 레이어들이 N 번 함께 바뀌었다"로 읽으면 안 된다.</p>
-          </div>
-        </details>
-        <details class="cmd-fold">
           <summary><div class="cmd-row"><span class="cmd-row__name"><code>coChange</code><span class="cmd-row__type">object[] | null</span></span><span class="cmd-row__desc">파일 짝 동시 변경 간선 — <code>graph --domain cochange</code> 가 그리는 바탕.<span class="cmd-row__more">계약</span></span></div></summary>
           <div class="design-notes__body">
-            <p>의존 그래프 설명이 기대는 것과 같은 증거다. <code>null</code> = git 이 비활성이거나 수집이 실패해 아무것도 재지 못했다. <code>[]</code> = 쟀고 함께 바뀐 것이 없었다 — 이 둘을 하나로 접으면 안 된다. <code>layerCoChurn</code> 과 같은 잡음 필터 둘을 그대로 달고 있으므로 총계가 아니라 표본이다. <code>disabledRules</code> 가 관문이 아니다: 이것은 룰의 판정이 아니라 측정된 증거다. 경로는 <code>nodes</code>·<code>dep</code> 와 마찬가지로 분석 대상 트리 기준이다: 이력은 레포지토리 단위로 모은 다음 각 트리 루트로 다시 얹히므로, 모노레포 안의 패키지는 자기 동시 변경만 보고 형제의 것은 결코 보지 않는다.</p>
+            <p>의존 그래프 설명이 기대는 것과 같은 증거다. <code>null</code> = git 이 비활성이거나 수집이 실패해 아무것도 재지 못했다. <code>[]</code> = 쟀고 함께 바뀐 것이 없었다 — 이 둘을 하나로 접으면 안 된다. <code>layerCoChurn</code> 과 같은 잡음 필터 둘을 그대로 달고 있으므로 총계가 아니라 표본이다. <code>disabledRules</code> 가 관문이 아니다: 이것은 룰의 판정이 아니라 측정된 증거다. 경로는 <code>nodes</code>·<code>dep</code> 와 마찬가지로 분석 대상 트리 기준이다: 이력은 레포지토리 단위로 모은 다음 각 트리 루트로 다시 얹히므로, 모노레포 안의 패키지는 자기 동시 변경만 보고 형제의 것은 결코 보지 않는다. <code>coChanges</code> 는 <em>부분집합</em> 총계다: 파일 2 개 미만이나 25 개 초과를 건드린 커밋은 잡음으로 건너뛰므로, "거른 뒤 동시 변경 N 회"로 읽어야지 "이 파일들이 N 번 함께 바뀌었다"로 읽으면 안 된다.</p>
           </div>
         </details>
         <details class="cmd-fold">
@@ -419,15 +415,15 @@ let result: serde_json::Value = serde_json::from_str(&amp;zzop_facade::analyze_t
         <details class="cmd-fold">
           <summary><div class="cmd-row"><span class="cmd-row__name"><code>nativeAnalyses</code><span class="cmd-row__type">object</span></span><span class="cmd-row__desc"><code>packsLoaded</code> 가 DSL 팩에 묻는 것을 내장 분석에 묻는다: 이 응답의 <code>findings</code> 에 키를 만들 수 <em>없었던</em> 것이 무엇인가.<span class="cmd-row__more">계약</span></span></div></summary>
           <div class="design-notes__body">
-            <p>모양: <code>{ registered, disabled, reportedInCrossLayerFindings }</code>. <code>registered</code> 는 이 빌드가 담은 내장 분석의 수 — 아래 두 목록을 읽을 때의 <strong>분모</strong>다. 세는 것은 <strong>게이트 id 공간</strong>(<code>rules</code>/<code>disabledRules</code> 가 부르는 이름)이지 발견이 실을 수 있는 id 가 아니다: 일부는 발견을 안 내는 점수 계산을 게이트하고, 일부는 발견이 더 잘게 <code>schema/&lt;label&gt;</code> 로 나가는 우산 id 다.</p>
-            <p>두 목록을 가르는 이유는 처방이 정반대라서다. <code>disabled</code> = 당신의 config 가 껐다 — <code>findings</code> 에 없다는 것은 <strong>분석 안 됨</strong>이고, 판정을 받으려면 다시 켜라. <code>reportedInCrossLayerFindings</code> = <strong>켜져 있는데도</strong> 여기 나올 수 없다. 이들은 크로스트리 조인을 판정하고 그 자신의 <code>crossLayerFindings</code> 채널로 보고하는데, 트리별 출력에는 그 채널이 없다 — 같은 config 로 크로스레이어 조인을 돌리면 보인다. 등록됐는데 어느 목록에도 없으면 그것은 돌았다 — 위 문단이 이름 댄 부류만 예외다. 점수 계산을 게이트하는 id 는 발견을 아예 안 내고, 우산 id 의 발견은 더 잘게 <code>schema/&lt;label&gt;</code> 이름으로 나온다. 어느 쪽도 <code>registered</code> 가 세는 자기 이름으로는 <code>findings</code> 에 키를 만들지 않으니, 거기가 비어 있는 것은 그 id 들의 평소 모습이지 판정이 아니다(우산이면 <code>schema/&lt;label&gt;</code> 쪽을 찾아라). 그 밖에 어느 목록에도 없는 것은 <code>findings</code> 에 없는 것이 실측된 0 이다.</p>
-            <p>두 목록은 비어 있어도 항상 실린다(<code>[]</code> 포함) — <code>zeroAdmissionRules</code> 와 달리, 고의로. 항목이 있을 때만 나오는 목록은 깨끗한 실행에서 아무 말도 안 하고, 그 바이트는 <em>보고하지 않는 빌드</em>와 구분되지 않는다. 이 객체가 없애려는 혼동이 바로 그것이다.</p>
+            <p>모양: <code>{ registered, disabled, shippedOff, reportedInCrossLayerFindings }</code>. <code>registered</code> 는 이 빌드가 담은 내장 분석의 수 — 아래 세 목록을 읽을 때의 <strong>분모</strong>다. 세는 것은 <strong>게이트 id 공간</strong>(<code>rules</code>/<code>disabledRules</code> 가 부르는 이름)이지 발견이 실을 수 있는 id 가 아니다: 일부는 발견을 안 내는 점수 계산을 게이트하고, 일부는 발견이 더 잘게 <code>schema/&lt;label&gt;</code> 로 나가는 우산 id 다.</p>
+            <p>목록을 가르는 이유는 처방이 정반대라서다. <code>disabled</code> = 당신의 config 가 껐다 — <code>findings</code> 에 없다는 것은 <strong>분석 안 됨</strong>이고, 판정을 받으려면 다시 켜라. <code>shippedOff</code> = <strong>이 빌드가</strong> 껐고 당신의 config 가 안 켰다. 분석 안 된 것은 같지만 <em>누가 골랐나</em>가 다르고, 그래서 처방도 다르다 — 끄기를 그만두는 것이 아니라 <code>rules</code> 에 심각도를 적어 이름을 부른다(<code>"dead-candidates": "info"</code>). 미사용 코드 위생 셋(<code>unimported-export</code> · <code>dead-candidates</code> · <code>unreachable</code>)이 그것이고, 도그푸드 코퍼스에서 전체 발견의 61.7% 였다. <code>reportedInCrossLayerFindings</code> = <strong>켜져 있는데도</strong> 여기 나올 수 없다. 이들은 크로스트리 조인을 판정하고 그 자신의 <code>crossLayerFindings</code> 채널로 보고하는데, 트리별 출력에는 그 채널이 없다 — 같은 config 로 크로스레이어 조인을 돌리면 보인다. 등록됐는데 <strong>세 목록 어디에도</strong> 없으면 그것은 돌았다 — 위 문단이 이름 댄 부류만 예외다. 점수 계산을 게이트하는 id 는 발견을 아예 안 내고, 우산 id 의 발견은 더 잘게 <code>schema/&lt;label&gt;</code> 이름으로 나온다. 어느 쪽도 <code>registered</code> 가 세는 자기 이름으로는 <code>findings</code> 에 키를 만들지 않으니, 거기가 비어 있는 것은 그 id 들의 평소 모습이지 판정이 아니다(우산이면 <code>schema/&lt;label&gt;</code> 쪽을 찾아라). 그 밖에 세 목록 어디에도 없는 것은 <code>findings</code> 에 없는 것이 실측된 0 이다.</p>
+            <p>목록은 하나하나 비어 있어도 항상 실린다(<code>[]</code> 포함) — <code>zeroAdmissionRules</code> 와 달리, 고의로. 항목이 있을 때만 나오는 목록은 깨끗한 실행에서 아무 말도 안 하고, 그 바이트는 <em>보고하지 않는 빌드</em>와 구분되지 않는다. 이 객체가 없애려는 혼동이 바로 그것이다.</p>
           </div>
         </details>
         <details class="cmd-fold">
           <summary><div class="cmd-row"><span class="cmd-row__name"><code>nativeAnalysesMeaning</code><span class="cmd-row__type">object</span></span><span class="cmd-row__desc">위 객체의 범례 — 주제가 항상 있으므로 범례도 항상 있다.<span class="cmd-row__more">계약</span></span></div></summary>
           <div class="design-notes__body">
-            <p>키마다 한 문장씩: <code>registered</code>, <code>disabled</code>, <code>reportedInCrossLayerFindings</code>, 그리고 <code>everythingElse</code> — 자기 필드가 없는 잔여 부류인데, 없는 것이 <em>곧</em> 판정인 경우가 정확히 그것이라서 그렇다. <code>packsLoadedMeaning</code> 과 달리 무조건 실린다: 팩을 하나도 안 싣는 실행은 정당하게 있지만, 내장 분석을 등록하지 않는 빌드는 없다.</p>
+            <p>키마다 한 문장씩: <code>registered</code>, <code>disabled</code>, <code>shippedOff</code>, <code>reportedInCrossLayerFindings</code>, 그리고 <code>everythingElse</code> — 자기 필드가 없는 잔여 부류인데, 없는 것이 <em>곧</em> 판정인 경우가 정확히 그것이라서 그렇다. <code>packsLoadedMeaning</code> 과 달리 무조건 실린다: 팩을 하나도 안 싣는 실행은 정당하게 있지만, 내장 분석을 등록하지 않는 빌드는 없다.</p>
           </div>
         </details>
         <details class="cmd-fold">
@@ -467,8 +463,9 @@ let result: serde_json::Value = serde_json::from_str(&amp;zzop_facade::analyze_t
           <code>severity</code><span><code>"critical" | "warning" | "info"</code> — the finding's <em>effective</em> severity: the rule's default, as remapped by <code>severityOverrides</code>, and as de-escalated by the rules that lower their own confidence when the run is blind (see below).</span>
           <code>file</code><span>Path relative to <code>root</code>.</span>
           <code>line</code><span>1-based line number.</span>
-          <code>message</code><span>Human-facing cause/fix hint, copied verbatim from the rule definition — unless <code>messageRef</code> is present, in which case this is a short pointer and the text itself is the entry it names.</span>
+          <code>message</code><span>Human-facing cause/fix hint, copied verbatim from the rule definition — unless <code>messageRef</code> or <code>templateParts</code> is present, in which case this is a short pointer and the text itself is rebuilt from the sibling table that pointer names.</span>
 <code>messageRef</code><span><strong>Present only when the text was folded.</strong> A key into <code>ruleMessages</code>, the object sitting beside the <code>shown</code> list this finding came from — a sibling, not a fixed path, because one shaper feeds both <code>findings</code> and <code>crossLayerFindings</code>. A text carried by more than one finding is stored there once and pointed at, but only where doing so removes more bytes than the pointer and the table cost, so a repeated text can also be absent. Read <code>message</code> directly when <code>messageRef</code> is absent. The stored text is byte-identical to the inline one — nothing is shortened or dropped, and no second request is needed. <code>ruleMessagesMeaning</code> states the same contract on the wire.</span>
+          <code>templateParts</code><span><strong>Present only when the text was folded on its TEMPLATE.</strong> A rule that writes a finding's own subject into its prose — a table name, a symbol, a cycle path — emits a different string every time, so <code>ruleMessages</code> above cannot hold it. What those messages share is stored in a sibling <code>ruleMessageTemplates</code> instead, keyed by the <em>rule id</em>: an array of literal segments. This field holds the bytes that differ, in order. Rebuild by interleaving them, segment first, ending on the last segment — <code>templateParts</code> is always exactly one shorter than the template, and a segment may be empty at either end. There is no separate key field, because a finding already names its rule; a rule whose messages do not all fit one template is left inline instead. A finding never carries both this and <code>messageRef</code>. The rebuilt text is byte-identical to the inline one. <code>ruleMessageTemplatesMeaning</code> states the same contract on the wire.</span>
           <code>data</code><span>Matcher-specific JSON payload — opaque, rule-specific keys.</span>
         </div>
       </div>
@@ -539,6 +536,6 @@ let result: serde_json::Value = serde_json::from_str(&amp;zzop_facade::analyze_t
 </footer>
 <!--/zzop:foot-->
 
-<script src="assets/docs.js"></script>
+<script src="../assets/docs.js"></script>
 </body>
 </html>

@@ -101,9 +101,12 @@ pub(in crate::structural) fn rule_nullable_fk(
     if sets_null_on_delete(rel) {
         return;
     }
+    // Ships `info` (2026-09-06, the `god-model` class): an optional side that a declared `@relation`
+    // names is a CHOICE this schema made, which the message says in its first clause -- and its own
+    // prescription opens by telling the reader to go count the NULLs before touching anything.
     out.push(issue(
         "nullable-fk",
-        Severity::Warning,
+        Severity::Info,
         &model.name,
         Some(&field.name),
     ));

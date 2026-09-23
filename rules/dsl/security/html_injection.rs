@@ -1,6 +1,52 @@
-use crate::{assert_disqualifier_summary_precedes_imperative, hits, label_of, scan, TempDir};
+use crate::{
+    assert_disqualifier_summary_precedes_imperative, assert_landing_precedes_imperative, hits,
+    label_of, sanitizer_subtraction_landing, scan, TempDir,
+};
 
 // --- html-response-from-request ---
+
+/// §33/§37 LANDING pin, plus the one EXIT this carrier needs. Its axis-A verdict is a template row in
+/// `rules/dsl/message_order_verdicts.rs` (`ORDER_CLAIMS`); this is the other axis, on a delivered
+/// finding, and the two do not displace each other.
+///
+/// WHY THE SHARED CONSTANT FITS. The first of this rule's three remedies is escape-or-sanitize before
+/// splicing, and the third is an auto-escaping template engine — the two halves the constant prices,
+/// reached from the server side rather than the DOM side. The mechanism is the same allow-list.
+///
+/// WHY THE EXIT IS NOT THE CONSTANT'S. The SECOND remedy is not a sanitizer at all: declaring
+/// `application/json` changes what the client does with the bytes rather than what is in them, and on a
+/// path a browser navigates to that means the body is displayed or downloaded instead of rendered. The
+/// message's own wording ("for pure API responses") states the precondition and not the consequence, so
+/// a reader who misjudges which kind of route they are on gets a broken page from a remedy that
+/// contains no sanitizer to blame.
+#[test]
+fn html_response_from_request_landing_precedes_the_imperative() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/greet.ts",
+        "declare const res: any;\ndeclare const req: any;\nexport function greet() {\n  const name = req.query.name;\n  res.send('<div>' + name + '</div>');\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "html-response-from-request");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_landing_precedes_imperative(
+        "html-response-from-request",
+        &h[0].message,
+        sanitizer_subtraction_landing(),
+        "Escape/sanitize request-derived values",
+    );
+    for needle in [
+        "THE CONTENT-TYPE ROUTE IS NOT INTERCHANGEABLE",
+        "displayed or downloaded instead of rendered",
+    ] {
+        assert!(
+            h[0].message.contains(needle),
+            "security/html-response-from-request: the exit lost {needle:?} — the shared constant \
+             does not say it, so nothing else would catch its removal: {}",
+            h[0].message
+        );
+    }
+}
 
 #[test]
 fn res_send_with_req_query_and_html_tag_literal_is_flagged() {
@@ -151,6 +197,66 @@ fn dangerous_html_concat_fp_prone_clause_precedes_the_template_engine_imperative
         "Kept `warning` and deployed-surface-excluded",
         "Use a template engine with auto-escaping",
         "all read the same way to a regex",
+    );
+}
+
+/// §33/§37 LANDING pin — the other axis on the same verb the pin above guards.
+///
+/// The cost is sharpest on exactly this rule's shape. What it flags is a tag literal concatenated with
+/// a non-literal, and in hand-assembled markup that non-literal is very often ANOTHER FRAGMENT of
+/// markup — rows built in a loop, a partial rendered above. An auto-escaping template engine escapes
+/// every interpolation by default, so the fragment that used to be a list arrives as the characters of
+/// its own tags, and the reader who followed the instruction sees a page, not an error.
+///
+/// The three-way order — disqualifier summary, then landing, then verb — is asserted across this
+/// `fn` and the one below it, one axis each, because `delivered_pins` refuses both in one function.
+/// The invalidation probe is to move the constant to the tail — every token stays spelled once and
+/// only ORDER changes.
+#[test]
+fn dangerous_html_concat_landing_precedes_the_imperative() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/render.ts",
+        "declare const res: any;\ndeclare const name: string;\nexport function render() {\n  res.send('<div>' + name);\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "dangerous-html-concat");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_landing_precedes_imperative(
+        "dangerous-html-concat",
+        &h[0].message,
+        sanitizer_subtraction_landing(),
+        "Use a template engine with auto-escaping",
+    );
+}
+
+/// The first leg of that three-way order, in its own `#[test]` because the second leg is asserted
+/// through a shared helper and `delivered_pins` refuses a `fn` that holds both — an inline offset
+/// comparison sitting beside a helper call is not counted, so the two together read as one axis.
+#[test]
+fn dangerous_html_concat_disqualifier_summary_precedes_the_landing() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "api/render.ts",
+        "declare const res: any;\ndeclare const name: string;\nexport function render() {\n  res.send('<div>' + name);\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "dangerous-html-concat");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    let at_summary = h[0]
+        .message
+        .find("Kept `warning` and deployed-surface-excluded")
+        .expect("disqualifier summary present");
+    let at_landing = h[0]
+        .message
+        .find(sanitizer_subtraction_landing())
+        .expect("landing present");
+    assert!(
+        at_summary < at_landing,
+        "security/dangerous-html-concat: the landing (byte {at_landing}) moved AHEAD of the summary \
+         that disqualifies this finding (byte {at_summary}) — the order is disqualifier, landing, \
+         verb. In: {}",
+        h[0].message
     );
 }
 

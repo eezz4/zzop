@@ -9,6 +9,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
+use zzop_core::posix_path::ancestor_dirs;
+
 /// Everything one pass over the tree's `Cargo.toml` files yields. The two products travel together
 /// because they are read from the SAME manifests in the same walk, and because import resolution needs
 /// both at once: [`Self::crate_roots`] answers "which file is crate `foo`", [`Self::target_roots`]
@@ -109,27 +111,6 @@ pub(crate) fn parse_target_paths(text: &str) -> Vec<String> {
         }
     }
     out
-}
-
-/// Every ancestor directory of `rel` (its own dirname, then each parent up to and including the tree
-/// root `""`), most specific first. The caller dedups via a `BTreeSet`, so the trailing `""` this always
-/// pushes (even when already present) is harmless.
-fn ancestor_dirs(rel: &str) -> Vec<String> {
-    let mut dir = dirname(rel).to_string();
-    let mut out = vec![dir.clone()];
-    while let Some(idx) = dir.rfind('/') {
-        dir.truncate(idx);
-        out.push(dir.clone());
-    }
-    out.push(String::new());
-    out
-}
-
-fn dirname(p: &str) -> &str {
-    match p.rfind('/') {
-        Some(i) => &p[..i],
-        None => "",
-    }
 }
 
 fn join(dir: &str, seg: &str) -> String {

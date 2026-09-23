@@ -72,6 +72,27 @@ pub fn call(params: Option<&serde_json::Value>) -> serde_json::Value {
             let filters = FindingFilters::from_args(args)?;
             zzop_summary::analyze_envelope_summary(envelope_json, &filters)
         })(),
+        "check_coverage" => (|| {
+            // Same source-mode shape as `cross_repo`, with ONE difference the handler owns: this lane
+            // takes 1+ paths, not 2+, because "how much of this tree do you see" is a question about a
+            // single tree first. `zzop_config::trees::resolve_trees_request` decides exclusivity for
+            // both hosts here too — see the `cross_repo` arm for why this layer must not restate it.
+            let paths = args::optional_string_array(args, "paths")?;
+            let config_path = args::optional_string(args, "configPath")?;
+            zzop_summary::coverage_summary(&paths, config_path)
+        })(),
+        "module_map" => (|| {
+            // Same 1+ paths / configPath shape as `check_coverage`, and exclusivity is the shared
+            // handler's call here too — see the `cross_repo` arm for why this layer must not restate
+            // it. `fold` is REQUIRED on the wire while the `zzop map` CLI twin defaults it to 1: a
+            // terminal caller is looking at the answer and can raise it, an agent is deciding how
+            // much of the tree to pull into a context window and must say which grain it meant.
+            let paths = args::optional_string_array(args, "paths")?;
+            let config_path = args::optional_string(args, "configPath")?;
+            let depth = args::optional_integer(args, "fold", 1)?
+                .ok_or_else(|| "missing `fold` argument".to_string())?;
+            zzop_summary::module_map(&paths, config_path, depth)
+        })(),
         "validate_envelope" => args::required_string(args, "envelopeJson")
             .map(zzop_summary::validate_envelope_only_json),
         "validate_rule_pack" => {
@@ -80,10 +101,76 @@ pub fn call(params: Option<&serde_json::Value>) -> serde_json::Value {
         other => Err(format!("unknown tool: {other}")),
     };
     match outcome {
-        Ok(text) => serde_json::json!({ "content": [{ "type": "text", "text": text }] }),
-        Err(e) => serde_json::json!({
-            "content": [{ "type": "text", "text": format!("zzop error: {e}") }],
-            "isError": true
-        }),
+        Ok(text) => {
+            // A `rule` filter that could not have matched anything is a FAILED call, not a clean one.
+            // The `zzop analyze` twin exits 2 on the identical input; this lane answered `isError`-less
+            // success with the reason 99% of the way into the document (measured: 28,757 bytes, offset
+            // 28,406). The judgment is `zzop_summary`'s, read off the reply's structured roster — this
+            // layer only decides WHICH tools have a `rule` argument, which is argument extraction and
+            // therefore its own job. The join lane is excluded because the shared check says it must
+            // be: its roster is per-`sources[]` and its findings carry native ids.
+            let unmatchable = matches!(name, "analyze_repo" | "analyze_envelope")
+                .then(|| args::optional_string(args, "rule").ok().flatten())
+                .flatten()
+                .and_then(|rule| zzop_summary::unmatchable_rule_filter(&text, rule));
+            match unmatchable {
+                // The reply stays `content[0]`, BYTE-IDENTICAL to what the CLI twin prints on stdout —
+                // the surface-parity contract is about the document, and an exit code is not part of
+                // it. `isError` is this host's exit code; the reason rides a SECOND block rather than
+                // being spliced into the first, because a client that reads `content[0]` as JSON must
+                // keep getting JSON.
+                Some(reason) => serde_json::json!({
+                    "content": [
+                        { "type": "text", "text": text },
+                        { "type": "text", "text": format!("zzop error: {reason}") },
+                    ],
+                    "isError": true
+                }),
+                None => serde_json::json!({ "content": [{ "type": "text", "text": text }] }),
+            }
+        }
+        // This host appends its OWN spelling of the way out, at its own display layer — the mirror of
+        // `cli/mod.rs`'s `Run \`zzop init\`` line, licensed by the same 2026-08-09 ruling that split the
+        // shared refusal in half (`zzop_config::load`'s doc). The shared string names the ARTIFACT and
+        // never a command, because `zzop init` is unactionable without a shell and `resources/read` is
+        // unactionable in a terminal; each host supplies the half only it can act on.
+        //
+        // 🔴 Until 2026-09-10 this host supplied nothing HERE. Its half lived in `server::orientation`,
+        // which is a different moment: orientation is paid every session and arrives before the agent
+        // has any reason to read it, and whether a client forwards `initialize.instructions` to the
+        // model is client-dependent. The refusal is paid only on failure and arrives exactly when it
+        // is actionable. Measured (external review, `4f5d05d0`): the MCP refusal named the artifact
+        // but carried the URI 0 times, so an agent had to already know that "contract document" means
+        // an MCP resource and which of 17 URIs is meant.
+        //
+        // The URI is built from the shared table's prefix and name rather than spelled here, for the
+        // reason `resources`'s module doc gives: a local copy is a pointer that can drift away from
+        // the lane that has to answer it. `tools::tests` pins that `zzop init` still never rides this
+        // wire — this line adds the MCP half, it does not relax that.
+        Err(e) => {
+            let text = if e.contains(zzop_summary::contracts::PATHS_MODE_CONFIG_MARKER) {
+                // Third refusal of the same class. This host's word for "CONFIG MODE" is an argument
+                // name, not a flag, so the shared sentence can name neither.
+                format!("zzop error: {e}\nCall this tool again with `configPath` set to that config instead of `paths`.")
+            } else if e.contains(zzop_summary::contracts::MULTI_TREE_MARKER) {
+                // This host's half of the 2026-08-09 ruling for the multi-tree refusal: the shared
+                // string names the join in prose, and the word for it here is a tool name, not a
+                // shell line. Ordered first because the multi-tree message does not carry the
+                // missing-config marker, so the two arms are disjoint either way.
+                format!("zzop error: {e}\nCall the `cross_repo` tool with this config to analyze those trees together, or `analyze_repo` with a config that declares exactly one tree.")
+            } else if e.contains(zzop_summary::contracts::MISSING_CONFIG_MARKER) {
+                format!(
+                    "zzop error: {e}\nRead {}{} from this server (`resources/read`) and save those bytes as that file.",
+                    zzop_summary::contracts::URI_PREFIX,
+                    zzop_summary::contracts::CONFIG_TEMPLATE_NAME,
+                )
+            } else {
+                format!("zzop error: {e}")
+            };
+            serde_json::json!({
+                "content": [{ "type": "text", "text": text }],
+                "isError": true
+            })
+        }
     }
 }

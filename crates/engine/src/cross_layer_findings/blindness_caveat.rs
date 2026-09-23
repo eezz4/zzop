@@ -32,8 +32,24 @@ use zzop_core::{Finding, SourceIo};
 /// route identity, so it does not count as visibility evidence here (round dogfood: fe-svelte's single
 /// `GET /{}` key was its only keyed consume while 20+ real call sites flowed unextracted through the
 /// wrapper — 32 unconsumed findings fired with no caveat).
-pub(super) fn build(source_ios: &[SourceIo]) -> Option<String> {
-    let zero_sources: Vec<&str> = source_ios
+/// The sources this join saw NO joinable io from — zero provides AND zero route-identity-bearing keyed
+/// consumes. Split out of [`build`] on 2026-09-07 so the SEVERITY path can read the same set the caveat
+/// sentence names: the band and the sentence must not disagree about which trees the join is blind to.
+///
+/// 🔴 The bug that forced the split (review ledger V63). Severity for `unconsumed-mutation-endpoint`
+/// keyed off `majority_unresolved_http_sources` alone, and that predicate is a RATIO over a floor
+/// (`MIN_TOTAL_CONSUMES`) — so a tree with 5 consumes of which 3 were unresolved counted as blind and
+/// dropped the band to `info`, while a tree that contributed NOTHING fell below the floor, counted as
+/// NOT blind, and left the band at `warning`. Measured on `corpus/oss/fe-svelte` + `be-gin`: 16 write
+/// endpoints reported at `warning` because the caller tree's `.svelte` files were never parsed. The band
+/// moved OPPOSITE to the evidence, which is exactly what the 2026-08-25 severity rule forbids.
+///
+/// Zero contribution alone is NOT enough to move a band, and that is why this returns a set rather than
+/// a verdict: a shared-lib or UI-only package in a monorepo join legitimately has no io, and silencing
+/// a real attack-surface warning because an unrelated tree is io-less would be a worse trade than the
+/// bug. The caller ANDs this with a positive blindness measurement — see `unconsumed_family`.
+pub(super) fn zero_contribution_sources(source_ios: &[SourceIo]) -> Vec<&str> {
+    source_ios
         .iter()
         .filter(|s| {
             s.io.provides.is_empty()
@@ -44,7 +60,11 @@ pub(super) fn build(source_ios: &[SourceIo]) -> Option<String> {
                     .any(|c| c.key.as_deref().is_some_and(evidences_visibility))
         })
         .map(|s| s.source.as_str())
-        .collect();
+        .collect()
+}
+
+pub(super) fn build(source_ios: &[SourceIo]) -> Option<String> {
+    let zero_sources = zero_contribution_sources(source_ios);
     if zero_sources.is_empty() {
         return None;
     }
@@ -67,7 +87,7 @@ warnings) — this can be extraction blindness rather than a dead endpoint."
 /// Does this keyed consume evidence real extraction visibility? Exactly the kernel's route-identity
 /// gate: a verb-path http key whose path segments are ALL `{}` placeholders picks out no particular
 /// endpoint, so it is not visibility evidence; a root `VERB /` key and any non-"VERB /path" key
-/// (`table:users`, env keys, topics) do count. A local re-implementation used to live here — it now
+/// (`table:users`, a tRPC procedure key) do count. A local re-implementation used to live here — it now
 /// CALLS [`zzop_core::key_carries_route_identity`], the same predicate the linker's
 /// unprovided-vs-unresolved bucketing and the single-tree `http/unprovided-consume` veto use, so the
 /// three surfaces can never disagree about which keys are junk.

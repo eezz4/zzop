@@ -31,7 +31,7 @@
 #
 # ## Deliberately NOT checked: whether an enumerating list is COMPLETE
 #
-# `zzop.config.jsonc`'s `packs.disabled` names all eleven packs under a comment claiming "Every shipped
+# `zzop.config.jsonc`'s `packs.disabled` names every bundled pack under a comment claiming "Every shipped
 # DSL pack" — a completeness claim that a twelfth pack would silently falsify. This guard checks
 # MEMBERSHIP only. Closing the completeness half means deciding, per array, whether it is a choice or
 # an enumeration, and the only evidence is the prose above it; anchoring a machine check on a sentence

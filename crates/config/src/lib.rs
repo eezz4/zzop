@@ -41,7 +41,13 @@
 //!
 //! Non-fatal by design (do not "fix" with `?`): unreadable/invalid overlay files, duplicate
 //! `sourceId`s from `trees: "auto"`, and unknown config keys are all WARNINGS, never errors — the
-//! pipeline threads a warnings collector instead of failing. The same channel carries this crate's
+//! pipeline threads a warnings collector instead of failing. ONE family is deliberately fatal and
+//! this sentence used to swallow it: a RELOCATED key (`trees[].mountedAt`/`mounts`/`hosts`, now
+//! under `trees[].topology`) returns `ConfigError` naming the new spelling — see
+//! `mapper::topology` for why warning there would be the silent failure, not the loud one.
+//! Retired keys (`warnings::RETIRED_KEYS`) are NOT this family; those stay warnings.
+//!
+//! The same channel carries this crate's
 //! one PROACTIVE disclosure — `workspaces::single_tree_workspace_warning`, emitted whenever a run
 //! resolves ONE tree over a root whose workspace manifest names 2+ packages (no config file, or a
 //! config that never declares `trees`), so a monorepo never degrades to a single tree — and thus no
@@ -147,4 +153,16 @@ pub struct LoadedRequest {
     /// The config file actually loaded, if any — `None` means no single file governs this request
     /// (paths mode loads one per root; an envelope has no filesystem location at all).
     pub config_path: Option<PathBuf>,
+    /// The `vocabulary` keys the AUTHOR wrote, ONE ENTRY PER TREE, index-aligned with
+    /// `request["trees"]`.
+    ///
+    /// Per tree rather than per request because paths mode loads a DIFFERENT config for each root, so
+    /// there is no single author list for the run. In config mode there is exactly one `vocabulary`
+    /// object (it lives at the config's top level and applies to every tree it declares), so every
+    /// entry is the same list — which is a fact about that mode, not a shortcut.
+    ///
+    /// Why it is here at all: `request` is what the engine reads, and the mapper deliberately
+    /// withholds the keys the front end consumes itself. A host asking the request "what did the
+    /// author declare" therefore gets a WRONG answer, and one did (2026-09-15, ledger V249).
+    pub declared_vocabulary: Vec<Vec<String>>,
 }

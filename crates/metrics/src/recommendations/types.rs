@@ -65,9 +65,98 @@ pub struct RecItem {
 #[serde(rename_all = "camelCase")]
 pub struct Recommendation {
     pub id: RecId,
+    /// What [`Self::id`] MEANS, shipped beside the value it explains.
+    ///
+    /// # Why it rides here and not in a lookup table (2026-09-14, review ledger V214)
+    ///
+    /// The analyze reply used to call `id` "one of a CLOSED SET", which invited a consumer to
+    /// hard-code the spellings — a promise this project does not make, because `VERSIONING.md` puts
+    /// field VALUES outside the freeze and the set can gain a member in a MINOR release. The consumer
+    /// who accepted the invitation breaks on a change that is not a compatibility break.
+    ///
+    /// The repair is to remove the need for the promise rather than enlarge it, and this workspace
+    /// already ships that design one lane over: `zzop_facade`'s io `verdict` carries `verdictMeaning`
+    /// FOR THE TOKEN IT RETURNED. A value that explains itself needs no memorized list, and an id
+    /// added later arrives explaining itself.
+    ///
+    /// SERIALIZED FROM THE ENUM, never stored: [`RecId::meaning`] is the one owner, so a renamed id
+    /// cannot keep an explanation about the old one. It rides on the WIRE rather than being resolved
+    /// by each reader because the shaping crate is forbidden a shipped dependency on this one — that
+    /// layering is why forwarding the sentence is the only honest way for it to reach the reply.
+    ///
+    /// PRIVATE, and that is the seal rather than a style choice (2026-09-14, review ledger V234). The
+    /// paragraph above says a renamed id "cannot keep an explanation about the old one" — which was a
+    /// discipline, not a mechanism: both construction sites spelled `id` and `id_meaning` as two
+    /// independent expressions, held together by a comment asking the next author to look. Only
+    /// [`Recommendation::new`] can set this now, from the id it is handed, so the drift the sentence
+    /// above forbids is no longer expressible.
+    #[serde(rename = "idMeaning")]
+    id_meaning: &'static str,
     pub severity: Severity,
     /// Sorted in descending ROI order.
     pub items: Vec<RecItem>,
+    /// How many rows this rule's own cap dropped. `0` means the list is complete.
+    ///
+    /// ALWAYS SERIALIZED, including as `0` — the same call `crate::scores::detail_cap` made and for the
+    /// same reason: a field that vanishes when nothing was dropped makes "complete list" and "this build
+    /// has no disclosure" identical bytes again, which is the silence being repaired.
+    ///
+    /// SCOPE: the cap, and only the cap. `items.len() + items_truncated` is what the rule PRODUCED, not
+    /// what the tree holds — config excludes and critical-escalation both move rows after this number is
+    /// taken. `super::rules`' module doc owns why one scalar cannot carry all three.
+    pub items_truncated: u32,
+}
+
+impl Recommendation {
+    /// The ONLY way to build one, so [`Self::id_meaning`] cannot disagree with [`Self::id`].
+    ///
+    /// Every other field stays public: they are independent facts about a run and there is nothing to
+    /// couple. The id and its sentence are one fact wearing two field names, and this is where that is
+    /// enforced instead of asked for.
+    pub(crate) fn new(
+        id: RecId,
+        severity: Severity,
+        items: Vec<RecItem>,
+        items_truncated: u32,
+    ) -> Self {
+        Self {
+            id,
+            id_meaning: id.meaning(),
+            severity,
+            items,
+            items_truncated,
+        }
+    }
+}
+
+/// One rule's output before enrichment: its id, the severity every item of it carries, the rows that
+/// survived its cap, and how many the cap dropped.
+///
+/// A struct rather than the 4-tuple it replaced. The 3-tuple was already at the edge of readable at the
+/// six construction sites, and the field this change adds is a bare `u32` sitting beside a `Vec` — in a
+/// tuple those are told apart only by position, which is exactly how a disclosure count ends up
+/// measuring the wrong list.
+pub(super) struct RuleOutput {
+    pub(super) id: RecId,
+    pub(super) severity: Severity,
+    pub(super) items: Vec<RawItem>,
+    pub(super) items_truncated: u32,
+}
+
+impl RuleOutput {
+    pub(super) fn new(
+        id: RecId,
+        severity: Severity,
+        items: Vec<RawItem>,
+        items_truncated: u32,
+    ) -> Self {
+        RuleOutput {
+            id,
+            severity,
+            items,
+            items_truncated,
+        }
+    }
 }
 
 /// Rule-gate thresholds for `build_recommendations`. `Default` provides the baseline thresholds

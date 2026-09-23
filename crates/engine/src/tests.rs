@@ -946,7 +946,7 @@ fn engine_src_lines() -> Vec<String> {
 /// gates would be 12 chances to forget one. [`DERIVED_SCHEMA_GATE`] is asserted to still exist in the
 /// source, so deleting the derived gate turns this test red exactly as deleting a literal one would; the
 /// behavioral half (that it drops the right findings) is
-/// `crates/engine/tests/pack_prisma_schema.rs`'s `disabling_one_*_issue_id_drops_only_that_rule`.
+/// `crates/engine/tests/integration/pack_prisma_schema.rs`'s `disabling_one_*_issue_id_drops_only_that_rule`.
 const DERIVED_SCHEMA_GATE: &str = "is_enabled(rule_config, &finding.rule_id)";
 
 #[test]

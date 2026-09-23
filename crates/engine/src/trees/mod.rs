@@ -11,6 +11,7 @@ use crate::{AnalyzeOutput, EngineConfig};
 mod cross_tree_imports;
 mod join_io_filter;
 mod parallel_impl;
+mod single_tree_join;
 mod unreported_read_drift;
 mod wildcard_disclosure;
 
@@ -150,6 +151,9 @@ pub fn analyze_trees(trees: &[(PathBuf, EngineConfig)]) -> MultiAnalyzeOutput {
     }
     // Wildcard-route partition disclosure — rationale in `wildcard_disclosure`'s module doc.
     wildcard_disclosure::disclose(&mut outputs, &cross_layer.wildcard_route_partitions);
+    // Single-tree join disclosure — rationale in `single_tree_join`'s module doc. AFTER the linker ran,
+    // because it reports what the join actually produced rather than predicting it from the tree count.
+    single_tree_join::disclose(&mut outputs, cross_layer.unconsumed_provides.len());
     // Cross-tree package-import disclosure — rationale in `cross_tree_imports`' module doc.
     cross_tree_imports::disclose(&mut outputs);
     let package_imports: Vec<zzop_rules_cross_layer::PackageImportSite> = outputs
@@ -196,11 +200,40 @@ pub fn analyze_trees(trees: &[(PathBuf, EngineConfig)]) -> MultiAnalyzeOutput {
         .iter()
         .map(|(_, source, output)| (source.clone(), &output.attributes))
         .collect();
+    // Measured in each tree's own pass, where `root` and the candidate file list exist — the run-wide
+    // gate below must not re-derive that file set, or it would judge a different population than the
+    // extractor actually saw. A tree that was never measured simply has no entry.
+    let visible_by_source: BTreeMap<String, usize> = outputs
+        .iter()
+        .filter_map(|(_, source, output)| {
+            output
+                .visible_route_registrations
+                .map(|n| (source.clone(), n))
+        })
+        .collect();
+    // Consume-side blindness EVIDENCE, per tree: most of this tree's analyzed files were never read by
+    // a structural parser. This is the mirror of `provide_blind_sources`' framework-import evidence on
+    // the other side, and it exists for the same reason — a zero is only blindness when something
+    // measured says the tree ought to have contributed. Majority, integer math, the same idiom (and the
+    // same reason: no float reaches output) `is_majority_unresolved` uses one layer down.
+    //
+    // Deliberately NOT the coverage-gaps table: that judgment lives downstream in `zzop-summary`, is
+    // built from the assembled reply, and re-deriving it here would put a second owner on a rule this
+    // repo has already watched drift three times. This reads two counts the census measured directly.
+    let mostly_unread_by_source: BTreeSet<String> = outputs
+        .iter()
+        .filter(|(_, _, output)| output.coverage.parser_dispatched * 2 < output.coverage.files)
+        .map(|(_, source, _)| source.clone())
+        .collect();
     let cross_layer_findings = compute_cross_layer_findings(
         &source_ios,
         &cross_layer,
         trees,
         &package_imports,
+        crate::cross_layer_findings::TreeBlindness {
+            visible_by_source: &visible_by_source,
+            mostly_unread_by_source: &mostly_unread_by_source,
+        },
         &trpc_participating_sources,
         &attribute_stores,
     );

@@ -8,15 +8,13 @@ use std::collections::HashMap;
 use zzop_core::{IoConsume, IoProvide};
 
 mod consume_chain;
+mod project_passes;
 
 use crate::analyze::compose::{
     apply_and_strip_global_prefix, apply_config_mounts, compose_controller_prefix_provides,
     compose_router_mount_provides, compose_trpc_provides, late_resolve_cross_file_consumes,
     merge_const_map_fragments, resolve_provide_body_refs, resolve_provide_response_refs,
     ShapeMerge,
-};
-use crate::analyze::native_rules::{
-    run_csharp_provides_project_pass, run_java_provides_project_pass,
 };
 use crate::pipeline::{GoModuleMap, PackageJsonScan, RustWorkspaceMap};
 use crate::EngineConfig;
@@ -102,16 +100,21 @@ pub(super) fn compose(
     // (prefixing a non-Nest route is wrong).
     apply_and_strip_global_prefix(&mut io_provides, &mut warnings);
 
-    // Whole-corpus Java Spring HTTP-provides resolution — a no-op when `java_rels` is empty.
-    if !java_rels.is_empty() {
-        run_java_provides_project_pass(root, java_rels, &mut io_provides);
-    }
-
-    // Whole-corpus C# ASP.NET Core HTTP-provides resolution — the C# twin of the Java pass just above, resolving non-literal route
-    // CONSTANTS (`[HttpGet(Routes.List)]`) across files and REPLACING the per-file C# `http` provides wholesale (`run_csharp_provides_project_pass`'s doc). A no-op when empty.
-    if !csharp_rels.is_empty() {
-        run_csharp_provides_project_pass(root, csharp_rels, &mut io_provides, &mut warnings);
-    }
+    // The two passes that resolve route paths across the WHOLE project (Java Spring, C# ASP.NET Core)
+    // and replace that language's per-file `http` provides wholesale. Both parse, so both run on a
+    // parsing-sized stack — see `project_passes` for why that is not optional.
+    // Resolved here rather than threaded down from `pipeline::run_file_pass`: this seam is reached from
+    // `assemble` with the `EngineConfig` in hand, and `resolve()` applies the one "declared or not made"
+    // rule in one place, so a second resolve cannot disagree with the first.
+    let vocab = config.vocabulary.resolve();
+    project_passes::run(
+        root,
+        java_rels,
+        csharp_rels,
+        &vocab,
+        &mut io_provides,
+        &mut warnings,
+    );
 
     // Workspace-package manifest scan — hoisted above `build_dep` because `workspace_pkgs` also feeds
     // cross-package import resolution (`build_dep_with_workspace`): a monorepo import like

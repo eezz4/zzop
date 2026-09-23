@@ -1,5 +1,5 @@
 //! Exercises `resolve_calls_for_file`'s resolution rules end-to-end, plus unit tests for
-//! `build_symbol_graph`/`bfs_depths`/`bfs_reachable` over this module's `SymbolGraph` shape.
+//! `build_symbol_graph`/`bfs_depths`/`bfs_reachable_in` over this module's `SymbolGraph` shape.
 use std::collections::{HashMap, HashSet};
 
 use super::bfs::bfs_depths;
@@ -314,7 +314,7 @@ fn build_symbol_graph_missing_file_entries_resolve_as_empty_not_panic() {
     assert!(graph.is_empty());
 }
 
-// --- bfs_depths / bfs_reachable ---
+// --- bfs_depths / bfs_reachable_in ---
 
 fn edge(from: &str, to: &str) -> SymbolEdge {
     SymbolEdge {
@@ -326,7 +326,7 @@ fn edge(from: &str, to: &str) -> SymbolEdge {
 #[test]
 fn bfs_depths_source_is_depth_zero() {
     let graph = vec![edge("a", "b")];
-    let depths = bfs_depths(&graph, "a");
+    let depths = bfs_depths(&Adjacency::build(&graph), "a");
     assert_eq!(depths.get("a"), Some(&0));
     assert_eq!(depths.get("b"), Some(&1));
 }
@@ -334,14 +334,14 @@ fn bfs_depths_source_is_depth_zero() {
 #[test]
 fn bfs_depths_multi_hop_chain() {
     let graph = vec![edge("a", "b"), edge("b", "c"), edge("c", "d")];
-    let depths = bfs_depths(&graph, "a");
+    let depths = bfs_depths(&Adjacency::build(&graph), "a");
     assert_eq!(depths.get("d"), Some(&3));
 }
 
 #[test]
 fn bfs_depths_unreachable_node_is_absent() {
     let graph = vec![edge("a", "b"), edge("x", "y")];
-    let depths = bfs_depths(&graph, "a");
+    let depths = bfs_depths(&Adjacency::build(&graph), "a");
     assert!(!depths.contains_key("y"));
 }
 
@@ -355,44 +355,47 @@ fn bfs_depths_diamond_takes_shortest_path() {
         edge("c", "c2"),
         edge("c2", "d"),
     ];
-    let depths = bfs_depths(&graph, "a");
+    let depths = bfs_depths(&Adjacency::build(&graph), "a");
     assert_eq!(depths.get("d"), Some(&2));
 }
 
 #[test]
 fn bfs_depths_cycle_does_not_loop_forever() {
     let graph = vec![edge("a", "b"), edge("b", "a")];
-    let depths = bfs_depths(&graph, "a");
+    let depths = bfs_depths(&Adjacency::build(&graph), "a");
     assert_eq!(depths.len(), 2);
     assert_eq!(depths.get("a"), Some(&0));
     assert_eq!(depths.get("b"), Some(&1));
 }
 
 #[test]
-fn bfs_reachable_finds_closest_predicate_match() {
+fn bfs_reachable_in_finds_closest_predicate_match() {
     let graph = vec![edge("h", "a"), edge("a", "write1"), edge("h", "write2")];
-    let found = bfs_reachable(&graph, "h", |id| id.starts_with("write"));
+    let found = bfs_reachable_in(&Adjacency::build(&graph), "h", |id| id.starts_with("write"));
     // "write2" is depth 1 (direct from h); "write1" is depth 2 (via a) — closest wins.
     assert_eq!(found, Some(("write2".to_string(), 1)));
 }
 
 #[test]
-fn bfs_reachable_ties_break_on_id_ascending() {
+fn bfs_reachable_in_ties_break_on_id_ascending() {
     let graph = vec![edge("h", "write-b"), edge("h", "write-a")];
-    let found = bfs_reachable(&graph, "h", |id| id.starts_with("write"));
+    let found = bfs_reachable_in(&Adjacency::build(&graph), "h", |id| id.starts_with("write"));
     assert_eq!(found, Some(("write-a".to_string(), 1)));
 }
 
 #[test]
-fn bfs_reachable_none_when_no_match() {
+fn bfs_reachable_in_none_when_no_match() {
     let graph = vec![edge("h", "a")];
-    assert_eq!(bfs_reachable(&graph, "h", |id| id == "nope"), None);
+    assert_eq!(
+        bfs_reachable_in(&Adjacency::build(&graph), "h", |id| id == "nope"),
+        None
+    );
 }
 
 #[test]
-fn bfs_reachable_can_match_the_start_node_itself_at_depth_zero() {
+fn bfs_reachable_in_can_match_the_start_node_itself_at_depth_zero() {
     let graph = vec![edge("h", "a")];
-    let found = bfs_reachable(&graph, "h", |id| id == "h");
+    let found = bfs_reachable_in(&Adjacency::build(&graph), "h", |id| id == "h");
     assert_eq!(found, Some(("h".to_string(), 0)));
 }
 

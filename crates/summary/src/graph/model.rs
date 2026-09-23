@@ -2,10 +2,13 @@
 //! `mod.rs` for the 300-line source cap when the cosmograph lane pushed it over; the three files stay
 //! one module in every other sense, which is why these items are private to `graph` rather than public.
 //!
-//! Note the asymmetry with the other three domains: `dep`/`risk`/`posture` each own their own model
-//! (`DepUniverse`, `Hub`/`Seam`, `Route`) because their nodes are files, folders and routes rather than
-//! io keys. This file is the JOIN's model specifically, not a shared one — a shared graph type across
-//! four domains whose nodes mean four different things would be a type that means nothing.
+//! Note the asymmetry with EVERY other domain (`GraphDomain`'s non-`Join` variants — today
+//! `dep`/`risk`/`posture`/`cochange`): each owns its own model because its nodes are files, folders,
+//! routes or co-changed pairs rather than io keys. This file is the JOIN's model specifically, not a
+//! shared one — a shared graph type across domains whose nodes mean different things would be a type
+//! that means nothing. The domain COUNT is not written here: this doc said "the other three" and "four
+//! domains" after a fifth variant landed (2026-09-12, ledger V168), and the enum is the only roster
+//! that cannot fall behind itself.
 
 use std::collections::{BTreeMap, BTreeSet};
 

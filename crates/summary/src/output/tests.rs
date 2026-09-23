@@ -7,6 +7,85 @@ fn finding(rule: &str, severity: &str, idx: usize) -> serde_json::Value {
     serde_json::json!({ "ruleId": rule, "severity": severity, "path": format!("f{idx}.ts") })
 }
 
+/// A FILTER narrows the window too, and until 2026-09-14 it did so leaving no trace (external review
+/// round 22, ledger V246).
+///
+/// `truncated` covers the CAP. A `severity`/`rule` filter cuts earlier, in `window_order`, and wrote
+/// nothing: measured on `corpus/frameworks/nest`, `analyze --severity critical` shipped `shown: 1`
+/// beside `total: 326` with no `truncated` key and no key anywhere naming a filter. Worse than silent
+/// — `shownMeaning` shipped "nothing is dropped" in the same reply, and `messageByIdMeaning` asserted
+/// `truncated` was the ONLY key meaning rows were left out.
+///
+/// All four arms are here because each one is a different claim, and three of them are the ones an
+/// implementation gets wrong: the unfiltered run must pay NOTHING (absence is the honest statement),
+/// the cap alone must not masquerade as a filter, and the filter alone must not masquerade as a cap.
+#[test]
+fn a_filter_that_removes_rows_says_so_and_an_unfiltered_run_pays_nothing() {
+    let findings: Vec<_> = (0..5)
+        .map(|i| {
+            finding(
+                if i == 0 { "r" } else { "other" },
+                if i == 0 { "critical" } else { "info" },
+                i,
+            )
+        })
+        .collect();
+    let no_filter = FindingFilters {
+        min_severity: None,
+        rule: None,
+        limit: Some(1000),
+    };
+    let by_severity = FindingFilters {
+        min_severity: Some("critical".into()),
+        rule: None,
+        limit: Some(1000),
+    };
+    let by_rule = FindingFilters {
+        min_severity: None,
+        rule: Some("r".into()),
+        limit: Some(1000),
+    };
+    let capped_only = FindingFilters {
+        min_severity: None,
+        rule: None,
+        limit: Some(2),
+    };
+
+    // 1. Nothing filtered: the key must be ABSENT, not a zero. An always-present `elided: 0` is the
+    //    field a reader has to check on every reply, which is the cost this shape refuses.
+    let plain = shape(&findings, &no_filter);
+    assert!(
+        plain.get("filtered").is_none(),
+        "an unfiltered run must not carry the key at all: {plain}"
+    );
+
+    // 2. A severity filter removed four of five.
+    let sev = shape(&findings, &by_severity);
+    assert_eq!(sev["shown"].as_array().unwrap().len(), 1);
+    assert_eq!(sev["filtered"]["elided"], 4);
+    assert_eq!(sev["filtered"]["applied"]["severity"], "critical");
+    assert!(
+        sev["filtered"]["applied"].get("rule").is_none(),
+        "a knob that was not passed must not appear as applied: {}",
+        sev["filtered"]["applied"]
+    );
+    // The counts stay over the FULL set — that is the half the filter must NOT move.
+    assert_eq!(sev["total"], 5);
+
+    // 3. A rule filter, so the key is not keyed to one knob.
+    let rule = shape(&findings, &by_rule);
+    assert_eq!(rule["filtered"]["applied"]["rule"], "r");
+    assert_eq!(rule["filtered"]["elided"], 4);
+
+    // 4. The CAP alone is not a filter. Without this the new key could be written on any narrowed
+    //    window and `truncated` would have a duplicate that means something else.
+    let capped = shape(&findings, &capped_only);
+    assert!(
+        capped.get("truncated").is_some() && capped.get("filtered").is_none(),
+        "the cap writes `truncated` and only that: {capped}"
+    );
+}
+
 /// `shape_findings` with NO manifest-declared build surface — the state every non-npm tree is genuinely in, and therefore the right default for every pin that
 /// is not itself about the build tier. The tier tests below call `shape_findings` directly with a real
 /// declaration; nothing else should, or a pin written about truncation starts also asserting an ordering.
@@ -650,6 +729,209 @@ fn rule_round_robin_orders_the_nth_finding_of_every_rule_before_any_rules_n_plus
     assert_eq!(shaped["byRule"]["c"], 1, "{shaped}");
 }
 
+/// RULE-IN-FILE, the fourth ordering key and the one that sits ABOVE the rule round-robin above
+/// (2026-09-05). The round-robin fixed "the window is the alphabetically-first 40" but could not see the
+/// duplication that remained, because that duplication is INSIDE a rule: measured by opening all 120
+/// first-screen rows of three real projects against their source, 14 OF ONE PROJECT'S 40 ROWS were the
+/// second or third instance of a judgment an earlier row had already delivered — one config file's dict
+/// taking three slots, one lockfile package taking two, one controller shape taking three. A reader who
+/// has read row 1 learns nothing from rows 2 and 3, and a forty-row budget spent fourteen times on
+/// "I saw this already" is a first screen that found less than it says.
+///
+/// The key is each finding's occurrence index within its own (role, severity, ruleId, FILE) group: every
+/// (rule, file) pair spends its first slot before any pair spends a second, and the rule round-robin then
+/// orders the inside of each round. It could not have been the rule key alone (the duplication is inside
+/// a rule) and it could not have been the file alone (one rule spread over twenty files would take twenty
+/// round-one slots and starve every other rule — the exact failure the rule key exists to prevent).
+///
+/// A finding with NO file — cross-layer findings and hand-built values both reach here — keys on the same
+/// empty string as every other file-less finding of its rule, which makes this index identical to the
+/// round-robin's for that population and therefore a no-op on it. That is the intended reading: the key
+/// can only ever separate findings it can prove sit in the same file.
+#[test]
+fn rule_in_file_gives_every_file_of_a_rule_a_slot_before_any_file_takes_a_second() {
+    // Rule `a` fires three times in one file and once in a second; rule `b` twice in a third. Engine
+    // order is clustered, which is the shape a per-file rule genuinely produces.
+    let findings = vec![
+        serde_json::json!({ "ruleId": "a", "severity": "warning", "file": "src/x.ts", "line": 1 }),
+        serde_json::json!({ "ruleId": "a", "severity": "warning", "file": "src/x.ts", "line": 2 }),
+        serde_json::json!({ "ruleId": "a", "severity": "warning", "file": "src/x.ts", "line": 3 }),
+        serde_json::json!({ "ruleId": "a", "severity": "warning", "file": "src/y.ts", "line": 4 }),
+        serde_json::json!({ "ruleId": "b", "severity": "warning", "file": "src/z.ts", "line": 5 }),
+        serde_json::json!({ "ruleId": "b", "severity": "warning", "file": "src/z.ts", "line": 6 }),
+    ];
+    let filters = FindingFilters {
+        min_severity: None,
+        rule: None,
+        limit: None,
+    };
+    let shaped = shape(&findings, &filters);
+    let order: Vec<String> = shaped["shown"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| {
+            format!(
+                "{}:{}",
+                f["file"].as_str().unwrap(),
+                f["line"].as_u64().unwrap()
+            )
+        })
+        .collect();
+    assert_eq!(
+        order,
+        // Round 1 is one row per (rule, file): x, z, then y — inside the round the rule round-robin
+        // still leads, so a#1 and b#1 come before a's SECOND file. Round 2 is x, z. Round 3 is x.
+        // The pin's whole point is `src/y.ts:4`: under the previous three keys it sat LAST, behind
+        // both repeats of a file the reader had already been shown.
+        vec![
+            "src/x.ts:1",
+            "src/z.ts:5",
+            "src/y.ts:4",
+            "src/x.ts:2",
+            "src/z.ts:6",
+            "src/x.ts:3",
+        ],
+        "{shaped}"
+    );
+    // Presentation only, in both directions: not one count moved, and nothing left the reply.
+    assert_eq!(shaped["total"], 6, "{shaped}");
+    assert_eq!(shaped["byRule"]["a"], 4, "{shaped}");
+    assert_eq!(shaped["byRule"]["b"], 2, "{shaped}");
+    assert_eq!(shaped["shown"].as_array().unwrap().len(), 6, "{shaped}");
+}
+
+/// SITE, the fifth ordering key and the one that leads all three diversity keys (2026-09-05). It is
+/// asked of no rule at all: how many findings — any rule's — already pointed at this exact file:line.
+///
+/// Same measurement as the key above, its second shape: two DIFFERENT rules fired on one line of one file
+/// and took two of that project's forty first-screen slots, and their verdicts were OPPOSITE (one defect
+/// worth fixing, one deliberate by design), so the pair was not even a corroboration — the reader had to
+/// read both rows to learn that the second disagreed with the first. One line of source, two slots.
+///
+/// It leads because it is the stronger form of the same reader question. "Have I already been told this?"
+/// is answered by the rule in the file; "have I already been sent HERE?" is answered by the site, and a
+/// reader who has read a row is standing at its line whichever rule wrote it.
+///
+/// Nothing is merged and nothing may be: two rules on one line are two findings, both true, both counted,
+/// both in the reply. The second one waits until every other place has had its turn — which is exactly
+/// what makes the disagreement between them worth a slot when it arrives.
+#[test]
+fn a_second_rule_on_a_line_that_already_has_a_row_waits_for_every_other_place() {
+    let findings = vec![
+        serde_json::json!({ "ruleId": "a", "severity": "warning", "file": "src/x.ts", "line": 171 }),
+        serde_json::json!({ "ruleId": "b", "severity": "warning", "file": "src/x.ts", "line": 171 }),
+        serde_json::json!({ "ruleId": "a", "severity": "warning", "file": "src/y.ts", "line": 5 }),
+        serde_json::json!({ "ruleId": "c", "severity": "warning", "file": "src/z.ts", "line": 9 }),
+    ];
+    let filters = FindingFilters {
+        min_severity: None,
+        rule: None,
+        limit: None,
+    };
+    let shaped = shape(&findings, &filters);
+    let order: Vec<String> = shaped["shown"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| {
+            format!(
+                "{} {}:{}",
+                f["ruleId"].as_str().unwrap(),
+                f["file"].as_str().unwrap(),
+                f["line"].as_u64().unwrap()
+            )
+        })
+        .collect();
+    assert_eq!(
+        order,
+        // Every distinct site first — inside that round the rule round-robin still leads, which is why
+        // `c` precedes `a`'s second finding. `b`, the second row on a line already spoken for, is last.
+        // Under the four keys that preceded this one it sat at slot TWO, immediately under the row it
+        // disagreed with.
+        vec![
+            "a src/x.ts:171",
+            "c src/z.ts:9",
+            "a src/y.ts:5",
+            "b src/x.ts:171",
+        ],
+        "{shaped}"
+    );
+    // Presentation only, in both directions: nothing merged, nothing dropped, no count moved.
+    assert_eq!(shaped["total"], 4, "{shaped}");
+    assert_eq!(shaped["shown"].as_array().unwrap().len(), 4, "{shaped}");
+    assert_eq!(shaped["byRule"]["a"], 2, "{shaped}");
+    assert_eq!(shaped["byRule"]["b"], 1, "{shaped}");
+    assert_eq!(shaped["byRule"]["c"], 1, "{shaped}");
+}
+
+/// The site key's NEGATIVE canary, and the reason a missing file takes 0 instead of joining a shared
+/// bucket: findings that share the ABSENCE of a file do not share a place. Cross-layer findings and
+/// hand-built values both reach the shaper with no file, and if they collided on one site key the first
+/// of them would take a round-one slot and the rest would sort behind every located finding in the tree —
+/// a silent demotion of an entire population on the strength of a field they never carry.
+#[test]
+fn findings_with_no_file_do_not_collide_on_the_site_key() {
+    let findings = vec![
+        finding("a", "warning", 0),
+        finding("a", "warning", 1),
+        finding("b", "warning", 2),
+    ];
+    let filters = FindingFilters {
+        min_severity: None,
+        rule: None,
+        limit: None,
+    };
+    let shaped = shape(&findings, &filters);
+    let order: Vec<&str> = shaped["shown"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["path"].as_str().unwrap())
+        .collect();
+    // Exactly the rule round-robin's answer, unchanged: both new keys are no-ops on a population with
+    // no file.
+    assert_eq!(order, vec!["f0.ts", "f2.ts", "f1.ts"], "{shaped}");
+    assert_eq!(shaped["total"], 3, "{shaped}");
+}
+
+/// The WIRING pin for `byDirectory` — the arithmetic is `super::by_directory`'s to prove; what this
+/// asserts is the property only the SHAPER can get wrong, and the one the channel's own note promises
+/// in as many words: the fold runs over the FULL set, never over the filtered window.
+///
+/// It is the same mistake `bySeverity` would make if it were computed after `window_order`, and it is
+/// the one that turns a disclosure into a lie: a reader who added `--severity critical` and read
+/// "96.4% in `examples/`" would be reading a share of their own filter while the sentence beside it
+/// says otherwise. The fixture puts the majority directory's findings BELOW the filter's floor, so a
+/// filtered fold could not produce this answer.
+#[test]
+fn the_directory_fold_counts_the_full_set_and_not_the_filtered_window() {
+    let mut findings: Vec<serde_json::Value> = (0..9)
+        .map(|i| serde_json::json!({ "ruleId": "a", "severity": "info", "file": format!("examples/e{i}.ts") }))
+        .collect();
+    findings.push(serde_json::json!({ "ruleId": "a", "severity": "critical", "file": "lib/x.ts" }));
+    let filters = FindingFilters {
+        min_severity: Some("critical".into()),
+        rule: None,
+        limit: None,
+    };
+    let shaped = shape(&findings, &filters);
+    assert_eq!(shaped["shown"].as_array().unwrap().len(), 1, "{shaped}");
+    // `shape_findings` RETURNS the `findings` object, so this is the reply's `findings.byDirectory`.
+    let rows = shaped["byDirectory"]["directories"]
+        .as_array()
+        .unwrap_or_else(|| panic!("byDirectory must ride beside byRule: {shaped}"));
+    assert_eq!(rows[0]["dir"], "examples/", "{shaped}");
+    assert_eq!(rows[0]["findings"], 9, "{shaped}");
+    assert_eq!(rows[0]["sharePct"], 90.0, "{shaped}");
+    assert!(
+        shaped["byDirectory"]["basis"]
+            .as_str()
+            .is_some_and(|b| b.starts_with("10 finding(s)")),
+        "the basis population is the full set too: {shaped}"
+    );
+}
+
 /// The WIRING pin for `byRuleMeaning` (the legend's own content is pinned in
 /// `super::by_rule_legend`'s tests). Unconditional and on BOTH lanes: `shape_findings` is the single
 /// shaper behind `findings` and `crossLayerFindings`, so one call site proves both — and the fixture
@@ -671,6 +953,49 @@ fn every_by_rule_map_ships_its_legend_even_when_no_finding_folded() {
     // Presentation only: the legend adds no count and moves none.
     assert_eq!(shaped["total"], 2, "{shaped}");
     assert_eq!(shaped["byRule"]["a"], 1, "{shaped}");
+}
+
+/// The WIRING pin for `shownMeaning`, plus the POSITION pin for the one reading that makes it worth
+/// bytes. `shown` is an ORDER and a reader takes it for a RANKING — that row 1 is likeliest to be real
+/// and a window of forty is "the forty worst". Neither was ever claimed on the wire, which is the
+/// defect: the claim was ABSENT, not false, and an absent claim gets supplied by the reader. So the
+/// caveat leads and the five-key recital follows; a note that ends in the caveat is a note whose first
+/// two thirds can be skimmed.
+///
+/// Unconditional, exactly like `byRuleMeaning`: the key it explains rides every reply, so the reader it
+/// could mislead is on every reply too. The fixture here deliberately has nothing interesting about its
+/// order — two findings, two rules, no repeat — which is precisely the reply whose reader would
+/// otherwise never be told what the sequence does and does not mean.
+#[test]
+fn every_shown_list_ships_the_legend_that_says_it_is_not_a_ranking() {
+    let findings = vec![finding("a", "warning", 0), finding("b", "info", 1)];
+    let filters = FindingFilters {
+        min_severity: None,
+        rule: None,
+        limit: None,
+    };
+    let shaped = shape_findings(&findings, &filters, &Default::default());
+    let meaning = shaped["shownMeaning"]
+        .as_str()
+        .unwrap_or_else(|| panic!("shownMeaning must ride beside shown: {shaped}"));
+    assert!(
+        meaning.starts_with("An ORDER, not a RANKING"),
+        "the caveat has to survive a skim, so it leads: {meaning}"
+    );
+    assert!(
+        meaning.contains("no per-finding confidence exists here"),
+        "the note must keep WHY there is no quality order, not only that there is none: {meaning}"
+    );
+    // The FOLD: the full text lives in the reply-legends document, and a fold that ships both is two
+    // copies. `crates/summary/tests/legend_fold.rs` proves this over real replies for every folded key;
+    // this line is the local canary that the string on the wire is the note and not the body.
+    assert!(
+        !meaning.contains("Never as: the N worst things in this tree"),
+        "the folded note must not carry the full text's closing line: {meaning}"
+    );
+    // Presentation only: the legend adds no count and moves none.
+    assert_eq!(shaped["total"], 2, "{shaped}");
+    assert_eq!(shaped["shown"].as_array().unwrap().len(), 2, "{shaped}");
 }
 
 /// The round-robin's NEGATIVE canary, and the reason the counter is keyed by (role, severity, rule)
@@ -906,6 +1231,195 @@ fn the_hint_stops_offering_a_bigger_limit_once_the_limit_is_at_its_ceiling() {
     );
 }
 
+/// The count says a band left. It does not say WHAT left, and the exit code is where that gap is
+/// measurable: `analyze --config <cal.com> --limit 1000 --fail-on critical` exits 3 naming
+/// `6 critical` while no file, line or rule id of those six appears in the reply the same command
+/// printed. A build breaks and its own artifact carries no evidence.
+///
+/// So a silenced severity names SITES, in the order `shown` itself uses. The two assertions below
+/// are one invariant in two halves, and either alone is satisfiable by a lie: "some anchor exists"
+/// is met by any row at all, and "the count is right" was already met before this key existed.
+#[test]
+fn a_silenced_severity_is_named_with_sites_not_only_a_count() {
+    let findings = vec![
+        serde_json::json!({ "ruleId": "a/one", "severity": "info", "file": "src/a.ts", "line": 1 }),
+        serde_json::json!({ "ruleId": "b/two", "severity": "info", "file": "src/b.ts", "line": 2 }),
+        serde_json::json!({ "ruleId": "security/private-key-committed", "severity": "critical",
+            "file": "src/__tests__/redaction.spec.ts", "line": 12 }),
+        serde_json::json!({ "ruleId": "security/shell-exec-interpolation", "severity": "critical",
+            "file": ".github/workflows/release.yml", "line": 30 }),
+    ];
+    let shaped = shape(
+        &findings,
+        &FindingFilters {
+            min_severity: None,
+            rule: None,
+            limit: Some(2),
+        },
+    );
+
+    // Precondition: this is the cal.com shape — the whole `critical` band is outside `shown`.
+    let shown = shaped["shown"].as_array().unwrap();
+    assert!(
+        shown.iter().all(|f| f["severity"] != "critical"),
+        "the cut has to have taken the whole band or this test proves nothing: {shaped}"
+    );
+    assert_eq!(shaped["bySeverity"]["critical"], 2, "{shaped}");
+
+    let named = shaped["truncated"]["severitiesNotShown"]["firstOmitted"]["critical"]
+        .as_array()
+        .unwrap_or_else(|| {
+            panic!(
+                "a severity the cut removed entirely has to name sites, not only a count: {shaped}"
+            )
+        });
+    // The rows named are the cut ones, in sort order — the demoted test path sorts ahead of the
+    // build surface, exactly as `shown` would have ordered them had the cap reached that far.
+    assert_eq!(named.len(), 2, "{shaped}");
+    assert_eq!(
+        named[0]["ruleId"], "security/private-key-committed",
+        "{shaped}"
+    );
+    assert_eq!(
+        named[0]["file"], "src/__tests__/redaction.spec.ts",
+        "{shaped}"
+    );
+    assert_eq!(named[0]["line"], 12, "{shaped}");
+    assert_eq!(
+        named[1]["file"], ".github/workflows/release.yml",
+        "{shaped}"
+    );
+    // No `message`. The cap exists to bound this reply, and re-admitting the biggest field a
+    // finding carries through the disclosure would undo it.
+    assert!(named[0].get("message").is_none(), "{shaped}");
+
+    // A severity `shown` still carries needs no anchors — the reader can already see one.
+    assert!(
+        shaped["truncated"]["severitiesNotShown"]["firstOmitted"]
+            .get("info")
+            .is_none(),
+        "`info` is visible in `shown`; naming it here would claim a silence that did not happen: {shaped}"
+    );
+}
+
+/// A SAMPLE, and bounded — `--limit 0` silences every severity in the run, and an unbounded anchor
+/// list would hand the token bomb this module exists to stop back through the disclosure door. The
+/// count beside it stays exact, so the sample is stated rather than implied. And when the cut
+/// silenced nothing the key is still `{}`, never missing, for the same reason `counts` is.
+#[test]
+fn the_named_sites_are_a_bounded_sample_beside_an_exact_count() {
+    let findings: Vec<_> = (0..9)
+        .map(|i| finding("security/private-key-committed", "critical", i))
+        .collect();
+    let shaped = shape(
+        &findings,
+        &FindingFilters {
+            min_severity: None,
+            rule: None,
+            limit: Some(0),
+        },
+    );
+    let silenced = &shaped["truncated"]["severitiesNotShown"];
+    assert_eq!(
+        silenced["counts"]["critical"], 9,
+        "the count is the whole set: {shaped}"
+    );
+    let named = silenced["firstOmitted"]["critical"]
+        .as_array()
+        .unwrap_or_else(|| {
+            panic!("`--limit 0` silences every severity, so all of them have to be named: {shaped}")
+        });
+    assert!(
+        named.len() < 9 && !named.is_empty(),
+        "the sites are a bounded sample of that set, neither empty nor all of it: {shaped}"
+    );
+    let meaning = silenced["meaning"].as_str().unwrap();
+    assert!(
+        meaning.contains(&named.len().to_string()) && meaning.contains("SAMPLE"),
+        "and the reply says the number is a sample and how big, from the constant rather than \
+         typed in: {meaning}"
+    );
+
+    let nothing_silenced = shape(
+        &(0..5).map(|i| finding("r", "info", i)).collect::<Vec<_>>(),
+        &FindingFilters {
+            min_severity: None,
+            rule: None,
+            limit: Some(2),
+        },
+    );
+    assert_eq!(
+        nothing_silenced["truncated"]["severitiesNotShown"]["firstOmitted"],
+        serde_json::json!({}),
+        "an empty object, never a missing key — the same contract `counts` keeps: {nothing_silenced}"
+    );
+}
+
+/// `counts` answers "how many rows left"; `ruleCounts` answers "how many RULES left", and the two
+/// come apart exactly where it matters. Measured on `cases/trees/api-be` after the 2026-09-03 band
+/// move: 30 silenced `info` rows drawn from NINETEEN distinct rules -- a reader handed only `30`
+/// and three anchors reads "a few noisy rules" and is wrong about sixteen of them.
+///
+/// Both directions are pinned, because one alone is satisfiable by a bug. Equal counts would pass a
+/// `ruleCounts` that just echoed `counts`, so the fixture below deliberately gives one severity MANY
+/// rows from FEW rules; and a `ruleCounts` that counted the whole population rather than the cut
+/// tail would also be wrong, so the shown rules must not be in it.
+#[test]
+fn the_silenced_band_names_how_many_rules_it_hid_not_only_how_many_rows() {
+    // 9 critical rows from 3 rules, all cut by `--limit 0`.
+    let mut findings = Vec::new();
+    for rule in ["security/a-rule", "security/b-rule", "security/c-rule"] {
+        for i in 0..3 {
+            findings.push(finding(rule, "critical", i));
+        }
+    }
+    let shaped = shape(
+        &findings,
+        &FindingFilters {
+            min_severity: None,
+            rule: None,
+            limit: Some(0),
+        },
+    );
+    let silenced = &shaped["truncated"]["severitiesNotShown"];
+    assert_eq!(
+        silenced["counts"]["critical"], 9,
+        "rows are counted whole: {shaped}"
+    );
+    assert_eq!(
+        silenced["ruleCounts"]["critical"], 3,
+        "and the RULES behind them are counted separately -- 9 rows, 3 rules, and a `ruleCounts` \
+         that merely echoed `counts` would say 9 here: {shaped}"
+    );
+    let meaning = silenced["meaning"].as_str().unwrap();
+    assert!(
+        meaning.contains("ruleCounts") && meaning.contains("DISTINCT RULES"),
+        "the reply says what the second number is, or it reads as a duplicate of the first: {meaning}"
+    );
+
+    // The tail, not the population: with a limit that SHOWS one rule, that rule must not be counted
+    // among the hidden ones. `info` sorts below `critical`, so a limit of 1 shows a critical row and
+    // silences the whole `info` band.
+    let mixed = shape(
+        &[
+            finding("security/shown-rule", "critical", 1),
+            finding("security/hidden-one", "info", 2),
+            finding("security/hidden-two", "info", 3),
+        ],
+        &FindingFilters {
+            min_severity: None,
+            rule: None,
+            limit: Some(1),
+        },
+    );
+    let hidden = &mixed["truncated"]["severitiesNotShown"];
+    assert_eq!(
+        hidden["ruleCounts"],
+        serde_json::json!({ "info": 2 }),
+        "only the CUT tail is counted, and only for a severity `shown` holds none of -- the shown \
+         rule contributes nothing here: {mixed}"
+    );
+}
 // ---------------------------------------------------------------------------
 // THE PER-REPLY PROSE FOLD (2026-08-31) — see `super::rule_prose` for the why.
 // Two pins in OPPOSITE directions. "No text stored twice" alone is satisfiable by
@@ -926,6 +1440,9 @@ fn finding_msg(rule: &str, severity: &str, idx: usize, message: &str) -> serde_j
 /// absent. Nothing here parses the human sentence — that is the whole point of the field existing,
 /// and a test that scraped prose would have quietly re-frozen the wording this repo publishes as free.
 fn resolve(shaped: &serde_json::Value, f: &serde_json::Value) -> String {
+    if let Some(parts) = f.get("templateParts") {
+        return splice(shaped, f, parts);
+    }
     match f.get("messageRef").and_then(|v| v.as_str()) {
         None => f["message"]
             .as_str()
@@ -938,19 +1455,57 @@ fn resolve(shaped: &serde_json::Value, f: &serde_json::Value) -> String {
     }
 }
 
+/// The template half of the same contract, spelled the way the legend spells it: look the segments
+/// up by the finding's OWN `ruleId`, then interleave SEGMENT FIRST, ending on the last segment.
+/// Written out rather than shared with the producer on purpose — a test that called the shipping
+/// splice would agree with it by construction, including where both are wrong.
+fn splice(shaped: &serde_json::Value, f: &serde_json::Value, parts: &serde_json::Value) -> String {
+    let rule = f["ruleId"]
+        .as_str()
+        .expect("a folded finding names its rule");
+    let segs = shaped["ruleMessageTemplates"][rule]
+        .as_array()
+        .unwrap_or_else(|| panic!("no template for rule {rule:?}: {shaped}"));
+    let parts = parts.as_array().expect("templateParts is an array");
+    assert_eq!(
+        parts.len() + 1,
+        segs.len(),
+        "templateParts must be exactly one shorter than its template: {f}"
+    );
+    let mut out = segs[0].as_str().expect("a segment is a string").to_string();
+    for (i, p) in parts.iter().enumerate() {
+        out.push_str(p.as_str().expect("a part is a string"));
+        out.push_str(segs[i + 1].as_str().expect("a segment is a string"));
+    }
+    out
+}
+
 /// Every prose text the reply STORES: an inline message is stored where it sits, and a
 /// `ruleMessages` value is stored in the table. A pointer stores nothing — it is an address, and
 /// its length is bounded by the assertion below rather than counted as prose here.
 fn stored_prose(shaped: &serde_json::Value) -> Vec<String> {
     let mut out = Vec::new();
     for f in shaped["shown"].as_array().expect("shown is an array") {
-        if f.get("messageRef").is_none() {
+        if f.get("messageRef").is_none() && f.get("templateParts").is_none() {
             out.push(f["message"].as_str().unwrap_or("").to_string());
         }
     }
     if let Some(map) = shaped["ruleMessages"].as_object() {
         for v in map.values() {
             out.push(v.as_str().unwrap_or("").to_string());
+        }
+    }
+    // Template SEGMENTS are stored prose too — that is the point of storing them once. The empty
+    // ones are skipped because an empty leading and an empty trailing segment are two absences, not
+    // two copies of a text, and counting them would fail this pin on a reply storing nothing twice.
+    if let Some(map) = shaped["ruleMessageTemplates"].as_object() {
+        for segs in map.values() {
+            for v in segs.as_array().into_iter().flatten() {
+                match v.as_str() {
+                    Some("") | None => {}
+                    Some(s) => out.push(s.to_string()),
+                }
+            }
         }
     }
     out
@@ -964,6 +1519,13 @@ fn unfold(shaped: &serde_json::Value) -> serde_json::Value {
     let table = shaped.get("ruleMessages").cloned();
     let mut out = shaped.clone();
     for f in out["shown"].as_array_mut().expect("shown is an array") {
+        if f.get("templateParts").is_some() {
+            f["message"] = serde_json::Value::String(splice(shaped, f, &f["templateParts"]));
+            f.as_object_mut()
+                .expect("a finding is an object")
+                .remove("templateParts");
+            continue;
+        }
         let Some(k) = f
             .get("messageRef")
             .and_then(|v| v.as_str())
@@ -984,6 +1546,8 @@ fn unfold(shaped: &serde_json::Value) -> serde_json::Value {
     let o = out.as_object_mut().expect("a shaped block is an object");
     o.remove("ruleMessages");
     o.remove("ruleMessagesMeaning");
+    o.remove("ruleMessageTemplates");
+    o.remove("ruleMessageTemplatesMeaning");
     out
 }
 
@@ -1265,6 +1829,203 @@ fn a_reply_with_no_repeated_message_carries_no_fold_table() {
         "{shaped}"
     );
     assert!(shaped["shown"][0].get("messageRef").is_none(), "{shaped}");
+    // These two DO share a template ("`parse" + "` is exported and imported nowhere.") — and it is
+    // worth far less than the pointer and the list it would cost, so the template lane must decline
+    // it too. Without this line the negative control only covers half the fold.
+    assert!(
+        shaped.get("ruleMessageTemplates").is_none(),
+        "a template worth less than its pointer must stay inline: {shaped}"
+    );
+    assert!(
+        shaped.get("ruleMessageTemplatesMeaning").is_none(),
+        "no table means no orphan legend: {shaped}"
+    );
+    assert!(
+        shaped["shown"][0].get("templateParts").is_none(),
+        "{shaped}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// THE TEMPLATE FOLD — the same two opposed pins, for the prose the exact fold structurally cannot
+// reach. A rule that writes its finding's own subject into its prescription emits a different string
+// every time, so keying on the whole message folds none of it; splitting the message into what every
+// finding shares and what each one adds folds it WITHOUT deleting a per-finding fact. The claim that
+// such prose "cannot be folded because folding erases per-finding facts" is what these pins refute:
+// the erasure is a property of one key choice, not of the prose.
+// ---------------------------------------------------------------------------
+
+/// The five models here differ ONLY in an interpolated name, which is the shape the exact fold gives
+/// up on. Four things are asserted together because any three of them are satisfiable by a cheat:
+/// (a) it really templated — without it every byte pin below is green on a build that folds nothing;
+/// (b) every original message rebuilds byte-identically from this reply alone; (c) no finding holds
+/// two addresses for one text; (d) the reply actually got smaller, in both serializers.
+#[test]
+fn interpolated_messages_of_one_rule_fold_to_one_template_and_rebuild_byte_identically() {
+    let msg = |model: &str| {
+        format!(
+            "Model `{model}` declares a column named like a foreign key with no declared relation. \
+             {LONG_PROSE} Add the relation to `{model}`, or rename the column so it stops reading \
+             as one."
+        )
+    };
+    let models = ["User", "Booking", "EventType", "Membership", "Webhook"];
+    let findings: Vec<_> = models
+        .iter()
+        .enumerate()
+        .map(|(i, m)| finding_msg("schema/implicit-fk", "warning", i, &msg(m)))
+        .collect();
+    let shaped = shape(
+        &findings,
+        &FindingFilters {
+            min_severity: None,
+            rule: None,
+            limit: None,
+        },
+    );
+
+    // (a) IT ACTUALLY TEMPLATED.
+    let table = shaped["ruleMessageTemplates"]
+        .as_object()
+        .unwrap_or_else(|| {
+            panic!(
+                "five messages differing only in a model name must fold to one template: {shaped}"
+            )
+        });
+    assert_eq!(
+        table.len(),
+        1,
+        "one rule, one template: {:?}",
+        table.keys().collect::<Vec<_>>()
+    );
+    let segs = table["schema/implicit-fk"]
+        .as_array()
+        .expect("a template is an array of segments");
+    assert!(
+        segs.len() >= 2,
+        "a template with no gap is the exact fold's population, not this one: {segs:?}"
+    );
+    // The segments hold only what every finding shares — the per-finding value is on the finding.
+    for model in models {
+        for s in segs {
+            assert!(
+                !s.as_str().expect("a segment is a string").contains(model),
+                "a template segment carries the per-finding value {model:?}, so it is not shared: {s}"
+            );
+        }
+    }
+    // ... and it is on the finding, which is the half that makes this a fold and not a diet.
+    assert!(
+        shaped["shown"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| serde_json::to_string(&f["templateParts"])
+                .unwrap()
+                .contains("EventType")),
+        "no finding kept its own subject: {shaped}"
+    );
+
+    // (b) NOTHING WAS DELETED.
+    let mut rebuilt: Vec<String> = shaped["shown"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| resolve(&shaped, f))
+        .collect();
+    let mut original: Vec<String> = models.iter().map(|m| msg(m)).collect();
+    rebuilt.sort();
+    original.sort();
+    assert_eq!(
+        rebuilt, original,
+        "the rebuilt set must be byte-identical to the pre-fold set: {shaped}"
+    );
+
+    // (c) ONE ADDRESS PER FINDING.
+    for f in shaped["shown"].as_array().unwrap() {
+        assert!(f.get("templateParts").is_some(), "{f}");
+        assert!(
+            f.get("messageRef").is_none(),
+            "a finding must not hold two addresses for one text: {f}"
+        );
+        let m = f["message"].as_str().expect("message stays a string");
+        assert!(
+            !m.is_empty() && m.len() < 320,
+            "a pointer must stay an address, not prose ({} bytes): {m}",
+            m.len()
+        );
+        assert!(
+            m.contains("ruleMessageTemplates") && m.contains("templateParts"),
+            "{m}"
+        );
+    }
+
+    // (d) THE REPLY GOT SMALLER, in both serializers this repo ships.
+    for (folded, plain) in fold_sizes(&shaped) {
+        assert!(
+            folded < plain,
+            "the template fold saved nothing here ({folded} folded vs {plain} unfolded) — a gate \
+             tuned until it folds nothing passes every 'never grows' pin: {shaped}"
+        );
+    }
+
+    // (e) The legend rides with the table and states the rule a consumer implements.
+    let meaning = shaped["ruleMessageTemplatesMeaning"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the template table must ride beside its legend: {shaped}"));
+    for token in [
+        "templateParts",
+        "ruleId",
+        "byte-identical",
+        "never truncation",
+    ] {
+        assert!(
+            meaning.contains(token),
+            "the legend never names {token:?}: {meaning}"
+        );
+    }
+}
+
+/// A rule whose two messages share only a few words must NOT template. The opposite of the pin
+/// above and the reason the gate is bytes rather than "did these have anything in common": every
+/// pair of English sentences shares SOMETHING, so a similarity gate would template every rule in
+/// every reply and pay a pointer plus a list for each one.
+#[test]
+fn a_rule_whose_messages_barely_overlap_stays_inline() {
+    let findings = vec![
+        finding_msg("r", "info", 0, "Delete this file, or import it somewhere."),
+        finding_msg(
+            "r",
+            "info",
+            1,
+            "This route mutates state with no auth on it.",
+        ),
+        finding_msg(
+            "r",
+            "info",
+            2,
+            "Bind this parameter instead of interpolating it.",
+        ),
+    ];
+    let shaped = shape(
+        &findings,
+        &FindingFilters {
+            min_severity: None,
+            rule: None,
+            limit: None,
+        },
+    );
+    assert!(
+        shaped.get("ruleMessageTemplates").is_none(),
+        "these share almost nothing — templating them costs bytes: {shaped}"
+    );
+    for f in shaped["shown"].as_array().unwrap() {
+        assert!(f.get("templateParts").is_none(), "{f}");
+    }
+    assert_eq!(
+        shaped["shown"][0]["message"], "Delete this file, or import it somewhere.",
+        "{shaped}"
+    );
 }
 
 /// The fold judges the WIRE, not the full set: a text repeated across findings the cap dropped is

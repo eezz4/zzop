@@ -88,6 +88,22 @@ pub(crate) enum Corpus<'a> {
     Config(&'a str),
 }
 
+/// How to reach the rule catalog, named for BOTH surfaces that print these errors.
+///
+/// 🔴 These strings are built once in the facade and printed by the CLI *and* by the MCP server, so a
+/// pointer written in one surface's vocabulary is an instruction the other surface's reader cannot
+/// follow. Measured (external review round 20, ledger V219): `resources/read` on
+/// `zzop://rule/mutating-route-no-auth` returned a `-32602` whose text was *"See `zzop contract
+/// rule-catalog`"* — a shell command, handed to a client that has no shell. The document itself was
+/// reachable the whole time as `zzop://contract/rule-catalog`, and is listed in `resources/list`; only
+/// the sentence naming it was wrong.
+///
+/// Naming both is deliberately preferred over threading a surface flag through this crate: an error
+/// path is the one place a reader is already stuck, one extra clause is cheap there, and a flag would
+/// put the "which surface am I" question into every caller of a shared text.
+const RULE_CATALOG_BOTH_WAYS: &str =
+    "`zzop contract rule-catalog` on the CLI, or the `zzop://contract/rule-catalog` resource over MCP.";
+
 /// `zzop explain <rule-id>` — `Ok` is the rendered rule text (print to stdout, exit 0), `Err` is a
 /// caller-facing message for one of the lookup-failure lanes described in the module doc (print
 /// to stderr, exit 1). Loads the real bundled packs and the real native-analysis registry fresh on
@@ -110,6 +126,49 @@ pub fn explain(query: &str) -> Result<String, String> {
 /// a load-time gate (that gate already lives at `validate-rule-pack` and the engine's own boot path). A
 /// shared helper would have to take the divergent failure handling as a parameter, which is the whole
 /// body.
+/// The assembled message a BUNDLED rule would have produced, keyed by full `"<pack>/<rule>"` id —
+/// the rule's own declared `message` plus the two sentences the engine appends
+/// (`zzop_core::dsl::message_with_hints`, the same function `pipeline::findings::append_hints` calls).
+///
+/// # Why this exists, and why the population is BUNDLED and not "every loaded pack"
+/// `zzop-summary` replaces a message equal to this with `BY_ID_MESSAGE` and tells the reader to
+/// resolve it by `ruleId` through `zzop explain <id>` or the MCP `zzop://rule/{id}` resource. Both of
+/// those answer out of [`bundled_packs`] — the packs compiled into this binary — and NOTHING ELSE:
+/// `explain` without `--config` cannot see a pack from `zzop/rules/` or `packs.extraDirs`, and the MCP
+/// resource has no config axis at all to give it one (`resources/templates/list` publishes
+/// `zzop://rule/{id}` and no second parameter). So a finding from a user pack that carried the pointer
+/// would name a door that answers "unknown rule id" — measured, round 18: a repo pack in `zzop/rules/`
+/// produced 6 findings, all 6 pointered, and both `zzop explain <id>` (exit 1) and
+/// `resources/read zzop://rule/<id>` (-32602) refused them.
+///
+/// 🔴 **`EngineConfig`'s `PackSource` is NOT the right discriminator for this**, which is the obvious
+/// wrong answer: its own doc says there is deliberately no `Bundled` variant, because "bundled" is a
+/// packaging fact of the host and the engine sees only a directory or an inline def. A bundled pack
+/// arrives as `Dir` whenever the mapper prepends the bundled directory to `packsDir`. The property
+/// that actually matters is not "where did this pack come from" but "can the door open for this id",
+/// and that question has exactly one honest answer: ask the same corpus the door asks.
+///
+/// Built once. The corpus is compile-time (`zzop_config::BUNDLED_PACK_SOURCES`), which is also what
+/// lets the shortening live in the shaper rather than needing a run's `config.packs` at the seam.
+pub fn bundled_verbatim_message(rule_id: &str) -> Option<&'static str> {
+    static TABLE: std::sync::OnceLock<std::collections::HashMap<String, String>> =
+        std::sync::OnceLock::new();
+    TABLE
+        .get_or_init(|| {
+            let mut out = std::collections::HashMap::new();
+            for pack in bundled_packs() {
+                for rule in &pack.rules {
+                    let id = format!("{}/{}", pack.id, rule.id);
+                    let text = zzop_core::dsl::message_with_hints(Some(rule), &id, &rule.message);
+                    out.insert(id, text);
+                }
+            }
+            out
+        })
+        .get(rule_id)
+        .map(String::as_str)
+}
+
 fn bundled_packs() -> Vec<RulePackDef> {
     zzop_config::BUNDLED_PACK_SOURCES
         .iter()
@@ -207,8 +266,8 @@ fn explain_over(
     // this lookup reads.
     if native_ids.iter().any(|id| id == query) {
         return Err(format!(
-            "{query:?} is a native analysis id, not a bundled DSL rule — `zzop explain` only reads the \
-             compiled-in DSL pack data. See `zzop contract rule-catalog` for its full prose entry."
+            "{query:?} is a native analysis id, not a bundled DSL rule — this lookup only reads the \
+             compiled-in DSL pack data. Its full prose entry is in the rule catalog: {RULE_CATALOG_BOTH_WAYS}"
         ));
     }
 
@@ -223,7 +282,7 @@ fn explain_over(
                 "{query:?} is the bare form of the native analysis id {full:?} (compiled into \
                  zzop-engine, not a bundled DSL pack) — real, just not data this lookup reads. Config \
                  matches ids EXACTLY, so `disabledRules` / `severityOverrides` need the full \
-                 {full:?}. See `zzop contract rule-catalog` for its full prose entry."
+                 {full:?}. Its full prose entry is in the rule catalog: {RULE_CATALOG_BOTH_WAYS}"
             ));
         }
         [] => {}
@@ -246,7 +305,8 @@ fn explain_over(
     }
 
     Err(format!(
-        "unknown rule id {query:?} — see `zzop contract rule-catalog` for the full list of rule ids.{}",
+        "unknown rule id {query:?} — the full list of rule ids is in the rule catalog: \
+         {RULE_CATALOG_BOTH_WAYS}{}",
         match corpus {
             // The tail that closes the retrieval loop. A rule that left the bundle and was recovered
             // into `zzop/rules/` RUNS — it appears in `packsLoaded` and its findings carry this exact

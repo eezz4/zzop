@@ -13,12 +13,17 @@
 #                                             failure trains people to ignore this script
 #
 # ## What counts as a "command"
-# The `cargo`/`node`/`npm ci`/`bash scripts/...` invocations in `ci.yml`'s `run:` steps. `node` covers
+# The `cargo`/`node`/`npm ci`/`bash scripts/...`/`bash docs/...` invocations in `ci.yml`'s `run:`
+# steps. `node` covers
 # BOTH shapes ci.yml actually runs — `node scripts/<file>` and `node --test $files` — because until
 # 2026-08-03 the extractor knew only the first, and the three test-runner commands (two `node --test`
 # steps, one `npm ci`) sat in ci.yml with no local counterpart while this guard reported "mirrored
 # both ways". A needle list that is narrower than the claim is the same defect this guard exists to
-# catch, one level down. Deliberately excluded:
+# catch, one level down. It happened a SECOND time on 2026-09-02: a demo wired into ci.yml as
+# `bash docs/demo/break-a-route-shipped.sh` was invisible to this needle, and an external reviewer
+# proved it by deleting the mirroring line from ci-local.sh and watching this guard report clean.
+# `bash docs/` is now a needle for the same reason `bash scripts/measure/` is: a demo that gates CI
+# is work, not plumbing. Deliberately excluded:
 #   * `bash scripts/check-*.sh` — the guards job. `pre-commit` runs those on every commit and
 #     `check-guards-wired.sh` already binds that list; mirroring them here would be a third owner.
 #   * `git`/`echo`/`set` plumbing inside multi-line steps — not the work, just the shell around it.
@@ -36,6 +41,23 @@ done
 
 # Normalize a command line to its comparable core: collapse whitespace, drop a leading `run: `.
 normalize() { sed -E 's/^[[:space:]]*-?[[:space:]]*run:[[:space:]]*//; s/[[:space:]]+/ /g; s/^ //; s/ $//'; }
+
+# The comparison is a MULTISET, not a set. `sort -u` here until 2026-09-12 (review ledger V167), and
+# the dedup was itself a blind spot: normalization maps ci.yml's TWO `node --test $files` steps --
+# the adapter-kit examples and the npm shim spawn test -- onto one identical string, so `-u` folded
+# them and the guard could not tell two steps from one. Measured: deleting ci-local.sh's CLI-shim
+# block left this guard printing `clean (11 ... mirrored both ways)`. What goes missing that way is
+# ci.yml's own "the ONLY thing proving the published shim spawns the binary".
+#
+# The distinguishing content is the `files=` line each step builds its argument from, which this
+# guard does not read -- so counting occurrences is what is available, and it is enough: two steps
+# on one side and one on the other is now a difference. `comm` on sorted input with duplicates
+# reports the surplus copy, which is the shape this needs.
+#
+# This is the third time this guard's needle has been too narrow (see the `npx` note below and the
+# bare-word note above it). The pattern across all three: a normalization chosen to make matching
+# ROBUST also makes two different things look the same, and the guard reports the collision as
+# agreement.
 
 # A command must BEGIN its line (optionally after `run: `). The first cut of this guard matched the
 # bare word anywhere, so six COMMENT sentences ("...runs cargo and never touches the network") read as
@@ -65,12 +87,12 @@ fi
 
 extract() {
   grep -vE '^[[:space:]]*#' "$1" \
-    | grep -hoE '^[[:space:]]*-?[[:space:]]*(run: )?(\$CARGO|cargo|node scripts/[^ ]+|node --test|npm ci|npx |bash scripts/measure/[^ ]+)([^|>&#"]*)?' \
+    | grep -hoE '^[[:space:]]*-?[[:space:]]*(run: )?(\$CARGO|cargo|node scripts/[^ ]+|node --test|npm ci|npx |bash scripts/measure/[^ ]+|bash docs/[^ ]+)([^|>&#"]*)?' \
     | sed -E 's/\$CARGO/cargo/' \
     | normalize \
     | grep -vE '^bash scripts/check-|site-graph-data' \
     | grep -vFx "$PLAYWRIGHT_INSTALL" \
-    | sort -u || true
+    | sort || true
 }
 
 ci_cmds="$(extract "$CI")"

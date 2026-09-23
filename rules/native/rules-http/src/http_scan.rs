@@ -14,12 +14,15 @@
 //! outer symbol; and a raw-SQL label truncates at the first newline, so a multi-line statement's label can
 //! be incomplete.
 
-use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use regex::Regex;
 use zzop_core::SourceSymbol;
 
+// The §27 landing clauses these two rules splice AHEAD of their own imperatives, in their own
+// module so the one spelling of each stays the one spelling (the position pins in `tests` compare an
+// index against these constants).
+mod landing;
 mod non_idempotent;
 mod sightlines;
 mod unsafe_read;
@@ -202,16 +205,24 @@ pub(crate) use symbol_index::{
 /// "the handler" fabricates a distinction the data does not carry — the same stance
 /// [`symbol_index::symbols_by_id`] takes on the write-site axis. For the ordinary UNIQUE id there is
 /// exactly one declaration and one window, so behavior is unchanged by construction.
+///
+/// 🔴 Takes a READER, not a map of every file's text, and the difference is MEASURED (2026-09-06,
+/// external review lane B). The engine used to hand this rule a `HashMap<String, String>` holding
+/// every TypeScript file in the tree, alive for the whole pass; peak RSS then tracked tree bytes at
+/// roughly 1:1 (615 MB of TS source produced a 660 MB process, unchanged at `RAYON_NUM_THREADS=1`).
+/// This scan touches ONE file per handler declaration and reads a few lines above it, so the map was
+/// never the shape of the need — it was the shape of the caller's convenience. Keep the reader: a
+/// signature asking for "all the texts" re-buys that whole term to save one read per finding.
 fn scan_marker_window<T>(
     handler_symbol: &str,
     symbols: &[SourceSymbol],
-    files: &HashMap<String, String>,
+    read_file: &dyn Fn(&str) -> Option<String>,
     mut pick: impl FnMut(&str) -> Option<T>,
 ) -> Option<T> {
     for sym in symbols.iter().filter(|s| s.id == handler_symbol) {
-        // A declaration whose file text was not supplied is skipped rather than aborting the whole
-        // scan: with several same-id declarations, one missing file must not blind the others.
-        let Some(text) = files.get(&sym.file) else {
+        // A declaration whose file text cannot be read is skipped rather than aborting the whole
+        // scan: with several same-id declarations, one unreadable file must not blind the others.
+        let Some(text) = read_file(&sym.file) else {
             continue;
         };
         let lines: Vec<&str> = text.split('\n').collect();
@@ -230,9 +241,9 @@ fn scan_marker_window<T>(
 fn is_whitelisted(
     handler_symbol: &str,
     symbols: &[SourceSymbol],
-    files: &HashMap<String, String>,
+    read_file: &dyn Fn(&str) -> Option<String>,
 ) -> bool {
-    scan_marker_window(handler_symbol, symbols, files, |l| {
+    scan_marker_window(handler_symbol, symbols, read_file, |l| {
         ok_marker_re().is_match(l).then_some(())
     })
     .is_some()
@@ -253,9 +264,9 @@ pub(crate) fn with_ok_marker_near_miss(
     base: String,
     handler_symbol: &str,
     symbols: &[SourceSymbol],
-    files: &HashMap<String, String>,
+    read_file: &dyn Fn(&str) -> Option<String>,
 ) -> String {
-    let found = scan_marker_window(handler_symbol, symbols, files, |l| {
+    let found = scan_marker_window(handler_symbol, symbols, read_file, |l| {
         near_miss_res()
             .iter()
             .find_map(|re| re.captures(l))

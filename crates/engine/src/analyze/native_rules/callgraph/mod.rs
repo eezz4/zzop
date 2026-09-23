@@ -11,7 +11,11 @@ use crate::EngineConfig;
 
 mod cache_lane;
 mod decorator_gate;
+mod graph_build;
+mod java_bridge;
 mod java_guard;
+mod marker_lookback_rules;
+mod python_bridge;
 mod python_guard;
 mod rust_guard;
 
@@ -45,14 +49,33 @@ use decorator_gate::{assemble_decorator_guarded, packs_read_io_scan_attrs};
 /// `ts_paths`-aware); a PYTHON one uses the real module resolver (`python_guard::
 /// resolve_python_call_target`); a JAVA one resolves a specifier to ITSELF (`Some(specifier.to_string())`)
 /// — Java import specifiers are dotted package/class names (`io.spring.core.service.AuthorizationService`),
-/// not relative paths, and no whole-corpus Java package/type index (`pipeline::JavaIndex`, used elsewhere
-/// for the dep-graph) is threaded into this function. Treating the specifier as its own opaque, stable
-/// target identity is sufficient for THIS graph's purpose — `bfs_reachable`'s predicate only needs a
-/// stable node id to visit and vocabulary-match (`mutating_route_no_auth::is_guard_id`), not a real
-/// cross-file resolution. Known limitation, shared with Python's own module-attribute case: a guard
-/// reachable only through a SECOND hop (handler -> helper in another file -> guard) is not found, since
-/// the first hop's target id is a node nothing else has outgoing edges from — single-hop (handler calls
-/// the guard directly, or through a same-file helper) is the coverage this wiring buys.
+/// not relative paths, and one specifier can name MANY files (`com.ex.svc.*`), which this callback's
+/// one-target shape cannot express. Treating the specifier as its own opaque, stable target identity is
+/// what this callback can honestly return — `bfs_reachable_in`'s predicate only needs a stable node id to
+/// visit and vocabulary-match (`mutating_route_no_auth::is_guard_id`).
+///
+/// 🔴 **That left Java single-hop, and single-hop was not a missing finding — it was a FALSE one.**
+/// A cross-file Java edge LANDS on `<specifier>#<Class>.<method>` while the callee file's own edges
+/// LEAVE from `<path>#<Class>.<method>`, so a guard one file further away (handler -> helper -> guard)
+/// was unreachable and `mutating-route-no-auth` FIRED on a route that is guarded. Measured on a
+/// three-controller fixture (2026-09-07, review ledger V30): 2 findings where 1 is real. This doc used
+/// to record the limit as coverage this wiring "does not buy", which is the half of the truth that does
+/// no harm to say.
+///
+/// It is now joined AFTER resolution by [`java_bridge`] — additive edges between the two id spaces,
+/// using the same `pipeline::JavaIndex` the dep-graph already builds (`java_index`). See that module for
+/// why the join belongs after the resolver rather than inside it.
+///
+/// **Python's module-attribute case is the analogous shape and is ALSO bridged**, by
+/// [`python_bridge`] (2026-09-08, review ledger V100): `from pkg import mod` + `mod.f()` lands on
+/// `pkg/__init__.py#mod.f` while `f`'s own edges leave from `pkg/mod.py#f`. Both bridges are called
+/// unconditionally from `graph_build::build`.
+///
+/// ⚠ This paragraph said Python was "NOT covered — no measurement yet" for four days after the bridge
+/// shipped (found 2026-09-12, ledger V169). A doc that reports a shipped capability as ABSENT is not a
+/// harmless lag: the next reader scoring coverage counts it as an open gap, and the reviewer who found
+/// this nearly did. When a second member joins a class, the sentence that named the first is part of
+/// the change.
 #[allow(clippy::too_many_arguments)]
 pub(in crate::analyze) fn run_callgraph_rules(
     root: &std::path::Path,
@@ -61,13 +84,24 @@ pub(in crate::analyze) fn run_callgraph_rules(
     io_provides: &[zzop_core::IoProvide],
     ts_paths: &HashSet<String>,
     ts_import_pairs: &[(String, ImportMap)],
+    // Produced by the per-file lane (`pipeline::fresh::call_graph`), not by this pass. That is the
+    // whole of review ledger V108: this pass used to re-read and re-parse every source to get it.
+    ts_call_graph_pairs: &[(String, zzop_core::callgraph::CallGraphFacts)],
     java_rels: &[String],
+    // The whole-corpus Java package/type index the dep graph already builds. Threaded in for
+    // `java_bridge` — see that module's doc for why a Java call graph needs it AFTER resolution rather
+    // than inside the resolver.
+    java_index: &crate::pipeline::JavaIndex,
     rust_workspace: &crate::pipeline::RustWorkspaceMap,
     all_symbols: &[zzop_core::SourceSymbol],
     profile: bool,
     rule_time: &mut HashMap<String, (u128, usize)>,
     global_findings: &mut Vec<Finding>,
     decorator_guarded_out: &mut BTreeSet<(String, u32)>,
+    // Files that LOOK like a Spring Security config and whose posture extraction bailed, with the bail's
+    // stable name. An out-param for the same reason `decorator_guarded_out` is one: this pass computes it
+    // as a by-product and the caller owns the reply channel it belongs in.
+    posture_bails_out: &mut Vec<(String, &'static str, String)>,
 ) {
     let api_endpoints: Vec<zzop_core::ApiEndpoint> = io_provides
         .iter()
@@ -112,7 +146,8 @@ pub(in crate::analyze) fn run_callgraph_rules(
     // Cost note (scouted, then corrected by review): WITHIN an invocation every decorator-guard producer
     // below reads text already in memory — Java's `extract_spring_guarded_lines`/
     // `extract_spring_security_posture` re-parse the same `text` string `parse_calls`/`parse_imports`
-    // consumed per `java_rels` entry, and the NestJS producers read from `file_texts` — so no producer
+    // consumed per `java_rels` entry, and the NestJS producers run inside the TS read loop below, on
+    // the text it already holds (`TsGuardEvidence::collect`) — so no producer
     // adds a per-file read on top of the pass. BUT the widened gate also makes the pass RUN in one config
     // it previously skipped outright: every callgraph-family rule off while a DSL pack reads auth attrs.
     // That config used to early-return with zero I/O and now pays this pass's own TS+Java file reads —
@@ -124,76 +159,26 @@ pub(in crate::analyze) fn run_callgraph_rules(
         return;
     }
 
-    let mut raw_calls = Vec::new();
-    let mut file_texts: HashMap<String, String> = HashMap::new();
-    #[allow(
-        clippy::iter_over_hash_type,
-        reason = "iteration order cannot reach the result: `file_texts` is a map, and `raw_calls` is re-bucketed per file into a BTreeMap by `build_symbol_graph` (and into a keyed map of sets by `cache_lane::run`) before any finding is minted"
-    )]
-    for rel in ts_paths {
-        if !crate::dead_exports::is_ts_source_ext(rel) {
-            continue; // non-TS overlay participant (e.g. .svelte) — re-parsing as TS would inject noise
-        }
-        if let Ok(bytes) = std::fs::read(root.join(rel)) {
-            let text = String::from_utf8_lossy(&bytes).into_owned();
-            raw_calls.extend(zzop_parser_typescript::parse_calls(rel, &text));
-            file_texts.insert(rel.clone(), text);
-        }
-    }
-    let mut imports_by_file: HashMap<String, ImportMap> = ts_import_pairs.iter().cloned().collect();
-    // Java's own re-parse — module doc "Engine-wiring route taken"; `java_guard`'s own doc for why its
-    // imports are parsed fresh here and its text stays out of `file_texts`.
-    let java = java_guard::parse_calls_and_guards(
-        root,
-        java_rels,
-        need_decorator_guarded,
-        &mut raw_calls,
-        &mut imports_by_file,
-    );
-    // Python's own re-parse + its two decorator-guard producers — module doc "Engine-wiring route taken",
-    // and `python_guard`'s own doc for the two guard shapes and why they are gathered in two phases.
-    let python_guards = python_guard::parse_calls_and_guards(
+    // Substrate first: four re-parses, one resolver, one graph — `graph_build`'s own doc for the seam.
+    let graph_build::BuiltGraph {
+        raw_calls,
+        symbol_graph,
+        unresolved_callees,
+        ts_guards,
+        java,
+        python_guards,
+    } = graph_build::build(
         root,
         ts_paths,
+        ts_import_pairs,
+        ts_call_graph_pairs,
+        java_rels,
+        java_index,
+        rust_workspace,
+        all_symbols,
+        &vocab,
         need_decorator_guarded,
-        &vocab.python_guard(),
-        &mut raw_calls,
     );
-    // Rust's own re-parse — calls PLUS handler-signature extractor evidence. Unconditional (not behind
-    // `need_decorator_guarded`) because the signature edges are ordinary graph edges, not side-channel
-    // guard evidence: see `rust_guard`'s module doc.
-    rust_guard::parse_calls_and_guards(root, ts_paths, &vocab.rust_guard(), &mut raw_calls);
-    let mut local_symbols_by_file: HashMap<String, HashSet<String>> = HashMap::new();
-    for s in all_symbols {
-        local_symbols_by_file
-            .entry(s.file.clone())
-            .or_default()
-            .insert(s.name.clone());
-    }
-    // Combined resolver, dispatched by the CALLING file's own extension — module doc "Java call
-    // resolution".
-    let py_roots = &vocab.python_package_roots;
-    let resolve_file_fn = |specifier: &str, from_file: &str| {
-        if from_file.ends_with(".java") {
-            Some(specifier.to_string())
-        } else if crate::analyze::assemble::helpers::is_python_source_ext(from_file) {
-            python_guard::resolve_python_call_target(specifier, from_file, ts_paths, py_roots)
-        } else if crate::analyze::assemble::helpers::is_rust_source_ext(from_file) {
-            rust_guard::resolve_rust_call_target(specifier, from_file, ts_paths, rust_workspace)
-        } else {
-            zzop_parser_typescript::resolve_file(specifier, from_file, ts_paths)
-        }
-    };
-    // Both halves: the resolved edges, and the calls the resolver DROPPED indexed by caller. A dropped
-    // name is still guard evidence for `mutating-route-no-auth` (see its `unresolved_callees` field) —
-    // a guard the resolver cannot place is a call whose written name the rule can read.
-    let (symbol_graph, unresolved_callees) =
-        zzop_core::callgraph::build_symbol_graph_with_unresolved(
-            &raw_calls,
-            &imports_by_file,
-            &local_symbols_by_file,
-            &resolve_file_fn,
-        );
     if run_cache_lane {
         let t0 = profile.then(Instant::now);
         let found = cache_lane::run(
@@ -206,32 +191,19 @@ pub(in crate::analyze) fn run_callgraph_rules(
         record_native_timing(rule_time, t0, "cache-lane-file-read", found.len());
         global_findings.extend(found);
     }
-    if run_unsafe_read {
-        let t0 = profile.then(Instant::now);
-        let found = zzop_rules_http::scan_unsafe_read_endpoint(
-            &zzop_rules_http::ScanUnsafeReadEndpointInput {
-                api_endpoints: &api_endpoints,
-                symbols: all_symbols,
-                symbol_graph: &symbol_graph,
-                files: &file_texts,
-            },
-        );
-        record_native_timing(rule_time, t0, "unsafe-read-endpoint", found.len());
-        global_findings.extend(found);
-    }
-    if run_non_idempotent {
-        let t0 = profile.then(Instant::now);
-        let found = zzop_rules_http::scan_non_idempotent_write(
-            &zzop_rules_http::ScanNonIdempotentWriteInput {
-                api_endpoints: &api_endpoints,
-                symbols: all_symbols,
-                symbol_graph: &symbol_graph,
-                files: &file_texts,
-            },
-        );
-        record_native_timing(rule_time, t0, "non-idempotent-write", found.len());
-        global_findings.extend(found);
-    }
+    marker_lookback_rules::run(
+        &marker_lookback_rules::Args {
+            root,
+            api_endpoints: &api_endpoints,
+            all_symbols,
+            symbol_graph: &symbol_graph,
+            run_unsafe_read,
+            run_non_idempotent,
+            profile,
+        },
+        rule_time,
+        global_findings,
+    );
     if need_decorator_guarded {
         // Reuses the same `symbol_graph` built above but reads `io_provides` directly rather than
         // `api_endpoints`, since the `Finding` anchors on the route's own registration `file`/`line`,
@@ -246,12 +218,20 @@ pub(in crate::analyze) fn run_callgraph_rules(
             java.decorator_guarded,
             &python_guards,
             &java.postures,
-            &file_texts,
+            &ts_guards,
             io_provides,
             all_symbols,
             vocab.java_source_root,
         );
         *decorator_guarded_out = decorator_guarded.iter().cloned().collect();
+        // Hand the named bails up. SCOPE, stated because the first version of this comment got it wrong:
+        // collection happens inside `need_decorator_guarded`, so a tree whose route-auth rules are all off
+        // (or that registered no route at all) produces no bail line even if it ships a security config.
+        // That gating is correct rather than a gap — the disclosure exists because a route-auth rule is
+        // about to judge routes without the posture, and with no such rule judging there is no silence to
+        // break — but it does mean this channel answers "what did the rule that RAN fail to read", not
+        // "what security configs does this tree have".
+        posture_bails_out.extend(java.posture_bails.iter().cloned());
 
         if run_mutating_no_auth {
             // Generic entity-attribute channel — injected auth-guard evidence for routes the call-graph

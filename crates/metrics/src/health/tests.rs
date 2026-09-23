@@ -131,7 +131,7 @@ fn all_measured_scores() -> Scores {
 
 #[test]
 fn all_perfect_scores_no_cycle_pain_0_no_contributors() {
-    let h = compute_health_index(&all_measured_scores());
+    let h = compute_health_index(&all_measured_scores(), false);
     assert_eq!(h.pain, Some(0.0));
     assert!(
         h.contributors.is_empty(),
@@ -148,7 +148,7 @@ fn all_perfect_scores_no_cycle_pain_0_no_contributors() {
 /// A reader holding that reply could not tell "nothing is wrong" from "nothing was looked at".
 #[test]
 fn an_unmeasured_metric_is_distinguishable_from_a_clean_one() {
-    let nothing_measured = compute_health_index(&perfect_scores());
+    let nothing_measured = compute_health_index(&perfect_scores(), false);
 
     let mut clean = perfect_scores();
     // Same perfect scores, but every metric actually judged a population.
@@ -167,7 +167,7 @@ fn an_unmeasured_metric_is_distinguishable_from_a_clean_one() {
     clean.diamond.roots_examined = 50;
     clean.rename_instability.total = 50;
     clean.bus_factor.total = 9;
-    let clean = compute_health_index(&clean);
+    let clean = compute_health_index(&clean, false);
 
     assert_ne!(
         nothing_measured, clean,
@@ -218,7 +218,7 @@ fn an_unmeasured_metric_does_not_dilute_pain_it_leaves_the_weighting() {
     all_measured.diamond.roots_examined = 50;
     all_measured.rename_instability.total = 50;
     all_measured.bus_factor.total = 9;
-    let all_measured = compute_health_index(&all_measured);
+    let all_measured = compute_health_index(&all_measured, false);
 
     // Case 2: identical, except featureSlicedDesign had no population at all (a tree that never
     // adopted the convention). Its 2.5 weight must LEAVE the denominator, not sit in it scoring 100.
@@ -236,7 +236,7 @@ fn an_unmeasured_metric_does_not_dilute_pain_it_leaves_the_weighting() {
     fsd_dark.diamond.roots_examined = 50;
     fsd_dark.rename_instability.total = 50;
     fsd_dark.bus_factor.total = 9;
-    let fsd_dark = compute_health_index(&fsd_dark);
+    let fsd_dark = compute_health_index(&fsd_dark, false);
 
     assert!(
         fsd_dark.pain.expect("measured") > all_measured.pain.expect("measured"),
@@ -280,7 +280,7 @@ fn a_zero_population_metric_rides_contributors_with_a_null_gap() {
     scores.god_file.total = 50;
     scores.god_file.score = 80.0;
 
-    let h = compute_health_index(&scores);
+    let h = compute_health_index(&scores, false);
     let fsd = h
         .contributors
         .iter()
@@ -306,7 +306,7 @@ fn a_zero_population_metric_rides_contributors_with_a_null_gap() {
     // though the clean one is dropped from the ranked list.
     let mut clean_measured = perfect_scores();
     clean_measured.god_file.total = 50;
-    let h = compute_health_index(&clean_measured);
+    let h = compute_health_index(&clean_measured, false);
     assert!(
         !h.contributors
             .iter()
@@ -325,7 +325,7 @@ fn a_zero_population_metric_rides_contributors_with_a_null_gap() {
 fn a_cycle_alone_contributes_circular_weight_x_10_binary_full_weight() {
     let mut scores = all_measured_scores();
     scores.coupling.circular_count = 2;
-    let h = compute_health_index(&scores);
+    let h = compute_health_index(&scores, false);
     assert_eq!(h.pain, Some(3.0 * 10.0)); // 30
     assert_eq!(h.contributors[0].metric, HealthMetric::Circular);
     assert_eq!(h.contributors[0].gap, Some(1.0));
@@ -337,7 +337,7 @@ fn a_cycle_alone_contributes_circular_weight_x_10_binary_full_weight() {
 fn circular_is_unmeasured_when_no_file_imports_anything() {
     let mut scores = all_measured_scores();
     scores.coupling.importer_count = 0;
-    let h = compute_health_index(&scores);
+    let h = compute_health_index(&scores, false);
     let circular = h
         .contributors
         .iter()
@@ -359,7 +359,7 @@ fn gap_scales_the_contribution_and_contributors_are_sorted_by_contribution_desc(
     let mut scores = all_measured_scores();
     scores.feature_sliced_design.score = 50.0;
     scores.god_file.score = 80.0;
-    let h = compute_health_index(&scores);
+    let h = compute_health_index(&scores, false);
     let metrics: Vec<HealthMetric> = h.contributors.iter().map(|c| c.metric).collect();
     assert_eq!(
         metrics,
@@ -400,7 +400,7 @@ fn axis_shares_sum_to_pain_under_both_renormalization_regimes() {
             s
         }),
     ] {
-        let h = compute_health_index(&scores);
+        let h = compute_health_index(&scores, false);
         let pain = h.pain.expect("something was measured");
         let shares = h
             .axis_pain

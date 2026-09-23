@@ -75,11 +75,18 @@
 //!   base classes are not detected — only a direct class-level decorator gates its own methods.
 //!
 //! ## NestJS `@UseGuards` decorator exemption (`extract_controller_guarded_lines`)
-//! Detects `@UseGuards(...)` auth-guard coverage at class level (every route in that controller) or
-//! method level (just that route). A decorator application is metadata, not a call edge, so it is
-//! invisible to a call-graph BFS — see `zzop_rules_http::mutating_route_no_auth`'s module doc. A
-//! returned line always matches a route `extract_controller_provides` would emit (same file/line).
-//! Guard presence is checked by decorator name only, not argument identities.
+//! Detects auth-guard coverage at class level (every route in that controller) or method level (just
+//! that route). A decorator application is metadata, not a call edge, so it is invisible to a call-graph
+//! BFS — see `zzop_rules_http::mutating_route_no_auth`'s module doc. A returned line always matches a
+//! route `extract_controller_provides` would emit (same file/line). Guard presence is checked by
+//! decorator NAME only, never by argument identities.
+//!
+//! Two names qualify since 2026-09-05: the framework's own `@UseGuards(...)`, and any decorator whose
+//! name says it authenticates or gates (`@Authenticated`, `@AuthGuard`) — a HOUSE decorator, which is
+//! what a NestJS codebase writes once it has wrapped its guard a single time. `provides`'
+//! `is_auth_decorator_name` owns that vocabulary, why it is narrower than the middleware one beside it,
+//! and what it deliberately does not recognize; the residual note below is what the widening closed
+//! half of.
 //!
 //! **Known residual:** NestJS's GLOBAL guards (`app.useGlobalGuards(...)`, or an `APP_GUARD`
 //! provider) apply to every route in the app — a file-level signal this per-class extractor can't

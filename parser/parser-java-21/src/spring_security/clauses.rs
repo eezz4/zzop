@@ -222,6 +222,17 @@ fn collect_groups<'a>(
             clauses: registry_chain(node, param, src)?,
             bound: bound.cloned(),
         }),
+        // A COMMENT IS NOT A CLAUSE. tree-sitter-java makes `line_comment`/`block_comment` NAMED
+        // nodes, and `valid_named_children` filters only errors and missing nodes, so a comment
+        // reached the catch-all below and bailed the whole config. Measured on macrozheng/mall
+        // (2026-09-05): its customizer lambda opens with a non-English `//` comment line, and that
+        // single line stopped a chain this pass otherwise handles — the `enhanced_for_statement` arm
+        // above was written FOR mall's shape and had never once been reached on mall.
+        //
+        // Skipped HERE rather than inside `valid_named_children`: that helper serves every extractor
+        // in this crate, and a comment is meaningful to some of them (a suppression marker is a
+        // comment). Narrow the skip to the place where a comment provably carries no clause.
+        "line_comment" | "block_comment" => {}
         kind => return Err(SpringPostureBail::LambdaBody(kind.to_string())),
     }
     Ok(())

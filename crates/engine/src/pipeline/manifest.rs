@@ -67,31 +67,11 @@ pub(super) fn package_json_dir(rel: &str) -> &str {
     }
 }
 
-/// POSIX join + `.`/`..`-segment normalize — a small local reimplementation of
-/// `zzop_parser_typescript::resolve`'s private `normalize`/dirname-join logic, sized to exactly what
-/// `package_json_entries` needs (that module's helpers are private, not importable from here).
-pub(super) fn join_and_normalize(dir: &str, candidate: &str) -> String {
-    let joined = if dir.is_empty() {
-        candidate.to_string()
-    } else {
-        format!("{dir}/{candidate}")
-    };
-    let mut stack: Vec<&str> = Vec::new();
-    for seg in joined.split('/') {
-        match seg {
-            "" | "." => continue,
-            ".." => {
-                if matches!(stack.last(), Some(&s) if s != "..") {
-                    stack.pop();
-                } else {
-                    stack.push("..");
-                }
-            }
-            s => stack.push(s),
-        }
-    }
-    stack.join("/")
-}
+/// POSIX join + `.`/`..`-segment normalize, re-exported so the `pipeline` modules that already import
+/// `super::manifest::join_and_normalize` keep one spelling. The implementation moved to
+/// `zzop_core::posix_path` on 2026-09-07 (review ledger V93 ⑵) — `config_entries.rs` carried a
+/// byte-identical second copy, and each was justified by the other original being a private helper.
+pub(super) use zzop_core::posix_path::join_and_normalize;
 
 /// Recursively collects every string leaf of `v` that looks like a relative path (`./`/`../`-prefixed)
 /// — the `exports` field walker: handles a single string, a conditional map, a subpath map, and

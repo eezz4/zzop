@@ -32,7 +32,7 @@ mod tests {                          // 6
 
 #[test]
 fn bare_test_attribute_on_a_free_function_is_covered() {
-    // The shape of `crates/core/src/dsl/tests_line_scan.rs`: a file that is a test module only because
+    // The shape of `crates/core/src/dsl/tests_line_scan/mod.rs`: a file that is a test module only because
     // its PARENT declared it so, whose functions still each carry `#[test]`. The parent's declaration is
     // invisible here; the attribute is not.
     let src = "\

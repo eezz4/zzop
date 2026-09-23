@@ -13,8 +13,10 @@ use std::collections::{HashSet, VecDeque};
 
 use zzop_core::{disable_hint, DepGraph, FileNode, Finding, Severity};
 
+mod landing;
 mod patterns;
 
+use landing::ISLAND_DELETION_LANDING;
 use patterns::entry_patterns;
 pub use patterns::is_tool_config_file;
 pub(crate) use patterns::{framework_route_patterns, is_tool_entry_file};
@@ -93,8 +95,10 @@ pub fn unreachable_findings(
             message: format!(
                 "file has {} importer(s) in this tree but is unreachable from any entrypoint — its \
                  importers form a closed island nothing outside it can reach, so it's effectively dead \
-                 despite having in-repo references. Delete the island, or wire it back to a real \
-                 entrypoint if it should be reachable. {} if this island is reached by a mechanism this \
+                 despite having in-repo references. Whether that is true rests entirely on the entrypoint \
+                 set, so read it before you treat this as dead. {ISLAND_DELETION_LANDING} IF NO SUCH \
+                 LOADER EXISTS: delete the island, or wire it back to a real entrypoint if it should be \
+                 reachable. {} if this island is reached by a mechanism this \
                  graph doesn't see (e.g. dynamic `require`, a plugin loader).",
                 u.fan_in,
                 disable_hint("unreachable")

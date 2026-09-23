@@ -21,7 +21,7 @@
 mod channel;
 mod path;
 
-pub use channel::{marker_channel, suppress_hint, MarkerChannel};
+pub use channel::{marker_channel, message_with_hints, suppress_hint, MarkerChannel};
 pub use path::{
     leaders_for_path, marker_leaders_for_path, marker_widening_prose, suppress_marker_sites,
     SuppressMarkerSite,

@@ -5,7 +5,7 @@
 //!
 //! This contract exists because the fact it pins previously lived only as prose, and prose had ALREADY
 //! drifted from the code: an audit found "loop spans are TS-only" stated somewhere while
-//! `parser/parser-go/src/lang/loop_spans.rs` and `go/goroutine-in-loop`'s `trigger_in_loop` matcher had
+//! `parser/parser-go/src/lang/loop_spans.rs` and `reliability/goroutine-in-loop`'s `trigger_in_loop` matcher had
 //! moved reality out from under that sentence. This module replaces the sentence with a table read
 //! straight from the engine's own per-language match arms (ground truth — `pipeline/fresh.rs` for
 //! `symbols`/`io`, `pipeline/fresh/spans.rs` for the three span facts) and a
@@ -212,7 +212,7 @@
 //! shape of the mistake is worth keeping: a claim about N languages backed by one language's example.
 //!
 //! Where the drift IS pinned, two-sided, on the one environment that has the channel:
-//! `crates/engine/tests/analyze_rust_test_spans.rs` — same violation inside and outside a `#[cfg(test)]`
+//! `crates/engine/tests/integration/analyze_rust_test_spans.rs` — same violation inside and outside a `#[cfg(test)]`
 //! region, one finding, on the shipped line. **If a second language ever learns `test_spans`, revisit
 //! this**: at two producers the asymmetry stops being self-evident from the one arm in `fresh.rs`.
 
@@ -445,7 +445,7 @@ fn environments_table_has_exactly_one_row_per_zzop_parser_token_in_version_strin
 // -------------------------------------------------------------------------------------------------------
 
 /// A self-cleaning temp directory — same std-only mkdtemp idiom every other `analyze_tree`-driving test in
-/// this repo hand-rolls (see e.g. `rules/dsl/go/go.rs`, `crates/engine/tests/analyze_asset_ref.rs`).
+/// this repo hand-rolls (see e.g. `rules/dsl/reliability/goroutine_in_loop.rs`, `crates/engine/tests/integration/analyze_asset_ref.rs`).
 struct TempDir(PathBuf);
 
 impl TempDir {

@@ -15,7 +15,7 @@
 //! Fixture extensions: `.vb` and `.rb` stand in for "a real source extension with no native parser frontend
 //! in this workspace" — `.sql` used to fill that role here, but `zzop-parser-sql` now gives `.sql` a real
 //! `Language::Sql` dispatch (`db-table` provides from `CREATE TABLE`), so it graduated out of this fixture
-//! (see `crates/engine/tests/analyze_unparsed_extensions.rs`'s own git history / `zzop-parser-sql`'s own
+//! (see `crates/engine/tests/integration/analyze_unparsed_extensions.rs`'s own git history / `zzop-parser-sql`'s own
 //! integration test for `.sql`'s new, no-longer-unparsed coverage).
 
 use std::collections::HashMap;
@@ -193,7 +193,12 @@ fn unparsed_source_extensions_warn_exactly_once_each_non_source_and_native_exten
         1
     );
 
-    // BTreeMap key order: "rb" sorts before "vb".
+    // Unread-count descending, and this leg is what proves the order SURVIVES assembly rather than
+    // only holding inside the producer: 2 `.vb` files rank above 1 `.rb`, the opposite of what the
+    // extension names say. Until 2026-09-01 these lines came out in `BTreeMap` key order, which
+    // ranked a run's blind spots by how they are spelled — measured on nocodb, the `.vue` line (962
+    // unread files) was the 42nd of 49 `warnings` entries because "v" sorts last. The key is the
+    // count each entry already carries; equal counts fall back to the name, so the order stays total.
     let rb_idx = out
         .warnings
         .iter()
@@ -205,8 +210,8 @@ fn unparsed_source_extensions_warn_exactly_once_each_non_source_and_native_exten
         .position(|w| w.contains("extension .vb"))
         .unwrap();
     assert!(
-        rb_idx < vb_idx,
-        "expected .rb before .vb: {:?}",
+        vb_idx < rb_idx,
+        "expected .vb (2 files) before .rb (1 file): {:?}",
         out.warnings
     );
 

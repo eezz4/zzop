@@ -89,7 +89,7 @@ fi
 #
 # The name set is read from the crate's WHOLE `src/`, not from `lib.rs` alone: on 2026-08-26
 # parser-typescript's table moved to `src/framework_recognizers.rs` (its `lib.rs` had reached the
-# 300-line source cap), and this guard's own vacuity assertion below is what reported it — the const
+# 400-line source cap), and this guard's own vacuity assertion below is what reported it — the const
 # had left the file the extractor read while the prose it judges stayed. Where the const LIVES is
 # incidental; that it is the one literal the engine tests also read is the property this guard needs.
 # The PROSE subject is unchanged: a crate lib.rs's own `//!` doc, plus parser/README.md.

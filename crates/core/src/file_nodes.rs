@@ -9,9 +9,8 @@ use crate::node::{
 
 #[cfg(test)]
 mod tests;
-mod time;
 
-use time::{now_ms, parse_iso_to_ms};
+use crate::clock::{now_ms, parse_iso_to_ms};
 
 /// A file changed fewer than this many times is not "frequently changed" -> not a hotspot.
 ///

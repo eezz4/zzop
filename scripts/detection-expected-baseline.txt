@@ -45,7 +45,7 @@
 # The selection was not ad hoc: a census of the shipped id space (118 bundled DSL + 60 native = 178,
 # the machine-checked total in docs/rules/catalog.md) against the ids EXPECTED.jsonc names found 61
 # with no row at all. These five are that set's `critical` members plus the one already known.
-api 105 0 0
+api 112 0 0
 bearticles 0 0 0
 beinvoices 0 0 0
 callgraph 5 0 0
@@ -53,6 +53,7 @@ cata 4 0 0
 catb 4 0 0
 decoy 0 44 0
 depedge 0 0 0
+extclose 34 1 0
 feaxios 2 0 0
 fecat 1 0 0
 fegensdk 2 0 0

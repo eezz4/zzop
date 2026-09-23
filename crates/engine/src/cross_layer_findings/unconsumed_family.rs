@@ -37,6 +37,11 @@ pub(super) fn compute(
     trpc_participating_sources: &BTreeSet<String>,
     caveat: &Option<String>,
     externally_fetched_paths: &[&str],
+    // The two halves of the zero-contribution blindness gate, ANDed below. Kept as two inputs rather
+    // than one precomputed verdict so the reason a source counts as blind stays readable at the seam.
+    zero_contribution_sources: &[&str],
+    untraced_blind_sources: &BTreeSet<String>,
+    mostly_unread_by_source: &BTreeSet<String>,
 ) -> (Vec<Finding>, Vec<Finding>) {
     let mutation = if zzop_core::is_enabled(gate, "cross-layer/unconsumed-mutation-endpoint") {
         // Same blindness predicate `cross-layer/unresolved-consume-ratio` self-reports with, via the shared
@@ -46,10 +51,33 @@ pub(super) fn compute(
             unresolved_consumes,
             http_consume_totals,
         );
+        // 🔴 The ratio predicate above CANNOT see the most blind tree of all (review ledger V63).
+        // `majority_unresolved_http_sources` is unresolved/total over a `MIN_TOTAL_CONSUMES` floor, so a
+        // tree that contributed NOTHING has total 0, falls below the floor, and reads as NOT blind — the
+        // band then stayed at `warning` on exactly the run where the caller side was darkest. Measured:
+        // `corpus/oss/fe-svelte` + `be-gin`, 16 write endpoints at `warning` while the caller tree's
+        // `.svelte` files were never parsed.
+        //
+        // Zero contribution alone does not qualify — a shared-lib or UI-only tree in a monorepo join is
+        // legitimately io-less, and downgrading a real attack-surface warning because of an unrelated
+        // tree would be the worse trade. It is ANDed with a POSITIVE measurement that the tree's own
+        // files went unread, the same shape `provide_blind_sources` uses on the other side: a zero
+        // counts as blindness only when something measured says io was owed.
+        //
+        // Kept SEPARATE from the ratio set rather than unioned into it, because the finding's own
+        // confidence sentence names the mechanism — and "majority-unresolved consumes" is FALSE about a
+        // tree that has no consumes at all. One set would have made the band right and the sentence wrong.
+        let silent_blind_sources: std::collections::BTreeSet<String> = zero_contribution_sources
+            .iter()
+            .filter(|s| mostly_unread_by_source.contains(**s))
+            .map(|s| (*s).to_string())
+            .collect();
         let mut findings = zzop_rules_cross_layer::unconsumed_mutation_endpoint_findings(
             unconsumed_provides,
             unresolved_consumes,
             &blind_sources,
+            &silent_blind_sources,
+            untraced_blind_sources,
             near_miss_targets,
             trpc_participating_sources,
         );

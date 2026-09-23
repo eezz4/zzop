@@ -69,15 +69,27 @@ pub(super) fn collect_config_warnings(config: &serde_json::Value) -> Vec<String>
     );
     warn_unknown_keys(config.get("git"), &known("git"), "git.", &mut warnings);
     // `parsers`, wired 2026-08-14 — the SECOND declared scope this walk never descended into, and the
-    // post-mortem of the FIRST is the comment directly below. `VERSIONING.md` publishes "Unknown keys
-    // are ignored with a warning, never a hard error" as a compatibility promise, so a typo here was
-    // not an unbuilt feature: it was that published promise, already broken. The walk stops HERE and
+    // post-mortem of the FIRST is the comment directly below. `VERSIONING.md`'s flags-and-keys row
+    // publishes the unknown-key promise this scope was already breaking, so a typo here was not an
+    // unbuilt feature: it was that published promise, already broken. (Quoting the sentence here
+    // would be a second copy of it; the row is the owner.) The walk stops HERE and
     // does not descend into `globOverrides[]` entries — `GlobOverrideRequest` makes `glob`/`language`
     // required, so a misspelled entry key fails the LOAD with serde naming the missing field.
     warn_unknown_keys(
         config.get("parsers"),
         &known("parsers"),
         "parsers.",
+        &mut warnings,
+    );
+    // `scores` — the structural-score POLICY scope (one key today). Walked from the day it was
+    // declared, rather than after the silence is discovered, which is the lesson the two comments
+    // below record: a scope whose keys are listed but never walked accepts a typo in total silence,
+    // and the whole point of a key here is to CHANGE a number, so the failure mode of a typo
+    // (nothing changes) is indistinguishable from "I set it correctly and it does nothing".
+    warn_unknown_keys(
+        config.get("scores"),
+        &known("scores"),
+        "scores.",
         &mut warnings,
     );
     // `vocabulary` and its one nested scope. Wired 2026-08-07, when `vocabulary.fsd` was renamed to
@@ -191,7 +203,7 @@ pub(super) fn collect_config_warnings(config: &serde_json::Value) -> Vec<String>
 /// That is this repo's first-ranked failure mode — believing a check is on while it is off — and it is
 /// why "just document the normalization" was rejected as the fix.
 ///
-/// The transform per key comes from [`zzop_engine::NORMALIZED_VOCABULARY_KEYS`], and the transforms
+/// The transform per key comes from [`zzop_core::vocab_norm::NORMALIZED_VOCABULARY_KEYS`], and the transforms
 /// themselves are the same `zzop_core::vocab_norm` functions the consuming rules call, so this warning
 /// cannot drift away from the comparison it predicts.
 ///
@@ -211,7 +223,7 @@ fn warn_unmatchable_vocabulary_entries(
         return;
     };
     for (key, value) in object {
-        let Some(normalize) = zzop_engine::normalizer_for(key) else {
+        let Some(normalize) = zzop_core::vocab_norm::normalizer_for(key) else {
             continue;
         };
         let Some(entries) = value.as_array() else {

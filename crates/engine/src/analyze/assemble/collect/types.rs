@@ -56,6 +56,16 @@ pub(in crate::analyze::assemble) struct Collected {
     /// `ts_re_export_pairs`. Same collection gate as `ts_re_export_pairs`.
     pub(in crate::analyze::assemble) ts_dynamic_import_pairs: Vec<(String, Vec<String>)>,
     pub(in crate::analyze::assemble) ts_asset_ref_pairs: Vec<(String, Vec<String>)>,
+    /// Each TypeScript file's own call-graph contribution — call sites plus NestJS guard evidence —
+    /// paired with its `rel`. Same collection gate as `ts_re_export_pairs`, because the pass that
+    /// consumes it walks exactly the dep-graph participants (`ts_paths`).
+    ///
+    /// It is COLLECTED rather than gathered by that pass because the pass gathering it meant reading
+    /// and re-parsing every source a second time — 68% of a warm run on this repository, and a
+    /// second full swc parse per file, for facts the per-file lane could produce off a parse it had
+    /// already paid for (review ledger V108).
+    pub(in crate::analyze::assemble) ts_call_graph_pairs:
+        Vec<(String, zzop_core::callgraph::CallGraphFacts)>,
     pub(in crate::analyze::assemble) ts_paths: HashSet<String>,
     /// Every file that fell back to the lexical projection, paired with WHY and with whether a native
     /// frontend was dispatched for its path at all. Three facts rather than a path list because they have

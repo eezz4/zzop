@@ -139,7 +139,7 @@ mod write_verb_pin {
 #[cfg(test)]
 mod tests {
     //! `retry-wrapper-binding-v1` coverage. The file gate and the distinctive-ident wrappers are
-    //! covered end-to-end in `crates/engine/tests/analyze_cross_layer_retry_write.rs`.
+    //! covered end-to-end in `crates/engine/tests/integration/analyze_cross_layer_retry_write.rs`.
     use crate::adapters::egress::{extract_http_egress, files};
 
     fn tags(src: &str) -> Vec<Option<bool>> {

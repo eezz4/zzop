@@ -742,6 +742,71 @@ fn contract_documents_named(norm: &str) -> Vec<String> {
 /// Re-measured against the two catches contracts 15/16 were built on: "use the `cross_repo` tool with
 /// `configPath`" names no CLI twin, and ``Usage: `zzop init [--force]``` names no MCP tool `init`.
 /// Both stay RED under this clause.
+/// The declared CLI-subcommand <-> MCP-tool pairing, from `docs/contracts/surface-parity.json`'s
+/// `_laneTwins`. Read rather than spelled, for the reason that block's own `_doc` gives: the names do
+/// not derive from one another for six of the nine lanes, and the mechanical `-`/`_` swap below was
+/// silently false about all six while no shared message happened to name both halves of a pair.
+fn lane_twins() -> Vec<(String, String)> {
+    let registry = crate::surface_parity::load_registry();
+    let declared = registry["_laneTwins"]
+        .as_object()
+        .expect("surface-parity.json must declare a `_laneTwins` object");
+    let out: Vec<(String, String)> = declared
+        .iter()
+        .filter(|(k, _)| !k.starts_with('_'))
+        .map(|(k, v)| {
+            (
+                k.clone(),
+                v.as_str()
+                    .unwrap_or_else(|| panic!("_laneTwins[{k:?}] must be an MCP tool name string"))
+                    .to_string(),
+            )
+        })
+        .collect();
+    assert!(
+        !out.is_empty(),
+        "_laneTwins declares no pair — the twin clause would then be the mechanical name swap alone, \
+         which is what this block replaced"
+    );
+    out
+}
+
+/// The declared pairing is REAL on both sides, and COMPLETE on the MCP side.
+///
+/// Completeness is the half that makes this a forcing function rather than a lookup table: a new tool
+/// either declares which subcommand it is the twin of, or fails here naming itself. The CLI side is
+/// deliberately not checked for completeness — a subcommand may legitimately have no tool, and
+/// `_cliOnlyLanes` is where that is declared and machine-read.
+#[test]
+fn every_declared_lane_twin_resolves_on_both_hosts_and_no_tool_is_undeclared() {
+    let tools = shipped_mcp_tool_names();
+    let subcommands = cli_subcommands();
+    let twins = lane_twins();
+    for (sub, tool) in &twins {
+        assert!(
+            subcommands.contains(sub),
+            "_laneTwins pairs {sub:?} with {tool:?}, but main.rs dispatches no `{sub}` subcommand — \
+             a pairing whose CLI half does not exist excuses a spelling that has no twin"
+        );
+        assert!(
+            tools.contains(tool),
+            "_laneTwins pairs {sub:?} with {tool:?}, but packages/mcp/src/tools/definitions.rs ships \
+             no `{tool}` tool — same failure, other host"
+        );
+    }
+    let undeclared: Vec<&String> = tools
+        .iter()
+        .filter(|t| !twins.iter().any(|(_, tool)| &tool == t))
+        .collect();
+    assert!(
+        undeclared.is_empty(),
+        "shipped MCP tool(s) with no `_laneTwins` entry: {undeclared:?}. Declare the CLI subcommand \
+         each is the twin of. If one genuinely has no CLI twin, that is a decision to record — this \
+         guard's twin clause would otherwise excuse a message naming it beside ANY subcommand \
+         spelling, and `_cliOnlyLanes` is the mirror for lanes with no tool"
+    );
+}
+
 fn cli_token_has_named_twin(token: &str, norm: &str, tools: &[String]) -> bool {
     let Some(sub) = token.strip_prefix("`zzop ") else {
         return false; // a dash-flag
@@ -753,8 +818,35 @@ fn cli_token_has_named_twin(token: &str, norm: &str, tools: &[String]) -> bool {
                 .iter()
                 .all(|doc| norm.contains(&format!("zzop://contract/{doc}")));
     }
-    let tool = sub.replace('-', "_");
-    tools.iter().any(|t| t == &tool) && names_token(norm, &tool)
+    // The SECOND resource-template twin, and the same shape as `contract` above: a subcommand whose
+    // MCP counterpart is a resource rather than a tool. `zzop explain` has no tool (the shipped list
+    // carries none), and what an MCP client actually has is the `zzop://rule/{id}` template
+    // `resources/templates/list` publishes. Added 2026-09-13, when `zzop_core::BY_ID_MESSAGE` became
+    // the first shared-crate message to name that pair — before it, the only shared message naming
+    // `zzop explain` named no twin at all, which is why the tool lookup alone had been enough.
+    //
+    // The template is addressed by a value that varies per finding, so the check is the PREFIX rather
+    // than a whole URI: `contract` can enumerate its documents, and a rule id cannot be enumerated
+    // here. That is a real weakening, so it is stated: a message naming `zzop explain` and the string
+    // `zzop://rule/` passes even if the two sentences around them disagree about which rule. The
+    // thing this clause is built to catch — a shared message offering ONE audience a route the other
+    // cannot take — is still caught, because the prefix cannot be present without the MCP route being
+    // named.
+    if sub == "explain" {
+        return norm.contains("zzop://rule/");
+    }
+    // The mechanical swap first — it is right for the three lanes whose two names really are one name
+    // — then the DECLARED pairing for the six where the tool is named for the question and the
+    // subcommand for the object (`coverage` / `check_coverage`).
+    let mechanical = sub.replace('-', "_");
+    let declared = lane_twins()
+        .into_iter()
+        .find(|(cli, _)| cli == sub)
+        .map(|(_, tool)| tool);
+    [Some(mechanical), declared]
+        .into_iter()
+        .flatten()
+        .any(|tool| tools.iter().any(|t| t == &tool) && names_token(norm, &tool))
 }
 
 /// The mirror: does this literal name the CLI twin of the MCP-only `token` it also names? A wire
@@ -764,8 +856,17 @@ fn mcp_token_has_named_twin(token: &str, norm: &str, subcommands: &[String]) -> 
     if MCP_ONLY_WIRE_ARGUMENTS.contains(&token) {
         return false;
     }
-    let sub = token.replace('_', "-");
-    subcommands.iter().any(|s| s == &sub) && names_token(norm, &format!("`zzop {sub}"))
+    let mechanical = token.replace('_', "-");
+    let declared = lane_twins()
+        .into_iter()
+        .find(|(_, tool)| tool == token)
+        .map(|(cli, _)| cli);
+    [Some(mechanical), declared]
+        .into_iter()
+        .flatten()
+        .any(|sub| {
+            subcommands.iter().any(|s| s == &sub) && names_token(norm, &format!("`zzop {sub}"))
+        })
 }
 
 /// Literals that name a host spelling whose twin DOES NOT EXIST, subtracted by (file, token) — the
@@ -774,31 +875,25 @@ fn mcp_token_has_named_twin(token: &str, norm: &str, subcommands: &[String]) -> 
 /// Per-token and per-file, never per-file alone: every OTHER host spelling in these two files is still
 /// scanned, so exempting the one lane a message is about does not blind the file it lives in.
 ///
-/// Both entries are the same shape: a document served to BOTH audiences, describing a lane that exists
-/// on only one of them, and saying so in the same sentence. Rewording them to be spelling-free would
-/// delete the fact the sentence is there to deliver — which host can run this and which cannot.
-const CLI_NO_TWIN_EXEMPTIONS: [(&str, &str, &str); 2] = [
-    (
-        // Repathed TWICE now, both times caught by this guard in the same commit that moved the text:
-        // 2026-08-17 when the ROWS left `disclosure.rs` for `registry.rs` on the file-line cap, and
-        // again the same day when `registry.rs` split one module per taxonomy group. An exemption keyed
-        // on a file its literal has left is a pre-armed hole, which is what its own failure message
-        // says — and a path that has moved twice is a standing argument for keying on the literal
-        // rather than the file, if it moves a third time.
-        "crates/engine/src/disclosure/registry/analysis.rs",
-        "`zzop coverage",
-        "the sightline census's own text says `the CLI-only `zzop coverage` lane ... (it has no MCP \
-         tool twin; an MCP host reads the same declarations out of this document)` — it names the CLI \
-         lane in order to tell the MCP reader that the document in their hands is the substitute",
-    ),
-    (
-        "crates/engine/src/disclosure/document.rs",
-        "`zzop explain",
-        "the disclosure-classes document says `zzop-mcp has no explain — this document, served as MCP \
+/// The entry here is a document served to BOTH audiences, describing a lane that exists on only one of
+/// them, and saying so in the same sentence. Rewording it to be spelling-free would delete the fact the
+/// sentence is there to deliver — which host can run this and which cannot.
+///
+/// 🔴 There were TWO until 2026-09-15, and the one that left is the more instructive. The sightline
+/// census in `registry/analysis.rs` said the `zzop coverage` lane `has no MCP tool twin; an MCP host
+/// reads the same declarations out of this document`, and that stopped being true on 2026-09-04 when
+/// `check_coverage` shipped — for eleven days a document served to MCP clients sent them to a
+/// substitute for an answer they could already call for. Nothing was red, and nothing could have been:
+/// an exemption records WHY a spelling is honest, and no guard re-asks whether the reason still holds.
+/// Direction 2 below is the half that eventually fires — once the sentence was corrected to name both
+/// hosts, the twin clause cleared the hit and this entry excused nothing.
+const CLI_NO_TWIN_EXEMPTIONS: [(&str, &str, &str); 1] = [(
+    "crates/engine/src/disclosure/document.rs",
+    "`zzop explain",
+    "the disclosure-classes document says `zzop-mcp has no explain — this document, served as MCP \
          resource zzop://contract/disclosure-classes, already carries every id's class, group and \
          status` — the absence of the twin IS the sentence's content",
-    ),
-];
+)];
 
 /// Subtract [`CLI_NO_TWIN_EXEMPTIONS`] from contract 16's `hits`, failing if an entry excused nothing.
 ///

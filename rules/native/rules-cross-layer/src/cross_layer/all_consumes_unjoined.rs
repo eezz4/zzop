@@ -148,7 +148,11 @@ pub fn all_consumes_unjoined_findings(
         subsumed_sources: BTreeSet::new(),
     };
 
-    if !run_has_http_provides(cross_layer) {
+    // Not a boolean any more: a verb-unknown route IS an http provide but can never join, and telling
+    // such a run "the likely cause is ONE unresolved base path" sends the reader to the wrong knob
+    // (review ledger V97). The shape decides the gate AND the sentence.
+    let provide_shape = shape::classify(cross_layer);
+    if provide_shape == shape::HttpProvideShape::None {
         return out;
     }
 
@@ -219,15 +223,20 @@ pub fn all_consumes_unjoined_findings(
             tally.unprovided, tally.ambiguous
         );
 
+        let cause = shape::cause_sentence(provide_shape, n);
+        let routes_repair = shape::routes_repair(provide_shape);
         let message = format!(
             "not one internal http call extracted from `{source}` reached a provider, and {n} of them \
              ({split}) got no more specific explanation from any other cross-layer rule — no near-miss, no \
-             method or version mismatch. This run does have routes to join against, so the likely cause is \
-             ONE unresolved base path, not {n} independent problems. This engine refuses to guess a base it \
-             cannot read \
+             method or version mismatch. {cause}. {routes_repair}This engine refuses to guess a \
+             base it cannot read \
              statically (a `baseURL` assigned from a cross-file constant on the calling side, a router \
              mounted under a computed prefix on the serving side), which is why the keys never lined up. \
-             Four repairs that work today: make the base a string literal at its assignment; declare THIS \
+             Four repairs that work today, and the first one carries a condition the other three do not: \
+             IF THAT BASE IS THE SAME STRING IN EVERY ENVIRONMENT, make it a string literal at its \
+             assignment — if it varies per environment, do not, because a deploy-time value pinned into \
+             source is a worse defect than the blindness reported here, and the other three change no \
+             shipped code at all. Declare THIS \
              tree's own outbound base in zzop.config.jsonc (`trees[].topology.clientBase` — the calling \
              side's knob, and the one to reach for when the base is a cross-file constant); declare the \
              SERVING side's mount (`trees[].topology.mountedAt`, `trees[].topology.mounts`, \
@@ -273,21 +282,7 @@ pub fn all_consumes_unjoined_findings(
     out
 }
 
-/// Does this run contain any http provide at all? True when an http edge landed, when an unconsumed provide
-/// is http, or when an ambiguous consume names http candidates — the three places a provide can survive
-/// into `CrossLayerResult`. Without one, no consume in the run COULD have joined and the rule stays silent.
-fn run_has_http_provides(cross_layer: &CrossLayerResult) -> bool {
-    cross_layer.edges.iter().any(|e| e.kind == "http")
-        || cross_layer
-            .unconsumed_provides
-            .iter()
-            .any(|p| p.provide.kind == "http")
-        || cross_layer
-            .ambiguous_consumes
-            .iter()
-            .any(|a| a.consume.kind == "http" && !a.candidates.is_empty())
-}
-
+mod shape;
 mod subsume;
 pub use subsume::{retain_non_subsumed_sources, REPLACED};
 

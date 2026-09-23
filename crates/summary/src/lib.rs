@@ -72,6 +72,7 @@ mod facts;
 mod file;
 mod graph;
 mod manifest;
+mod module_map;
 pub mod output;
 mod siblings;
 mod suggest;
@@ -91,10 +92,16 @@ pub use graph::{
     graph_cosmograph, graph_mermaid, CosmographOutput, GraphDomain, GraphFormat, DEFAULT_GRAPH_TOP,
 };
 pub use manifest::{diff_manifests_json, manifest_json};
+pub use module_map::module_map;
 // `severity_rank` is public so a HOST gate (`zzop --fail-on`) orders severities by the same function
 // the findings view filters with. A second ordering in the CLI would be a second answer to "is warning
 // above info", and the two would drift the day a severity is added.
 pub use output::{severity_rank, FindingFilters, RunKnobs};
+// Public for the same one-owner reason `severity_rank` is: a HOST that must decide whether a `rule`
+// filter answered anything (the CLI's exit 2, the MCP `isError`) reads the SAME derivation the shaper
+// ran, never a second one and never the wording of a sentence. See its doc for the measured asymmetry
+// between the two hosts that made it public.
+pub use warnings::unmatchable_rule_filter;
 // Verbatim `zzop-facade` entry points, re-exported (never wrapped) so a host product needs only this
 // crate: the two `explain` forms, `version` and `version_string` are pure reads over engine/rule data the
 // facade owns (`explain_with_config` reads the config file too — it widens which PACKS are read, not what

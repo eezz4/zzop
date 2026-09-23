@@ -18,6 +18,10 @@ use landing::{
 
 mod index_build;
 
+// The SILENT axis (no DDL, no error, delivered later) — a third sibling of
+// `landing`/`index_build`; each module header is a promise the next author reuses.
+mod silent_breakage;
+
 use index_build::{CONCURRENT_INDEX_EXIT, INDEX_BUILD_LANDING};
 pub use sightline::{rule_sightlines, QUERY_CALL_SITE_EXTENSIONS};
 // The two pinned CLAIM fragments are used only by this module's seal tests (`tests.rs` reaches them
@@ -153,10 +157,9 @@ pub fn schema_issue_message(issue: &SchemaIssue) -> String {
             field,
             &param("type").unwrap_or_else(|| "Float".to_string()),
         ),
-        "stale-updated-at" => format!(
-            "Model {} field {field} looks like an updatedAt timestamp but lacks @updatedAt — it will not auto-refresh on writes.",
-            issue.model
-        ),
+        // The SILENT axis: `@updatedAt` emits no DDL, so this edit is absent from the migration review
+        // that would otherwise catch it (`silent_breakage`).
+        "stale-updated-at" => silent_breakage::stale_updated_at_message(&issue.model, field),
         "temporal-as-string" => landing::temporal_as_string_message(&issue.model, field),
         "fk-no-index" => {
             index_build::fk_no_index_message(&issue.model, field, issue.params.as_ref())
@@ -190,11 +193,11 @@ pub fn schema_issue_message(issue: &SchemaIssue) -> String {
         "model-churn" => format!(
             "Model {} accumulated {} migration change(s) — the design may be unstable. THAT COUNT IS \
              NOT ZZOP'S OWN: no native analysis produces migration churn, so it reached this rule from \
-             a producer that knows this project's migration layout and injected it. The two lines the \
-             count is read against — report at 5, escalate to critical at 10 — are round numbers with \
-             no measurement behind them, because zzop has never held a churn distribution to calibrate \
-             from. The raw count is in `data.count`: judge it against your own migration history \
-             rather than against these two.",
+             a producer that knows this project's migration layout and injected it. The line the count \
+             is read against — report at 5 — is a round number with no measurement behind it, because \
+             zzop has never held a churn distribution to calibrate from, and for that same reason this rule \
+             reports in ONE band only. The raw count is in `data.count`: judge it against your own history \
+             rather than against that line.",
             issue.model,
             param("count").unwrap_or_default()
         ),
@@ -219,18 +222,13 @@ pub fn join_issue_message(issue: &JoinIssue) -> String {
         .and_then(|v| v.as_str())
         .unwrap_or("query");
     match issue.rule.as_str() {
-        "soft-delete-bypass" => format!(
-            "Model {} has a soft-delete marker field ({field}) but this {method}() call has no `{field}` \
-             filter in its arguments — it may return soft-deleted rows. Add `{field}: null` (or your app's \
-             not-deleted convention) to the `where` clause. Note: a Prisma middleware (`$use`) or `$extends` \
-             client extension that injects this filter globally is invisible to this static check — if your \
-             app relies on one, this rule will false-positive on every call site for the model. {} \
-             To silence that, disable it \
-             {} (this rule \
-             has no inline suppression marker).",
-            issue.model,
-            query_call_site_sightline(),
-            disable_hint_tail("soft-delete-bypass")
+        // Same axis: adding the filter emits nothing and raises nothing -- the call sites that EXIST to
+        // read deleted rows just start returning none (`silent_breakage`).
+        "soft-delete-bypass" => silent_breakage::soft_delete_bypass_message(
+            &issue.model,
+            field,
+            method,
+            &disable_hint_tail("soft-delete-bypass"),
         ),
         // Shares `INDEX_BUILD_LANDING`/`CONCURRENT_INDEX_EXIT` byte-identically with `fk-no-index` (the
         // mechanism belongs to the DDL, not to what either rule detects), and deliberately NOT

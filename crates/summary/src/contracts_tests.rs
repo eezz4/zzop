@@ -235,3 +235,46 @@ fn every_served_pack_is_stamped_with_this_build_and_no_committed_pack_is() {
         );
     }
 }
+
+/// The SERVED stamp, both directions — the document sibling of `every_served_pack_is_stamped_with_this_build`.
+///
+/// Without the first assertion these documents go back to being undatable: they are compiled into the
+/// binary, so a reader holds whatever was baked at that release and nothing in the bytes says which.
+/// Without the second, someone folds the banner into every mime and produces invalid JSON from a
+/// resource whose whole contract is that it parses — the MCP resource test would catch it, but only
+/// after a release had shipped an unparseable schema.
+#[test]
+fn every_markdown_contract_is_served_with_this_builds_provenance_and_no_json_one_is() {
+    let mut markdown = 0;
+    for name in crate::contracts::names() {
+        let doc = crate::contracts::find(name).expect("names() must resolve");
+        let served = crate::contracts::served_content(doc);
+        if doc.mime == "text/markdown" {
+            markdown += 1;
+            assert!(
+                served.starts_with("<!-- served by zzop "),
+                "{name} is markdown and must be served with the provenance banner"
+            );
+            assert!(
+                served.contains(env!("CARGO_PKG_VERSION")),
+                "{name}'s banner must name the build that serves it"
+            );
+            assert!(
+                served.ends_with(doc.content),
+                "{name}'s banner must PREPEND -- the document itself may not be altered"
+            );
+        } else {
+            assert_eq!(
+                served, doc.content,
+                "{name} is {} and must be served byte-identical: a banner is not valid in it, and it \
+                 carries its own version channel",
+                doc.mime
+            );
+        }
+    }
+    assert!(
+        markdown >= 4,
+        "only {markdown} markdown contract(s) seen -- if that population collapsed, this test is \
+         vouching for almost nothing and the count is the thing to re-read"
+    );
+}

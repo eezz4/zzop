@@ -156,11 +156,36 @@ pub fn unconsumed_endpoint_findings(
         .iter()
         .filter(|c| c.consume.kind == "http")
         .count();
-    let vetoed_list = externally_fetched_paths
-        .iter()
-        .map(|p| format!("`{p}`"))
-        .collect::<Vec<_>>()
-        .join(", ");
+    // The veto CLAUSE, not just the list — because the undeclared case changes the sentence's meaning,
+    // not only its punctuation. `externallyFetchedPaths` follows this repo's "declared or not made"
+    // rule (`vocabulary/resolved.rs`: an undeclared list arrives EMPTY, never seeded from
+    // `built_in()` — that function's own doc says so in as many words). Until 2026-09-07 this built
+    // one sentence for both cases and an undeclared run read:
+    //
+    //     "the paths fetched by external agents by definition (, and anything under `/.well-known/`)"
+    //
+    // — a broken parenthetical, and under it a false claim: it told the reader `/health`-style probe
+    // paths "are never reported at all" while this very run WAS reporting them, since nothing but the
+    // `/.well-known/` prefix was vetoed. Undeclared is this tool's DEFAULT state, so that was the
+    // sentence most readers got (review ledger V96).
+    let veto_clause = if externally_fetched_paths.is_empty() {
+        format!(
+            "and anything under `{WELL_KNOWN_PREFIX}` is never reported at all — but nothing else is \
+             vetoed on this run, because `vocabulary.externallyFetchedPaths` is undeclared. Probe and \
+             crawler paths (`/health`, `/robots.txt`, `/favicon.ico` …) therefore DO appear above; \
+             declare that vocabulary to have them vetoed instead"
+        )
+    } else {
+        let list = externally_fetched_paths
+            .iter()
+            .map(|p| format!("`{p}`"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!(
+            "the paths fetched by external agents by definition ({list}, and anything under \
+             `{WELL_KNOWN_PREFIX}`) are never reported at all"
+        )
+    };
 
     let mut out: Vec<(String, Finding)> = unconsumed_provides
         .iter()
@@ -207,8 +232,7 @@ pub fn unconsumed_endpoint_findings(
                  removing the route.{near_miss_note} Two exclusions apply here: a write route already reported \
                  by `cross-layer/unconsumed-mutation-endpoint` (this rule's write-verb specialization) is not \
                  repeated, so one route is never billed twice — disable that rule and such routes appear here \
-                 instead; and the paths fetched by external agents by definition ({vetoed_list}, and anything \
-                 under `/.well-known/`) are never reported at all. {} if provider-only endpoints (webhook \
+                 instead; and {veto_clause}. {} if provider-only endpoints (webhook \
                  targets, endpoints consumed only outside this analysis) are expected in your stack.",
                 p.source,
                 disable_hint("cross-layer/unconsumed-endpoint")

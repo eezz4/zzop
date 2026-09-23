@@ -7,7 +7,7 @@
 //!   `scores`/`health` — `None` when `EngineConfig::git` is `None`, `Some` (real content) when git
 //!   collection succeeds.
 //!
-//! Uses the same hand-rolled `TempDir` pattern as `crates/engine/tests/analyze_git.rs`/
+//! Uses the same hand-rolled `TempDir` pattern as `crates/engine/tests/integration/analyze_git.rs`/
 //! `analyze_diagnostics.rs`; the git-fixture helpers below mirror `analyze_git.rs`'s own
 //! `git_fixture_repo`/`git_available`/`run_git` — see those files' own doc comments for why each test
 //! file keeps its own copy of the FIXTURE builders. (`zzop-test-support` is the workspace's shared

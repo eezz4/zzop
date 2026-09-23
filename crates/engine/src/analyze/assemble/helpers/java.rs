@@ -67,10 +67,7 @@ pub(in crate::analyze::assemble) fn java_census_key(specifier: &str) -> String {
 /// The lowercase gate also terminates the trim walk (segments below it are package-shaped). The AS-IS
 /// first attempt stays convention-free — an exact index hit needs no guard. Returns empty when no
 /// attempt resolves (an external/unresolvable import — the caller's own job to census it).
-pub(in crate::analyze::assemble) fn resolve_java_import(
-    specifier: &str,
-    index: &JavaIndex,
-) -> Vec<String> {
+pub(in crate::analyze) fn resolve_java_import(specifier: &str, index: &JavaIndex) -> Vec<String> {
     if let Some(package) = specifier.strip_suffix(".*") {
         return index.by_package.get(package).cloned().unwrap_or_default();
     }

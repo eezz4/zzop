@@ -9,7 +9,7 @@ fn analyze_request_adapter_overlays_flow_into_engine_config() {
     // `AnalyzeRequest::adapter_overlays` and survives `build_engine_config` into
     // `EngineConfig::adapter_overlays` unchanged. The overlay MERGE itself (into a real
     // `analyze_tree` run) is already covered end-to-end by
-    // `crates/engine/tests/analyze_adapter_overlay.rs` — this test never touches a filesystem
+    // `crates/engine/tests/integration/analyze_adapter_overlay.rs` — this test never touches a filesystem
     // root, since `build_engine_config` doesn't need one to build the config.
     let config_json = r#"{
         "root": "unused",
@@ -62,7 +62,7 @@ fn injected_routes_expand_into_a_synthetic_overlay_with_normalized_keys() {
     // `http_interface_key` normalization the extractors use — so lowercase/trailing-slash input keys
     // canonically. Expanded into ONE synthetic overlay appended to `EngineConfig::adapter_overlays`, whose
     // `source` matches the tree so it makes no intra-source-mismatch claim. The join itself is covered
-    // end-to-end by `crates/engine/tests/analyze_multi_tree.rs`.
+    // end-to-end by `crates/engine/tests/integration/analyze_multi_tree.rs`.
     let config_json = r#"{
         "root": "unused",
         "sourceId": "be",
@@ -162,7 +162,7 @@ fn analyze_request_git_commit_type_patterns_flow_into_engine_config() {
     // `GitOptionsRequest::commit_type_patterns` and survives `build_engine_config` into
     // `EngineConfig::git`'s `GitOptions::commit_type_patterns` unchanged, as `(String, String)` tuple
     // pairs. The end-to-end tagging behavior (a custom table actually reclassifying a commit) is
-    // covered by `crates/engine/tests/analyze_git.rs`'s git-fixture tests instead.
+    // covered by `crates/engine/tests/integration/analyze_git.rs`'s git-fixture tests instead.
     let config_json = r#"{
         "root": "unused",
         "sourceId": "t",
@@ -216,7 +216,7 @@ fn analyze_request_git_commit_subject_patterns_flow_into_engine_config() {
     // tag }` — the two axes must stay tellable apart at the config surface) deserializes into
     // `GitOptionsRequest::commit_subject_patterns` and survives `build_engine_config` into
     // `GitOptions::commit_subject_patterns` as ordered `(String, String)` pairs. Behavior (what a
-    // declared pattern actually labels) is pinned in `crates/engine/tests/analyze_git.rs`.
+    // declared pattern actually labels) is pinned in `crates/engine/tests/integration/analyze_git.rs`.
     let config_json = r#"{
         "root": "unused",
         "sourceId": "t",
@@ -347,7 +347,7 @@ fn analyze_request_vocabulary_flows_into_engine_config_and_skip_dirs_splits_off(
     // into `AnalyzeRequest::vocabulary` and lands on `EngineConfig::vocabulary` — EXCEPT `skipDirs`, which
     // is routed to `DispatchConfig::skip_dirs` (the list that already owned the walker's skip set, so a
     // declared value and the built-in can never both be live). The behavior each key buys is covered
-    // end-to-end by `crates/engine/tests/analyze_vocabulary_config.rs`; this test is the plumbing half.
+    // end-to-end by `crates/engine/tests/integration/analyze_vocabulary_config.rs`; this test is the plumbing half.
     let config_json = r#"{
         "root": "unused",
         "sourceId": "t",

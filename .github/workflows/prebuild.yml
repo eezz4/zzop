@@ -59,6 +59,9 @@ jobs:
     # reads none of this job's outputs, so it still starts immediately — only the TAG waits.
     needs: [gate]
     runs-on: ubuntu-latest
+    # A hang must name the job that hung rather than burning GitHub's 360-minute default and
+    # reporting 'cancelled' (review ledger V27, widened to this workflow by V187). Version/tag consistency checks plus the autotag push. No build, no toolchain -- jq, git and a few greps.
+    timeout-minutes: 15
     permissions:
       contents: write
     outputs:
@@ -169,6 +172,9 @@ jobs:
             cross: "true"
             platform: linux-arm64-gnu
     runs-on: ${{ matrix.os }}
+    # A hang must name the job that hung rather than burning GitHub's 360-minute default and
+    # reporting 'cancelled' (review ledger V27, widened to this workflow by V187). The long one: release builds of zzop-mcp and zzop-cli-bin across a 5-target matrix, cold on every runner, two of them cross-compiled. Sized well above a cold cargo release build rather than against a warm one.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -283,6 +289,9 @@ jobs:
     needs: meta
     if: needs.meta.outputs.release == 'true'
     runs-on: ubuntu-latest
+    # A hang must name the job that hung rather than burning GitHub's 360-minute default and
+    # reporting 'cancelled' (review ledger V27, widened to this workflow by V187). Reads committed manifests and compares strings. No build.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Verify Cargo.toml (version SSOT) matches the release version
@@ -378,6 +387,9 @@ jobs:
     needs: [build, meta]
     if: needs.meta.outputs.release == 'true'
     runs-on: ubuntu-latest
+    # A hang must name the job that hung rather than burning GitHub's 360-minute default and
+    # reporting 'cancelled' (review ledger V27, widened to this workflow by V187). Attestation over artifacts another job already produced; upload-bound, not compute-bound.
+    timeout-minutes: 20
     permissions:
       id-token: write
       attestations: write
@@ -404,6 +416,9 @@ jobs:
     needs: [build, verify-plugin-version, meta, gate, attest]
     if: needs.meta.outputs.release == 'true'
     runs-on: ubuntu-latest
+    # A hang must name the job that hung rather than burning GitHub's 360-minute default and
+    # reporting 'cancelled' (review ledger V27, widened to this workflow by V187). Creates the GitHub release and uploads every matrix asset. Network-bound, and the asset count grows with the matrix.
+    timeout-minutes: 30
     permissions:
       contents: write
     steps:
@@ -552,6 +567,9 @@ jobs:
     needs: [build, verify-plugin-version, meta, gate]
     if: needs.meta.outputs.release == 'true'
     runs-on: ubuntu-latest
+    # A hang must name the job that hung rather than burning GitHub's 360-minute default and
+    # reporting 'cancelled' (review ledger V27, widened to this workflow by V187). npm publish across the package set, each a small tarball. Network-bound; sized for a slow registry rather than a fast one.
+    timeout-minutes: 30
     permissions:
       contents: write
       id-token: write
@@ -669,6 +687,9 @@ jobs:
     needs: [release, meta]
     if: needs.meta.outputs.release == 'true'
     runs-on: ubuntu-latest
+    # A hang must name the job that hung rather than burning GitHub's 360-minute default and
+    # reporting 'cancelled' (review ledger V27, widened to this workflow by V187). Rewrites server.json from the real assets and publishes one registry record.
+    timeout-minutes: 20
     permissions:
       id-token: write
       contents: read

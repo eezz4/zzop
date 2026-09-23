@@ -95,7 +95,7 @@ pub(crate) const DEFAULT_SKIP_DIRS: &[&str] = &[
 /// which directory names to skip while walking a tree.
 #[derive(Debug, Clone)]
 pub struct DispatchConfig {
-    /// `(glob, language)` — a path matching `glob` (see `matches_glob`) is dispatched to `language`
+    /// `(glob, language)` — a path matching `glob` (shell-style, `zzop_core::glob_matches` — the same dialect `exclude`/`suppressions` use) is dispatched to `language`
     /// regardless of its extension. Checked in order; the first matching entry wins.
     pub glob_overrides: Vec<(String, Language)>,
     pub skip_dirs: Vec<String>,
@@ -115,7 +115,22 @@ impl Default for DispatchConfig {
 /// extension map, so a project can force-route paths the extension map would otherwise miss or mis-tag.
 pub fn dispatch(rel_path: &str, config: &DispatchConfig) -> Option<Language> {
     for (glob, lang) in &config.glob_overrides {
-        if matches_glob(rel_path, glob) {
+        // ONE glob dialect for the workspace (`zzop_core::glob_matches`), not two.
+        //
+        // This used to be a local `matches_glob` justified by a comment reading "reimplemented here
+        // rather than imported — `core::recommendations`'s equivalent is a private helper with no public
+        // home". That module does not exist (it is `zzop_metrics::recommendations`, and it holds no glob
+        // helper at all — it delegates to core). The real sibling was
+        // `core::registry::config::path_filter`, which was private, so the argument was true and
+        // self-perpetuating; making it public was the whole fix (review ledger V98).
+        //
+        // The two dialects DISAGREED on 7 of 12 measured cases, and one disagreement was a defect, not a
+        // dialect choice: the old translator did not escape `?`, so a user glob `file?.ts` compiled to
+        // the regex `^file?\.ts$` — the `?` became a QUANTIFIER, matching `fil.ts` and not `file1.ts`,
+        // exactly backwards. It also matched `{a,b}` literally instead of alternating, and read `**/x`
+        // as requiring at least one directory. All three now behave the way `exclude`/`suppressions`
+        // already did — the other user-writable glob key in the same config.
+        if zzop_core::glob_matches(glob, rel_path) {
             return Some(*lang);
         }
     }
@@ -131,7 +146,16 @@ pub(crate) fn dispatch_by_extension(rel_path: &str) -> Option<Language> {
         .extension()
         .and_then(|e| e.to_str())?
         .to_ascii_lowercase();
-    match ext.as_str() {
+    language_for_extension(&ext)
+}
+
+/// The same table addressed by a bare extension instead of a path.
+///
+/// Split out so [`non_source::extension_content_kind`] can ask "does this build have a parser for this
+/// extension?" from the one place the answer lives. A second list would be the exact duplicate this
+/// module already names as the widest it ever carried.
+pub(crate) fn language_for_extension(ext: &str) -> Option<Language> {
+    match ext {
         "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "mts" | "cts" => Some(Language::TypeScript),
         "prisma" => Some(Language::Prisma),
         "java" => Some(Language::Java21),
@@ -163,31 +187,6 @@ pub fn declaration_only_extension(ext: &str) -> bool {
 /// `config.skip_dirs`. Exact match against the directory's own name (not a glob).
 pub fn is_skip_dir(name: &str, config: &DispatchConfig) -> bool {
     config.skip_dirs.iter().any(|d| d == name)
-}
-
-/// Minimal glob: "**" matches any characters (including "/"), "*" matches non-slash characters.
-/// Reimplemented here rather than imported — `core::recommendations`'s equivalent is a private helper
-/// with no public home.
-fn matches_glob(path: &str, glob: &str) -> bool {
-    let mut escaped = String::with_capacity(glob.len());
-    for c in glob.chars() {
-        if matches!(
-            c,
-            '.' | '+' | '^' | '$' | '{' | '}' | '(' | ')' | '|' | '[' | ']' | '\\'
-        ) {
-            escaped.push('\\');
-        }
-        escaped.push(c);
-    }
-    const DOUBLE_STAR_PLACEHOLDER: char = '\u{0}';
-    let rewritten = escaped
-        .replace("**", &DOUBLE_STAR_PLACEHOLDER.to_string())
-        .replace('*', "[^/]*")
-        .replace(DOUBLE_STAR_PLACEHOLDER, ".*");
-    let anchored = format!("^{rewritten}$");
-    regex::Regex::new(&anchored)
-        .map(|re| re.is_match(path))
-        .unwrap_or(false)
 }
 
 mod non_source;

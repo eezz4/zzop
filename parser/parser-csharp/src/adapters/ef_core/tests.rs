@@ -253,3 +253,176 @@ fn without_the_using_an_interface_dbset_does_not_ride_a_sibling_context() {
     let keys: Vec<&str> = out.iter().map(|p| p.key.as_str()).collect();
     assert_eq!(keys, vec!["table:users"], "{out:?}");
 }
+
+// --- fluent `ToTable` inside `IEntityTypeConfiguration<T>` (pass 3) ---------------------------------
+
+/// The shape eShop actually writes, byte-for-byte: NO `using` line at all (C# 10 `global using`), a
+/// non-public class, a base list on its own line, and a receiver named after the entity rather than
+/// `builder`. Under the two older gates this file extracted ZERO and the database's real table name
+/// (`paymentmethods`) was never seen, while `OrderingContext.cs` emitted `table:payments` for it.
+#[test]
+fn a_fluent_entity_configuration_provides_the_literal_table_name() {
+    let src = concat!(
+        "namespace eShop.Ordering.Infrastructure.EntityConfigurations;\n",
+        "class PaymentMethodEntityTypeConfiguration\n",
+        "    : IEntityTypeConfiguration<PaymentMethod>\n",
+        "{\n",
+        "    public void Configure(EntityTypeBuilder<PaymentMethod> paymentConfiguration)\n",
+        "    {\n",
+        "        paymentConfiguration.ToTable(\"paymentmethods\");\n",
+        "        paymentConfiguration.Ignore(b => b.DomainEvents);\n",
+        "    }\n",
+        "}\n",
+    );
+    let out = extract_ef_core_db_table_provides(
+        "src/Ordering.Infrastructure/EntityConfigurations/PaymentMethodEntityTypeConfiguration.cs",
+        src,
+    );
+    assert_eq!(out.len(), 1, "{out:?}");
+    assert_eq!(out[0].key, "table:paymentmethods");
+    assert_eq!(out[0].symbol.as_deref(), Some("PaymentMethod"));
+    assert_eq!(out[0].kind, "db-table");
+    assert_eq!(
+        out[0].line, 7,
+        "the ToTable call's own line, not the class's"
+    );
+}
+
+/// The entity comes from the BASE LIST, never from the receiver — the receiver identifier is an
+/// arbitrary parameter name (9 different ones across eShop's 9 configuration files) and reading it
+/// would need a type resolver this crate does not have.
+#[test]
+fn the_entity_comes_from_the_base_list_and_not_from_the_receiver() {
+    let src = concat!(
+        "namespace App;\n",
+        "class CatalogItemEntityTypeConfiguration : IEntityTypeConfiguration<CatalogItem>\n",
+        "{ public void Configure(EntityTypeBuilder<CatalogItem> builder) { builder.ToTable(\"Catalog\"); } }\n",
+    );
+    let out = extract_ef_core_db_table_provides("src/CatalogItemEntityTypeConfiguration.cs", src);
+    assert_eq!(out.len(), 1, "{out:?}");
+    // `db_table_channel_casing` lowercases the leading character only, so the physical `Catalog`
+    // keys as `table:catalog` — NOT as the `DbSet<CatalogItem> CatalogItems` convention name.
+    assert_eq!(out[0].key, "table:catalog");
+    assert_eq!(out[0].symbol.as_deref(), Some("CatalogItem"));
+}
+
+#[test]
+fn a_non_literal_to_table_argument_is_skipped_never_guessed() {
+    let src = concat!(
+        "namespace App;\n",
+        "class C : IEntityTypeConfiguration<Order>\n",
+        "{ public void Configure(EntityTypeBuilder<Order> b) { b.ToTable(TableNames.Orders); } }\n",
+    );
+    assert!(extract_ef_core_db_table_provides("src/C.cs", src).is_empty());
+}
+
+#[test]
+fn a_configuration_class_that_never_calls_to_table_is_silent() {
+    // It maps by convention; the `DbSet` arm already names that table and this arm adds nothing.
+    let src = concat!(
+        "namespace App;\n",
+        "class C : IEntityTypeConfiguration<Order>\n",
+        "{ public void Configure(EntityTypeBuilder<Order> b) { b.HasKey(o => o.Id); } }\n",
+    );
+    assert!(extract_ef_core_db_table_provides("src/C.cs", src).is_empty());
+}
+
+/// The gate is the base list and nothing else: a bare `ToTable("…")` in a class that implements no
+/// configuration interface is not evidence of a mapping, and a `ToTable` on some unrelated builder must
+/// not key a table.
+#[test]
+fn to_table_outside_a_configuration_class_does_not_extract() {
+    let src = concat!(
+        "namespace App;\n",
+        "public static class Ext\n",
+        "{ public static void Use(this ModelBuilder b) { b.Entity<Log>(e => { e.ToTable(\"IntegrationEventLog\"); }); } }\n",
+    );
+    assert!(
+        extract_ef_core_db_table_provides("src/Ext.cs", src).is_empty(),
+        "the ModelBuilder.Entity<T>(lambda) overload is a separate, deliberately unread shape"
+    );
+}
+
+/// The gate is also THIS class's own base list — a sibling configuration class in the same file must not
+/// lend its gate to a neighbour that implements nothing.
+#[test]
+fn the_configuration_gate_belongs_to_one_class_and_not_to_the_file() {
+    let src = concat!(
+        "namespace App;\n",
+        "class OrderConfig : IEntityTypeConfiguration<Order>\n",
+        "{ public void Configure(EntityTypeBuilder<Order> b) { b.ToTable(\"orders\"); } }\n",
+        "class Helper { public void Setup(EntityTypeBuilder<Audit> b) { b.ToTable(\"audits\"); } }\n",
+    );
+    let out = extract_ef_core_db_table_provides("src/Config.cs", src);
+    let keys: Vec<&str> = out.iter().map(|p| p.key.as_str()).collect();
+    assert_eq!(keys, vec!["table:orders"], "{out:?}");
+}
+
+/// TWO configuration classes in one file each get their own provide — the walk is per class, not per
+/// file, so a file holding several configurations is not collapsed to its first.
+#[test]
+fn several_configuration_classes_in_one_file_each_provide() {
+    let src = concat!(
+        "namespace App;\n",
+        "class A : IEntityTypeConfiguration<Brand>\n",
+        "{ public void Configure(EntityTypeBuilder<Brand> b) { b.ToTable(\"CatalogBrand\"); } }\n",
+        "class B : IEntityTypeConfiguration<Kind>\n",
+        "{ public void Configure(EntityTypeBuilder<Kind> b) { b.ToTable(\"CatalogType\"); } }\n",
+    );
+    let out = extract_ef_core_db_table_provides("src/Configs.cs", src);
+    let mut keys: Vec<&str> = out.iter().map(|p| p.key.as_str()).collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        vec!["table:catalogBrand", "table:catalogType"],
+        "{out:?}"
+    );
+}
+
+/// The documented staged result, pinned so it cannot pass as success by accident: with the `DbSet` and
+/// the configuration class in the SAME file both keys emit, and in eShop's real layout (different
+/// files) the losing convention key survives the same way. Nothing here suppresses it — that is batch 2.
+#[test]
+fn the_convention_key_is_not_suppressed_by_the_fluent_one() {
+    let src = concat!(
+        "namespace App;\n",
+        "public class OrderingContext : DbContext { public DbSet<PaymentMethod> Payments { get; set; } }\n",
+        "class PaymentConfig : IEntityTypeConfiguration<PaymentMethod>\n",
+        "{ public void Configure(EntityTypeBuilder<PaymentMethod> b) { b.ToTable(\"paymentmethods\"); } }\n",
+    );
+    let out = extract_ef_core_db_table_provides("src/Ctx.cs", src);
+    let mut keys: Vec<&str> = out.iter().map(|p| p.key.as_str()).collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        vec!["table:paymentmethods", "table:payments"],
+        "the fluent arm ADDS the real name; removing the phantom is batch 2 ({out:?})"
+    );
+}
+
+#[test]
+fn a_test_classified_configuration_path_is_silent() {
+    let src = concat!(
+        "namespace App;\n",
+        "class C : IEntityTypeConfiguration<Order>\n",
+        "{ public void Configure(EntityTypeBuilder<Order> b) { b.ToTable(\"orders\"); } }\n",
+    );
+    assert!(extract_ef_core_db_table_provides("Api.Tests/C.cs", src).is_empty());
+}
+
+/// Only the FIRST `ToTable` in a class: EF maps one entity per configuration to one table, and a second
+/// call belongs to an owned/split entity this arm does not model.
+#[test]
+fn only_the_first_to_table_in_a_class_provides() {
+    let src = concat!(
+        "namespace App;\n",
+        "class C : IEntityTypeConfiguration<Order>\n",
+        "{ public void Configure(EntityTypeBuilder<Order> b) {\n",
+        "    b.ToTable(\"orders\");\n",
+        "    b.OwnsOne(o => o.Address, a => { a.ToTable(\"order_addresses\"); });\n",
+        "} }\n",
+    );
+    let out = extract_ef_core_db_table_provides("src/C.cs", src);
+    let keys: Vec<&str> = out.iter().map(|p| p.key.as_str()).collect();
+    assert_eq!(keys, vec!["table:orders"], "{out:?}");
+}

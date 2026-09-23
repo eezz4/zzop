@@ -17,7 +17,7 @@
 //!   parsing to a numeric timestamp: ISO-8601 date strings sort lexicographically in the same order as
 //!   chronologically, as long as every compared string shares the same UTC-offset notation, so string
 //!   min/max is a cheap correct comparison here. The *recency cutoff* instead parses to real epoch
-//!   milliseconds (`iso_date.rs`, offset-aware) because it's a numeric threshold comparison against
+//!   milliseconds (`zzop_core::clock`, offset-aware) because it's a numeric threshold comparison against
 //!   `now_ms - recent_days`, not a min/max over a fixed set of already-comparable strings.
 
 mod commit;
@@ -25,9 +25,9 @@ mod rename;
 
 use std::collections::BTreeMap;
 
+use zzop_core::clock::parse_iso_to_ms;
 use zzop_core::{CommitFileSet, GitPathStats, GitStats};
 
-use crate::iso_date::parse_iso_to_ms;
 use crate::process::COMMIT_MARKER;
 use crate::subject::SubjectMatchers;
 use crate::tags::CommitClassifiers;

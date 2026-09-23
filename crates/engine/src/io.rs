@@ -79,8 +79,18 @@ pub(crate) fn extract_java_file_io(rel: &str, text: &str, degraded: bool) -> Opt
 /// syntactically-broken sibling method still contributes its well-formed routes). Egress CONSUMES stay gated behind `!degraded`,
 /// matching every other language's consume arm (`Rust`/`Go`/`Python` in `pipeline::fresh`) — a degraded parse can't be trusted to
 /// have seen the whole call site. Before this split, both directions were dropped for any degraded `.cs` file, silently vanishing real endpoints from the cross-layer join.
-pub(crate) fn extract_csharp_file_io(rel: &str, text: &str, degraded: bool) -> Option<IoFacts> {
-    let mut provides = zzop_parser_csharp::extract_csharp_http_provides(rel, text);
+///
+/// Takes `vocab` for the minimal-API root-receiver names (`vocabulary.csharpRootRouteBuilderVariableNames`).
+/// CACHED IR lane, like `router_names` on the TypeScript side: the declaration decides which `MapGet` call
+/// sites become route provides at all, so it rides `cache::vocabulary_fingerprint` into every cache key.
+pub(crate) fn extract_csharp_file_io(
+    rel: &str,
+    text: &str,
+    degraded: bool,
+    vocab: &crate::vocabulary::ResolvedVocabulary<'_>,
+) -> Option<IoFacts> {
+    let mut provides =
+        zzop_parser_csharp::extract_csharp_http_provides(rel, text, &vocab.csharp_routes());
     // EF Core `DbSet<T>`/`[Table]` db-table provides — the C# member of the ORM db-table family,
     // riding the provide side's unconditional (Java-parity) projection like the routes above.
     provides.extend(zzop_parser_csharp::extract_ef_core_db_table_provides(

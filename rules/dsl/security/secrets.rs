@@ -1,4 +1,6 @@
-use crate::{assert_disqualifier_summary_precedes_imperative, hits, scan, TempDir};
+use crate::{
+    assert_disqualifier_summary_precedes_imperative, hits, scan, scan_with_secret_names, TempDir,
+};
 
 // --- hardcoded-secret ---
 
@@ -700,6 +702,104 @@ fn django_style_secret_key_is_flagged_by_both_secret_rules() {
     );
 }
 
+/// U103's drill, closed. A project that declares its OWN secret names is judged by them.
+///
+/// Measured 2026-08-18, before this channel existed: declaring six names and planting one line each
+/// produced three findings, and the three that were silently ignored got no `configWarnings` entry
+/// either. The user had said "these are my secret names" and the tool answered with its own list.
+///
+/// The second half of this test is the direction that surprises, and it is the contract rather than a
+/// side effect: `PASSWORD` — a built-in — STOPS being judged, because this key REPLACES. See
+/// `RulePackDef::rewrite_secret_names` for the failure-direction test that puts it on that side of the
+/// line, and note what it costs: a config that declares a narrow list narrows the rule. That is why
+/// `zzop init` writes the built-in ten, and why deleting the key is a decision rather than a tidy-up.
+#[test]
+fn a_declared_vocabulary_replaces_the_built_in_secret_names() {
+    let dir = TempDir::new("zzop-be-sec-declared");
+    dir.write(
+        "app/keys.ts",
+        concat!(
+            "export const JWT = \"eyJhbGciOiJIUzI1NiJ9xxxxxxxx\";\n",
+            "export const NONCE = \"9f8e7d6c5b4a39281706\";\n",
+            "export const PASSWORD = \"hunter2hunter2hunter2\";\n"
+        ),
+    );
+
+    let declared = scan_with_secret_names(&dir, Some(&["jwt", "nonce"]));
+    let lines: Vec<u32> = hits(&declared, "hardcoded-secret")
+        .iter()
+        .map(|h| h.line)
+        .collect();
+    assert_eq!(
+        lines,
+        vec![1, 2],
+        "the two DECLARED names must fire and the undeclared built-in must not: {:?}",
+        declared.findings
+    );
+
+    // The control: under the shipped default the same file reports the opposite line, so this test
+    // cannot pass because the rule went quiet or because the fixture stopped parsing.
+    let default = scan(&dir);
+    let default_lines: Vec<u32> = hits(&default, "hardcoded-secret")
+        .iter()
+        .map(|h| h.line)
+        .collect();
+    assert_eq!(
+        default_lines,
+        vec![3],
+        "under the built-in vocabulary only `PASSWORD` is a secret name: {:?}",
+        default.findings
+    );
+}
+
+/// A config that omits the key makes NO name judgment — the standing contract for every vocabulary key
+/// in `zzop_engine::VocabularyConfig` except `extraTestPathPatterns`, applied here.
+///
+/// It is pinned in its own test because the failure mode is silence, and silence is what every other
+/// test in this file is unable to distinguish from a fixture that stopped producing secrets. The
+/// assertion below is therefore paired: the same bytes MUST still fire under a declaration.
+#[test]
+fn an_undeclared_vocabulary_makes_no_secret_name_judgment_at_all() {
+    let dir = TempDir::new("zzop-be-sec-undeclared");
+    dir.write(
+        "app/keys.ts",
+        "export const PASSWORD = \"hunter2hunter2hunter2\";\n",
+    );
+    assert!(
+        hits(&scan_with_secret_names(&dir, None), "hardcoded-secret").is_empty(),
+        "an undeclared vocabulary must not judge any name"
+    );
+    assert_eq!(
+        hits(&scan_with_secret_names(&dir, Some(&["password"])), "hardcoded-secret").len(),
+        1,
+        "the same bytes under a declaration — without this the test above passes on a broken fixture"
+    );
+}
+
+/// The alternation this pack spells inline is the one `zzop_core::dsl::secret_names` owns, in exactly
+/// the number of arms that module declares.
+///
+/// This is the whole safety of the rewrite seam. `${NAME}` fragments substitute only as a WHOLE value
+/// and the alternation sits mid-pattern, so the pack carries a COPY of the text — and a copy nobody
+/// counts is a copy that drifts. Reword one arm and this fails here, loudly, instead of that arm
+/// silently ceasing to receive a project's declaration with every other test still green.
+#[test]
+fn the_pack_spells_the_owned_alternation_in_exactly_the_declared_number_of_arms() {
+    let source = include_str!("security.json");
+    let arms = source
+        .matches(&zzop_core::dsl::secret_names::group())
+        .count();
+    assert_eq!(
+        arms,
+        zzop_core::dsl::secret_names::PACK_ARMS,
+        "security.json carries the owned secret-name alternation in {arms} arm(s), and \
+         `secret_names::PACK_ARMS` says {}. Either a rule was reworded (and has stopped receiving \
+         `vocabulary.secretNames`) or a new arm was added (and nobody decided whether it should be \
+         declarable). Both are triage, neither is a number to update.",
+        zzop_core::dsl::secret_names::PACK_ARMS
+    );
+}
+
 /// The other half of the same decision, and the reason it is `secret[_-]?key` rather than a bare `key`
 /// in the name list. Adding `key` catches the fixture above as well — and over the 17-repo corpus it
 /// brought 46 further findings of which exactly ONE was a credential. These three lines are the shapes
@@ -1019,4 +1119,57 @@ fn a_lang_or_translations_directory_is_deliberately_not_exempt() {
         .collect();
     lines.sort_unstable();
     assert_eq!(lines, vec![2, 2], "{:?}", scan(&dir).findings);
+}
+
+/// F7-1 (external review, 2026-09-04): this rule's message said the name arms "match a keyword that
+/// the identifier ENDS with". They do not. The arm requires the keyword at a WORD BOUNDARY — preceded
+/// by a non-alphanumeric character or starting the line — which is the opposite end of the identifier.
+/// So `clientSecret` and `myPassword`, the dominant camelCase spellings in TypeScript, were silent
+/// while the shipped sentence claimed they were covered. A rule that misstates its own reach in its own
+/// message is the "false self-report" class this project keeps as a 1.0 veto, so the sentence was the
+/// defect and it was repaired rather than the regex — widening the regex is a DETECTION change and
+/// would need its own measurement and gate run.
+///
+/// The pin asserts the BEHAVIOUR both directions, not the prose: prose is checked by the message-token
+/// guards, and a pin that only read the sentence would go green on a sentence that lies consistently.
+/// The sibling half matters as much as the miss: `security/high-entropy-secret` anchors its
+/// binding-name test to the END of the name, so it DOES report `clientSecret` once the value clears its
+/// 80-bit floor. That is why the corrected sentence names exactly two residual blind spots rather than
+/// claiming the pair is closed — and this test pins the sibling's catch, so a future narrowing there
+/// turns the corrected sentence back into a false one and goes red here first.
+#[test]
+fn the_name_arms_match_at_a_word_boundary_and_the_sibling_covers_the_trailing_keyword() {
+    let dir = TempDir::new("zzop-sec-name-boundary");
+    // One value, four spellings: only the NAME shape differs, so nothing else can explain the split.
+    dir.write(
+        "src/a.ts",
+        "const clientSecret = \"aB3xK9mQ7zP2wL5nR8tV4yH6jF1dG0sC\";\n\
+         const myPassword = \"aB3xK9mQ7zP2wL5nR8tV4yH6jF1dG0sC\";\n\
+         const client_secret = \"aB3xK9mQ7zP2wL5nR8tV4yH6jF1dG0sC\";\n\
+         const apiKey = \"aB3xK9mQ7zP2wL5nR8tV4yH6jF1dG0sC\";\n",
+    );
+    let out = scan(&dir);
+    let line_scan: Vec<u32> = hits(&out, "hardcoded-secret")
+        .iter()
+        .map(|f| f.line)
+        .collect();
+    assert_eq!(
+        line_scan,
+        vec![3, 4],
+        "the boundary arm reaches `client_secret` (line 3) and `apiKey` (line 4) and NOT the camelCase \
+         spellings on lines 1-2. If lines 1-2 appear here the regex was widened — then the corrected \
+         message paragraph is stale and must be rewritten in the same change: {:?}",
+        out.findings
+    );
+    let sibling: Vec<u32> = hits(&out, "high-entropy-secret")
+        .iter()
+        .map(|f| f.line)
+        .collect();
+    assert!(
+        sibling.contains(&1) && sibling.contains(&2),
+        "the sibling anchors to the END of the binding name, which is what makes the camelCase gap \
+         narrow rather than total — the corrected message says so, and it is only true while this \
+         holds: {:?}",
+        out.findings
+    );
 }

@@ -1,7 +1,7 @@
 //! Helpers for `run_callgraph_rules`'s decorator-guard evidence gate — split out of `mod.rs` purely to
 //! stay under the repo's per-file line cap; every item here is `pub(super)`, used only by `callgraph::mod`.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use zzop_core::{is_pack_enabled, IoProvide, Matcher, SourceSymbol};
 
@@ -29,11 +29,50 @@ use super::python_guard;
 /// Rust has no entry here on purpose: its guard evidence is a TYPE in the handler signature, which the
 /// BFS already reaches as a real graph edge (`zzop_parser_rust::parse_extractor_guards`), so it needs no
 /// side-channel at all.
+/// The TypeScript half of the decorator-guard evidence, gathered file by file as the caller reads
+/// each source and dropped along with the text.
+///
+/// This type exists so that `callgraph::run` does not have to keep every TS file's source alive to the
+/// end of the pass — see the memory contract at its read loop. The three extractors folded in here were
+/// the only reason that map existed, and each of them looks at exactly one file, so the pass keeps
+/// their (small) output instead of their (unbounded) input.
+#[derive(Default)]
+pub(super) struct TsGuardEvidence {
+    /// `(file, line)` pairs from `extract_controller_guarded_lines`.
+    guarded_lines: Vec<(String, u32)>,
+    /// Nest `forRoutes` patterns. Consumed with `.any(..)`, so collection order cannot reach a verdict.
+    forroutes: Vec<zzop_parser_typescript::ForRoutesPattern>,
+    /// `(file, prefix)` from `extract_global_prefix_marker`. Kept as a list rather than a first hit
+    /// because the winner is the LOWEST path, and this loop meets files in walk order.
+    prefix_candidates: Vec<(String, String)>,
+}
+
+impl TsGuardEvidence {
+    /// Folds one file's already-extracted evidence in.
+    ///
+    /// This used to take the file's TEXT and run three extractors on it, which is why the pass that
+    /// called it had to read every source. The extractors moved to `pipeline::fresh::call_graph`
+    /// (review ledger V108); what is left here is the fold, which is all this type ever wanted.
+    pub(super) fn absorb(&mut self, rel: &str, facts: &zzop_core::callgraph::CallGraphFacts) {
+        #[allow(
+            clippy::iter_over_hash_type,
+            reason = "the lines are pushed onto `guarded_lines`, which the assembler drains into a `HashSet` of `(file, line)` — a commutative fold, so the visit order of that extractor cannot reach a verdict"
+        )]
+        for line in &facts.controller_guarded_lines {
+            self.guarded_lines.push((rel.to_string(), *line));
+        }
+        self.forroutes.extend(facts.nest_forroutes.iter().cloned());
+        if let Some(p) = &facts.global_prefix {
+            self.prefix_candidates.push((rel.to_string(), p.clone()));
+        }
+    }
+}
+
 pub(super) fn assemble_decorator_guarded(
     java_decorator_guarded: HashSet<(String, u32)>,
     python_guards: &python_guard::PythonGuards,
     spring_postures: &[(String, zzop_parser_java_21::SpringSecurityPosture)],
-    file_texts: &HashMap<String, String>,
+    ts_guards: &TsGuardEvidence,
     io_provides: &[IoProvide],
     all_symbols: &[SourceSymbol],
     java_source_root: Option<&str>,
@@ -46,16 +85,8 @@ pub(super) fn assemble_decorator_guarded(
         all_symbols,
         &mut guarded,
     );
-    #[allow(
-        clippy::iter_over_hash_type,
-        reason = "iteration order cannot reach the result: the loop only inserts into `guarded`, a set, so the fold is commutative"
-    )]
-    for (rel, text) in file_texts {
-        for line in zzop_parser_typescript::extract_controller_guarded_lines(rel, text) {
-            guarded.insert((rel.clone(), line));
-        }
-    }
-    apply_nest_forroutes_guards(file_texts, io_provides, &mut guarded);
+    guarded.extend(ts_guards.guarded_lines.iter().cloned());
+    apply_nest_forroutes_guards(ts_guards, io_provides, &mut guarded);
     if let [(config_file, posture)] = spring_postures {
         let app_root = spring_app_root(config_file, java_source_root);
         for p in io_provides.iter().filter(|p| {
@@ -149,28 +180,28 @@ pub(super) fn spring_app_root<'a>(config_file: &'a str, src_root: Option<&str>) 
 /// written WITHOUT it. A non-literal/absent prefix leaves it `None` (exact match against the unprefixed
 /// pattern) — a miss then only fails to exempt, never over-exempts.
 pub(super) fn apply_nest_forroutes_guards(
-    file_texts: &std::collections::HashMap<String, String>,
+    ts_guards: &TsGuardEvidence,
     io_provides: &[zzop_core::IoProvide],
     decorator_guarded: &mut std::collections::HashSet<(String, u32)>,
 ) {
-    let forroutes: Vec<zzop_parser_typescript::ForRoutesPattern> = file_texts
-        .iter()
-        .flat_map(|(rel, text)| zzop_parser_typescript::extract_nest_forroutes_guarded(rel, text))
-        .collect();
+    let forroutes = &ts_guards.forroutes;
     if forroutes.is_empty() {
         return;
     }
-    // Sorted before the first-match pick: `file_texts` is a `HashMap`, and a monorepo where two apps
-    // each call `setGlobalPrefix` with a DIFFERENT literal would otherwise resolve to whichever the
-    // hash order reached first — flipping a `forRoutes` exemption (matched by path EQUALITY below) on
-    // and off between runs with identical input. The sibling Python guard phase sorts for the same
-    // reason; picking the lowest path is arbitrary but STABLE, which is the property that matters.
-    let mut rels: Vec<&String> = file_texts.keys().collect();
-    rels.sort();
-    let global_prefix: Option<String> = rels
-        .into_iter()
-        .find_map(|rel| zzop_parser_typescript::extract_global_prefix_marker(rel, &file_texts[rel]))
-        .map(|p| p.key);
+    // LOWEST path wins, and the tie-break is the whole point: a monorepo where two apps each call
+    // `setGlobalPrefix` with a DIFFERENT literal would otherwise resolve to whichever one the walk
+    // reached first — flipping a `forRoutes` exemption (matched by path EQUALITY below) on and off
+    // between runs with identical input. The sibling Python guard phase sorts for the same reason;
+    // picking the lowest path is arbitrary but STABLE, which is the property that matters.
+    //
+    // This used to sort the keys of a `HashMap` of file texts. It now sorts the few files that actually
+    // carry a prefix marker, which is the same winner over a smaller set — the map itself was the
+    // memory cost this pass no longer pays.
+    let global_prefix: Option<String> = ts_guards
+        .prefix_candidates
+        .iter()
+        .min_by(|a, b| a.0.cmp(&b.0))
+        .map(|(_, prefix)| prefix.clone());
     for p in io_provides.iter().filter(|p| p.kind == "http") {
         let Some((method, path)) = p.key.split_once(' ') else {
             continue;

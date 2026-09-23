@@ -9,7 +9,6 @@
 //! entry point — the one that feeds it (exactly one git process per call).
 
 mod error;
-mod iso_date;
 mod parse;
 mod process;
 mod rebase;
@@ -24,6 +23,7 @@ pub use process::{repo_root, spawn_log};
 pub use rebase::tree_prefix;
 pub use subject::compile_commit_subject_pattern;
 
+use zzop_core::clock::now_ms;
 use zzop_core::{CommitFileSet, GitStats};
 
 /// The single source of the `(?i)` prefix (+ any future flags) used to compile a caller-supplied
@@ -112,14 +112,6 @@ impl Default for CollectOptions {
 pub fn collect(repo: &Path, opts: &CollectOptions) -> Result<GitCollection, GitError> {
     let output = process::run_git_log(repo, opts)?;
     Ok(parse_git_log(&output, opts, now_ms()))
-}
-
-fn now_ms() -> i64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
 }
 
 #[cfg(test)]

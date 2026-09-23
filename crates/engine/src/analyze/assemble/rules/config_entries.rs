@@ -87,6 +87,7 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 use regex::Regex;
+use zzop_core::posix_path::join_and_normalize;
 
 /// Every tree-relative source file a tool config in this tree names as a path. Resolution is relative
 /// to each config's OWN directory (a monorepo's `packages/web/vite.config.ts` starts from
@@ -137,32 +138,6 @@ fn quoted_source_path() -> &'static Regex {
     R.get_or_init(|| {
         Regex::new(r#"['"`]([^'"`\r\n]+\.(?i:ts|tsx|js|jsx|mjs|cjs|mts|cts))['"`]"#).unwrap()
     })
-}
-
-/// POSIX join + `.`/`..`-segment normalize, relative to the config's own directory (`""` = tree root).
-/// A leading `/` is absorbed by the empty-segment rule, so an absolute string simply fails to resolve
-/// rather than escaping the tree.
-fn join_and_normalize(dir: &str, candidate: &str) -> String {
-    let joined = if dir.is_empty() {
-        candidate.to_string()
-    } else {
-        format!("{dir}/{candidate}")
-    };
-    let mut stack: Vec<&str> = Vec::new();
-    for seg in joined.split('/') {
-        match seg {
-            "" | "." => continue,
-            ".." => {
-                if matches!(stack.last(), Some(&s) if s != "..") {
-                    stack.pop();
-                } else {
-                    stack.push("..");
-                }
-            }
-            s => stack.push(s),
-        }
-    }
-    stack.join("/")
 }
 
 #[cfg(test)]

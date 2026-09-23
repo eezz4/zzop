@@ -751,11 +751,24 @@ fn the_shaped_reply_carries_the_native_analyses_disclosure_and_its_legend() {
             .unwrap_or(false),
         "the cross-layer list must survive shaping: {v}"
     );
+    // RE-AIMED 2026-09-01, not relaxed. The legend folded (`output::legends`), so the per-key sentences
+    // moved to the `reply-legends` contract document and the reply carries `{note, resource, command}`.
+    // What this pin asserts is unchanged and is the same fact at the new address: the numbers must not
+    // arrive without the sentence that says WHERE TO GO. So it still demands the channel by name AND
+    // the action, because "these report elsewhere" without "run the join" is the half that leaves a
+    // reader with a list and no next step — and the pointer half is checked here too, since a note that
+    // said less and pointed nowhere would satisfy a weaker version of this test.
+    let legend = v
+        .get("nativeAnalysesMeaning")
+        .unwrap_or_else(|| panic!("the shaped reply dropped nativeAnalysesMeaning: {v}"));
+    let note = legend["note"].as_str().unwrap_or_default();
     assert!(
-        v.get("nativeAnalysesMeaning")
-            .and_then(|m| m.get("reportedInCrossLayerFindings"))
-            .and_then(serde_json::Value::as_str)
-            .is_some_and(|s| s.contains("crossLayerFindings")),
+        note.contains("crossLayerFindings") && note.contains("run the cross-layer join"),
         "the numbers must not arrive without the sentence that says where to go: {v}"
+    );
+    assert!(
+        legend["resource"].as_str().is_some_and(|r| !r.is_empty())
+            && legend["command"].as_str().is_some_and(|c| !c.is_empty()),
+        "a folded legend without its pointer is prose deleted rather than moved: {v}"
     );
 }

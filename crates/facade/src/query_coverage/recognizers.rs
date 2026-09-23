@@ -56,3 +56,59 @@ pub(super) fn legend() -> Value {
          missing channel is legible next to its siblings."
     )
 }
+
+/// The `framework-recognizers` CONTRACT document — the same capability table as markdown, served
+/// run-free.
+///
+/// # The question this answers, and why no existing surface answered it
+///
+/// External review round 20 (ledger V225 ⑸): *"there is no way to know whether zzop reads my Go
+/// router, my Django URLconf or my MyBatis XML **before running it**."* Every channel that carried
+/// this table needed a tree first — [`table`] rides in the `coverage` reply, and every
+/// framework-silence tripwire is per-run and fires only on a tree already showing the symptom. So the
+/// buyer's first question had to be answered by running the tool on their own repository and reading
+/// what came back, which is the one thing they were deciding whether to do.
+///
+/// The table itself was always run-free — `zzop_engine::recognizers`' own doc calls it "CAPABILITY-kind
+/// ('this build can/cannot see X'), independent of any run". Only its delivery was not.
+///
+/// # Rendered, never embedded
+///
+/// The third RENDERED contract row, for the same reason as the two before it: there is no file to
+/// `include_str!`, and a checked-in copy would be a second hand-maintained list of what this binary can
+/// read — which is exactly the drift the aggregator exists to prevent. `resources/list`'s description,
+/// the `coverage` reply's cell and this document are three views of one compiled-in registry.
+///
+/// Rows keep the aggregator's order (grouped by owning parser) rather than sorting by name, because a
+/// parser missing a whole CHANNEL is legible next to its siblings and invisible in an alphabet.
+pub fn contract_text() -> String {
+    let mut out = String::from(
+        "# Framework recognizers\n\n\
+         Every framework recognizer compiled into THIS build, grouped by the parser crate that owns \
+         the adapter. This is a fact of the build: it is true before any tree is walked, and answers \
+         \"will zzop read my stack\" without running an analysis.\n\n\
+         **A row means the recognizer runs on files with those extensions. It does not mean every \
+         idiom of that framework is modelled** — each adapter's own module doc states its recognized \
+         shapes and its documented gaps. **An absent framework means no recognizer for it exists in \
+         this build at all**, which is the one question no per-run silence tripwire can answer: those \
+         fire on a tree already showing the symptom.\n\n\
+         `emits` names the cross-layer channel each recognizer fills. A language with route \
+         recognizers and no consume-side one contributes only half of a cross-layer join, and that \
+         asymmetry is why this column is a column rather than prose.\n\n\
+         | framework | extensions | emits |\n|---|---|---|\n",
+    );
+    for r in zzop_engine::framework_recognizers() {
+        out.push_str(&format!(
+            "| {} | {} | {} |\n",
+            r.framework,
+            r.extensions.join(", "),
+            r.emits.join(", "),
+        ));
+    }
+    out.push_str(
+        "\nThe per-run counterpart is the `coverage` reply's `ioChannels` block, which says what a \
+         given tree actually YIELDED through these recognizers — a filled row here with a zero there \
+         is an extraction gap on that tree, not a missing capability.\n",
+    );
+    out
+}

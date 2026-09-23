@@ -2,18 +2,52 @@
 //! parent module to keep that file under the 300-line source cap. Message contract lives here in one
 //! place: problem, fix, every veto that could have suppressed this finding, and how to turn the rule off.
 
+/// Which side of the first-path-segment split this consume landed on — the classification the parent
+/// module computes to decide this finding's very SHAPE, carried into the message instead of being spent
+/// on the routing and dropped.
+///
+/// # Why it had to be published (2026-09-05)
+/// The two legs make OPPOSITE claims about the same evidence, and which one a reader gets turns on a
+/// count they cannot see: below [`super::MIN_FOREIGN_UNPROVIDED_GROUP`] a foreign consume speaks as an
+/// individual finding whose causes are "typo'd path, renamed/removed route" — a DEFECT claim — while at
+/// that count or above the identical keys are replaced by one aggregate reading "most likely served by
+/// something outside this analysis rather than N independent broken routes" — a COVERAGE claim. The
+/// individual message described the fold MECHANISM and never said which side THIS finding was on, and
+/// `data` carried `key`/`injectionStub`/`rawKey` and nothing else, so the fact was unreadable in both
+/// dialects at once. Two independent labelers judging this rule from its shipped text alone split on
+/// exactly this axis, and each named this rule as their hardest call.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum PathSpace {
+    /// First segment IS one of the families this source itself provides.
+    Overlapping,
+    /// First segment is NOT — the same signal the fold aggregates on, seen below its threshold.
+    Foreign,
+}
+
+impl PathSpace {
+    /// The wire spelling. A short stable token rather than prose, because the sentence below is for a
+    /// reader and this is for whatever reads `findings[].data`.
+    fn as_str(self) -> &'static str {
+        match self {
+            PathSpace::Overlapping => "overlapping",
+            PathSpace::Foreign => "foreign",
+        }
+    }
+}
+
 /// The individual finding for one unmatched consume — both non-folded legs (parent module doc:
 /// "overlapping", and "foreign" below the fold threshold).
 ///
 /// `key` is always the JOIN key (post host re-key), matching the linker's own bucket invariant that
 /// nothing downstream of the re-key ever sees a scheme-carrying key. `raw` carries the original
 /// absolute-URL spelling when a declared-host re-key rewrote it, so the message can point at the line the
-/// author actually wrote.
+/// author actually wrote. `space` is [`PathSpace`], whose doc holds why this argument exists at all.
 pub(super) fn individual_finding(
     key: &str,
     raw: Option<&str>,
     file: &str,
     line: u32,
+    space: PathSpace,
 ) -> zzop_core::Finding {
     // Paste-ready `routes` stub (single-tree, so the serving tree is this one — no cross-tree ambiguity).
     let injection_stub = format!("routes: [{{ \"key\": \"{key}\", \"role\": \"provide\" }}]");
@@ -24,7 +58,30 @@ pub(super) fn individual_finding(
         ),
         None => String::new(),
     };
-    let mut data = serde_json::json!({ "key": key, "injectionStub": injection_stub });
+    // The reading this finding's own classification supports, spelled out rather than left to the
+    // generic counting note further down — that note explains the MECHANISM and never said which side
+    // the reader is standing on. See `PathSpace`.
+    let space_clause = match space {
+        PathSpace::Overlapping => " This key's first path segment IS one of the families this source \
+             serves itself, so a local provider is the expected reading and the causes above are the \
+             likely ones."
+            .to_string(),
+        PathSpace::Foreign => format!(
+            " NOTE — this key's first path segment is NOT one of the families this source serves, so \
+             weigh the causes above against a fourth one they do not include: the provider may simply \
+             be outside this analysis. That is the same signal the fold aggregates on, seen below its \
+             threshold — at {} such keys these findings are REPLACED by one aggregate that states the \
+             partial-provider reading outright, and at fewer they are reported per call like this one. \
+             The count is the only thing that differs, so read this as evidence toward that reading \
+             rather than against it.",
+            super::MIN_FOREIGN_UNPROVIDED_GROUP
+        ),
+    };
+    let mut data = serde_json::json!({
+        "key": key,
+        "injectionStub": injection_stub,
+        "pathSpace": space.as_str(),
+    });
     if let Some(raw) = raw {
         data["rawKey"] = serde_json::json!(raw);
     }
@@ -36,7 +93,7 @@ pub(super) fn individual_finding(
         message: format!(
             "This call consumes `{key}`{rekey_clause} but no HTTP route anywhere in this analysis provides \
              that key — likely a typo'd path, a renamed/removed backend route, or a route defined in a file \
-             this analysis didn't parse. Verify the route still exists at that path and method; if it does, inject it with `{injection_stub}`. \
+             this analysis didn't parse.{space_clause} Verify the route still exists at that path and method; if it does, inject it with `{injection_stub}`. \
              Veto: a key path ending in a static-asset extension (.js/.mjs/.cjs, .map, .css, .txt, .svg, \
              .png, .jpg/.jpeg, .gif, .ico, .bmp, .avif, .webp, .woff/.woff2/.ttf/.otf/.eot) is never \
              flagged; .json/.xml is vetoed by default UNLESS the path carries an API-ish segment (/api/, \

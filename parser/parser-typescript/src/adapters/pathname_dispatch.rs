@@ -130,7 +130,7 @@
 //! trailing-slash-tolerance idiom is not a shadow). Case 1 therefore makes that rule newly fire
 //! when two branches of one dispatcher register the same key with two different handlers — correct
 //! (the second branch is genuinely dead), and a deliberate detection increase pinned e2e in
-//! `crates/engine/tests/analyze_routes_pathname_dispatch.rs` together with the case-2 control that
+//! `crates/engine/tests/integration/analyze_routes_pathname_dispatch.rs` together with the case-2 control that
 //! must stay silent.
 //!
 //! A `SwitchStmt` whose discriminant is a pathname-provenanced receiver is handled the same way,

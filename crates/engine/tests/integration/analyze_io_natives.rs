@@ -1,7 +1,7 @@
 //! End-to-end coverage for the three fullstack io/graph native rules added alongside `duplicate-route`/
 //! `route-shadowing`'s siblings (rule-pack catalog #46/#47/#48): `route-shadowing`, `mutating-route-no-auth`,
 //! and `unprovided-consume` — all `zzop_rules_http`, wired into `zzop_engine::analyze::assemble` beside
-//! `schema-usage`/`duplicate-route`. Same `TempDir` fixture-tree pattern as `pack_sql.rs`/
+//! `schema-usage`/`duplicate-route`. Same `TempDir` fixture-tree pattern as `integration/analyze_sql_db_table.rs`/
 //! `analyze_callgraph.rs`.
 
 use std::fs;
@@ -414,6 +414,52 @@ fn nestjs_forroutes_with_a_non_auth_middleware_does_not_exempt() {
         hits(&out, "mutating-route-no-auth").len(),
         1,
         "a non-auth middleware must not exempt: {:?}",
+        out.findings
+    );
+}
+
+#[test]
+fn nestjs_forroutes_bound_to_one_verb_does_not_exempt_the_others_on_that_path() {
+    // 🔴 Review ledger V64. The verb axis of `forRoutes` had NO negative test. Every test that mentioned
+    // `forRoutes` asserted the POSITIVE — that a matching route IS exempted — so deleting the verb
+    // comparison from `decorator_gate`'s coverage check left eight crates' suites entirely green while
+    // `RequestMethod.POST` started clearing GET, PUT and DELETE on the same path. That is a silent
+    // false-clear on an auth gate: an unauthenticated mutating route reads as guarded.
+    //
+    // The shape here is the one a real NestJS app writes — auth applied to the write verb only, because
+    // the read is public. `DELETE /items/x` must still fire.
+    let dir = TempDir::new("zzop-mutating-no-auth-nest-forroutes-other-verb");
+    dir.write(
+        "items.controller.ts",
+        concat!(
+            "import { Controller, Delete } from '@nestjs/common';\n\n",
+            "@Controller('items')\n",
+            "export class ItemsController {\n",
+            "  @Delete('x')\n",
+            "  async remove() {\n",
+            "    return true;\n",
+            "  }\n",
+            "}\n"
+        ),
+    );
+    dir.write(
+        "items.module.ts",
+        concat!(
+            "import { MiddlewareConsumer, Module, NestModule, RequestMethod } from '@nestjs/common';\n\n",
+            "export class ItemsModule implements NestModule {\n",
+            "  public configure(consumer: MiddlewareConsumer) {\n",
+            "    consumer\n",
+            "      .apply(AuthMiddleware)\n",
+            "      .forRoutes({path: 'items/x', method: RequestMethod.POST});\n",
+            "  }\n",
+            "}\n"
+        ),
+    );
+    let out = scan(&dir);
+    assert_eq!(
+        hits(&out, "mutating-route-no-auth").len(),
+        1,
+        "auth bound to POST must not exempt DELETE on the same path: {:?}",
         out.findings
     );
 }
@@ -1271,5 +1317,123 @@ fn call_graph_language_gap_is_disclosed_for_a_language_the_bfs_cannot_walk() {
         !gap[0].contains(".py ("),
         "Python is call-graph-covered now and must not be listed as a gap: {}",
         gap[0]
+    );
+}
+
+/// A Spring Security config this build FINDS, READS, and then declines to draw a posture from must SAY
+/// SO. Before 2026-09-05 it did not: `extract_spring_security_posture` has always returned a NAMED bail
+/// (`SpringPostureBail`) precisely so a "this config exists but we could not read it" report could be
+/// written, and `parse_calls_and_guards` carried a comment recording that nothing consumed the reason.
+/// Nothing did. The visible consequence is that every route stayed unexempted and the reply said "no
+/// auth evidence" about routes whose auth configuration had been located and parsed — the silent-failure
+/// class this project treats as its cardinal defect.
+///
+/// The fixture uses `.anyRequest().permitAll()`, which bails `not-secure-by-default`: the chain IS
+/// readable and simply is not authenticated-by-default, so no posture may be derived from it. That is a
+/// real bail rather than a synthetic one, and it is the same bail `macrozheng/mall`'s `mall-demo` config
+/// produces (measured 2026-09-05, alongside `lambda-body` from its `mall-security` config).
+///
+/// Two things are pinned and the second is the one that decays quietly: that the warning EXISTS and
+/// names the file, and that it states the DIRECTION of the consequence. A missing posture makes findings
+/// APPEAR, never disappear — a reader who takes it the other way concludes something was suppressed and
+/// goes looking for the wrong repair.
+#[test]
+fn a_spring_security_config_that_yields_no_posture_is_disclosed_by_name() {
+    let dir = TempDir::new("zzop-spring-posture-bail-disclosure");
+    // A ROUTE is part of the fixture on purpose: the bail collection runs only when a route-auth rule
+    // needs the posture, so a tree with a security config and no routes discloses nothing — correctly,
+    // since no rule is judging routes there. Pinning the shape WITH a route is pinning the case that
+    // matters, and it also keeps this test honest about the channel's real scope.
+    dir.write(
+        "src/main/java/com/x/api/UserController.java",
+        concat!(
+            "package com.x.api;
+
+",
+            "import org.springframework.web.bind.annotation.PutMapping;
+",
+            "import org.springframework.web.bind.annotation.RestController;
+
+",
+            "@RestController
+",
+            "public class UserController {
+",
+            "  @PutMapping(\"/user\")
+",
+            "  public void updateUser() {}
+",
+            "}
+"
+        ),
+    );
+    dir.write(
+        "src/main/java/com/x/config/SecurityConfig.java",
+        concat!(
+            "package com.x.config;\n\n",
+            "import org.springframework.context.annotation.Bean;\n",
+            "import org.springframework.security.config.annotation.web.builders.HttpSecurity;\n",
+            "import org.springframework.security.web.SecurityFilterChain;\n\n",
+            "public class SecurityConfig {\n",
+            "  @Bean\n",
+            "  public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {\n",
+            "    http.authorizeHttpRequests(registry -> registry.anyRequest().permitAll());\n",
+            "    return http.build();\n",
+            "  }\n",
+            "}\n"
+        ),
+    );
+    let out = scan(&dir);
+    let disclosed: Vec<&String> = out
+        .warnings
+        .iter()
+        .filter(|w| w.contains("Spring Security config read but NOT applied"))
+        .collect();
+    assert_eq!(
+        disclosed.len(),
+        1,
+        "the config was located and parsed; declining to use it must not be silent: {:?}",
+        out.warnings
+    );
+    let w = disclosed[0];
+    assert!(
+        w.contains("SecurityConfig.java"),
+        "the disclosure has to name the file, or it cannot be acted on: {w}"
+    );
+    assert!(
+        w.contains("not-secure-by-default"),
+        "the bail's stable name is the whole reason it was named — a disclosure that says only \
+         'something stopped us' sends the reader to read the config by hand: {w}"
+    );
+    assert!(
+        w.contains("NOTHING WAS SUPPRESSED BY THIS"),
+        "the direction is the half a reader gets backwards: no posture means MORE findings, never \
+         fewer, and a disclosure that leaves that open invites the wrong repair: {w}"
+    );
+}
+
+/// The zero-proving half, without which the test above proves nothing: an ordinary Java tree with no
+/// Spring Security config at all must produce NO such warning. Every non-config Java file bails
+/// `not-a-config`, and that bail is dropped at the collection site rather than downstream — a channel
+/// that fires on every file carries no information and would bury the real ones.
+#[test]
+fn a_tree_with_no_spring_security_config_gets_no_posture_disclosure() {
+    let dir = TempDir::new("zzop-spring-posture-no-config");
+    dir.write(
+        "src/main/java/com/x/PlainService.java",
+        concat!(
+            "package com.x;\n\n",
+            "public class PlainService {\n",
+            "  public String hello() { return \"hi\"; }\n",
+            "}\n"
+        ),
+    );
+    let out = scan(&dir);
+    assert!(
+        !out.warnings
+            .iter()
+            .any(|w| w.contains("Spring Security config read but NOT applied")),
+        "a tree with no security config must stay silent here: {:?}",
+        out.warnings
     );
 }

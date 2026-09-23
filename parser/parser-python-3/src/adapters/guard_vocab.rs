@@ -142,7 +142,7 @@ impl PythonGuardVocab<'static> {
 /// TypeScript sibling's does: a name this producer cannot read as a DECISION must never suppress a
 /// finding, whatever guard word it happens to contain.
 pub(crate) fn is_guard_name(name: &str, vocab: &PythonGuardVocab<'_>) -> bool {
-    // The SHARED transform, not a local twin: `zzop_engine::NORMALIZED_VOCABULARY_KEYS` registers the four
+    // The SHARED transform, not a local twin: `zzop_core::vocab_norm::NORMALIZED_VOCABULARY_KEYS` registers the four
     // `pythonGuard*` keys against this same function so the config front end can warn about a declared
     // entry that could never match here. A private copy would make that agreement a convention again.
     // It also drops `-`, which the local copy did not — no behaviour change, because every caller passes a

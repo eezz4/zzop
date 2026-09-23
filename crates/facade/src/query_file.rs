@@ -30,7 +30,7 @@
 //! |-----------------|-----------------------------------------------------------------------------|
 //! | `analyzed`      | a structural projection exists (symbols and/or dep-graph membership)         |
 //! | `lexical-only`  | walked and line-scanned, but no structural projection — no parser for it     |
-//! | `degraded`      | the parser bailed (syntax error, or over `sizeCap`); projection is empty     |
+//! | `degraded`      | no structural projection was built; the reply does not say which of the four |
 //! | `not-found`     | this run never walked that path                                              |
 //!
 //! Each token's one-sentence meaning ships in the reply as `verdictMeaning`, the same self-describing
@@ -76,9 +76,24 @@ fn verdict_meaning(verdict: &str) -> &'static str {
              `parsers.globOverrides`."
         }
         "degraded" => {
-            "zzop tried to parse this file and could not — a syntax error its parser does not tolerate, \
-             or a file over `sizeCap`. Text-based rules still ran; everything structural did not. An \
-             empty findings list here does NOT mean clean."
+            // 🔴 This used to say "zzop tried to parse this file and could not — a syntax error its
+            // parser does not tolerate, or a file over `sizeCap`". That named two of FOUR causes, and
+            // the lead clause was false for two of them: an oversized file and one past a recursion
+            // cap never reach a parser at all (review ledger V139). It is a sentence shipped to a
+            // reader who is about to go and check the thing it points at.
+            //
+            // ⚠ It still does not say WHICH, and that is a wire limit rather than a choice: the
+            // per-file cause is not on this lane's wire (`/output/degraded` is a path list), and
+            // putting it there is an ADDITION to a frozen surface whose size is itself an open user
+            // decision (review ledger V66). So this names the whole set, says the two things that are
+            // true of every member, and points at the run-level report that does split them.
+            "zzop walked this file and built no structural projection from it. Four things cause \
+             that and this reply does not distinguish them: the file was over `sizeCap`, or past a \
+             parser-recursion cap (in both of those no parser was invoked at all), or a parser was \
+             invoked and failed, or the file could not be read. The run's `warnings` carry the \
+             per-cause breakdown and the lever for each. Text-based rules still ran unless the file \
+             was unreadable; everything structural did not. An empty findings list here does NOT \
+             mean clean."
         }
         "not-found" => {
             "This run never walked that path. It may be excluded by config (`exclude`, \

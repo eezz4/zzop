@@ -71,6 +71,17 @@
 //! is byte-identical to what it was before this module existed. Sold as a general axis it would be a lie.
 //! To find out for any one tree, run `zzop analyze --config <cfg> --limit 0` and look for
 //! `findings.buildPaths`: an absent key IS the "no build surface here" answer.
+//!
+//! That limitation stopped being hypothetical on 2026-09-01, and the measured shape is the ECOSYSTEM
+//! SCOPE clause rather than the total blindness beside it. On `dotnet/aspnetcore` the build is declared
+//! in MSBuild and PowerShell, so `eng/scripts/npm/pack-workspace.mjs` and
+//! `eng/scripts/npm/update-dependency-versions.mjs` are release machinery that no `package.json`
+//! `scripts` command names — and neither sits under `.github/` nor ends in `.example`, so both arms miss
+//! them and they sort as `SHIPPED`. What is blind there is the manifest arm's ECOSYSTEM, not an absent
+//! manifest: a build declared outside npm is unreadable to this axis however many `package.json` files
+//! the tree carries, which is a different sentence from the one above. The failure direction is the safe
+//! one — under-demotion only, never a demotion of code that ships — so `buildPaths` is a LOWER bound on
+//! any tree's build surface, and its `meaning` says what it counted, never that it counted everything.
 
 /// Ships: the default role. Never demoted.
 pub(crate) const ROLE_SHIPPED: u8 = 2;

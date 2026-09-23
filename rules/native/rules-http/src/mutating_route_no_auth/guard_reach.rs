@@ -8,7 +8,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-use zzop_core::callgraph::bfs_reachable;
+use zzop_core::callgraph::{bfs_reachable_in, Adjacency};
 
 use super::vocab::vocab_re;
 use super::{qualifier, ScanMutatingRouteNoAuthInput};
@@ -19,6 +19,10 @@ pub(super) struct GuardReach<'a> {
     guard_re: Option<regex::Regex>,
     /// Memoizes the per-handler BFS across every mutating endpoint sharing a handler symbol.
     memo: RefCell<HashMap<String, bool>>,
+    /// The graph's adjacency index, built once here rather than inside every traversal. The memo
+    /// above already collapses REPEATED handlers; this collapses the setup cost for the DISTINCT
+    /// ones, which the memo never could (review ledger V112).
+    adjacency: Adjacency<'a>,
 }
 
 impl<'a> GuardReach<'a> {
@@ -31,6 +35,7 @@ impl<'a> GuardReach<'a> {
             name_index,
             guard_re: vocab_re(input.auth_guard_pattern),
             memo: RefCell::new(HashMap::new()),
+            adjacency: Adjacency::build(input.symbol_graph),
         }
     }
 
@@ -41,7 +46,7 @@ impl<'a> GuardReach<'a> {
         if let Some(hit) = self.memo.borrow().get(handler_symbol) {
             return *hit;
         }
-        let found = bfs_reachable(self.input.symbol_graph, handler_symbol, |id| {
+        let found = bfs_reachable_in(&self.adjacency, handler_symbol, |id| {
             self.is_guard_id(id) || self.calls_unresolved_guard(id)
         })
         .is_some();

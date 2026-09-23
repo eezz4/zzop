@@ -119,6 +119,48 @@ impl RulePackDef {
     /// So the built-in conventions are floor, never ceiling, and a declaration can only widen what is
     /// declined. Narrowing is deliberately not expressible here: `rules: { "<id>": "off" }` turns a rule
     /// off, and that is the knob for "I want to be judged on this path after all".
+    /// REPLACES the built-in secret-name alternation in every matcher pattern that carries it with
+    /// `declared`, or — when a config declared nothing — with a pattern that can never match.
+    ///
+    /// Returns how many patterns were rewritten, so a caller can refuse to proceed on zero. That
+    /// number is the whole safety of this seam: the alternation is spelled INLINE in the pack (a
+    /// `${NAME}` fragment substitutes only as a whole value, and this text sits mid-pattern), so the
+    /// only thing standing between a reworded rule and a declaration that silently stops arriving is
+    /// a count that has to keep coming out right. `secret_names::PACK_ARMS` is that count.
+    ///
+    /// ## Why this REPLACES where its neighbour above ADDS
+    /// `extend_test_path_exclusions` is the one documented exception to
+    /// `zzop_engine::VocabularyConfig`'s contract, and its own doc says why: an undeclared test-path
+    /// vocabulary makes the engine judge test code as production, which is a WRONG CLAIM rather than
+    /// an abstention. Secret names fail the other way. With nothing declared this rule says less than
+    /// it could — an under-report the caller chose — which is the direction every other key in that
+    /// struct is calibrated for. Same test, opposite answer, so: whole replacement, and absence means
+    /// the judgment is not made.
+    ///
+    /// The never-match sentinel is `[^\s\S]` rather than an empty alternative, and that is not a
+    /// style choice: an empty branch matches the empty string, so a rule rewritten to `()` would fire
+    /// on every line in the tree. Writing "nothing" as a character class that cannot be satisfied is
+    /// the only spelling of it that is safe to substitute into a pattern we did not author.
+    pub fn rewrite_secret_names(&mut self, declared: Option<&str>) -> usize {
+        // The CAPTURE GROUP, never the bare alternation — see `secret_names::group` for the drill
+        // that found the difference: matching without the closing paren lets an appended name survive
+        // the rewrite as a live alternative.
+        let built_in = crate::dsl::secret_names::group();
+        let replacement = format!("({})", declared.unwrap_or(r"[^\s\S]"));
+        let mut rewritten = 0usize;
+        for rule in &mut self.rules {
+            let _ =
+                for_each_pattern_field::<std::convert::Infallible>(rule, &mut |_field, value| {
+                    if value.contains(&built_in) {
+                        *value = value.replace(&built_in, &replacement);
+                        rewritten += 1;
+                    }
+                    Ok(())
+                });
+        }
+        rewritten
+    }
+
     pub fn extend_test_path_exclusions(&mut self, extra: &str) -> usize {
         let mut extended = 0usize;
         for rule in &mut self.rules {

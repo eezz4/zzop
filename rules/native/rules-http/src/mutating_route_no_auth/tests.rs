@@ -1,5 +1,5 @@
 //! Unit tests for `scan_mutating_route_no_auth`'s BFS + guard-vocabulary logic in isolation (e2e coverage
-//! — real handler-file fixtures — lives in `crates/engine/tests/analyze_io_natives.rs`).
+//! — real handler-file fixtures — lives in `crates/engine/tests/integration/analyze_io_natives.rs`).
 use super::*;
 use zzop_core::callgraph::SymbolEdge;
 use zzop_core::SourceSymbolKind;
@@ -1163,10 +1163,15 @@ fn injected_pathscope_auth_guarded_exempts_every_route_under_the_prefix() {
     assert_eq!(out[0].data.as_ref().unwrap()["path"], "/public/signup-lite");
 }
 
-/// The message may not claim an UNBOUNDED search. `anywhere in its call graph` is literal only for the
-/// JS/TS extensions; for `.java` the specifier resolves to itself (no whole-corpus type index is
-/// threaded in) and for a Python module-attribute receiver the walk stops one hop out, so in those
-/// cases a finding means "no guard within one hop".
+/// The message may not claim an UNBOUNDED search. `anywhere in its call graph` is literal for the JS/TS
+/// extensions and — since 2026-09-07, review ledger V30 — for `.java` too; for a Python
+/// module-attribute receiver the walk still stops one hop out, so in THAT case a finding means "no
+/// guard within one hop".
+///
+/// 🔴 The Java half of this bound moved, and why it had to is worth keeping here: the bound was never a
+/// missing finding, it was a FALSE one — a Java route whose guard sat two hops away FIRED. Keeping the
+/// message honest WHILE the bound existed is what let it be removed cleanly instead of leaving a
+/// disclosure that outlived its subject.
 ///
 /// Pinned because the phrase read as an unbounded claim for the whole of 2026-07 while the bound was
 /// stated only in `callgraph::run_callgraph_rules`' doc comment — visible to maintainers, invisible to
@@ -1180,15 +1185,14 @@ fn the_message_never_claims_an_unbounded_walk_without_naming_the_hop_bound() {
         msg.contains("anywhere in its call graph"),
         "the phrase this test qualifies must still be there, or the pin is checking nothing: {msg}"
     );
-    // Every token here must be UNIQUE to the hop-bound clause. `per-language` was in this list until
-    // an invalidation probe showed it was already satisfied by an unrelated sentence about test-path
-    // conventions — a token that matches elsewhere pins nothing, which is the shape a probe exists to
-    // find.
+    // Every token here must be UNIQUE to the bound that REMAINS — the Python module-attribute one.
+    // `resolves to ITSELF` was in this list until 2026-09-07 and had to leave with the Java bound it
+    // described: a token that survives its own subject pins the SENTENCE, not the claim.
     for token in [
-        "resolves to ITSELF",
-        "one hop",
         "module-attribute",
+        "stops one hop out",
         "within one hop",
+        "no guard anywhere",
     ] {
         assert!(
             msg.contains(token),

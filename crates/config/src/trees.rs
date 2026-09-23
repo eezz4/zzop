@@ -40,6 +40,14 @@ use crate::paths;
 /// Three refusals, one per way a call can name no usable source: BOTH sources, NEITHER source, and a
 /// config that resolves to one tree. `operation` names the CALLER in every one of them, for the same
 /// reason `zero_config_trees` takes it (see the module doc's misattribution incident).
+/// The paths-mode multi-tree refusal's stable phrase — the third member of the class
+/// `MISSING_CONFIG_MARKER` and `zzop_summary::contracts::MULTI_TREE_MARKER` already belong to, wired
+/// 2026-09-23 (review ledger V275). This module's own doc promises every sentence built here is
+/// spelling-free "because each product's own usage text owns its own words" — and until now no
+/// product supplied the second half for THIS one, so a reader was told to use "CONFIG MODE" with no
+/// way to type it. Matched by `cli::print_or_exit` and `mcp::tools`, which each append their own.
+pub const PATHS_MODE_CONFIG_MARKER: &str = "in CONFIG MODE over that config";
+
 pub fn load_trees_request(
     operation: &str,
     paths: &[String],
@@ -187,6 +195,7 @@ pub(crate) fn zero_config_trees(
         ));
     }
     let mut trees: Vec<serde_json::Value> = Vec::with_capacity(paths.len());
+    let mut declared_vocabulary: Vec<Vec<String>> = Vec::with_capacity(paths.len());
     let mut warnings: Vec<String> = Vec::new();
     let mut honored: Vec<String> = Vec::with_capacity(paths.len());
     for p in paths {
@@ -209,7 +218,7 @@ pub(crate) fn zero_config_trees(
             crate::Method::AnalyzeTrees => {
                 return Err(format!(
                     "{p} has a {} declaring its own tree set, which this call's path list also \
-                     answers — run {operation} in CONFIG MODE over that config instead, or point \
+                     answers — run {operation} {PATHS_MODE_CONFIG_MARKER} instead, or point \
                      these paths at trees whose configs declare one tree each",
                     crate::DEFAULT_CONFIG_FILENAME
                 ))
@@ -222,6 +231,15 @@ pub(crate) fn zero_config_trees(
             .to_string();
         req["sourceId"] = serde_json::Value::String(source_id);
         trees.push(req);
+        // Each root loaded its OWN config, so this is the one mode where the per-tree lists genuinely
+        // differ. Pushed in the same loop as `trees` so the two cannot fall out of alignment.
+        declared_vocabulary.push(
+            loaded
+                .declared_vocabulary
+                .into_iter()
+                .next()
+                .unwrap_or_default(),
+        );
         honored.push(loaded_path);
     }
     // `config_path` stays `None` and the reply's `config` field with it: there is no ONE config this run
@@ -242,5 +260,6 @@ pub(crate) fn zero_config_trees(
         request: serde_json::json!({ "trees": trees }),
         warnings,
         config_path: None,
+        declared_vocabulary,
     })
 }

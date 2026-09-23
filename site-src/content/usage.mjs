@@ -46,11 +46,11 @@ export default {
           "note",
           {
             ko: `둘은 같은 핸들러로 디스패치한다 — 같은 경로면 같은 판정이다. 다만
-      <code>manifest</code> · <code>diff</code> · <code>facts</code> · <code>coverage</code> ·
+      <code>manifest</code> · <code>diff</code> · <code>facts</code> ·
       <code>graph</code> · <code>explain</code> · <code>init</code> 은 CLI 에만 있다.
       어느 쪽도 네트워크 요청을 하지 않는다.`,
             en: `Both dispatch to the same handlers, so the same path gets the same verdict. Only these lanes are
-      CLI-only: <code>manifest</code>, <code>diff</code>, <code>facts</code>, <code>coverage</code>,
+      CLI-only: <code>manifest</code>, <code>diff</code>, <code>facts</code>,
       <code>graph</code>, <code>explain</code>, <code>init</code>. Neither binary makes a network request.`,
           },
         ],
@@ -268,12 +268,33 @@ export default {
         [
           "p",
           {
-            ko: `네이티브 분석 — <code>dead-candidates</code>, <code>cross-layer/unconsumed-endpoint</code> 같은 것들 — 에는 마커가 없다.
-      설정으로만 끈다: <code>"dead-candidates": "off"</code>. 심각도만 낮추거나 경로만 빼려면 객체로 쓴다 —
-      <code>{ "severity": "warn", "exclude": ["legacy/"] }</code>.`,
-            en: `Native analyses — <code>dead-candidates</code>, <code>cross-layer/unconsumed-endpoint</code> and friends — carry no
-      marker and are disabled in config only: <code>"dead-candidates": "off"</code>. To soften rather than silence, use the
-      object form: <code>{ "severity": "warn", "exclude": ["legacy/"] }</code>.`,
+            ko: `네이티브 분석 — <code>circular</code>, <code>cross-layer/unconsumed-endpoint</code> 같은 것들 — 에는 마커가 없다.
+      설정으로만 끈다: <code>"circular": "off"</code>. 지우지 않고 대역을 옮기거나 경로만 빼려면 객체로 쓴다 —
+      <code>{ "severity": "info", "exclude": ["legacy/"] }</code>. ⚠ 이 자리는 <b>양방향</b>이다: 위 둘을 포함해 여러
+      네이티브 분석이 이미 <code>info</code> 로 출하되므로, <code>"warn"</code> 은 낮추는 것이 아니라 <b>올리는</b> 것이다 —
+      지금 대역은 룰 카탈로그가 답한다.`,
+            en: `Native analyses — <code>circular</code>, <code>cross-layer/unconsumed-endpoint</code> and friends — carry no
+      marker and are disabled in config only: <code>"circular": "off"</code>. To move the band or scope the paths
+      instead of silencing, use the object form: <code>{ "severity": "info", "exclude": ["legacy/"] }</code>.
+      ⚠ That knob runs <b>both ways</b>: several native analyses — both ids above among them — already ship at
+      <code>info</code>, so <code>"warn"</code> RAISES them rather than softening. The rule catalog is what says
+      where a rule sits today.`,
+          },
+        ],
+        [
+          "p",
+          {
+            ko: `같은 자리가 <b>켜는</b> 자리이기도 하다. <code>unimported-export</code> · <code>dead-candidates</code> ·
+      <code>unreachable</code> 셋은 기본이 off 다 — 미사용 코드 위생이지 결함 주장이 아니고, 도그푸드 코퍼스에서
+      전체 발견의 61.7% 였다. 심각도를 적어 이름을 부르면 켜진다: <code>"dead-candidates": "info"</code>.
+      모든 실행이 <code>nativeAnalyses.shippedOff</code> 에 무엇을 안 봤는지 적는다 — 당신이 끈 것만 담는
+      <code>nativeAnalyses.disabled</code> 와는 일부러 다른 칸이다.`,
+            en: `The same place is where you turn one <b>on</b>. <code>unimported-export</code>, <code>dead-candidates</code> and
+      <code>unreachable</code> ship OFF — they are unused-code hygiene rather than defect claims, and were 61.7% of
+      every finding across the dogfood corpus. Name one with a severity to get it back:
+      <code>"dead-candidates": "info"</code>. Every run lists what it skipped under
+      <code>nativeAnalyses.shippedOff</code> — deliberately a different box from
+      <code>nativeAnalyses.disabled</code>, which only ever holds what you turned off.`,
           },
         ],
         [

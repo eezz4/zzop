@@ -587,3 +587,117 @@ fn the_loop_sibling_remedy_questions_the_column_pair_before_it_prescribes_the_co
         ],
     );
 }
+
+// --- the RECEIVER the trigger never reads (2026-09-11) ---
+//
+// The trigger is the bare method name `\.create\s*\(`, so what arrives here is "something spelled
+// create", not "a database insert". Measured on cal.com 2026-09-11, all 38 findings, by receiver:
+// `prisma.*` 34 · `CredentialRepository` 1 · `VerificationTokenService` 1 ·
+// `stripe.checkout.sessions` 1 · `this` 1. Three of those five receivers were opened and read:
+//   * `stripe.checkout.sessions.create(createSessionParams)` (stripepayment/api/subscription.ts:85) is
+//     an HTTP call to a payment vendor. No row, no table, nothing a unique constraint attaches to —
+//     and it is NOT vetoed, because no lexical test tells a vendor SDK's `create` from an ORM's. It is
+//     DISCLOSED in the message instead, which is what the third pin below asserts.
+//   * `CredentialRepository.create(...)` and `VerificationTokenService.create(...)` BOTH reach a
+//     `prisma.*.create` one call deeper. A `prisma.`-shaped receiver whitelist — the obvious narrowing
+//     — would have dropped two genuine writes to remove one wrong one, which is why it is not the fix.
+// The ONE receiver declined is the literal `this.create(`: the enclosing class's own method, whose
+// body this rule judges where it is written rather than through the call. Its cost is disclosed.
+
+/// The veto, with anti-vacuity: the silence at the `this.create(` line is only correct while an
+/// ordinary `prisma.x.create` in the same file still fires, so this asserts the surviving finding
+/// rather than the absence. cal.com's shape, reduced (`EventManager.ts:716` —
+/// `const createdEvent = await this.create(originalEvt)`, which fans out to calendar and video
+/// adapters and writes no row).
+///
+/// INVALIDATION: delete `trigger_call_exclude_pattern` from the rule and this reports 2 findings with
+/// the first at line 6 — run that before believing the green.
+#[test]
+fn a_create_on_the_enclosing_classes_own_this_receiver_is_declined_and_a_real_write_still_fires() {
+    let dir = TempDir::new("zzop-db");
+    dir.write(
+        "src/eventManager.ts",
+        "declare const prisma: any;\nexport class EventManager {\n  async reschedule(id: string) {\n    const booking = await prisma.booking.findFirst({ where: { id } });\n    if (!booking) {\n      const createdEvent = await this.create(id);\n      return createdEvent;\n    }\n    return booking;\n  }\n  async ensure(id: string) {\n    const booking = await prisma.booking.findFirst({ where: { id } });\n    if (!booking) {\n      await prisma.booking.create({ data: { id } });\n    }\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "find-then-create-no-unique");
+    assert_eq!(
+        h.len(),
+        1,
+        "the class's own create call must be declined and the ORM write must not be: {:?}",
+        out.findings
+    );
+    assert_eq!(
+        h[0].line, 14,
+        "the anchor must be the ORM write, not the this-receiver call at line 6: {:?}",
+        out.findings
+    );
+}
+
+/// The loop sibling shares the trigger shape and therefore the blindness, so it declines the same
+/// receiver. Anti-vacuity again: the ORM write inside the second loop still fires.
+///
+/// INVALIDATION: delete the field from `check-then-act-in-loop` and this reports 2 with the first at 8.
+#[test]
+fn the_loop_sibling_declines_the_same_this_receiver_and_still_fires_on_the_orm_write() {
+    let dir = TempDir::new("zzop-db");
+    dir.write(
+        "src/seedLoop.ts",
+        "declare const prisma: any;\ndeclare const rows: { key: string }[];\nexport class Seeder {\n  async viaOwnMethod() {\n    for (const r of rows) {\n      const e = await prisma.item.findFirst({ where: { key: r.key } });\n      if (!e) {\n        await this.create(r);\n      }\n    }\n  }\n  async viaOrm() {\n    for (const r of rows) {\n      const e = await prisma.item.findFirst({ where: { key: r.key } });\n      if (!e) {\n        await prisma.item.create({ data: r });\n      }\n    }\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "check-then-act-in-loop");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(
+        h[0].line, 16,
+        "the anchor must be the ORM write, not the this-receiver call at line 8: {:?}",
+        out.findings
+    );
+}
+
+/// The half that is DISCLOSED rather than vetoed, pinned by POSITION (rule-quality.md 27): a reader
+/// holding a vendor SDK's `create` has to meet "this trigger never read the receiver" BEFORE the
+/// message tells them to write a migration. The stripe site is quoted because it is the measured
+/// counterexample the clause exists for — without it the clause asserts something about nothing.
+#[test]
+fn the_find_then_create_message_says_the_trigger_never_reads_the_receiver_before_it_prescribes() {
+    let dir = TempDir::new("zzop-db");
+    dir.write(
+        "src/serviceReceiver.ts",
+        "declare const prisma: any;\nexport async function ensureUserReceiver(email: string) {\n  const existing = await prisma.user.findFirst({ where: { email } });\n  if (!existing) {\n    await prisma.user.create({ data: { email } });\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "find-then-create-no-unique");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    let m = &h[0].message;
+
+    for needle in [
+        // the blindness itself, in the rule's own voice
+        "THIS TRIGGER NEVER READS IT",
+        // the measured census, so the claim is a count rather than a worry
+        "`stripe.checkout.sessions` 1",
+        // the false positive that is disclosed rather than fixed — and that it still fires
+        "STILL FIRES",
+        // why the obvious narrowing is refused: it would cost two real writes
+        "would have dropped two genuine writes to remove one wrong one",
+        // the one receiver that IS declined, and what declining it costs
+        "is now silently unreported",
+    ] {
+        assert!(
+            m.contains(needle),
+            "find-then-create-no-unique lost its receiver-blindness clause — missing {needle:?}. A \
+             reader holding a payment vendor's create call is then told to add a unique constraint \
+             and a P2002 handler to an HTTP request. In: {m}"
+        );
+    }
+
+    // INVALIDATION PROBE: move the clause behind "THE REMEDY IS THE UNIQUE CONSTRAINT" with every
+    // token above still present — every contains assertion stays green and this call goes red.
+    assert_disqualifier_summary_precedes_imperative(
+        "find-then-create-no-unique",
+        m,
+        "FIRST CHECK THE RECEIVER",
+        "THE REMEDY IS THE UNIQUE CONSTRAINT",
+        "no lexical test separates a vendor SDK",
+    );
+}

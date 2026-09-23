@@ -44,7 +44,7 @@ set -euo pipefail
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo"
 
-template="crates/config/src/template.rs"
+template="crates/config/src/config-template.jsonc"
 [ -f "$template" ] || { echo "check-committed-config-vocabulary: missing $template" >&2; exit 1; }
 
 # The template's `vocabulary` block, verbatim: from the line that opens it to its closing brace at the

@@ -49,7 +49,12 @@ pub(super) fn run(
     tsconfigs: &std::collections::BTreeMap<String, zzop_parser_typescript::TsconfigPaths>,
     ts_paths: &std::collections::HashSet<String>,
     ts_import_pairs: &[(String, ImportMap)],
+    // Each dep-graph TypeScript file's own call-graph contribution, produced by the per-file lane.
+    // The pass below used to gather this itself, at the cost of a second read and a second full
+    // parse of every source — review ledger V108.
+    ts_call_graph_pairs: &[(String, zzop_core::callgraph::CallGraphFacts)],
     java_rels: &[String],
+    java_index: &crate::pipeline::JavaIndex,
     rust_workspace: &crate::pipeline::RustWorkspaceMap,
     all_symbols: &[zzop_core::ir::SourceSymbol],
     dead_export_names_by_file: &std::collections::HashMap<
@@ -139,7 +144,6 @@ pub(super) fn run(
     if is_enabled(&config.rule_config, "unimported-export") {
         let t0 = profile.then(Instant::now);
         let found = crate::dead_exports::dead_export_findings(
-            root,
             ts_paths,
             ts_import_pairs,
             all_symbols,
@@ -148,7 +152,6 @@ pub(super) fn run(
             tsconfigs,
             prescan_import_pairs,
             graph.auto_import_names,
-            &vocab.generated_file_markers,
         );
         record_native_timing(rule_time, t0, "unimported-export", found.len());
         global_findings.extend(found);
@@ -222,21 +225,36 @@ pub(super) fn run(
     }
 
     let mut decorator_guarded = BTreeSet::new();
-    run_callgraph_rules(
-        root,
-        config,
-        attribute_store,
-        io_provides,
-        ts_paths,
-        ts_import_pairs,
-        java_rels,
-        rust_workspace,
-        all_symbols,
-        profile,
-        rule_time,
-        &mut global_findings,
-        &mut decorator_guarded,
-    );
+    let mut posture_bails: Vec<(String, &'static str, String)> = Vec::new();
+    // The SECOND parse site, and the reason the first fix was not the whole fix. This pass re-reads
+    // and re-parses call sites in its own sequential loops (`graph_build.rs` and the four
+    // `*_guard.rs`), on the CALLING thread — so the big-stack pool around the per-file pass does not
+    // reach it. Measured after that pass was fixed: nine of eleven deep-nesting shapes passed and
+    // `rust-brace-20k` / `cs-paren-20k` still aborted, with stderr naming `thread 'main'` rather than
+    // `thread '<unknown>'` — which is what said a second site existed. Review ledger V99.
+    crate::pipeline::with_parse_stack(|| {
+        run_callgraph_rules(
+            root,
+            config,
+            attribute_store,
+            io_provides,
+            ts_paths,
+            ts_import_pairs,
+            ts_call_graph_pairs,
+            java_rels,
+            java_index,
+            rust_workspace,
+            all_symbols,
+            profile,
+            rule_time,
+            &mut global_findings,
+            &mut decorator_guarded,
+            &mut posture_bails,
+        );
+    });
+    warnings.extend(crate::analyze::diagnostics::spring_posture_bail_warnings(
+        &posture_bails,
+    ));
 
     // Whole-tree `Matcher::IoScan` DSL pass — runs last, now that `decorator_guarded` (just above) is
     // fully accumulated, so `io_scan::run` can mint from it. See that fn's doc. Takes `rule_time` for the

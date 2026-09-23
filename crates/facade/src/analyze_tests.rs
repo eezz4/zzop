@@ -160,15 +160,14 @@ fn analyze_json_top_level_key_set_is_pinned_exactly() {
             "configWarnings",
             "coverage",
             "critical",
+            "criticalTruncated",
             "degraded",
             "disclosure",
             "fileCount",
             "findings",
-            "folders",
             "gitWindow",
             "health",
             "ir",
-            "layerCoChurn",
             "nativeAnalyses",
             "nativeAnalysesMeaning",
             "nodes",
@@ -267,22 +266,20 @@ fn analyze_json_top_level_key_set_with_git_signals_is_pinned_exactly() {
             "configWarnings",
             "coverage",
             "critical",
+            "criticalTruncated",
             "degraded",
             "disclosure",
             "fileCount",
             "findings",
-            "folders",
             "gitWindow",
             "health",
             "ir",
-            "layerCoChurn",
             "nativeAnalyses",
             "nativeAnalysesMeaning",
             "nodes",
             "packsLoaded",
             "recommendations",
             "ruleTimings",
-            "scoreMeanings",
             "scores",
             "seams",
             "warnings",
@@ -292,59 +289,11 @@ fn analyze_json_top_level_key_set_with_git_signals_is_pinned_exactly() {
     );
 }
 
-/// `scoreMeanings` rides exactly when `scores` does, and says something for every key `scores` carries.
-///
-/// The pairing is the point: a legend for numbers that did not run explains nothing, and a score with
-/// no legend is the bare-acronym state this field exists to end (`sdp`, `file_size_compliance`, `lod`, `feature_sliced_design` had their
-/// expansions only in Rust doc-comments — `docs/` and `site/` carried none).
-#[test]
-fn score_meanings_ride_with_scores_and_cover_every_key() {
-    if !git_available() {
-        skip_notice!("git not on PATH");
-        return;
-    }
-    let dir = cycle_and_git_fixture();
-    let with_git = format!(
-        r#"{{"root": {:?}, "sourceId": "t", "git": {{}}}}"#,
-        dir.path().display()
-    );
-    let value: serde_json::Value =
-        serde_json::from_str(&analyze_json(&with_git).expect("analyze_json should succeed"))
-            .expect("valid JSON");
-    let scores = value["scores"]
-        .as_object()
-        .expect("git ran, so scores is an object");
-    let meanings = value["scoreMeanings"]
-        .as_object()
-        .expect("scoreMeanings must ride with scores");
-    for key in scores.keys() {
-        let sentence = meanings
-            .get(key)
-            .and_then(|v| v.as_str())
-            .unwrap_or_else(|| panic!("score `{key}` shipped with no meaning beside it"));
-        assert!(
-            sentence.len() > 20,
-            "score `{key}`'s meaning is too short to be a definition: {sentence:?}"
-        );
-    }
-    assert_eq!(
-        scores.len(),
-        meanings.len(),
-        "scoreMeanings must explain exactly the keys scores carries — no more, no fewer"
-    );
-
-    // The other half of the contract: no scores, no legend.
-    let no_git = format!(r#"{{"root": {:?}, "sourceId": "t"}}"#, dir.path().display());
-    let bare: serde_json::Value =
-        serde_json::from_str(&analyze_json(&no_git).expect("analyze_json should succeed"))
-            .expect("valid JSON");
-    assert!(bare["scores"].is_null(), "no git means no scores");
-    assert!(
-        bare.get("scoreMeanings").is_none(),
-        "a legend for numbers that did not run must be absent, not null"
-    );
-}
-
+/// `scores` legend removal (2026-09-06): the `scoreMeanings` WIRE FIELD was deleted for having no
+/// reader on any lane, and the test that pinned it went with its subject. The legend DATA is not gone
+/// and neither is its contract — `zzop_metrics::SCORE_MEANINGS` still ships and its completeness is
+/// pinned in BOTH directions in that crate (`scores/meanings/tests.rs`), which is where the one owner
+/// of that fact lives. What was removed here was the second copy of a check plus the field it read.
 /// The same exact pin for the ONE conditionally-present top-level field: `ruleOverridesApplied` is
 /// omitted entirely when the caller requested no `disabledRules`/`severityOverrides` (see
 /// `analyze_json_omits_rule_overrides_applied_when_nothing_was_requested`), so the pin above — whose
@@ -377,15 +326,14 @@ fn analyze_json_top_level_key_set_with_rule_overrides_is_pinned_exactly() {
             "configWarnings",
             "coverage",
             "critical",
+            "criticalTruncated",
             "degraded",
             "disclosure",
             "fileCount",
             "findings",
-            "folders",
             "gitWindow",
             "health",
             "ir",
-            "layerCoChurn",
             "nativeAnalyses",
             "nativeAnalysesMeaning",
             "nodes",
@@ -441,15 +389,14 @@ fn analyze_json_top_level_key_set_with_packs_loaded_is_pinned_exactly() {
             "configWarnings",
             "coverage",
             "critical",
+            "criticalTruncated",
             "degraded",
             "disclosure",
             "fileCount",
             "findings",
-            "folders",
             "gitWindow",
             "health",
             "ir",
-            "layerCoChurn",
             "nativeAnalyses",
             "nativeAnalysesMeaning",
             "nodes",
@@ -522,9 +469,12 @@ fn analyze_trees_json_top_level_key_set_is_pinned_exactly() {
 
 #[test]
 fn analyze_json_severity_overrides_remap_a_finding_severity() {
-    // `circular` defaults to `warning` (rules-graph). A `severityOverrides` request entry must
-    // promote it to `critical` on the way through `base_engine_config` -> `RuleConfig` ->
-    // `merge_findings`'s `apply_severity_override`.
+    // `circular` defaults to `info` (rules-graph, since 2026-09-06). A `severityOverrides` request
+    // entry must promote it to `critical` on the way through `base_engine_config` -> `RuleConfig` ->
+    // `merge_findings`'s `apply_severity_override`. The assertion below reads only the POST-override
+    // band, which is why the shipped default can move without this test going red -- so the default is
+    // named here rather than assumed, and the sibling that does pin it is
+    // `crates/engine/tests/integration/analyze_rule_config.rs`.
     let dir = cycle_fixture();
     let config = format!(
         r#"{{"root": {:?}, "severityOverrides": {{"circular": "critical"}}}}"#,
@@ -539,7 +489,7 @@ fn analyze_json_severity_overrides_remap_a_finding_severity() {
         .expect("expected a circular finding");
     assert_eq!(
         circular["severity"], "critical",
-        "severityOverrides must remap circular warning -> critical, got: {value}"
+        "severityOverrides must remap circular info -> critical, got: {value}"
     );
 }
 

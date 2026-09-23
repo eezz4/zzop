@@ -97,8 +97,10 @@ pub fn missing_config_error(candidate: &Path) -> ConfigError {
     ConfigError(format!(
         "{MISSING_CONFIG_MARKER}{}.\nzzop analyzes what a config DECLARES: the convention vocabulary a \
          project picks — what it calls its auth guards, which banners mark its generated files, how it \
-         names its data-access receivers — has no built-in default, so a run without a config would \
-         judge less while reporting itself complete. Start from the `config-template` contract document \
+         names its data-access receivers — has no built-in default, so a run without a config answers \
+         a different question than you think while reporting itself complete: most axes go unjudged, \
+         and the auth axis goes the OTHER way, reporting guarded routes because no name is declared \
+         that could prove a guard. Start from the `config-template` contract document \
          (every zzop surface can serve it) and save it as {}.",
         candidate.display(),
         candidate.display()
@@ -175,11 +177,21 @@ fn load_config_file_with(path: &Path, advice: TreeAdvice) -> Result<LoadedReques
             &mut warnings,
         );
     }
+    // One `vocabulary` object governs every tree this config declares (it sits at the config's top
+    // level), so the per-tree list is that one list repeated. `wrap_single_tree` may still turn an
+    // `Analyze` request into a one-entry `analyzeTrees` one after this, and one copy is right there too.
+    let tree_count = mapped
+        .request
+        .get("trees")
+        .and_then(serde_json::Value::as_array)
+        .map_or(1, Vec::len);
+    let declared_vocabulary = vec![mapped.declared_vocabulary; tree_count];
     Ok(LoadedRequest {
         method: mapped.method,
         request: mapped.request,
         warnings,
         config_path: Some(candidate),
+        declared_vocabulary,
     })
 }
 

@@ -81,7 +81,7 @@ fn an_excluded_file_is_dropped_from_the_report_but_still_counts_toward_blast_rad
             },
         ),
     ];
-    let crit = compute_criticality(
+    let (crit, _) = compute_criticality(
         &nodes,
         &d,
         &exclude("vendor/**"),
@@ -131,7 +131,7 @@ fn an_excluded_hub_never_eats_a_report_slot() {
         hub("vendor/big2.ts", 800),
         hub("core.ts", 10),
     ];
-    let crit = compute_criticality(
+    let (crit, _) = compute_criticality(
         &nodes,
         &d,
         &exclude("vendor/**"),
@@ -169,7 +169,7 @@ fn ranks_by_transitive_blast_radius() {
             },
         ),
     ];
-    let crit = compute_criticality(
+    let (crit, _) = compute_criticality(
         &nodes,
         &d,
         &[],
@@ -217,7 +217,7 @@ fn flags_high_blast_low_churn_hub_as_silent() {
             },
         ),
     ];
-    let crit = compute_criticality(
+    let (crit, _) = compute_criticality(
         &nodes,
         &d,
         &[],
@@ -262,7 +262,7 @@ fn weights_blast_by_hub_size() {
             },
         ),
     ];
-    let crit = compute_criticality(
+    let (crit, _) = compute_criticality(
         &nodes,
         &d,
         &[],
@@ -302,6 +302,7 @@ fn cycle_safe_and_respects_min_blast_radius() {
         CRITICALITY_SILENT_CHANGE_MAX,
         CRITICALITY_LIMIT
     )
+    .0
     .is_empty());
     assert_eq!(
         compute_criticality(
@@ -312,7 +313,76 @@ fn cycle_safe_and_respects_min_blast_radius() {
             CRITICALITY_SILENT_CHANGE_MAX,
             CRITICALITY_LIMIT
         )
+        .0
         .len(),
         2
+    );
+}
+
+/// The cap says what it dropped. Until 2026-09-04 it did not, and 20 rows read as the whole set —
+/// `architecture.criticalTop`'s legend publishes only the THREE it lifts, so nothing in the reply
+/// named the wall behind it.
+///
+/// Both directions, because a count that is always `0` and a count that is always `len - cap` fail
+/// this test the same way a silent cap did: the complete case must report `0`, not omit the number.
+#[test]
+fn the_cap_reports_how_many_rows_it_dropped_and_reports_zero_when_it_dropped_none() {
+    // A chain a0 -> a1 -> ... -> a5. Each aK is imported transitively by all K files before it, so
+    // every node but the first has a distinct non-zero blast radius and the ranked list is a real
+    // one rather than a tie the cap would cut arbitrarily.
+    let names: Vec<String> = (0..6).map(|i| format!("a{i}.ts")).collect();
+    let pairs: Vec<(&str, Vec<&str>)> = (0..6)
+        .map(|i| {
+            let imports = if i + 1 < 6 {
+                vec![names[i + 1].as_str()]
+            } else {
+                vec![]
+            };
+            (names[i].as_str(), imports)
+        })
+        .collect();
+    let borrowed: Vec<(&str, &[&str])> = pairs.iter().map(|(f, t)| (*f, t.as_slice())).collect();
+    let d = dep(&borrowed);
+    let nodes: Vec<FileNode> = names
+        .iter()
+        .enumerate()
+        .map(|(i, n)| {
+            node(
+                n,
+                P {
+                    fan_in: u32::from(i > 0),
+                    ..P::default()
+                },
+            )
+        })
+        .collect();
+
+    let (all, none_dropped) = compute_criticality(
+        &nodes,
+        &d,
+        &[],
+        1,
+        CRITICALITY_SILENT_CHANGE_MAX,
+        CRITICALITY_LIMIT,
+    );
+    assert_eq!(
+        none_dropped, 0,
+        "a list under the cap must report 0 dropped, never omit the number — an absent count and a \
+         complete list have to be different bytes"
+    );
+
+    let cap = all.len() - 1;
+    let (capped, dropped) =
+        compute_criticality(&nodes, &d, &[], 1, CRITICALITY_SILENT_CHANGE_MAX, cap);
+    assert_eq!(capped.len(), cap, "the cap still caps");
+    assert_eq!(
+        dropped, 1,
+        "one row was dropped and the count must be that row, not a bool and not the total"
+    );
+    assert_eq!(
+        capped.len() + dropped as usize,
+        all.len(),
+        "`shown + dropped` must reconstruct the full set — the property that makes this count worth \
+         shipping rather than a bare `truncated: true`"
     );
 }

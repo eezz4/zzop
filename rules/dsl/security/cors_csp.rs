@@ -37,14 +37,24 @@ fn allowlisted_origin_is_not_flagged() {
     assert!(hits(&out, "cors-wildcard").is_empty(), "{:?}", out.findings);
 }
 
-/// POSITION, not presence (rule-quality.md §27). The clause that disqualifies this finding — a
-/// public, credential-less API where `*` is the correct configuration — was already in the message,
-/// 583 bytes BEHIND the imperative (measured 2026-08-26: clause at byte 808, imperative at 225 of
-/// 986). A reader who acts on the first instruction never reaches it, and here the edit it leads to
-/// is not a style change: cal.com's `apps/api/v2/src/bootstrap.ts:44` is the PUBLIC Platform API v2,
-/// called from arbitrary customer domains by the `@calcom/atoms` React SDK it ships to those
-/// customers. An allow-list cannot enumerate a multi-tenant public API's callers, so replacing the
-/// wildcard fails every embedded integration at preflight.
+/// POSITION, not presence (rule-quality.md §27). The clause that disqualifies this finding — the API
+/// where `*` is the correct configuration — was already in the message, 583 bytes BEHIND the
+/// imperative (measured 2026-08-26: clause at byte 808, imperative at 225 of 986). A reader who acts
+/// on the first instruction never reaches it, and here the edit it leads to is not a style change:
+/// cal.com's `apps/api/v2/src/bootstrap.ts:44` is the PUBLIC Platform API v2, called from arbitrary
+/// customer domains by the `@calcom/atoms` React SDK it ships to those customers. An allow-list
+/// cannot enumerate a multi-tenant public API's callers, so replacing the wildcard fails every
+/// embedded integration at preflight.
+///
+/// THE ORDER WAS RIGHT AND THE PREMISE WAS WRONG, and that is a separate defect from §27's: the
+/// clause used to read "a purely public, credential-less API (no cookies/auth headers involved)".
+/// What makes a wildcard safe is the absence of `credentials: true`, not the absence of auth headers
+/// — a browser rejects a wildcard response to a credentialed request outright, while an
+/// `Authorization` header the caller sets itself travels fine under `credentials: "omit"`. Measured
+/// on the very tree the paragraph above is about: `apps/api/v2/src/bootstrap.ts` LISTS
+/// `Authorization` in `allowedHeaders` (:50) and `grep -rn "credentials\s*:\s*true" apps/api/v2/src`
+/// returns 0 (control: 10 tree-wide, all Prisma selects). So the one reader this exemption exists for
+/// read it as somebody else's, which a move cannot fix. The needle below is the repaired premise.
 ///
 /// This pin asserts ORDER. The `contains` checks stay green with the clause anywhere in the string,
 /// which is exactly how it shipped behind the imperative. The invalidation probe: move the clause
@@ -65,7 +75,7 @@ fn the_public_api_exemption_precedes_the_imperative() {
     assert_disqualifier_clause_precedes_imperative(
         "cors-wildcard",
         m,
-        "A wildcard is legitimate for a purely public, credential-less API",
+        "A wildcard is legitimate for an API that carries NO AMBIENT AUTHORITY",
         "Return a specific allow-listed origin instead",
     );
     // The exit the clause names has to survive the move, or the reader is told the finding may not
@@ -73,6 +83,15 @@ fn the_public_api_exemption_precedes_the_imperative() {
     assert!(
         m.contains("zzop-cors-wildcard-ok"),
         "the clause no longer names the suppression marker: {m}"
+    );
+    // The PREMISE, not only its position. A wildcard is made safe by the absence of the credentials
+    // flag, and the sentence has to say THAT: the reader this exemption exists for has
+    // `Authorization` sitting in `allowedHeaders`, and under the old premise read the exemption as
+    // somebody else's and went on to the breaking edit.
+    assert!(
+        m.contains("THE TEST IS `credentials: true`")
+            && m.contains("NOT whether auth headers are used"),
+        "the exemption no longer rests on the credentials flag: {m}"
     );
 }
 

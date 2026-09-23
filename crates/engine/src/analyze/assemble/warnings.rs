@@ -6,6 +6,7 @@
 
 use std::collections::BTreeMap;
 
+mod provide_side;
 mod wrong_key;
 
 /// Runs every framework-silence tripwire and returns each warning that fired, in the push order the
@@ -47,6 +48,11 @@ pub(super) fn framework_silence_warnings(
     // ("does this tree have route visibility?") and answering the first with the second is what let an
     // overlay silence the very warning that asked for it. See `diagnostics::overlay_provenance`.
     overlay_io: &BTreeMap<String, crate::envelope::OverlayIoCounts>,
+    // The lexically-visible route-registration count, set only when the provide-side trio measured it
+    // (S2's precondition). Rides out of this phase because its second reader is the run-wide
+    // provide-blind severity gate, which cannot re-derive the file set without risking a different
+    // population than the extractor saw — see `provide_side_warnings`.
+    visible_route_registrations_out: &mut Option<usize>,
 ) -> Vec<String> {
     let mut warnings = Vec::new();
 
@@ -66,45 +72,19 @@ pub(super) fn framework_silence_warnings(
     // channel came up empty — S15 at the bottom rides them rather than gating itself, because "the
     // channel is empty" and "an empty channel here is a surprise" are different judgments and the
     // siblings own the second one. A frontend tree with no routes is not a gap.
-    let mut provide_side_alarm = false;
-    if let Some(w) =
-        crate::framework_silence::controller_silence_warning(root, &candidate_rels, http_count)
-    {
-        provide_side_alarm = true;
-        warnings.push(w);
-    }
-
-    // S2 — server-framework import tripwire (provide side): a server-framework package import present
-    // while extracted `http` provides stay near-zero (closes the method-call registration idiom S1's
-    // decorator regex cannot see). Additive to S1 above; both may fire. Pure map lookup over
-    // `package_import_files` (already a sorted `BTreeMap`/`BTreeSet`) — no disk IO, so unconditional.
-    if let Some(w) =
-        crate::framework_silence::server_framework_import_warning(package_import_files, http_count)
-    {
-        provide_side_alarm = true;
-        warnings.push(w);
-    }
-
-    // S16 — PARTIAL-silence tripwire (provide side). Every sibling above asks a tree-wide question and
-    // can therefore only see a tree with almost NO routes; this one asks per FILE, which is the shape a
-    // partial gap takes — and partial is the common one. It stays quiet when the tree extracted nothing
-    // (S1/S2 own that case and name the framework), so the two cannot double-report one silence.
-    // Judged on the NATIVE count for the same reason S1/S2 are: an overlay answers "does this tree have
-    // routes", not "can zzop see this framework".
-    let provide_files: std::collections::BTreeSet<String> = io_provides
-        .iter()
-        .filter(|p| p.kind == "http")
-        .map(|p| p.file.clone())
-        .collect();
-    if let Some(w) = crate::framework_silence::partial_route_silence_warning(
+    // S1 · S2 · S16 — the provide-side tripwire trio. They live in their own module because they are
+    // the only three that read `candidate_rels` from DISK, and because this file crossed the 300-line
+    // cap when S2 grew a fourth argument (2026-09-06). Splitting on that seam rather than at an
+    // arbitrary line keeps one question in one file: "does this tree serve routes zzop cannot see?"
+    let provide_side_alarm = provide_side::provide_side_warnings(
+        root,
+        &candidate_rels,
         package_import_files,
-        &provide_files,
+        io_provides,
         http_count,
-    ) {
-        provide_side_alarm = true;
-        warnings.push(w);
-    }
-
+        &mut warnings,
+        visible_route_registrations_out,
+    );
     // S4 — http-client import tripwire (consume side): an http-CLIENT package import present while
     // extracted `http` consumes stay near-zero — the consume-side dual of S2. Additive to S1-S3 above;
     // any subset may fire together. `http_consumes_count` counts ALL extracted `http`-kind consume
@@ -173,6 +153,16 @@ pub(super) fn framework_silence_warnings(
     // the one auth idiom this engine cannot see (a tower layer) start costing false positives. Also a
     // pure pass over `io_provides`, so also unconditional.
     if let Some(w) = crate::framework_silence::rust_router_layer_warning(io_provides) {
+        warnings.push(w);
+    }
+
+    // S18 — protected-path auth RANGE self-report: S10's twin one rule over (same family, different
+    // consumer — see its own module doc for the three idioms and the tree that measured them). Takes
+    // `rule_gate` for S15's reason (it NAMES a rule id); otherwise a pure `io_provides` pass, so also
+    // unconditional.
+    if let Some(w) =
+        crate::framework_silence::protected_path_auth_range_warning(io_provides, rule_gate)
+    {
         warnings.push(w);
     }
 

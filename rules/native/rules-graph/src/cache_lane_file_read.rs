@@ -61,7 +61,7 @@
 //!   checkable in one jump.
 //! - **Macro bodies and dynamic dispatch are invisible**, per each parser's own declared blindness.
 
-use zzop_core::callgraph::{bfs_reachable, SymbolGraph};
+use zzop_core::callgraph::{bfs_reachable_in, Adjacency, SymbolGraph};
 use zzop_core::{Finding, Severity, SourceSymbol};
 
 /// Built-in default for `vocabulary.fileReadCallees` — standard-library spellings that read the
@@ -145,11 +145,15 @@ pub fn scan_cache_lane_file_read(input: &ScanCacheLaneFileReadInput) -> Vec<Find
             .copied()
     };
 
+    // One index for the whole anchor loop — same reason as the two http rules (review ledger V112):
+    // Building the adjacency map rebuilds it from the edge list, so doing that per route is
+    // quadratic in the tree.
+    let adjacency = Adjacency::build(input.symbol_graph);
     let mut out = Vec::new();
     for anchor in anchors {
-        let Some((reached, depth)) = bfs_reachable(input.symbol_graph, &anchor.id, |id| {
-            reads_a_file(id).is_some()
-        }) else {
+        let Some((reached, depth)) =
+            bfs_reachable_in(&adjacency, &anchor.id, |id| reads_a_file(id).is_some())
+        else {
             continue;
         };
         // The predicate just proved this is `Some`; re-reading it is how the CALLEE gets into the
@@ -169,7 +173,14 @@ pub fn scan_cache_lane_file_read(input: &ScanCacheLaneFileReadInput) -> Vec<Find
                 "reachedSymbol": reached,
                 "callee": callee,
                 "depth": depth,
-                "hint": hint,
+                // 🔴 NO `hint` KEY HERE, and its absence is the repair. This rule used to emit
+                // `"hint": hint` beside `message: hint.clone()` — the SAME string twice in one finding.
+                // Harmless while both were inline; expensive once the prose fold landed, because the fold
+                // shrinks `message` to a pointer and `data.hint` kept shipping the full text per finding,
+                // cancelling the saving exactly. 📏 Measured 2026-09-13 (ledger V231) on
+                // `analyze corpus/frameworks/fastapi --limit 1000`: `data.hint` was 624,774 of the reply's
+                // 1,167,742 bytes (60%), and 117 of 117 hints were byte-identical to their own finding's
+                // message. The text is not lost — it is in `message`, which is the field that carries it.
             })),
         });
     }

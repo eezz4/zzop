@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 mod bfs;
 mod resolve;
 
-pub use bfs::bfs_reachable;
+pub use bfs::{bfs_reachable_in, Adjacency};
 pub use resolve::{
     build_symbol_graph, build_symbol_graph_with_unresolved, resolve_calls_for_file,
     resolve_calls_for_file_with_unresolved,
@@ -41,6 +41,48 @@ pub struct RawCall {
     pub is_heritage: bool,
 }
 
+/// Everything ONE TypeScript file contributes to the whole-tree call-graph pass, gathered while that
+/// file's AST is already in hand.
+///
+/// The pass used to read and re-parse every dispatched source itself, which cost a SECOND full swc
+/// parse per file: `parse_with_cm`'s memo is one entry and thread-local, so it collapses the per-file
+/// lane's consecutive extractors and can never be warm for a pass that runs later on another thread.
+/// Measured on this repository: two parses per `.ts` file, and the pass was 68% of a warm run (review
+/// ledger V103/V108). Moving the extraction to where the parse already happened makes it one, and puts
+/// the result behind the per-file cache — which is where the 68% actually lived.
+///
+/// The three guard fields are NestJS-specific and TypeScript-only, the same unevenness `function_spans`
+/// (TypeScript) and `test_spans` (Rust) already carry: a fact belongs to the languages that can produce
+/// it, and an empty vec here means this file had none, never that the question was not asked.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CallGraphFacts {
+    /// This file's call sites, attributed to their enclosing symbol. Cross-file resolution into
+    /// `SymbolEdge`s is still [`resolve_calls_for_file`]'s job — this is the per-file half only.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub raw_calls: Vec<RawCall>,
+    /// Lines where a controller-level guard decorator applies (`extract_controller_guarded_lines`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub controller_guarded_lines: Vec<u32>,
+    /// Nest `forRoutes` (method, path) patterns. Consumed with `.any(..)`, so order cannot reach a
+    /// verdict.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nest_forroutes: Vec<(String, String)>,
+    /// This file's `setGlobalPrefix` marker, if it declares one. The tree-wide winner is the LOWEST
+    /// path, which is the consumer's decision, not this file's — so every candidate is carried.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub global_prefix: Option<String>,
+}
+
+impl CallGraphFacts {
+    /// True when this file contributed nothing — the common case, and what lets a cached slice skip
+    /// the whole object rather than serialize four empty containers per file.
+    pub fn is_empty(&self) -> bool {
+        self.raw_calls.is_empty()
+            && self.controller_guarded_lines.is_empty()
+            && self.nest_forroutes.is_empty()
+            && self.global_prefix.is_none()
+    }
+}
 /// A resolved caller-symbol -> callee-symbol edge.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SymbolEdge {

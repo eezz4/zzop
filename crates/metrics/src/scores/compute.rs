@@ -67,32 +67,77 @@ pub struct ScoresInput<'a> {
 /// Assembles the full `Scores` report by calling each of the 15 metric modules exactly once. `coupling`
 /// receives `circular.len()` (the cycle count), never the cycles themselves.
 ///
-/// Thirteen take `input.is_scored` — see [`ScoresInput::is_scored`] for what the gate means and why it
-/// applies to both the violation list and the denominator. The four that do not (`cohesion`, `sdp`,
-/// `main_sequence`, `modularity`) are keyed by slice/module rather than by file.
+/// ELEVEN of the fifteen take the per-file gate [`ScoresInput::is_scored`] — see that field for what the
+/// gate means and why it applies to both the violation list and the denominator. The four that do not
+/// (`cohesion`, `sdp`, `main_sequence`, `modularity`) are keyed by slice/module rather than by file.
+/// (This sentence read "thirteen" until 2026-09-11, which no arithmetic in this file supports — 15 minus
+/// the 4 named right after it is 11. Recount without trusting either number:
+/// `sed -n '/^    Scores {/,/^    }$/p' crates/metrics/src/scores/compute.rs | grep -c is_scored`.)
+///
+/// # The scored POPULATION is applied here, and ONLY to the eleven file-keyed metrics
+/// [`ScoresConfig::population`] says which files may be counted at all, and it reaches the scores by
+/// exactly one route: it folds into the `is_scored` gate. An excluded file loses its own standing as a
+/// judged subject and nothing else — every OTHER file's fan-out, coupling and violations are untouched,
+/// exactly as [`ScoresInput::is_scored`] already specifies for the top-level `exclude` key.
+///
+/// **The four slice/module-keyed metrics therefore keep scoring the WHOLE tree**, test files included,
+/// while their eleven siblings score a narrowed one. That is a real split inside one `Scores` struct,
+/// and it is PUBLISHED rather than left for a reader to infer: the shaped reply's
+/// `architecture.painMeaning` names those four by name whenever the key is on (`crates/summary/src/
+/// analyze/architecture.rs`, pinned end to end by `crates/summary/tests/
+/// score_population_disclosure.rs`). It is stated there rather than in `super::meanings` because the
+/// `scoreMeanings` WIRE FIELD was deleted on 2026-09-06 for having no reader — a sentence added there
+/// would reach nobody, which is the failure this comment would otherwise be committing.
+///
+/// ## Why they are not narrowed too (2026-09-11 user ruling; the first attempt DID narrow them)
+/// The first implementation handed those four a dep graph RESTRICTED to the population — an excluded
+/// file was neither a member of its slice nor an endpoint of any counted edge. It was reverted, and the
+/// reasoning is measurement rather than taste:
+///
+/// * The metric it was built for measures NOTHING on any tree anyone has run. `cohesion` is the only
+///   score whose subject is an FSD SLICE, and its own published population (`cohesion.sliceCount`) is
+///   0 on all 21 corpus trees AND on this repo: the slice regex is anchored (`^<container>/<slice>/`),
+///   so a tree whose slices sit under `src/` or `public/app/` has none at all. A restriction whose
+///   only slice-keyed beneficiary has an empty population is buying nothing.
+/// * It costs a doctrine that holds everywhere. Dropping a node from the graph states that a real
+///   dependency does not exist, which [`ScoresInput::is_scored`] exists to avoid. Trading a rule that
+///   holds on every tree for a delta that shows up on none is the wrong side of that exchange.
+///
+/// **What the revert costs, measured rather than assumed**: the other three (`sdp`, `main_sequence`,
+/// `modularity`) are FOLDER-keyed (`super::shared::module_of`, which falls back to the top path
+/// segment), so they have real populations — and with the restriction gone they no longer respond to
+/// the key AT ALL. Measured over the 21-tree corpus (`corpus/frameworks/*`, each analyzed twice, the
+/// key off then on): `main_sequence` moved on 14 trees WITH the restriction and on **0** without it;
+/// `modularity` 14 -> 0; `sdp` 2 -> 0; `cohesion` 0 -> 0. That is the price, it is not zero, and it is
+/// recorded here so re-opening this is an argument about a known number rather than a rediscovery.
+///
+/// When the filter keeps everything — the DEFAULT — the wrapping does not run at all: the caller's own
+/// `is_scored` reference is passed through, so the untouched path is untouched rather than merely
+/// equivalent.
 pub fn compute_scores(input: &ScoresInput, cfg: &ScoresConfig) -> Scores {
+    let population_scoped = |path: &str| (input.is_scored)(path) && !cfg.population.excludes(path);
+    // The caller's own `&dyn Fn` when nothing is excluded, so the default path is the pre-existing one
+    // by reference rather than by arithmetic.
+    let is_scored: &dyn Fn(&str) -> bool = if cfg.population.keeps_everything() {
+        input.is_scored
+    } else {
+        &population_scoped
+    };
     Scores {
         feature_sliced_design: feature_sliced_design::compute_feature_sliced_design(
-            input.dep,
-            cfg,
-            input.is_scored,
+            input.dep, cfg, is_scored,
         ),
         cohesion: cohesion::compute_cohesion(input.dep, cfg),
-        coupling: coupling::compute_coupling(
-            input.nodes,
-            input.circular.len(),
-            cfg,
-            input.is_scored,
-        ),
+        coupling: coupling::compute_coupling(input.nodes, input.circular.len(), cfg, is_scored),
         sdp: sdp::compute_sdp(input.dep, cfg),
-        hierarchy: hierarchy::compute_hierarchy(input.dep, cfg, input.is_scored),
-        public_api: public_api::compute_public_api(input.dep, cfg, input.is_scored),
+        hierarchy: hierarchy::compute_hierarchy(input.dep, cfg, is_scored),
+        public_api: public_api::compute_public_api(input.dep, cfg, is_scored),
         file_size_compliance: file_size_compliance::compute_file_size_compliance(
             input.nodes,
             input.target,
             cfg,
             input.is_source,
-            input.is_scored,
+            is_scored,
         ),
         main_sequence: main_sequence::compute_main_sequence(input.dep, input.file_kinds, cfg),
         modularity: modularity::compute_modularity(input.dep, cfg),
@@ -101,13 +146,13 @@ pub fn compute_scores(input: &ScoresInput, cfg: &ScoresConfig) -> Scores {
             input.target,
             cfg,
             input.is_source,
-            input.is_scored,
+            is_scored,
         ),
-        sibling_cross: sibling_cross::compute_sibling_cross(input.dep, cfg, input.is_scored),
-        diamond: diamond::compute_diamond(input.dep, cfg, input.is_scored),
-        rename_instability: rename::compute_rename(input.nodes, input.is_scored),
-        bus_factor: bus_factor::compute_bus_factor(input.nodes, cfg, input.is_scored),
-        fix_ratio: fix_ratio::compute_fix_ratio(input.nodes, cfg, input.is_scored),
+        sibling_cross: sibling_cross::compute_sibling_cross(input.dep, cfg, is_scored),
+        diamond: diamond::compute_diamond(input.dep, cfg, is_scored),
+        rename_instability: rename::compute_rename(input.nodes, is_scored),
+        bus_factor: bus_factor::compute_bus_factor(input.nodes, cfg, is_scored),
+        fix_ratio: fix_ratio::compute_fix_ratio(input.nodes, cfg, is_scored),
     }
 }
 

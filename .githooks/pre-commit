@@ -28,9 +28,14 @@ GUARDS=(
   check-ruff-isolation
   check-syn-isolation
   check-tree-sitter-isolation
+  check-dep-closure
+  check-rule-extension-closure
   check-git-spawn-isolation
   check-guards-wired
   check-rules-catalog-sync
+  check-catalog-severity-sync
+  check-message-band-claims
+  check-shipped-off-sync
   check-site-generated
   check-rule-desc-tokens
   check-pack-suppress-sentence
@@ -48,8 +53,10 @@ GUARDS=(
   check-ci-local-mirrors-ci
   check-convention-vocab-declarable
   check-committed-config-vocabulary
+  check-config-surface-read-by
   check-shell-pipe-sigpipe
   check-shell-mute-floor
+  check-shell-herestring-scale
   check-version-lists-parsers
   check-framework-prose-enumeration
   check-asset-name-prose
@@ -61,6 +68,12 @@ GUARDS=(
   check-release-version-propagation
   check-embedded-contract-docs
   check-license-shipping
+  check-fragment-fixture-pairing
+  check-mcp-tools-listed
+  check-cli-flags-documented
+  check-rule-id-renames-recorded
+  check-ci-job-timeouts
+  check-cached-finding-producers
 )
 
 for g in "${GUARDS[@]}"; do
@@ -86,4 +99,29 @@ echo "pre-commit: ${#GUARDS[@]} guards clean."
 # move a finding, which over the last 96 commits was 65.6% of them.
 # The script owns the trigger, the announcement and the escape hatch; read its header for what the
 # trigger is blind to (crates/, notably) before quoting a green run as "detection is fine".
+# The README reproduction block is a COPY of numbers only a run knows, and it went stale four times
+# before anything checked it (the fourth shipped in v0.34.0 with all guards green). This verifier is
+# deliberately NOT a scripts/check-*.sh, for the reason detection-benchmark states in ci.yml: that
+# would oblige every commit to afford a release build. It arms itself off the index instead, and is
+# a no-op unless README.md or the fixture tree is staged.
+bash scripts/measure/readme-result-block.sh
+
 bash scripts/detection-gate-if-touched.sh
+
+# The other half of that gate's signal, and the half the ninety-commit episode actually turned on.
+# The line above runs the gate when this commit stages a path that can move a finding; it says nothing
+# on the commits that stage none — which is most of them, and every one of the commits over which a red
+# verdict would sit unread. A failing gate leaves its verdict in one terminal and nowhere else, so
+# `not armed` after a red and `not armed` after a green are the same bytes. This reads the verdict
+# detection-gate.sh now records and prints it at every commit. It never refuses: see its header, and
+# scripts/unseen-commits.sh below for the precedent it follows.
+bash scripts/detection-gate-staleness.sh
+
+# Same shape, a different subject: the guards above are text checks and none of them loads a rule pack
+# and asserts on it. A pack edit that splits an invariant between two rules is invisible to every one of
+# them AND to the detection gate (cases/trees holds no file of the extension that showed it) -- so it
+# stayed red for a commit with everything green (review ledger V137). Armed off the index; ~15% of
+# commits stage rules/dsl/. Its header owns the cost and the escape hatch.
+bash scripts/rule-pack-tests-if-touched.sh
+
+bash scripts/unseen-commits.sh

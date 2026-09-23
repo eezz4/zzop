@@ -226,7 +226,7 @@ assert_workspace_members_scanned() {
   # Counted with the shell. `printf | grep -c` forks twice for a number this loop already has to
   # walk for, and on this machine a fork is the unit of cost -- see the scanned-set comment below.
   local _m
-  while IFS= read -r _m; do [ -n "$_m" ] && member_count=$((member_count + 1)); done <<< "$members"
+  while IFS= read -r _m; do [ -n "$_m" ] && member_count=$((member_count + 1)); done < <(printf '%s\n' "$members")
   # The seal's OWN subject set. Without this, a Cargo.toml reshape that makes the awk match nothing
   # turns this whole assertion into a loop over zero members — green, having proved nothing, which is
   # precisely the defect it exists to remove, reproduced one level up.
@@ -255,6 +255,17 @@ assert_workspace_members_scanned() {
   # invalidation drill in the callers (rename the members array, expect a named failure) still
   # reports the same members. The SIGPIPE hazard the old comment named is gone with the pipeline
   # it described; check-shell-pipe-sigpipe.sh has nothing to catch here any more.
+  # Fed by process substitution, NOT `<<< "$scanned"`, and that is not style. bash implements a
+  # here-string as a PIPE: it writes the whole string into the pipe and only then execs the reader.
+  # Over 65,536 bytes the write blocks against a pipe nobody is draining yet, and the script hangs
+  # forever -- no error, no exit, no timeout. Measured 2026-09-08 (bash 5.3.9, Git for Windows):
+  # `git ls-files -- '*.rs'` had just crossed the ceiling at 65,603 bytes, the same string
+  # truncated to 64,000 passed, and a pre-commit sat in check-max-file-lines for 31 minutes at 0%
+  # CPU. SIX guards call this function, so the whole fleet stopped -- and stopping silently is
+  # worse than a false green: nothing turns red, the run just never ends and reads as "slow".
+  # The subject here is `git ls-files` output, so its size is the repository's size; every
+  # here-string in this fleet whose content scales that way was converted with it, and
+  # check-shell-herestring-scale.sh keeps them converted.
   local -A _ancestors=()
   local _path _dir
   while IFS= read -r _path; do
@@ -264,13 +275,13 @@ assert_workspace_members_scanned() {
       _dir="${_dir%/*}"
       _ancestors["$_dir"]=1
     done
-  done <<< "$scanned"
+  done < <(printf '%s\n' "$scanned")
 
   local m
   while IFS= read -r m; do
     [ -n "$m" ] || continue
     [ -n "${_ancestors[$m]:-}" ] || missing+=("$m")
-  done <<< "$members"
+  done < <(printf '%s\n' "$members")
   if [ ${#missing[@]} -gt 0 ]; then
     echo "$label: FAILED -- ${#missing[@]} of $member_count declared workspace member(s) contributed NO" >&2
     echo "file to this scan: ${missing[*]}" >&2

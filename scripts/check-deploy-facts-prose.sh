@@ -423,7 +423,7 @@ claim_pattern="$claim_pattern|[0-9]+-rule ${q}($pack_alt)${q}"
 files=()
 while IFS= read -r f; do
   [ -n "$f" ] && files+=("$f")
-done <<< "$candidate_files"
+done < <(printf '%s\n' "$candidate_files")
 
 matches=""
 if [ "${#files[@]}" -gt 0 ]; then
@@ -486,6 +486,46 @@ while IFS= read -r row; do
   fi
 done <<< "$matches"
 
+
+# ── AXIS: a RETIRED public identity must not survive on a distribution surface ───────────────────
+#
+# ## The defect this exists for (2026-09-08, external review round 12, review ledger V101)
+#
+# The public identity was changed by user decision on 2026-09-07 — the frontend-call x backend-route
+# join went from being the headline to being one of four axes, and the one still under validation
+# the join is one of four axes and the one still being validated, not the headline).
+# that day. Six distribution surfaces did not: server.json, the plugin and marketplace manifests, the
+# .mcpb manifest and its bundle README all still led with "cross-repo contract analysis", and one of
+# them is the description published to the MCP registry.
+#
+# Those are precisely the surfaces a user reads BEFORE installing — README's own words for that lane
+# are "you run no commands" — so they were advertising the narrowest axis to the persona least able
+# to check it. The counts on these same files were guarded; the SENTENCE was not.
+#
+# A retired-phrase list rather than a required-phrase list, deliberately. The surfaces legitimately
+# differ in length and emphasis, so demanding one sentence would either be vacuous or force identical
+# prose onto a registry blurb and a bundle README. What is checkable without judgement is that a
+# spelling the project has RETIRED is gone from all of them.
+retired_identities="cross-repo contract analysis"
+identity_surfaces="server.json .claude-plugin/plugin.json .claude-plugin/marketplace.json packages/mcpb/manifest.json packages/mcpb/BUNDLE-README.md README.md"
+stale_identity=""
+for surface in $identity_surfaces; do
+  [ -f "$surface" ] || { echo "$SELF: missing identity surface $surface -- re-anchor this axis." >&2; exit 1; }
+  # shellcheck disable=SC2086
+  if grep -q -i -- "$retired_identities" "$surface"; then
+    stale_identity="$stale_identity $surface"
+  fi
+done
+if [ -n "$stale_identity" ]; then
+  echo "$SELF: RETIRED public identity still on distribution surface(s):" >&2
+  echo " $stale_identity" >&2
+  echo "  \"$retired_identities\" was retired on 2026-09-07 (user decision: the join is one of four" >&2
+  echo "  axes, and the one still being validated -- not the headline). These files are what a user" >&2
+  echo "  reads before installing, so a retired identity here outlives it everywhere else." >&2
+  echo "  The current wording is owned by the project positioning decision, not by these files." >&2
+  exit 1
+fi
+echo "check-deploy-facts-prose: OK (no retired public identity on $(printf '%s' "$identity_surfaces" | wc -w) distribution surface(s))."
 if [ "$fail" -ne 0 ]; then
   echo "$SELF: FAILED -- the counts above are derived from the code on every run. Fix the prose to match" >&2
   echo "  the code, or (if the code is what is wrong) fix the code -- never widen this guard to hide a drift." >&2

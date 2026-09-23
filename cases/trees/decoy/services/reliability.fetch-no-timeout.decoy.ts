@@ -1,5 +1,5 @@
 // DECOY for reliability/fetch-no-timeout. In scope, provably: the rule's require_file is a SERVER signal
-// (express import, `createServer(`, `.listen(<digit>`, `.prepare(`, …) and `app.listen(3000)` below
+// (express import, `http.createServer(`, `.listen(<digit>`, `.prepare(`, …) and `app.listen(3000)` below
 // supplies it — without that line the rule would never look at this file and the decoy would prove
 // nothing. The fetch then carries an explicit AbortSignal deadline, which is the fix the rule asks for.
 //

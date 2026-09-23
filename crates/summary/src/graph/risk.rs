@@ -72,11 +72,17 @@ pub(super) fn project(v: &Value, scope: Option<&str>, top: usize) -> String {
     let mut hubs: Vec<Hub> = Vec::new();
     let mut seams: Vec<Seam> = Vec::new();
     let mut scores_present = 0usize;
+    let mut upstream_capped = 0usize;
     for t in trees {
         let source = t["sourceId"].as_str().unwrap_or("").to_string();
         if !t["output"]["scores"].is_null() {
             scores_present += 1;
         }
+        // The producer's OWN cap, summed across trees. `critical` arrives already truncated at
+        // `zzop_metrics::CRITICALITY_LIMIT`, so `total_hubs` below counts a truncated population --
+        // and until 2026-09-04 this census then printed "complete: all N hubs drawn" over it. The
+        // census was honest about the cap IT applies (`--top`) and silently inherited the one above it.
+        upstream_capped += t["output"]["criticalTruncated"].as_u64().unwrap_or(0) as usize;
         for c in t["output"]["critical"].as_array().unwrap_or(&empty) {
             let Some(path) = c["path"].as_str() else {
                 continue;
@@ -121,6 +127,7 @@ pub(super) fn project(v: &Value, scope: Option<&str>, top: usize) -> String {
         &seams,
         Census {
             total_hubs,
+            upstream_capped,
             total_seams,
             scoped_hubs,
             scoped_seams,
@@ -134,6 +141,10 @@ pub(super) fn project(v: &Value, scope: Option<&str>, top: usize) -> String {
 
 struct Census {
     total_hubs: usize,
+    /// Hubs the PRODUCER's cap dropped before this lane ever saw them (`criticalTruncated`, summed over
+    /// trees). Distinct from every other number here, which are this lane's own: `total_hubs` counts what
+    /// arrived, and what arrived was already cut.
+    upstream_capped: usize,
     total_seams: usize,
     scoped_hubs: usize,
     scoped_seams: usize,
@@ -172,6 +183,13 @@ fn render(
         "%% per-kind cap --top {top}{}\n",
         scope.map(|s| format!(" | --scope {s}")).unwrap_or_default()
     ));
+    if c.upstream_capped > 0 {
+        out.push_str(&format!(
+            "%% + {} more hub(s) were dropped BEFORE this view by the producer's own cap, so the \
+             hub totals above are of a truncated population\n",
+            c.upstream_capped
+        ));
+    }
     // Named, not inferred — the same rule the join map's header follows. The COUNT is derived from
     // the registry rather than typed: it was typed as 17, v0.30.0 removed two scores, and this line
     // went on publishing 17 over a table of 15 with a test pinning the literal. And the pointer was
@@ -218,10 +236,20 @@ fn render(
 
     let dropped =
         (c.scoped_hubs.saturating_sub(hubs.len())) + (c.scoped_seams.saturating_sub(seams.len()));
-    let note = if dropped == 0 && scope.is_none() {
+    // `upstream_capped` joins the condition rather than the message: "complete" is a claim about the
+    // POPULATION, and a population the producer already cut is not one this view can call complete no
+    // matter how many of its own rows it drew.
+    let note = if dropped == 0 && scope.is_none() && c.upstream_capped == 0 {
         format!(
             "complete: all {} hubs and {} seams drawn",
             c.total_hubs, c.total_seams
+        )
+    } else if dropped == 0 && scope.is_none() {
+        format!(
+            "PARTIAL VIEW: all {} hubs and {} seams THIS VIEW RECEIVED are drawn, but the producer's \
+             own cap had already dropped {} more hub(s) upstream. Arrows mean CONTAINMENT, not imports \
+             -- use --domain dep for import direction.",
+            c.total_hubs, c.total_seams, c.upstream_capped
         )
     } else {
         format!(

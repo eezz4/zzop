@@ -48,6 +48,37 @@ fn usage_line() -> &'static str {
     &after[..end]
 }
 
+/// The declared `(cli subcommand, mcp tool)` pairing, from `docs/contracts/surface-parity.json`'s
+/// `_laneTwins` — the one owner. Read rather than spelled, for the reason the block's own `_doc`
+/// gives: the two names do not derive from one another for most lanes.
+fn declared_lane_twins() -> Vec<(String, String)> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../docs/contracts/surface-parity.json");
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+    let registry: serde_json::Value = serde_json::from_str(&text)
+        .unwrap_or_else(|e| panic!("{} is not JSON: {e}", path.display()));
+    let out: Vec<(String, String)> = registry["_laneTwins"]
+        .as_object()
+        .expect("surface-parity.json must declare a `_laneTwins` object")
+        .iter()
+        .filter(|(k, _)| !k.starts_with('_'))
+        .map(|(k, v)| {
+            (
+                k.clone(),
+                v.as_str()
+                    .unwrap_or_else(|| panic!("_laneTwins[{k:?}] must be a tool name string"))
+                    .to_string(),
+            )
+        })
+        .collect();
+    assert!(
+        !out.is_empty(),
+        "_laneTwins declares no pair — the assertion below would then vouch for nothing"
+    );
+    out
+}
+
 /// Every MCP tool name's CLI twin subcommand must appear in the CLI's one-line USAGE string. Cheap
 /// and loose by design: a substring check, not a full grammar parse — the goal is "a tool the USAGE
 /// line never mentions (or a stale rename on either side) fails the build," not byte-parity.
@@ -73,15 +104,48 @@ fn every_mcp_tool_names_cli_twin_subcommand_appears_in_usage() {
     // The CLI spelling is a distinctive USAGE PHRASE rather than the bare subcommand token wherever one
     // token is a substring of another: `analyze` occurs inside `analyze-envelope`, so a bare search
     // would stay green even if the standalone subcommand were dropped.
+    //
+    // 🔴 The PAIRING itself is no longer spelled here (2026-09-15). It lives in
+    // `docs/contracts/surface-parity.json`'s `_laneTwins`, and this table now carries only the half
+    // that block cannot: the distinctive USAGE PHRASE. Three copies of one pairing existed for a
+    // moment — that block, `host_vocabulary`'s twin clause, and this array — which is the "one fact,
+    // one owner" failure this repo has measured repeatedly; the loop below asserts this table against
+    // the declaration rather than beside it, so a rename reaches one place and fails the other two.
     let pairs = [
         ("analyze_repo", "analyze <path>"),
         ("cross_repo", "cross"),
         ("check_file", "file <path>"),
         ("check_endpoint", "endpoint"),
+        ("check_coverage", "coverage <path>..."),
+        ("module_map", "map <path>..."),
         ("analyze_envelope", "analyze-envelope"),
         ("validate_envelope", "validate-envelope"),
         ("validate_rule_pack", "validate-rule-pack"),
     ];
+
+    // Each phrase must BEGIN with the subcommand the contract declares this tool's twin to be. That
+    // is what keeps the phrase a disambiguator rather than a second, quietly diverging pairing: a
+    // `_laneTwins` rename makes the phrase stop matching and fails here, naming both spellings.
+    let declared = declared_lane_twins();
+    for (tool_name, phrase) in &pairs {
+        let sub = declared
+            .iter()
+            .find(|(_, t)| t == tool_name)
+            .map(|(c, _)| c);
+        let sub = sub.unwrap_or_else(|| {
+            panic!(
+                "this table pairs MCP tool `{tool_name}` with USAGE phrase {phrase:?}, but \
+                 surface-parity.json's `_laneTwins` declares no twin for it — the pairing's owner is \
+                 that block, and a row here for a tool it does not name is a second answer"
+            )
+        });
+        assert!(
+            phrase.starts_with(sub.as_str()),
+            "this table pairs `{tool_name}` with USAGE phrase {phrase:?}, but `_laneTwins` declares \
+             its CLI twin as `{sub}` — the phrase exists only to disambiguate that subcommand inside \
+             the USAGE line, so it has to start with it"
+        );
+    }
 
     assert!(
         !tool_names.is_empty(),

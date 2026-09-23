@@ -114,6 +114,20 @@ pub struct DiagnosticsInput {
     /// sentence than a run that just lost its whole DSL surface.
     #[serde(default)]
     pub only_packs_matched_nothing: bool,
+
+    /// Whether an allowlist was requested and WORKS — at least one entry named a loaded pack.
+    ///
+    /// The complement of [`Self::only_packs_matched_nothing`], and the case that had no receipt until
+    /// 2026-09-14 (review ledger V232). The total-typo case already tells the reader native analyses
+    /// still ran; the WORKING case said nothing, and that is the one where the reader believes the run
+    /// is narrowed to the packs they named. 📏 `corpus/frameworks/express` with
+    /// `packs: { "only": ["security"] }`: 58 findings become 51, of which 29 are `duplicate-route` and
+    /// `mutating-route-no-auth` — native ids the allowlist never named — with `configWarnings` empty and
+    /// `packsLoaded` byte-identical to the un-narrowed run.
+    ///
+    /// Passed rather than derived for [`Self::only_packs_matched_nothing`]'s reason: this module never
+    /// sees how many entries were requested.
+    pub only_packs_active: bool,
 }
 
 /// Extends the counts of `DiagnosticsInput` with warnings. Rust has no struct inheritance, so the input is

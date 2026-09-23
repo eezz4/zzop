@@ -12,7 +12,7 @@ use crate::util::node_text;
 pub(super) fn local_names(imports: &ImportMap) -> HashSet<String> {
     imports
         .iter()
-        .filter(|(_, b)| b.specifier == "github.com/gin-gonic/gin")
+        .filter(|(_, b)| b.specifier == super::GIN_SPECIFIER)
         .map(|(local, _)| local.clone())
         .collect()
 }

@@ -80,7 +80,18 @@ fn a_stdout_exemption_sits_on_a_target_root_or_a_test_module_never_on_a_library(
             let is_target_root = rel.contains("/examples/")
                 || rel.ends_with("/src/main.rs")
                 || rel.contains("/src/bin/");
-            let is_test_module = name.ends_with("_tests.rs") || name == "tests.rs";
+            // 🔴 This asked the FILE NAME and nothing else, and that could not see a whole shape of
+            // its own population: a module split into `tests.rs` + `tests/<part>.rs` is test-only by
+            // construction, and `tests/census.rs` was judged a library module because of its name
+            // (review ledger V139). Same class as V138 — a needle that cannot reach part of the set it
+            // claims to cover, reporting what it could not read as a verdict.
+            //
+            // So the directory case is decided by the DECLARATION chain rather than by the spelling:
+            // `<dir>/tests/<part>.rs` counts only when `<dir>/tests.rs` exists (it is the module body)
+            // AND `<dir>.rs` declares that module under `#[cfg(test)]`. A directory someone merely
+            // NAMED `tests` and wired into the library still fails, which is the point of the pin.
+            let is_test_module =
+                name.ends_with("_tests.rs") || name == "tests.rs" || declared_under_cfg_test(&path);
             if !is_target_root && !is_test_module {
                 offenders.push(rel);
             }
@@ -96,4 +107,35 @@ fn a_stdout_exemption_sits_on_a_target_root_or_a_test_module_never_on_a_library(
         "a file-level print_stdout/exit exemption on a LIBRARY module uncovers that whole file while \
          clippy stays green — move the printing into a target root, or make the module test-only: {offenders:?}"
     );
+}
+
+/// Whether `path` is a part of a `#[cfg(test)] mod tests;` module body, proven by reading the two
+/// files that declare it rather than by trusting the directory's name.
+fn declared_under_cfg_test(path: &std::path::Path) -> bool {
+    let Some(dir) = path.parent() else {
+        return false;
+    };
+    if dir.file_name().and_then(|n| n.to_str()) != Some("tests") {
+        return false;
+    }
+    // `<dir>/../tests.rs` is the module body that declares this part.
+    let body = dir.with_extension("rs");
+    let Ok(body_text) = std::fs::read_to_string(&body) else {
+        return false;
+    };
+    let part = path
+        .file_stem()
+        .and_then(|n| n.to_str())
+        .unwrap_or_default();
+    if !body_text.contains(&format!("mod {part};")) {
+        return false;
+    }
+    // And whoever declares `mod tests;` must mark it test-only.
+    let Some(owner) = dir.parent().map(|d| d.with_extension("rs")) else {
+        return false;
+    };
+    let Ok(owner_text) = std::fs::read_to_string(&owner) else {
+        return false;
+    };
+    owner_text.contains("#[cfg(test)]") && owner_text.contains("mod tests;")
 }

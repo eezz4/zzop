@@ -25,7 +25,10 @@
 //! - **Pattern parsing (Go 1.22+ method-in-pattern syntax)**: a pattern literal may lead with an
 //!   UPPERCASE `zzop_core::HTTP_KEY_VERBS` token followed by a single space (`"GET /users"`) — split
 //!   into `(method, path)` and emit ONE `Verb` entry. A pattern with NO leading verb token serves
-//!   every method, statically unknown: emit ONE [`zzop_core::UNKNOWN_VERB`] sentinel `Verb` entry (not
+//!   every method, statically unknown — a PATTERN GRAMMAR saying nothing about the method, not a
+//!   catch-all API a vendor documented, which is the line `cross-layer-resolution.md`'s catch-all row
+//!   draws and the reason this lane answers differently from `adapters::gin`'s `.Any` (that one is
+//!   gin's own documented catch-all and EXPANDS): emit ONE [`zzop_core::UNKNOWN_VERB`] sentinel entry (not
 //!   a fabricated `[GET, POST]`) — the engine lifts a `"? <path>"` key out of the exact-key join into
 //!   the `cross-layer/unknown-verb-route` disclosure channel. A pattern (after stripping any
 //!   leading verb token) that does not start with `/` — Go 1.22 patterns may ALSO lead with a host,

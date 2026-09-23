@@ -113,12 +113,6 @@ own type-checked ESLint config is ever a signal zzop can consume.
 | `egress/get-and-body` | none | stays — no tool |
 | `egress/ws-no-auth` | none | stays — no tool |
 
-## `go`
-
-| Rule | Nearest standard-linter equivalent | Verdict |
-|---|---|---|
-| `go/goroutine-in-loop` | `go vet` (`loopclosure`) covers a *different* loop defect — variable capture, not unbounded spawn | stays — no tool |
-
 ## `http`
 
 | Rule | Nearest standard-linter equivalent | Verdict |
@@ -128,13 +122,6 @@ own type-checked ESLint config is ever a signal zzop can consume.
 
 Both read the projected io channel — route declarations across a tree — which is the cross-layer fact
 no file-scoped linter has.
-
-## `perf` · `react`
-
-| Rule | Nearest standard-linter equivalent | Verdict |
-|---|---|---|
-| `perf/api-in-loop` | none | stays — no tool |
-| `react/setstate-after-async-unguarded` | none — `eslint-plugin-react-hooks` does not model this | stays — no tool |
 
 ## `redis`
 
@@ -154,6 +141,9 @@ sequence across a method span.
 | `reliability/await-inside-promise-all-array` | core ESLint `no-await-in-loop` sees a different shape | stays — no tool |
 | `reliability/map-async-no-promise-all` | `@typescript-eslint/no-misused-promises`, partially | stays — needs a fact linters lack |
 | `reliability/async-route-no-catch` · `reliability/debug-true-committed` · `reliability/promise-all-and-writes` · `reliability/json-parse-no-try` · `reliability/fetch-no-timeout` · `reliability/reqwest-no-timeout` · `reliability/body-limit-missing` · `reliability/interval-no-clear` · `reliability/stream-open-no-close-in-loop` · `reliability/listener-subscribe-in-loop` · `reliability/emitter-async-listener` · `reliability/fs-check-then-use` | none | stays — no tool |
+| `reliability/goroutine-in-loop` | `go vet` (`loopclosure`) covers a *different* loop defect — variable capture, not unbounded spawn | stays — no tool |
+| `reliability/api-in-loop` | none | stays — no tool |
+| `reliability/setstate-after-async-unguarded` | none — `eslint-plugin-react-hooks` does not model this | stays — no tool |
 
 `n/no-sync` is the closest call in this pack. It flags *every* sync call; zzop's rule flags one inside
 a request handler, which is the difference between a style preference and a latency bug. The handler

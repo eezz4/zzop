@@ -520,3 +520,32 @@ fn non_array_non_object_roots_keep_their_already_clear_serde_message() {
         );
     }
 }
+
+#[test]
+fn a_leading_utf8_bom_is_stripped_rather_than_rejected() {
+    // The defect (2026-09-02): an external reviewer's FIRST custom pack failed to load with serde's
+    // "expected value at line 1 column 1" -- a message that sends the author to re-read JSON that is
+    // fine, over a byte their editor added and does not show them. PowerShell 5.1's `Out-File
+    // -Encoding utf8` writes that byte by default, so on Windows the documented growth path (drop a
+    // pack in `zzop/rules/`) failed on the ordinary way of creating the file.
+    let body = valid_pack("bom");
+
+    // Plant-before is not available here -- the strip is a single expression -- so the control is the
+    // failure MODE instead: the same bytes with the BOM must parse to the same pack as without it.
+    let without = parse_dsl_pack(&body).expect("the pack itself is valid");
+    let with_bom =
+        parse_dsl_pack(&format!("\u{feff}{body}")).expect("a BOM must not fail the load");
+    assert_eq!(
+        with_bom.id, without.id,
+        "a BOM must be invisible to the parse, not merely survivable"
+    );
+    assert_eq!(with_bom.rules.len(), without.rules.len());
+
+    // The strip must be a PREFIX strip and nothing more: a BOM in the middle of the text is a real
+    // encoding fault and must still fail, or this becomes a general "ignore stray bytes" rule.
+    let mid = body.replacen('{', "{\u{feff}", 1);
+    assert!(
+        parse_dsl_pack(&mid).is_err(),
+        "only a LEADING BOM is an encoding artifact; one inside the body is corruption"
+    );
+}

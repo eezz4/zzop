@@ -21,8 +21,9 @@
 //! rule that an unmeasured one is an omitted column rather than a zero — is [`node`]'s business.
 //!
 //! # Cycles are the point, so they are drawn differently
-//! `circular` is the highest-severity structural finding this engine emits and the hardest to read as
-//! text: a 6-file cycle is a list of 6 paths that a reader has to mentally close into a loop. Files that
+//! `circular` is the structural finding hardest to read as TEXT — a 6-file cycle is a list of 6 paths
+//! a reader has to mentally close into a loop — and that, not its band (`info` since 2026-09-06), is
+//! why this lane draws it specially. Drawing follows what is hard to READ, never what is loud. Files that
 //! participate in a cycle are marked, and their edges use a distinct arrow, so the loop is visible
 //! rather than reconstructed. The cycle membership comes from the engine's own `circular` findings —
 //! this module does NOT re-run Tarjan, because a second cycle implementation is a second answer.
@@ -52,6 +53,7 @@ mod window;
 use super::fold::{self, Fold};
 
 use disagreement::mutual_pairs_outside_cycles;
+pub(super) use folded::collapse;
 pub(super) use node::DepNode;
 use render::render;
 pub(super) use window::GitWindows;

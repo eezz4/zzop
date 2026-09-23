@@ -139,6 +139,17 @@ ALLOWLIST=(
 allow_arg=""
 for e in "${ALLOWLIST[@]}"; do allow_arg="$allow_arg$e"$'\n'; done
 
+# The `nrules == 0` floor inside the awk program above is the right refusal, and it was UNREACHABLE
+# for the one input that most needs it: with rules/dsl emptied, the glob stays literal and awk dies
+# on `cannot open file` before parsing anything. A guard that crashes is not a guard that refuses --
+# it exits non-zero for a reason the reader has to decode (review ledger V143). So the glob is
+# checked here, in the shell, where it is expanded.
+packs=(rules/dsl/*/*.json examples/packs/*.json)
+if [ ! -e "${packs[0]}" ]; then
+  echo "check-rule-desc-tokens: rules/dsl/*/*.json + examples/packs/*.json matched no file -- the pack layout moved," >&2
+  echo "or this ran from the wrong directory. An empty subject set is a broken scan, not a clean tree." >&2
+  exit 1
+fi
 awk -v allow="$allow_arg" -v shared="$SHARED" -v catalog="$CATALOG" '
 BEGIN {
   NEG_WINDOW = 90

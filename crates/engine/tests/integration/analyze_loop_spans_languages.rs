@@ -1,5 +1,12 @@
-//! End-to-end proof that the four 2026-08-02 `loop_spans` producers (Python/Java/C#/Rust — see each
-//! `parser/*/src/lang/loop_spans.rs`) REACH `MethodScan::trigger_in_loop` — the whole chain
+//! End-to-end proof that EVERY `loop_spans` producer (see each
+//! `parser/*/src/lang/loop_spans.rs` plus `parser-typescript/src/loop_spans.rs`) REACHES
+//! `MethodScan::trigger_in_loop` — the whole chain
+//!
+//! 🔴 This said "the four 2026-08-02 producers" and named Python/Java/C#/Rust. There are SIX, and
+//! the two it did not name — Go and TypeScript — were the two nobody was proving anything about
+//! (review ledger V149). TypeScript is the product's principal language. The count is gone rather
+//! than corrected: a number in prose beside a set that grows is how this gap was invisible, and the
+//! `file_pattern` below is now the only place the covered set is written down.
 //! `parser -> pipeline::fresh::spans -> SourceFile::loop_spans -> dsl::method_scan`, driven through
 //! the real `analyze_tree` entry point. Same rationale as `analyze_rust_test_spans.rs`: a parser unit
 //! test proves the fact EXISTS, not that it ARRIVES across the four struct boundaries on the way to a
@@ -72,7 +79,7 @@ const PROBE_PACK_JSON: &str = r#"{
       "message": "loop-spans reach probe (NOT a real finding): a zzop_probe/zzopProbe call structurally inside a projected loop span.",
       "matcher": {
         "type": "method-scan",
-        "file_pattern": "(?i)\\.(py|java|cs|rs)$",
+        "file_pattern": "(?i)\\.(py|java|cs|rs|go|ts|tsx|mts|cts)$",
         "patterns": [{ "pattern": "(?i)zzop_?probe\\s*\\(", "label": "probe" }],
         "trigger": "probe",
         "trigger_in_loop": true
@@ -167,6 +174,49 @@ fn fixtures() -> Vec<(&'static str, &'static str, Vec<u32>)> {
         (
             "LazyLinq.cs",
             "class LazyLinqCs {\n  object Handler(System.Collections.Generic.List<int> xs) {\n    return xs.Select(x => ZzopProbe(x)).ToList();\n  }\n}\n",
+            vec![],
+        ),
+        // ---- Go ----
+        (
+            "go_in_loop.go",
+            "package p\n\nfunc handler(xs []int) {\n\tfor _, x := range xs {\n\t\tzzop_probe(x)\n\t}\n}\n",
+            vec![5],
+        ),
+        (
+            "go_outside.go",
+            "package p\n\nfunc handler(x int) {\n\tzzop_probe(x)\n}\n",
+            vec![],
+        ),
+        // Go has NO lazy-iteration form to pin: its grammar unifies every loop shape into one
+        // `for_statement` and it has no array-iteration callback idiom, which
+        // `parser-go/src/lang/loop_spans.rs`'s module doc states as the reason it emits a single
+        // span source. So this language gets two directions rather than three, on purpose.
+        // ---- TypeScript ----
+        (
+            "ts_in_loop.ts",
+            "export function handler(xs: number[]) {\n  for (const x of xs) {\n    zzopProbe(x);\n  }\n}\n",
+            vec![3],
+        ),
+        (
+            "ts_outside.ts",
+            "export function handler(x: number) {\n  zzopProbe(x);\n}\n",
+            vec![],
+        ),
+        // TypeScript is the one producer with a SECOND span source: a recognized array-iteration
+        // callback argument. Multi-line, so it is emitted and the probe fires.
+        (
+            "ts_callback.ts",
+            "export function handler(xs: number[]) {\n  xs.forEach((x) => {\n    zzopProbe(x);\n  });\n}\n",
+            vec![3],
+        ),
+        // And its documented UNDER-report, pinned as a silence rather than left to be discovered: a
+        // callback whose span starts and ends on one line is not emitted at all, because a
+        // line-granular span cannot tell that body apart from the one-shot calls sharing its line.
+        // `parser-typescript/src/loop_spans.rs` owns that rule; this is the fixture that makes
+        // deleting it visible.
+        (
+            "ts_callback_oneline.ts",
+            "export function handler(xs: number[]) {\n  xs.forEach((x) => zzopProbe(x));\n}\n",
             vec![],
         ),
         // ---- Rust ----

@@ -170,7 +170,9 @@ export default {
                 comment: { ko: "// 필터·상한이 걸린 목록", en: "// the filtered, capped list" },
               },
               `    "truncated": { "shown": 50, "totalMatching": 137,`,
-              `                   "severitiesNotShown": { "counts": { "critical": 3 } }, "hint": "..." }`,
+              `                   "severitiesNotShown": { "counts": { "critical": 3 },`,
+              `                     "firstOmitted": { "critical": [ { "ruleId": "...", "file": "...", "line": 12 } ] } },`,
+              `                   "hint": "..." }`,
               `  },`,
               `  <span class="hit">"warnings"</span>: [ ],`,
               `  <span class="hit">"coverage"</span>: {`,
@@ -266,8 +268,8 @@ export default {
             {
               k: "<code>findings.truncated</code>",
               v: {
-                ko: `잘렸을 때만 나오고, <code>{shown, totalMatching, severitiesNotShown, hint}</code> 넷을 같이 준다. <code>severitiesNotShown</code> 은 <strong>잘림이 통째로 삼킨 심각도</strong>를 건수와 함께 댄다 — 배포 역할이 심각도보다 위라 <code>critical</code> 한 무리가 상한 밖으로 밀려나도 <code>bySeverity</code> 는 계속 세고 있기 때문이다. 세는 모집단은 <strong>상한이 걸린 집합</strong>(필터 적용 후)이라, 사용자가 직접 뺀 심각도를 “안 보인다”고 하지 않는다. <code>hint</code> 에는 <strong>이 목록에 실제로 먹는 방법</strong>만 적힌다 — 고정 상한인 목록에는 “limit 을 올려라”라고 쓰지 않고, <code>limit</code> 이 이미 1000 이면 그 말도 빠진다.`,
-                en: `Present only when the cut bit, carrying <code>{shown, totalMatching, severitiesNotShown, hint}</code>. <code>severitiesNotShown</code> names <strong>the severities the cut removed outright</strong>, with counts — deployment role outranks severity, so a whole <code>critical</code> band can sit past the cap while <code>bySeverity</code> still counts it. It counts the set <strong>the cap was applied to</strong> (after your filter), so a severity you filtered out yourself is never reported as missing. The <code>hint</code> names <strong>a remedy that actually works on that list</strong> — a fixed-cap list is never told to "raise the limit", and neither is a caller whose <code>limit</code> is already 1000.`,
+                ko: `잘렸을 때만 나오고, <code>{shown, totalMatching, severitiesNotShown, hint}</code> 넷을 같이 준다. <code>severitiesNotShown</code> 은 <strong>잘림이 통째로 삼킨 심각도</strong>를 건수와 함께 댄다 — 배포 역할이 심각도보다 위라 <code>critical</code> 한 무리가 상한 밖으로 밀려나도 <code>bySeverity</code> 는 계속 세고 있기 때문이다. 세는 모집단은 <strong>상한이 걸린 집합</strong>(필터 적용 후)이라, 사용자가 직접 뺀 심각도를 “안 보인다”고 하지 않는다. 그리고 건수만으로는 <strong>무엇이 잘렸는지</strong>를 못 말하므로, <code>firstOmitted</code> 가 그 심각도의 첫 몇 행을 <code>ruleId</code>/<code>file</code>/<code>line</code> 로 같이 낸다(심각도당 최대 3행의 <strong>표본</strong>, 정확한 수는 <code>counts</code>). <code>--fail-on</code> 이 목록에 한 줄도 없는 심각도로 빌드를 깨뜨릴 때 그 자리들이 stderr 로도 나간다 — 게이트 자체는 여전히 <code>bySeverity</code> 만 읽는다. <code>hint</code> 에는 <strong>이 목록에 실제로 먹는 방법</strong>만 적힌다 — 고정 상한인 목록에는 “limit 을 올려라”라고 쓰지 않고, <code>limit</code> 이 이미 1000 이면 그 말도 빠진다.`,
+                en: `Present only when the cut bit, carrying <code>{shown, totalMatching, severitiesNotShown, hint}</code>. <code>severitiesNotShown</code> names <strong>the severities the cut removed outright</strong>, with counts — deployment role outranks severity, so a whole <code>critical</code> band can sit past the cap while <code>bySeverity</code> still counts it. It counts the set <strong>the cap was applied to</strong> (after your filter), so a severity you filtered out yourself is never reported as missing. A count cannot say <strong>what</strong> left, so <code>firstOmitted</code> carries that band's first rows as <code>ruleId</code>/<code>file</code>/<code>line</code> — a <strong>sample</strong>, at most 3 a severity, with <code>counts</code> the exact number. <code>--fail-on</code> prints those sites on stderr when it breaks a build on a severity the list holds none of; the gate still reads <code>bySeverity</code> alone. The <code>hint</code> names <strong>a remedy that actually works on that list</strong> — a fixed-cap list is never told to "raise the limit", and neither is a caller whose <code>limit</code> is already 1000.`,
               },
             },
             {

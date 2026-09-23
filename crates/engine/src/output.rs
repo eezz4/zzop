@@ -52,6 +52,16 @@ pub struct AnalyzeOutput {
     /// for `cross-layer/untraced-client-import-no-visible-consume` (the tree IR drops package imports during dep
     /// resolution) — not part of the serialized output surface.
     pub package_imports: Vec<PackageImportSummary>,
+    /// Route registrations this tree's source shows LEXICALLY, when that was measured — plumbing for the
+    /// run-wide provide-blind severity gate (`framework_silence::provide_blind_sources`), not part of the
+    /// serialized output surface.
+    ///
+    /// `None` means NOT MEASURED, and the distinction is load-bearing: the scan runs only under the S2
+    /// tripwire's precondition (a server-framework import with fewer than `MIN_PROVIDES_FLOOR` extracted
+    /// routes), so an ordinary tree pays nothing and arrives here unmeasured. A reader that collapses
+    /// `None` into `Some(0)` turns "we did not look" into "there is nothing there", which is the exact
+    /// confusion that gate exists to avoid.
+    pub visible_route_registrations: Option<usize>,
     /// This tree's assembled entity-attribute store (native producer judgments + Mode B overlay
     /// injections — see `zzop_core::AttributeStore`). Plumbing for the cross-layer stage
     /// (`cross-layer/retrying-write-no-idempotency`'s provider-side `idempotency-guarded` veto reads
@@ -63,6 +73,17 @@ pub struct AnalyzeOutput {
     pub health: Option<HealthIndex>,
     pub recommendations: Vec<Recommendation>,
     pub critical: Vec<CriticalFile>,
+    /// How many rows `zzop_metrics::CRITICALITY_LIMIT` dropped from `critical`. `0` = complete list.
+    ///
+    /// ALWAYS SERIALIZED, `0` included — the convention `zzop_metrics::scores::detail_cap` set for this
+    /// repo's capped lists, and for its reason: a field that vanishes when nothing was dropped makes
+    /// "complete list" and "this build has no disclosure" the same bytes.
+    ///
+    /// Added 2026-09-04. `architecture.criticalTop`'s legend publishes the THREE paths it lifts, so a
+    /// reader who drilled into `critical` itself met a 20-row wall that no sentence in the reply named —
+    /// and 20 rows read as the whole set. Zero when the analysis did not run (git inactive, or the id
+    /// disabled): nothing was capped, which the empty list already says.
+    pub critical_truncated: u32,
     pub seams: Vec<SeamCandidate>,
     /// Folder-granularity rollup over `nodes`/`ir.ir.dep` at `zzop_metrics::DEFAULT_FOLDER_DEPTH`. Unlike
     /// `scores`/`health`, this is NOT git-gated — `nodes` and the dep graph are built unconditionally, so

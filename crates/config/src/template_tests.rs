@@ -46,6 +46,24 @@ fn every_key_the_template_sets_is_in_the_knob_dictionary() {
 /// clean up. The template's own convention is what makes this checkable: a key is named in backticks,
 /// everything else (commands, JSON snippets) is not key-shaped and is out of scope, the same narrow
 /// gate the engine's reference-validation contract uses on shipped messages.
+///
+/// # BACKTICKS MEAN CONFIG KEY, and two other vocabularies look identical in prose
+/// [`is_key_shaped`] accepts any bare identifier or dotted path, and this crate has no dependency that
+/// would let it hold a second dictionary — so a backticked RULE ID (`unreachable`) or REPLY FIELD
+/// (`nativeAnalyses.disabled`) reads as a config key that does not exist and fails here. That is the
+/// guard working, not a false positive: the three vocabularies genuinely look the same, and only the
+/// author knows which one a token is from. The template's convention resolves it without weakening the
+/// gate:
+///
+/// * a **rule id** is written the way a user writes it — `"unreachable": "info"` — which carries a
+///   quote and a colon and is out of scope by shape, and which is more useful anyway, since it is the
+///   line they paste;
+/// * a **reply field** is named in plain prose with no backticks, as `ruleOverridesApplied.disabled`
+///   already was before either of these arrived.
+///
+/// Hyphenated ids (`dead-candidates`) fall out on the hyphen, which is why this only ever bites the
+/// single-word ones — and why it went unnoticed until both a bare id and a reply field arrived in the
+/// same edit on 2026-09-03, each failing this test in turn.
 #[test]
 fn every_key_the_template_comments_name_is_in_the_knob_dictionary() {
     let surface: serde_json::Value =
@@ -336,5 +354,89 @@ fn the_typescript_only_vocabulary_disclosure_holds_only_while_its_channels_are_t
         CONFIG_TEMPLATE_JSONC.contains("TypeScript/JavaScript"),
         "the starter template no longer discloses that part of its vocabulary is read for one language \
          family only, while the declarations above say it still is"
+    );
+}
+
+/// The half the two tests above BOTH declared out of scope: a JSON snippet inside a comment.
+///
+/// 🔴 That exemption cost a real defect (2026-09-07, review ledger V53). The template's `trees` example
+/// taught `{ "root": …, "clientBase": …, "mountedAt": … }` FLAT, and the deployment-topology keys had
+/// moved under `topology`. A reader who copied it hit two different failures from one snippet: a flat
+/// `mountedAt` is a hard load error naming the new path, but a flat `clientBase` is an unknown key —
+/// warned, then IGNORED. Exit 0, and a join that silently lost its prefix. That is the single biggest
+/// join blocker this repo has measured, taught by the file `zzop init` writes into every tree.
+///
+/// The snippets are findable because the template already separates them by indentation: prose is
+/// `// `, a snippet line is `//` plus three spaces. So this reads what a copying user reads, wraps it
+/// into an object, and runs the SAME unknown-key walk a real run would.
+///
+/// ⚠ Scope, stated so the next reader does not over-trust a green: this validates snippets that parse
+/// as an object body. A snippet that is a bare fragment (one array, one scalar) is skipped rather than
+/// guessed at, and a snippet naming a key whose VALUE is wrong is out of reach — key vocabulary is what
+/// `config-surface.json` can judge.
+#[test]
+fn every_json_snippet_in_the_templates_comments_loads_without_an_unknown_key() {
+    let mut snippets: Vec<String> = Vec::new();
+    let mut current: Vec<String> = Vec::new();
+    for line in CONFIG_TEMPLATE_JSONC.lines() {
+        let trimmed = line.trim_start();
+        match trimmed.strip_prefix("//") {
+            Some(rest) if rest.starts_with("   ") && !rest.trim().is_empty() => {
+                current.push(rest[3..].to_string());
+            }
+            _ => {
+                if !current.is_empty() {
+                    snippets.push(current.join("\n"));
+                    current.clear();
+                }
+            }
+        }
+    }
+    if !current.is_empty() {
+        snippets.push(current.join("\n"));
+    }
+
+    let mut checked = 0usize;
+    for snippet in &snippets {
+        let body = snippet.trim().trim_end_matches(',');
+        let wrapped = format!("{{{body}}}");
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&wrapped) else {
+            continue; // not an object body — see the scope note above
+        };
+        checked += 1;
+        let dir = TempDir::new("zzop-config-template-snippet");
+        let mapped = crate::mapper::config_to_request(&value, dir.path()).unwrap_or_else(|e| {
+            panic!(
+                "a JSON snippet in the template's comments is REFUSED by the loader — a reader who \
+                 copies it gets this error instead of a run:\n  snippet: {body}\n  error: {e:?}"
+            )
+        });
+        // A snippet whose ROOT keys are unknown is not a top-level config fragment at all — it is a
+        // VALUE-position example (the `rules` block's rule ids, a vocabulary list). The sibling test's
+        // doc already names that ambiguity: three vocabularies look identical in prose. A NESTED
+        // unknown (`trees[0].clientBase`) is different in kind — the root key IS real, so the reader is
+        // being taught a wrong SHAPE under a right name, and that is the defect this test exists for.
+        let offenders: Vec<&String> = mapped
+            .warnings
+            .iter()
+            .filter(|w| w.contains("unknown config key"))
+            .filter(|w| {
+                w.split_once('"')
+                    .and_then(|(_, rest)| rest.split_once('"'))
+                    .is_some_and(|(key, _)| key.contains('.') || key.contains('['))
+            })
+            .collect();
+        assert!(
+            offenders.is_empty(),
+            "a JSON snippet in the template's comments names a key zzop ignores — the reader gets \
+             exit 0 and the key does nothing, which is worse than the refusal above:\n  \
+             snippet: {body}\n  warnings: {offenders:?}"
+        );
+    }
+
+    assert!(
+        checked > 0,
+        "no object-shaped snippet was found in the template's comments — the extractor stopped \
+         matching (the convention is `//` plus three spaces), so this test is now vacuous"
     );
 }

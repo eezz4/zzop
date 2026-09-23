@@ -142,7 +142,7 @@ while IFS= read -r line; do
     echo "$SELF: $where:$lineno declares version \"$v\"; the workspace version is \"$VERSION\"." >&2
     violations=$((violations + 1))
   fi
-done <<< "$json_lines"
+done < <(printf '%s\n' "$json_lines")
 
 # --- Subject B ------------------------------------------------------------------------------------
 url_lines="$(git grep -n 'releases/download/v[0-9][0-9.]*' -- . 2>/dev/null \
@@ -167,7 +167,7 @@ while IFS= read -r line; do
       violations=$((violations + 1))
     fi
   done
-done <<< "$url_lines"
+done < <(printf '%s\n' "$url_lines")
 
 if [ "$violations" -ne 0 ]; then
   echo >&2

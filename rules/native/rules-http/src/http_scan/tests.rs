@@ -3,6 +3,8 @@
 //! code calls at parse time) rather than re-implementing a test double, so these tests exercise the
 //! real detection + the BFS/selection logic together. Every fixture body is single-line, so
 //! `body_start == body_end == <declaration line>`.
+use std::collections::HashMap;
+
 use super::*;
 use zzop_core::callgraph::SymbolEdge;
 use zzop_core::{ApiEndpoint, SourceSymbolKind};
@@ -12,6 +14,16 @@ fn files(pairs: &[(&str, &str)]) -> HashMap<String, String> {
         .iter()
         .map(|(f, t)| (f.to_string(), t.to_string()))
         .collect()
+}
+
+/// Serves a fixture map through the rules' `read_file` port.
+///
+/// The port is a READER, not a map, because production must not hold the whole tree in memory (see
+/// [`super::scan_marker_window`]). A test does hold its two-file fixture, so it hands the reader a
+/// closure over that map — the map is the test's convenience here, never the rule's contract. A
+/// fixture that omits a file therefore still reproduces the real "could not read" branch exactly.
+fn reader(files: &HashMap<String, String>) -> impl Fn(&str) -> Option<String> + '_ {
+    |rel: &str| files.get(rel).cloned()
 }
 
 fn sym(file: &str, name: &str, line: u32) -> SourceSymbol {
@@ -95,7 +107,7 @@ fn get_handler_reaching_a_write_across_a_call_edge_is_flagged_with_hops() {
         api_endpoints: &endpoints,
         symbols: &symbols,
         symbol_graph: &graph,
-        files: &files,
+        read_file: &reader(&files),
     });
     assert_eq!(out.len(), 1);
     let data = out[0].data.as_ref().unwrap();
@@ -117,7 +129,7 @@ fn write_directly_in_the_handler_is_depth_zero() {
         api_endpoints: &[endpoint("GET", "/touch", "touch")],
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        files: &files,
+        read_file: &reader(&files),
     });
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].data.as_ref().unwrap()["depth"], 0);
@@ -137,25 +149,23 @@ fn unsafe_read_endpoint_message_is_byte_identical_to_the_pre_sweep_text() {
         api_endpoints: &[endpoint("GET", "/touch", "touch")],
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        files: &files,
+        read_file: &reader(&files),
     });
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].rule_id, "unsafe-read-endpoint");
     assert_eq!(
         out[0].message,
-        "GET /touch writes directly (prisma.ping.create) — GET/HEAD must be safe & idempotent. Move \
-         the write behind a mutating method (POST/PUT/PATCH/DELETE), or make this endpoint genuinely \
-         read-only. If the write is deliberate and safe to repeat (e.g. a fire-and-forget audit log), \
-         mark it with `// idempotent-ok: <reason>` on the body-start line or up to 3 lines above, or disable via \
-         config `rules: { \"unsafe-read-endpoint\": \"off\" }` (embedders: `disabledRules`) if this \
-         applies more broadly. LANGUAGE SIGHTLINE: this check needs store-write evidence that only the \
-         TypeScript parser produces (ts/tsx/js/jsx/mjs/cjs/mts/cts) — `SourceSymbol::write_sites`, \
-         which parser-python-3/go/rust/csharp/java-21 all leave empty, so a handler in those languages \
-         has no write site the call-graph BFS could reach and this rule cannot fire there at all. \
-         Easiest to misread: the sibling `mutating-route-no-auth` rule DOES walk Java, so a Java repo \
-         can show that rule's findings while this rule stayed dark on the very same routes. ZERO \
-         findings of this rule outside ts/tsx/js/jsx/mjs/cjs/mts/cts therefore means NOT ANALYZED, \
-         never \"no risky write on these routes\"."
+        format!(
+            "GET /touch writes directly (prisma.ping.create) — GET/HEAD must be safe & idempotent. If \
+             the write is deliberate and safe to repeat (e.g. a fire-and-forget audit log), this is a \
+             false positive here: mark it with `// idempotent-ok: <reason>` on the body-start line or \
+             up to 3 lines above and nothing else has to change. {} IF IT IS NOT: move the write \
+             behind a mutating method (POST/PUT/PATCH/DELETE), or make this endpoint genuinely \
+             read-only. Or disable via config `rules: {{ \"unsafe-read-endpoint\": \"off\" }}` \
+             (embedders: `disabledRules`) if this applies more broadly. {}",
+            super::landing::SAFE_METHOD_MOVE_LANDING,
+            write_site_sightline()
+        )
     );
 }
 
@@ -170,7 +180,7 @@ fn non_safe_methods_are_never_flagged_even_when_they_write() {
         api_endpoints: &[endpoint("POST", "/users", "create")],
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        files: &files,
+        read_file: &reader(&files),
     });
     assert!(out.is_empty());
 }
@@ -186,7 +196,7 @@ fn read_only_get_handler_has_no_finding() {
         api_endpoints: &[endpoint("GET", "/users", "list")],
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        files: &files,
+        read_file: &reader(&files),
     });
     assert!(out.is_empty());
 }
@@ -212,7 +222,7 @@ fn get_reaching_a_raw_sql_write_across_an_edge_is_flagged() {
         api_endpoints: &[endpoint("GET", "/api/rates", "getRates")],
         symbols: &symbols,
         symbol_graph: &graph,
-        files: &files,
+        read_file: &reader(&files),
     });
     assert_eq!(out.len(), 1);
     let data = out[0].data.as_ref().unwrap();
@@ -234,7 +244,7 @@ fn get_that_only_runs_a_select_is_not_flagged() {
         api_endpoints: &[endpoint("GET", "/api/rates", "list")],
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        files: &files,
+        read_file: &reader(&files),
     });
     assert!(out.is_empty());
 }
@@ -250,7 +260,7 @@ fn idempotent_ok_marker_above_the_handler_suppresses_the_finding() {
         api_endpoints: &[endpoint("GET", "/touch", "touch")],
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        files: &files,
+        read_file: &reader(&files),
     });
     assert!(out.is_empty());
 }
@@ -269,11 +279,14 @@ fn unsafe_read_with_comment(comment: &str) -> Vec<zzop_core::Finding> {
         ),
     )]);
     let symbols = with_write_sites(&files, vec![sym("api/h.ts", "touch", 2)]);
+    // Bound rather than inlined: the reader borrows `files`, and a temporary in tail position would be
+    // dropped after the locals it borrows.
+    let read_file = reader(&files);
     scan_unsafe_read_endpoint(&ScanUnsafeReadEndpointInput {
         api_endpoints: &[endpoint("GET", "/touch", "touch")],
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        files: &files,
+        read_file: &read_file,
     })
 }
 
@@ -347,7 +360,7 @@ fn the_disclosure_also_reaches_non_idempotent_write_and_stays_in_sync_with_data_
         api_endpoints: &[endpoint("PUT", "/thing", "put")],
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        files: &files,
+        read_file: &reader(&files),
     });
     assert_eq!(out.len(), 1, "{out:?}");
     assert!(
@@ -355,10 +368,15 @@ fn the_disclosure_also_reaches_non_idempotent_write_and_stays_in_sync_with_data_
         "{}",
         out[0].message
     );
-    assert_eq!(
-        out[0].data.as_ref().unwrap()["hint"].as_str(),
-        Some(out[0].message.as_str()),
-        "data.hint must carry the same string as the message, disclosure included"
+    // 🔴 This used to assert `data.hint == message` — the two were a deliberate duplicate and the pin
+    // kept them in sync. The duplicate is gone (ledger V231: it was 60% of a fastapi reply and the
+    // prose fold shrank `message` while `data.hint` shipped the full text per finding, cancelling the
+    // saving exactly). What is pinned now is the ABSENCE, so nothing reintroduces the copy: the
+    // disclosure has to reach `message`, which is the field that carries prose.
+    assert!(
+        out[0].data.as_ref().unwrap().get("hint").is_none(),
+        "data.hint is a duplicate of message and must not come back: {:?}",
+        out[0].data
     );
 }
 
@@ -375,7 +393,7 @@ fn a_marker_shaped_comment_outside_the_lookback_window_is_not_disclosed() {
         api_endpoints: &[endpoint("GET", "/touch", "touch")],
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        files: &files,
+        read_file: &reader(&files),
     });
     assert_eq!(out.len(), 1, "{out:?}");
     assert!(
@@ -402,7 +420,7 @@ fn ambiguous_handler_name_defined_in_two_files_is_skipped() {
         api_endpoints: &[endpoint("GET", "/x", "dup")],
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        files: &files,
+        read_file: &reader(&files),
     });
     assert!(out.is_empty());
 }
@@ -418,7 +436,7 @@ fn wrapped_handler_resolves_to_the_inner_identifier() {
         api_endpoints: &[endpoint("GET", "/thing", "rateLimit(getThing)")],
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        files: &files,
+        read_file: &reader(&files),
     });
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].data.as_ref().unwrap()["sink"], "prisma.thing.delete");
@@ -434,7 +452,7 @@ fn put_handler_that_creates_a_row_is_flagged_kind_create() {
         api_endpoints: &[endpoint("PUT", "/things/:id", "putThing")],
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        files: &files,
+        read_file: &reader(&files),
     });
     assert_eq!(out.len(), 1);
     let data = out[0].data.as_ref().unwrap();
@@ -454,25 +472,23 @@ fn non_idempotent_write_message_is_byte_identical_to_the_pre_sweep_text() {
         api_endpoints: &[endpoint("PUT", "/things/:id", "putThing")],
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        files: &files,
+        read_file: &reader(&files),
     });
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].rule_id, "non-idempotent-write");
     assert_eq!(
         out[0].message,
-        "PUT /things/:id reaches prisma.thing.create directly (create) — a retry inserts a duplicate \
-         row; PUT must be idempotent. Add an idempotency key or a dedup/uniqueness check before the \
-         write, or mark it with `// idempotent-ok: <reason>` on the body-start line or up to 3 lines above if a retry is \
-         genuinely safe here. Disable via config `rules: { \"non-idempotent-write\": \"off\" }` \
-         (embedders: `disabledRules`) if this applies more broadly. LANGUAGE SIGHTLINE: this check \
-         needs store-write evidence that only the TypeScript parser produces \
-         (ts/tsx/js/jsx/mjs/cjs/mts/cts) — `SourceSymbol::write_sites`, which \
-         parser-python-3/go/rust/csharp/java-21 all leave empty, so a handler in those languages has \
-         no write site the call-graph BFS could reach and this rule cannot fire there at all. Easiest \
-         to misread: the sibling `mutating-route-no-auth` rule DOES walk Java, so a Java repo can show \
-         that rule's findings while this rule stayed dark on the very same routes. ZERO findings of \
-         this rule outside ts/tsx/js/jsx/mjs/cjs/mts/cts therefore means NOT ANALYZED, never \"no \
-         risky write on these routes\"."
+        format!(
+            "PUT /things/:id reaches prisma.thing.create directly (create) — a retry inserts a \
+             duplicate row; PUT must be idempotent. If a retry is genuinely safe here, this is a false \
+             positive: mark it with `// idempotent-ok: <reason>` on the body-start line or up to 3 \
+             lines above and nothing else has to change. {} IF A RETRY IS NOT SAFE: add an idempotency \
+             key, or a dedup check the DATABASE enforces, before the write. Disable via config `rules: \
+             {{ \"non-idempotent-write\": \"off\" }}` (embedders: `disabledRules`) if this applies \
+             more broadly. {}",
+            super::landing::UNIQUE_ENFORCEMENT_LANDING,
+            write_site_sightline()
+        )
     );
 }
 
@@ -497,7 +513,7 @@ fn delete_reaching_a_create_across_a_call_edge_is_flagged_with_hops() {
         api_endpoints: &[endpoint("DELETE", "/things/:id", "removeThing")],
         symbols: &symbols,
         symbol_graph: &graph,
-        files: &files,
+        read_file: &reader(&files),
     });
     assert_eq!(out.len(), 1);
     let data = out[0].data.as_ref().unwrap();
@@ -517,7 +533,7 @@ fn put_with_atomic_increment_is_flagged_kind_atomic_accumulate() {
         api_endpoints: &[endpoint("PUT", "/counter/:id", "bump")],
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        files: &files,
+        read_file: &reader(&files),
     });
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].data.as_ref().unwrap()["kind"], "atomic-accumulate");
@@ -534,7 +550,7 @@ fn put_with_a_plain_idempotent_update_is_not_flagged() {
         api_endpoints: &[endpoint("PUT", "/users/:id", "setName")],
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        files: &files,
+        read_file: &reader(&files),
     });
     assert!(out.is_empty());
 }
@@ -550,7 +566,7 @@ fn put_using_upsert_is_not_flagged() {
         api_endpoints: &[endpoint("PUT", "/profile/:id", "put")],
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        files: &files,
+        read_file: &reader(&files),
     });
     assert!(out.is_empty());
 }
@@ -566,7 +582,7 @@ fn counter_bump_via_a_store_like_receiver_is_flagged_kind_counter() {
         api_endpoints: &[endpoint("PUT", "/rate/:key", "put")],
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        files: &files,
+        read_file: &reader(&files),
     });
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].data.as_ref().unwrap()["kind"], "counter");
@@ -586,7 +602,7 @@ fn post_and_get_with_a_bare_create_are_not_flagged() {
         ],
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        files: &files,
+        read_file: &reader(&files),
     });
     assert!(out.is_empty());
 }
@@ -602,13 +618,14 @@ fn post_with_atomic_increment_is_flagged_regardless_of_method() {
         api_endpoints: &[endpoint("POST", "/polls/:id/vote", "vote")],
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        files: &files,
+        read_file: &reader(&files),
     });
     assert_eq!(out.len(), 1);
     let data = out[0].data.as_ref().unwrap();
     assert_eq!(data["method"], "POST");
     assert_eq!(data["kind"], "atomic-accumulate");
-    assert!(data["hint"].as_str().unwrap().contains("idempotency key"));
+    // Reads `message`, not the retired `data.hint` duplicate (ledger V231).
+    assert!(out[0].message.contains("idempotency key"));
 }
 
 #[test]
@@ -622,7 +639,7 @@ fn idempotent_ok_marker_suppresses_non_idempotent_write_finding() {
         api_endpoints: &[endpoint("PUT", "/things/:id", "put")],
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        files: &files,
+        read_file: &reader(&files),
     });
     assert!(out.is_empty());
 }
@@ -731,7 +748,7 @@ fn the_write_site_sightline_is_identical_in_the_finding_and_the_published_docs()
         api_endpoints: &[endpoint("PUT", "/things/:id", "putThing")],
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        files: &files,
+        read_file: &reader(&files),
     });
     assert_eq!(non_idempotent.len(), 1);
     for (rule, out) in [
@@ -744,12 +761,12 @@ fn the_write_site_sightline_is_identical_in_the_finding_and_the_published_docs()
             "{rule}'s finding no longer renders the shared sightline claim `{claim}` — it reads: \
              {message}"
         );
-        // `data.hint` and `message` are the same string by contract; pin that here too so a future
-        // splice cannot disclose on one and stay silent on the other.
-        assert_eq!(
-            out[0].data.as_ref().unwrap()["hint"].as_str().unwrap(),
-            message,
-            "{rule}'s data.hint drifted from its message"
+        // `data.hint` used to be a second copy of this same string, pinned here so a splice could not
+        // disclose on one and stay silent on the other. The copy is retired (ledger V231); the pin now
+        // asserts it stays retired, which is the same protection with one string instead of two.
+        assert!(
+            out[0].data.as_ref().unwrap().get("hint").is_none(),
+            "{rule} reintroduced the data.hint duplicate"
         );
     }
 
@@ -878,11 +895,12 @@ fn a_marker_under_a_same_id_sibling_declaration_still_suppresses() {
             &files,
             vec![sym("api/h.ts", "touch", 1), sym("api/h.ts", "touch", 4)],
         );
+        let read_file = reader(&files);
         scan_unsafe_read_endpoint(&ScanUnsafeReadEndpointInput {
             api_endpoints: &[endpoint("GET", "/touch", "touch")],
             symbols: &symbols,
             symbol_graph: &Vec::new(),
-            files: &files,
+            read_file: &read_file,
         })
         .len()
     };
@@ -914,7 +932,7 @@ fn a_near_miss_marker_under_a_same_id_sibling_declaration_is_still_disclosed() {
         api_endpoints: &[endpoint("GET", "/touch", "touch")],
         symbols: &symbols,
         symbol_graph: &Vec::new(),
-        files: &files,
+        read_file: &reader(&files),
     });
     // Still fires (a near-miss never suppresses) — but now it SAYS the comment does not suppress.
     assert_eq!(out.len(), 1);
@@ -923,5 +941,86 @@ fn a_near_miss_marker_under_a_same_id_sibling_declaration_is_still_disclosed() {
             && out[0].message.contains("does not suppress this rule"),
         "the near-miss sentence must name the token it found: {}",
         out[0].message
+    );
+}
+
+// ===========================================================================================
+// §27 ORDER pins: DISQUALIFIER < LANDING < IMPERATIVE. Position, not existence -- a reader who
+// acts on the first instruction never reaches a caveat placed behind it. The invalidation probe
+// for both is "move the landing behind that arm's imperative and leave every token present".
+// ===========================================================================================
+
+/// Shared body of the two pins below.
+fn assert_landing_order(who: &str, msg: &str, disqualifier: &str, landing: &str, imperative: &str) {
+    for (name, needle) in [
+        ("the disqualifier", disqualifier),
+        ("the landing clause", landing),
+        ("the imperative", imperative),
+    ] {
+        assert_eq!(
+            msg.matches(needle).count(),
+            1,
+            "{who}: {name} must be spelled ONCE, or an index comparison means nothing: {msg}"
+        );
+    }
+    let dq = msg.find(disqualifier).expect("disqualifier missing");
+    let land = msg.find(landing).expect("landing missing");
+    let verb = msg.find(imperative).expect("imperative missing");
+    assert!(
+        dq < land,
+        "{who}: the disqualifier is at {dq} and the landing at {land} -- whether this finding is TRUE \
+         is the question a reader answers first: {msg}"
+    );
+    assert!(
+        land < verb,
+        "{who}: the landing clause is at {land} and the imperative at {verb} -- a reader who acts on \
+         the instruction never reaches the caveat behind it: {msg}"
+    );
+}
+
+/// `unsafe-read-endpoint`: the quiet way out (a new mutating route, GET left in place) is the one this
+/// message used to offer as if it were the safe one.
+#[test]
+fn unsafe_read_endpoint_lands_the_method_move_before_its_imperative() {
+    let files = files(&[(
+        "api/h.ts",
+        "export function touch(c: any) { return prisma.ping.create({ data: {} }); }\n",
+    )]);
+    let symbols = with_write_sites(&files, vec![sym("api/h.ts", "touch", 1)]);
+    let out = scan_unsafe_read_endpoint(&ScanUnsafeReadEndpointInput {
+        api_endpoints: &[endpoint("GET", "/touch", "touch")],
+        symbols: &symbols,
+        symbol_graph: &Vec::new(),
+        read_file: &reader(&files),
+    });
+    assert_eq!(out.len(), 1);
+    assert_landing_order(
+        "unsafe-read-endpoint",
+        &out[0].message,
+        "this is a false positive here",
+        super::landing::SAFE_METHOD_MOVE_LANDING,
+        "IF IT IS NOT: move the write behind a mutating method",
+    );
+}
+
+/// `non-idempotent-write`: two remedies, and the message priced neither. The landing says which one is
+/// a migration and which one is a wire change.
+#[test]
+fn non_idempotent_write_lands_the_unique_enforcement_before_its_imperative() {
+    let files = files(&[("api/h.ts", "export function putThing(c: any) { return prisma.thing.create({ data: { id: c.id } }); }\n")]);
+    let symbols = with_write_sites(&files, vec![sym("api/h.ts", "putThing", 1)]);
+    let out = scan_non_idempotent_write(&ScanNonIdempotentWriteInput {
+        api_endpoints: &[endpoint("PUT", "/things/:id", "putThing")],
+        symbols: &symbols,
+        symbol_graph: &Vec::new(),
+        read_file: &reader(&files),
+    });
+    assert_eq!(out.len(), 1);
+    assert_landing_order(
+        "non-idempotent-write",
+        &out[0].message,
+        "this is a false positive: mark it with",
+        super::landing::UNIQUE_ENFORCEMENT_LANDING,
+        "IF A RETRY IS NOT SAFE: add an idempotency key",
     );
 }

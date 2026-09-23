@@ -189,6 +189,14 @@ consume here was a literal path**, so the answer key was planted exclusively ins
 boundary. A perfect score on it measured the inside of that boundary, not the capability. Verified the
 same day: no tree contained a cross-file `baseURL` assignment.
 
+> **That 2-of-6 is a 2026-07-29 reading and it has moved: 4 of 6 join today** (2026-09-07). Two join
+> outright (`fe-vue`, `fe-vite`); two more are matched modulo a missing `/api` prefix and reported as
+> `cross-layer/prefix-drift` rather than as silence. The two that still contribute nothing are
+> `fe-redux` (a `superagent` wrapper idiom) and `fe-svelte` (no `.svelte` parser), and both say so in
+> their own `warnings`. Recount: run `zzop cross` over the front-end × back-end matrix and read
+> `buckets.edges` with `crossLayerFindings.byRule`. The paragraph above is kept as written because it
+> records why the negative cases below exist — the gap it names is the reason, not the current number.
+
 Two pairs now sit deliberately outside it. Each is a front end whose call sites carry only the path
 SUFFIX, paired with a backend that genuinely provides the full route — so the **correct** answer is a
 join and the **current** answer is a miss:

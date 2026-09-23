@@ -139,14 +139,15 @@ pub(super) fn missing_auth_hint(
          false-positive on a route guarded only that way — this finding starts at Info severity until \
          this check becomes middleware-aware. Second precision limit, and the one \"anywhere in its \
          call graph\" above would otherwise overstate: how FAR the walk reaches is per-language. For \
-         the JS/TS extensions a call is resolved across files, so the phrase is literal. For `.java` \
-         it is not — a Java import specifier is a dotted package/class name and no whole-corpus type \
-         index is threaded into this graph, so a specifier resolves to ITSELF and the walk stops one \
-         hop out; a guard reached as handler -> helper in another file -> guard is NOT found. The \
-         same one-hop bound applies to a Python module-attribute receiver (`from pkg import mod; \
-         mod.f()`). In those two cases a finding means \"no guard within one hop\", never \"no guard \
-         anywhere\".{unresolved_clause} {} if your auth happens at the middleware layer or beyond that \
-         hop bound (this rule has no inline suppression marker).",
+         the JS/TS extensions a call is resolved across files, so the phrase is literal, and since \
+         2026-09-07 it is literal for `.java` too — a Java import specifier is a dotted package/class \
+         name that resolves to ITSELF, which used to stop the walk one hop out, and the whole-corpus \
+         type index is now bridged onto the graph so the walk continues. It is NOT literal for a \
+         Python module-attribute receiver (`from pkg import mod; mod.f()`): that receiver is read as \
+         a class, so the walk stops one hop out and a guard reached as handler -> helper in another \
+         file -> guard is NOT found. In that one case a finding means \"no guard within one hop\", never \
+         \"no guard anywhere\".{unresolved_clause} {} if your auth happens at the middleware layer or \
+         beyond that hop bound (this rule has no inline suppression marker).",
         disable_hint("mutating-route-no-auth")
     )
 }

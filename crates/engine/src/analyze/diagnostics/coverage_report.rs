@@ -77,6 +77,7 @@ pub(crate) fn run_diagnostics(
         unknown_suppression_rule_ids: unknown_suppression_rule_ids(config),
         unknown_only_pack_ids: unknown_only_pack_ids(config),
         only_packs_matched_nothing: only_packs_matched_nothing(config),
+        only_packs_active: only_packs_active(config),
     });
 
     DiagnosticsReport {
@@ -118,6 +119,27 @@ fn only_packs_matched_nothing(config: &EngineConfig) -> bool {
             .only_packs
             .iter()
             .any(|id| loaded.contains(id.as_str()))
+}
+
+/// `true` when an allowlist was requested and it WORKS — at least one entry named a loaded pack.
+///
+/// The complement of [`only_packs_matched_nothing`], and the case that needed a receipt (2026-09-14,
+/// review ledger V232). The total-typo case already says "native analyses are not packs and still ran";
+/// the WORKING case said nothing at all, which is the one where the reader believes the run is narrowed.
+/// 📏 Measured on `corpus/frameworks/express` with `packs: { "only": ["security"] }`: 58 findings
+/// become 51, and 29 of those 51 come from `duplicate-route` and `mutating-route-no-auth` — native ids
+/// the allowlist never named — while `configWarnings` was `[]` and `packsLoaded` listed all eight packs,
+/// byte-identical to the un-narrowed run.
+///
+/// Computed here for [`only_packs_matched_nothing`]'s reason: only this side knows how many entries
+/// were requested.
+fn only_packs_active(config: &EngineConfig) -> bool {
+    let loaded = loaded_pack_ids(config);
+    config
+        .rule_config
+        .only_packs
+        .iter()
+        .any(|id| loaded.contains(id.as_str()))
 }
 
 /// Every native-analysis id (built fresh here since the engine keeps no live `RuleRegistry` of its own)

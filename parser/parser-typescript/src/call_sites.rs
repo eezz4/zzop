@@ -29,13 +29,20 @@
 //!   emitting guesses nothing. The line is therefore "is the callee resolvable", never "is the argument
 //!   literal". The Python producer draws it at the same place (`os.environ[k]` emits there too); the two
 //!   must not diverge, or a rule reading `env-read` would see different populations per language for no
-//!   reason it could state. ⚠ This is WIDER than the line-scan rule it replaces
+//!   reason it could state. ⚠ This is WIDER than the line-scan that `env-outside-config` used to be
 //!   (`\bprocess\.env\.[A-Za-z0-9_]+` cannot see a bracket form at all), so the migration's detection
 //!   delta includes these — measured and disclosed, not silent.
 //! - **Bare `process.env`** with no key access at all — `const e = process.env`, `{ PORT } = process.env`,
 //!   `Object.keys(process.env)`. Same scope line as above: no key is named at the site. This matches
-//!   what the shipped `env-outside-config` line-scan sees today (`\bprocess\.env\.[A-Za-z0-9_]+`), so the
+//!   what that rule's OLD line scan saw (`\bprocess\.env\.[A-Za-z0-9_]+`), so the
 //!   transfer does not lose a population here.
+//!
+//!   ⚠ **`env-outside-config` is not a shipped rule and no longer scans lines** — two stale facts in
+//!   one sentence, corrected 2026-09-07 (review ledger V92 ⑸). It left the bundled `reliability` pack
+//!   on 2026-08-12 with five siblings, exported to `examples/packs/code-hygiene.json`, and in the same
+//!   rework its evidence moved off the regex onto this very channel. So it is not the population
+//!   this producer is measured against — it is a DOWNSTREAM CONSUMER of it, in a pack a user opts
+//!   into. The population claim above still holds; only its witness changed.
 //! - **A non-bare receiver** — `globalThis.console.log(...)`, `window.console.log(...)`, or a `console`
 //!   aliased through a local (`const c = console; c.log(x)`). v1 requires the identifier at the site.
 //!

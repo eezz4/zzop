@@ -31,6 +31,30 @@ fi
 missing=0
 count=0
 
+# The subject is the SHIPPED half of this file, and narrowing it to that is the whole repair.
+#
+# Until 2026-09-06 the check was `grep -F` over the whole file, and an external review showed a comment
+# could satisfy it. Fixing only that turned out to be the smaller half: this file's own `#[cfg(test)]`
+# module lists every expected token as a string literal, so the TEST vouched for the shipped format!
+# string. Rename the format token alone and the guard stays green — the assertion that would have
+# caught it lives in `cargo test`, which had not run for 47 commits when this was found (the gap
+# `scripts/unseen-commits.sh` now prints). A guard whose evidence is the test it is standing in for is
+# not a second opinion.
+#
+# So: everything above the first `#[cfg(test)]`, minus `//` comment lines. POSIX bracket class rather
+# than `\s` — this is a BRE, where `\s` is not a space class and the strip would silently do nothing,
+# which is how the first attempt at this fix passed its own canary.
+set +e
+code="$(awk '/^#\[cfg\(test\)\]/ { exit } !/^[[:space:]]*\/\// { print }' "$VERSION_RS")"
+rc=$?
+set -e
+if [ "$rc" -ne 0 ] || [ -z "$code" ]; then
+  echo "check-version-lists-parsers: could not read the shipped half of $VERSION_RS (awk exit $rc)." >&2
+  echo "  An empty subject is a broken guard, never a file with no code in it. If the test module" >&2
+  echo "  moved above the shipped code, re-anchor this split." >&2
+  exit 1
+fi
+
 # git ls-files (TRACKED only) so an untracked/gitignored local corpus checkout under parser/ can't
 # spoof a phantom crate into the requirement -- same tracked-only rationale as the isolation guards.
 while IFS= read -r -d '' toml; do
@@ -49,10 +73,18 @@ while IFS= read -r -d '' toml; do
   # version_string() stamps each parser as `zzop-parser-<x>={}`; the literal token to find is
   # `<name>=`. A grep -F fixed-string match on that exact token (name + '=') is enough -- it can't
   # collide across crates because the names are distinct and each carries its own '=' in the format!.
-  if ! grep -qF "${name}=" "$VERSION_RS"; then
-    echo "check-version-lists-parsers: ($name, $VERSION_RS) -- parser crate not reported by version_string()"
-    missing=1
-  fi
+  # Comment lines are stripped BEFORE the match, once, into `code` above. `grep -F` reads whole files,
+  # so a `// ... zzop-parser-sql= ...` note satisfied this check while the real token had been renamed
+  # (external review, 2026-09-06) -- a guard a comment can satisfy is one a comment can also break.
+  # `case` rather than a pipe into `grep -q`: check-shell-pipe-sigpipe.sh bans that shape repo-wide,
+  # and a fixed-string test over a variable needs no process at all.
+  case "$code" in
+    *"${name}="*) ;;
+    *)
+      echo "check-version-lists-parsers: ($name, $VERSION_RS) -- parser crate not reported by version_string()"
+      missing=1
+      ;;
+  esac
 done < <(git ls-files -z -- 'parser/*/Cargo.toml')
 
 if [ "$missing" -ne 0 ]; then

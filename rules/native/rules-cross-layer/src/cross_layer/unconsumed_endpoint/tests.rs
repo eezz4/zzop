@@ -78,6 +78,8 @@ fn with_mutation_rule_enabled(provides: &[TaggedProvide]) -> (Vec<Finding>, Vec<
         provides,
         &[],
         &BTreeSet::new(),
+        &BTreeSet::new(),
+        &BTreeSet::new(),
         &no_near_miss(),
         &no_trpc(),
     );
@@ -474,6 +476,8 @@ fn suppression_is_anchored_per_route_not_per_rule_run() {
         &provides[..1],
         &[],
         &BTreeSet::new(),
+        &BTreeSet::new(),
+        &BTreeSet::new(),
         &no_near_miss(),
         &no_trpc(),
     );
@@ -620,4 +624,106 @@ fn the_fold_is_per_source_so_a_small_tree_beside_a_huge_one_is_untouched() {
         .unwrap()
         .get("foldedEndpointCount")
         .is_none()));
+}
+
+// ---------------------------------------------------------------------------------------------
+// The UNDECLARED veto list — this tool's default state, and until 2026-09-07 the one state no test
+// here covered. Every other test in this file passes `EXTERNALLY_FETCHED_PATHS`, which
+// `VocabularyConfig::built_in`'s own doc says is NOT what an undeclared run uses: a run that does
+// not declare `vocabulary.externallyFetchedPaths` gets an EMPTY slice here. Review ledger V96.
+// ---------------------------------------------------------------------------------------------
+
+/// The sentence must not render its own punctuation as the list. This is the literal broken output the
+/// old single-sentence build produced, and it is asserted as an absence so it cannot come back.
+#[test]
+fn an_undeclared_veto_list_never_renders_an_empty_parenthetical() {
+    let out = unconsumed_endpoint_findings(
+        &[dead("GET /orphan", "be", "Api.java", 12)],
+        &[],
+        &no_near_miss(),
+        &no_trpc(),
+        &none_reported(),
+        &[],
+    );
+    assert_eq!(out.len(), 1);
+    assert!(
+        !out[0]
+            .message
+            .contains("by definition (, and anything under"),
+        "the empty list rendered as punctuation: {}",
+        out[0].message
+    );
+    // (No blanket "no parentheses" assertion: the message legitimately carries several of its own —
+    // the source attribution and the unresolved-consume count both use them. The pin is the specific
+    // empty-list rendering above.)
+}
+
+/// Sharper than the punctuation: with nothing declared the old sentence made a FALSE CLAIM — it told
+/// the reader that probe and crawler paths "are never reported at all" while the same run reported
+/// them, because only the `/.well-known/` prefix is vetoed unconditionally. The message must now say
+/// what actually happened and name the vocabulary that changes it.
+#[test]
+fn an_undeclared_run_says_probe_paths_are_reported_not_vetoed() {
+    let out = unconsumed_endpoint_findings(
+        &[dead("GET /health", "be", "Api.java", 3)],
+        &[],
+        &no_near_miss(),
+        &no_trpc(),
+        &none_reported(),
+        &[],
+    );
+    // The route IS reported — that is the fact the sentence has to match.
+    assert_eq!(
+        out.len(),
+        1,
+        "an undeclared run vetoes nothing but /.well-known/"
+    );
+    let m = &out[0].message;
+    assert!(m.contains("is undeclared"), "{m}");
+    assert!(m.contains("externallyFetchedPaths"), "{m}");
+    assert!(m.contains("DO appear above"), "{m}");
+    assert!(
+        !m.contains("are never reported at all"),
+        "the message still claims a veto this run did not perform: {m}"
+    );
+}
+
+/// `/.well-known/` is a hard prefix, not part of the declared list, so it is vetoed even with nothing
+/// declared — and the undeclared sentence still has to say so.
+#[test]
+fn well_known_stays_vetoed_with_an_undeclared_list() {
+    let out = unconsumed_endpoint_findings(
+        &[dead(
+            "GET /.well-known/acme-challenge/tok",
+            "be",
+            "Api.java",
+            4,
+        )],
+        &[],
+        &no_near_miss(),
+        &no_trpc(),
+        &none_reported(),
+        &[],
+    );
+    assert!(out.is_empty(), "the RFC 8615 prefix veto is unconditional");
+}
+
+/// The declared arm keeps the sentence it always had, list and all.
+#[test]
+fn a_declared_veto_list_still_renders_its_members() {
+    let out = unconsumed_endpoint_findings(
+        &[dead("GET /orphan", "be", "Api.java", 12)],
+        &[],
+        &no_near_miss(),
+        &no_trpc(),
+        &none_reported(),
+        &["/health", "/robots.txt"],
+    );
+    assert_eq!(out.len(), 1);
+    let m = &out[0].message;
+    assert!(
+        m.contains("by definition (`/health`, `/robots.txt`, and anything under"),
+        "{m}"
+    );
+    assert!(m.contains("are never reported at all"), "{m}");
 }

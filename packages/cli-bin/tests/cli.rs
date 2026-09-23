@@ -17,6 +17,48 @@ fn run(args: &[&str]) -> Output {
         .expect("zzop binary should spawn")
 }
 
+/// `init` NAMES THE NEXT STEP, and the second command it names is not decoration.
+///
+/// Measured on a fresh two-file tree (external review round 22, ledger V248): this command writes a
+/// ~29 KB annotated config and used to print two lines with no next move, and the run that follows
+/// returns 22,536 bytes across 17 root keys of which 509 are the findings. The first-time reader's
+/// opening act was choosing which key is the answer.
+///
+/// `coverage` is named because the config's whole contract is that zzop judges what you DECLARE and
+/// stays silent on what you do not, and `vocabularyDeclared` in that reply is the only place that
+/// says which half is which. Deleting keys you do not recognize is the common first edit of a file
+/// this size, and for the auth keys that deletion makes the reply LOUDER, not quieter.
+#[test]
+fn init_names_what_to_run_next_and_where_to_see_what_the_config_turned_on() {
+    let dir = TempDir::new("zzop-cli-init-next");
+    dir.write("src/a.ts", "export const x = 1;\n");
+    let path = dir.path().display().to_string();
+
+    let out = run(&["init", &path]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let said = format!("{}{}", stdout(&out), stderr(&out));
+
+    assert!(
+        said.contains("zzop analyze"),
+        "a command that sets a tree up must say what to run on it: {said}"
+    );
+    assert!(
+        said.contains("zzop coverage"),
+        "the reply that says which declarations were honoured is the other half of the first run: \
+         {said}"
+    );
+    // The point of naming `coverage` is the DECLARED/SILENT split, so the sentence has to carry it —
+    // without this, "mentions coverage" would pass on a line that named it for any reason at all.
+    assert!(
+        said.contains("silent"),
+        "naming the command without naming what it answers is a pointer to nothing: {said}"
+    );
+    assert!(
+        said.contains(&path),
+        "the next-step line must carry the tree it is about, or it is a snippet to edit: {said}"
+    );
+}
+
 /// Like `run`, but from a chosen working directory — the lane that pins relative-path arguments
 /// (`analyze .`, `endpoint <pattern> <relative dir>`) resolving against the invocation cwd.
 fn run_in(dir: &Path, args: &[&str]) -> Output {
@@ -324,6 +366,14 @@ fn findings_filter_knobs_are_wired_and_reject_bad_values_as_usage_errors() {
 /// Exit 2, not a new code: `1` means "zzop could not answer", `3` means "the findings met the declared
 /// threshold", and this is neither — the caller named a filter that cannot match, which is exactly what
 /// `2` already means everywhere else in this binary.
+///
+/// # All three shapes, plus the control — because the verdict is now shared with the other host
+/// `cli/fail_on.rs` stopped deriving this itself on 2026-09-02 and asks
+/// `zzop_summary::unmatchable_rule_filter`, the same function whose `Some` the MCP host turns into
+/// `isError`. That makes the two hosts' answers one answer, and it makes THIS test the place the
+/// terminal half is held: a bare id no run could report (refused at argv time), a typo inside a pack
+/// that DID load, a real id from a pack this build ships but does not load — and a real loaded id,
+/// without which every leg above is satisfied by a binary that refuses everything.
 #[test]
 fn a_rule_filter_that_can_never_match_is_loud_on_stderr_and_exits_two() {
     let dir = TempDir::new("zzop-cli-rule-filter");
@@ -364,6 +414,40 @@ fn a_rule_filter_that_can_never_match_is_loud_on_stderr_and_exits_two() {
         stderr(&out)
     );
 
+    // The third shape, and the one that used to be silent: a typo INSIDE a pack that DID load. It is a
+    // different reading from the two above and needs a different fix, so the refusal has to SAY the pack
+    // loaded — a reader told "no pack `security`" goes looking for a missing file that is right there.
+    let out = run(&[
+        "analyze",
+        &path,
+        "--rule",
+        "security/no-such-rule",
+        "--limit",
+        "5",
+    ]);
+    assert_eq!(out.status.code(), Some(2), "stdout: {}", stdout(&out));
+    assert!(
+        stderr(&out).contains("security/no-such-rule") && stderr(&out).contains("DID load"),
+        "a typo inside a loaded pack must be named as one, not as an unloaded pack: {}",
+        stderr(&out)
+    );
+
+    // POSITIVE CONTROL, and the reason the three refusals above mean anything: a real id from a pack
+    // that really loaded is a clean exit 0 with nothing on stderr, on a tree where it happens to find
+    // nothing. Without this leg, "exit 2 on a bad id" is indistinguishable from "exit 2 on every id".
+    let out = run(&["analyze", &path, "--rule", "security/weak-crypto"]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "a real loaded rule id must run: {}",
+        stderr(&out)
+    );
+    assert!(
+        stderr(&out).is_empty(),
+        "a usable filter says nothing: {}",
+        stderr(&out)
+    );
+
     // Precedence over the CI gate: a filter that cannot match makes the printed VIEW a lie, so the
     // argument refusal wins over the threshold's own exit 3.
     let out = run(&[
@@ -378,6 +462,148 @@ fn a_rule_filter_that_can_never_match_is_loud_on_stderr_and_exits_two() {
         out.status.code(),
         Some(2),
         "the unusable-filter refusal outranks --fail-on's exit 3: {}",
+        stderr(&out)
+    );
+}
+
+/// A value-taking flag given TWICE is refused, on every lane that lifts one — and a single use of the
+/// same flag is byte-for-byte what it always was.
+///
+/// # The defect (2026-09-12)
+/// Every argv lifter in this binary stored its knob as `slot = Some(value)`, so a repeat kept the LAST
+/// value and threw the earlier one away with exit 0 and an EMPTY stderr. Measured on
+/// `cases/trees/api-be` before the fix: `--rule db/update-delete-no-where --rule
+/// http/protected-path-no-auth-evidence --limit 200` printed the 4 rows of the second rule, none of the
+/// first's 3, and `findings.truncated` was absent — so the reply did not say a row had been withheld
+/// either. `--limit 1 --limit 200` returned the 92 rows of the 200, and `--severity critical --severity
+/// info` widened a narrowing filter.
+///
+/// This repo's own backlog wrote `--rule <a> --rule <b>` twice as a re-measurement recipe, believing it
+/// accumulated; both recipes were measuring one rule.
+///
+/// # What each leg is for
+/// The FIRST three legs are the findings knobs, the fourth is the CI gate (where the discarded value
+/// decides an exit code), and the fifth is the one that made this worse than a narrow view: a typo in
+/// the DISCARDED position was doubly silent, because `fail_on::gate_or_exit`'s unmatchable-filter
+/// refusal only ever sees the surviving value. The `graph`/`explain` legs prove the fix is not local to
+/// one lifter. The POSITIVE CONTROLS at the end are what keep "exit 2 on a repeat" from being
+/// indistinguishable from "exit 2 on everything".
+#[test]
+fn a_value_taking_flag_given_twice_is_refused_and_named() {
+    let dir = TempDir::new("zzop-cli-repeated-flag");
+    dir.write("a.ts", "export const a = 1;\n");
+    init_config(dir.path());
+    let path = dir.path().display().to_string();
+
+    // (lane args, the flag the refusal must name)
+    let repeats: &[(&[&str], &str)] = &[
+        (
+            &[
+                "analyze",
+                "--rule",
+                "security/weak-crypto",
+                "--rule",
+                "security/jwt-no-expiry",
+            ],
+            "--rule",
+        ),
+        (
+            &["analyze", "--severity", "critical", "--severity", "info"],
+            "--severity",
+        ),
+        (&["analyze", "--limit", "1", "--limit", "5"], "--limit"),
+        (
+            &["analyze", "--fail-on", "critical", "--fail-on", "info"],
+            "--fail-on",
+        ),
+        // The typo in the DISCARDED position: silent before, because the post-run refusal never saw it.
+        (
+            &[
+                "analyze",
+                "--rule",
+                "totally/bogus-rule",
+                "--rule",
+                "security/weak-crypto",
+            ],
+            "--rule",
+        ),
+        (&["graph", "--top", "5", "--top", "9"], "--top"),
+        (
+            &["graph", "--domain", "dep", "--domain", "risk"],
+            "--domain",
+        ),
+        (
+            &["graph", "--format", "mermaid", "--format", "mermaid"],
+            "--format",
+        ),
+        (&["graph", "--scope", "a", "--scope", "b"], "--scope"),
+        (&["graph", "--fold", "1", "--fold", "2"], "--fold"),
+    ];
+    for (lane, flag) in repeats {
+        let mut argv: Vec<&str> = vec![lane[0], &path];
+        argv.extend_from_slice(&lane[1..]);
+        let out = run(&argv);
+        assert_eq!(
+            out.status.code(),
+            Some(2),
+            "{argv:?} must be refused as an argument-shape error, not answered about half of it \
+             (stdout: {})",
+            stdout(&out)
+        );
+        let err = stderr(&out);
+        assert!(
+            err.contains(flag) && err.contains("more than once"),
+            "the refusal must name the repeated flag {flag} and say what was wrong: {err}"
+        );
+    }
+
+    // `explain` takes its own `--config`, parsed by a different function again.
+    let cfg = dir.path().join("zzop.config.jsonc").display().to_string();
+    let out = run(&[
+        "explain",
+        "security/weak-crypto",
+        "--config",
+        &cfg,
+        "--config",
+        &cfg,
+    ]);
+    assert_eq!(out.status.code(), Some(2), "stdout: {}", stdout(&out));
+    assert!(
+        stderr(&out).contains("--config") && stderr(&out).contains("more than once"),
+        "explain's own --config must be refused too: {}",
+        stderr(&out)
+    );
+
+    // POSITIVE CONTROLS — one use of each of those flags is still a clean run. Without these the
+    // assertions above would pass on a binary that refused every invocation.
+    for argv in [
+        vec!["analyze", &path, "--rule", "security/weak-crypto"],
+        vec!["analyze", &path, "--severity", "critical"],
+        vec!["analyze", &path, "--limit", "5"],
+        vec!["graph", &path, "--domain", "dep", "--top", "5"],
+        vec!["explain", "security/weak-crypto", "--config", &cfg],
+    ] {
+        let out = run(&argv);
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "{argv:?} uses each flag ONCE and must still run: {}",
+            stderr(&out)
+        );
+        assert!(
+            !stderr(&out).contains("more than once"),
+            "{argv:?} repeats nothing: {}",
+            stderr(&out)
+        );
+    }
+
+    // And the repeat refusal must not have eaten the pre-existing VALUE refusals, which live in the
+    // same match arms: a bad value given once is still judged on the value.
+    let out = run(&["analyze", &path, "--limit", "not-a-number"]);
+    assert_eq!(out.status.code(), Some(2), "stdout: {}", stdout(&out));
+    assert!(
+        stderr(&out).contains("non-negative integer") && !stderr(&out).contains("more than once"),
+        "a single bad value is still reported as a bad VALUE: {}",
         stderr(&out)
     );
 }
@@ -951,7 +1177,8 @@ fn explain_reports_an_io_scan_rules_real_exclusion_fields() {
 /// ⚠ THE SUBJECT LEFT THE BUNDLE on 2026-08-12 (`reliability/env-outside-config` ->
 /// `code-hygiene/env-outside-config`, `examples/packs/code-hygiene.json`, `axis: opinion`), and it was
 /// the ONLY bundled rule carrying attribute gates on a `call-scan` matcher — recounted at export time
-/// across all 11 bundled packs, the only other attribute-gated rule being `io-scan`'s
+/// across all bundled packs at that time (11; eight since the 2026-09-03 single-rule-pack merge), the
+/// only other attribute-gated rule being `io-scan`'s
 /// `http/protected-path-no-auth-evidence`. So this test could not be repointed at a bundled sibling the
 /// way the `sql/select-star` probe was in the previous increment: there is none. It runs through the
 /// `--config` lane instead, over a tree that has RECOVERED the exported pack under `zzop/rules/` — which
@@ -1865,6 +2092,81 @@ fn facts_emits_the_uncapped_post_assembly_substrate_for_one_tree() {
     assert!(tree.get("findings").is_none(), "{tree}");
 }
 
+/// `zzop map` end to end through the real binary — the module map as DATA, and the three properties
+/// that make it a map rather than a picture in JSON clothing.
+///
+/// The fixture plants an import ACROSS two directories on purpose: a one-directory tree folds to a
+/// single box with no edges, which would satisfy every "the key is present" assertion below while
+/// proving nothing about what the fold computed.
+#[test]
+fn map_folds_the_import_graph_into_modules_and_caps_nothing() {
+    let dir = TempDir::new("zzop-map");
+    dir.write("lib/util.ts", "export const load = () => 1;\n");
+    dir.write(
+        "src/api.ts",
+        "import { load } from '../lib/util';\nexport const go = () => load();\n",
+    );
+    init_config(dir.path());
+    let path = dir.path().to_str().unwrap();
+
+    let out = run(&["map", path]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let v: serde_json::Value = serde_json::from_str(&stdout(&out)).expect("map must be JSON");
+
+    assert_eq!(v["fold"], 1, "the default grain is the top-level map: {v}");
+    let ids: Vec<&str> = v["modules"]
+        .as_array()
+        .expect("modules")
+        .iter()
+        .map(|m| m["id"].as_str().expect("a module id is a string"))
+        .collect();
+    assert!(
+        ids.contains(&"lib") && ids.contains(&"src"),
+        "both planted directories must be modules: {ids:?}"
+    );
+    // The edge really carries the FOLD's own arithmetic, not a placeholder: one file-level import
+    // collapsed into one module edge.
+    let edge = &v["edges"][0];
+    assert_eq!(edge["from"], "src", "{v}");
+    assert_eq!(edge["to"], "lib", "{v}");
+    assert_eq!(edge["fileEdges"], 1, "{v}");
+
+    // `lines` never ships without the count of files it was summed over — the pair that keeps a
+    // partially-measured module from reading as a fully-measured one.
+    for m in v["modules"].as_array().expect("modules") {
+        assert_eq!(
+            m.get("lines").is_some(),
+            m.get("linesMeasuredOver").is_some(),
+            "`lines` and `linesMeasuredOver` ship together or not at all: {m}"
+        );
+    }
+
+    // NOTHING IS CAPPED, stated as an absence a test can see: no truncation channel exists on this
+    // reply, and the one knob refuses a value that would collapse the map into a single box.
+    assert!(v.get("truncated").is_none(), "{v}");
+    assert!(v.get("filtered").is_none(), "{v}");
+    let refused = run(&["map", path, "--fold", "0"]);
+    assert_eq!(refused.status.code(), Some(2), "{}", stderr(&refused));
+    assert!(
+        stderr(&refused).contains("--fold"),
+        "the refusal must name the flag: {}",
+        stderr(&refused)
+    );
+    // A repeated knob is refused rather than last-wins, the rule every other lane here follows.
+    let repeated = run(&["map", path, "--fold", "1", "--fold", "2"]);
+    assert_eq!(repeated.status.code(), Some(2), "{}", stderr(&repeated));
+
+    // Coarser is a different answer, not a truncated one: depth 2 splits what depth 1 merged.
+    let deeper = run(&["map", path, "--fold", "2"]);
+    assert!(deeper.status.success(), "stderr: {}", stderr(&deeper));
+    let d: serde_json::Value = serde_json::from_str(&stdout(&deeper)).expect("map must be JSON");
+    assert_eq!(d["fold"], 2, "{d}");
+    assert_eq!(
+        d["census"]["fileImports"], v["census"]["fileImports"],
+        "the fold changes the BOXES, never the file-level graph underneath: {d}"
+    );
+}
+
 #[test]
 fn coverage_aggregates_dispatch_by_extension_and_declares_recall_unmeasured() {
     // The aggregate-visibility lane, end to end through the real binary: one tree holding a structural
@@ -2333,6 +2635,114 @@ fn an_analysis_lane_without_a_config_refuses_with_exit_one_and_names_the_templat
     }
 }
 
+/// A config declaring 2+ trees is refused by `analyze` — and until 2026-09-23 that refusal named TWO
+/// remedies and a reader who transcribed either one got an error. `zzop cross <that dir>` exits 2 (the
+/// join takes 2+ paths or `--config`), and "point this single-tree analysis at one tree root directly"
+/// cannot be done when the declared roots carry no config of their own — which is the shape the config
+/// template's own comment teaches. The shared string stays host-neutral by contract (it also reaches MCP
+/// clients that have no shell); the 2026-08-09 ruling is that each host appends its OWN runnable line,
+/// and it had been applied to the missing-config refusal only. This pins the other half.
+#[test]
+fn the_multi_tree_refusal_carries_this_host_s_runnable_way_out() {
+    let dir = TempDir::new("zzop-multi-tree");
+    dir.write("web/src/a.ts", "export const a = 1;\n");
+    dir.write("api/src/b.ts", "export const b = 1;\n");
+    init_config(dir.path());
+
+    let cfg_path = dir.path().join("zzop.config.jsonc");
+    let cfg = std::fs::read_to_string(&cfg_path).expect("starter config");
+    let one_tree = "\"roots\": [\".\"]";
+    assert!(
+        cfg.contains(one_tree),
+        "the starter config no longer declares a single root the way this test rewrites; \
+         re-read it before trusting the rewrite below"
+    );
+    let two_trees = "\"trees\": [{ \"root\": \"./web\" }, { \"root\": \"./api\" }]";
+    std::fs::write(&cfg_path, cfg.replace(one_tree, two_trees)).expect("write two-tree config");
+
+    let root = dir.path().to_str().unwrap();
+    let out = run(&["analyze", root]);
+    let err = stderr(&out);
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "a multi-tree config is an environment failure (1), not a usage error (2); stderr: {err}"
+    );
+    assert!(
+        err.contains("defines 2 trees"),
+        "the shared refusal must say what it found: {err}"
+    );
+    assert!(
+        err.contains("zzop cross --config"),
+        "the CLI must append its own host's runnable way out to the multi-tree refusal: {err}"
+    );
+    assert!(
+        !err.contains("cross_repo"),
+        "MCP-only vocabulary leaked into the CLI's prescription: {err}"
+    );
+
+    // And the prescription must be true: the spelling it names actually answers.
+    let joined = run(&["cross", "--config", cfg_path.to_str().unwrap()]);
+    assert!(
+        joined.status.success(),
+        "the way out the refusal names must work, stderr: {}",
+        stderr(&joined)
+    );
+}
+
+/// The THIRD refusal the 2026-08-09 ruling covers, and the one that had no pin on either host until
+/// 2026-09-23 — which is exactly the condition that let the second member ship two prescriptions that
+/// both failed when typed, unnoticed, for six weeks. Paths mode: the caller passes tree roots, and one
+/// of those roots turns out to carry a config declaring its OWN tree set, so the path list and the
+/// config answer the same question. The shared sentence says "CONFIG MODE" because a flag is a CLI
+/// word and an argument name is an MCP word; this pins that the CLI then supplies its own.
+#[test]
+fn the_paths_mode_refusal_carries_this_host_s_runnable_way_out() {
+    let dir = TempDir::new("zzop-paths-mode");
+    dir.write("A/web/src/a.ts", "export const a = 1;\n");
+    dir.write("A/api/src/b.ts", "export const b = 1;\n");
+    dir.write("B/src/c.ts", "export const c = 1;\n");
+    dir.write(
+        "A/zzop.config.jsonc",
+        r#"{ "trees": [{ "root": "./web" }, { "root": "./api" }] }"#,
+    );
+    dir.write("B/zzop.config.jsonc", r#"{ "roots": ["."] }"#);
+
+    let a = dir.path().join("A");
+    let b = dir.path().join("B");
+    let out = run(&["cross", a.to_str().unwrap(), b.to_str().unwrap()]);
+    let err = stderr(&out);
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "a path whose config declares its own trees is an environment failure (1), not a usage error (2); stderr: {err}"
+    );
+    assert!(
+        err.contains("CONFIG MODE"),
+        "the shared refusal must name the mode it is sending the caller to: {err}"
+    );
+    assert!(
+        err.contains("--config"),
+        "the CLI must append its own host's runnable way out to the paths-mode refusal: {err}"
+    );
+    assert!(
+        !err.contains("configPath"),
+        "MCP-only vocabulary leaked into the CLI's prescription: {err}"
+    );
+
+    // And the prescription must be true, not merely present.
+    let joined = run(&[
+        "cross",
+        "--config",
+        a.join("zzop.config.jsonc").to_str().unwrap(),
+    ]);
+    assert!(
+        joined.status.success(),
+        "the way out the refusal names must work, stderr: {}",
+        stderr(&joined)
+    );
+}
+
 /// The lanes that must keep working WITHOUT a config, because they are how a user gets one (or asks the
 /// binary about itself). Listed mechanically rather than described: a lane added to the required set by
 /// accident shows up here as a failure instead of as a support question.
@@ -2653,6 +3063,72 @@ fn fail_on_moves_the_exit_code_with_the_findings_and_ignores_the_view_knobs() {
     }
 }
 
+/// A red build has to carry the evidence it went red on — cal.com in miniature, at the exit code.
+///
+/// Measured on the real tree: `analyze --config <cal.com> --limit 1000 --fail-on critical` exits 3
+/// naming `6 critical`, and the 1000-row reply it just printed carries none of them. Deployment-role
+/// ordering is why (fixtures and release scripts sort behind every shipped finding) and it stays;
+/// what changes is that the cut now names the rows it took, and the gate reads them back out. This
+/// fixture is that shape at two findings: one shipped `warning`, one `critical` on a test path,
+/// `--limit 1`.
+///
+/// Both directions are asserted, because either alone is satisfiable by a lie: a gate that always
+/// printed sites would "pass" the first half while telling a reader who can already see the row to
+/// go look for it.
+#[test]
+fn a_gate_that_fires_on_findings_the_cap_removed_names_them_anyway() {
+    let dir = TempDir::new("zzop-cli-fail-on-evidence");
+    dir.write(
+        "a.ts",
+        "export const API_KEY = \"sk-not-a-real-key-abcdefgh\";\n",
+    );
+    dir.write(
+        "tests/conn.ts",
+        "export const DB = \"postgres://admin:s3cretpassword@db.example.com:5432/app\";\n",
+    );
+    init_config(dir.path());
+    let path = dir.path().display().to_string();
+
+    let cut = run(&["analyze", &path, "--limit", "1", "--fail-on", "critical"]);
+    assert_eq!(
+        cut.status.code(),
+        Some(3),
+        "the fixture must break the build or this test proves nothing: {}",
+        stderr(&cut)
+    );
+    let v: serde_json::Value = serde_json::from_str(&stdout(&cut)).expect("analyze prints JSON");
+    // Precondition: the reply's own list carries no `critical` — the state that made the exit code
+    // unanswerable from the artifact.
+    assert!(
+        v["findings"]["shown"]
+            .as_array()
+            .expect("a shown list")
+            .iter()
+            .all(|f| f["severity"] != "critical"),
+        "the cap has to have taken the whole band: {v}"
+    );
+    let named = &v["findings"]["truncated"]["severitiesNotShown"]["firstOmitted"]["critical"];
+    assert!(
+        named[0]["file"].as_str().unwrap_or("").contains("conn.ts"),
+        "the reply names the site the cut took: {v}"
+    );
+    assert!(
+        stderr(&cut).contains("conn.ts"),
+        "and the CI log — usually all a reader has — names it too: {}",
+        stderr(&cut)
+    );
+
+    // The other direction: uncapped, the critical is in `shown`, so there is nothing to point at and
+    // the gate says nothing extra. A message that fires either way is not evidence, it is noise.
+    let whole = run(&["analyze", &path, "--fail-on", "critical"]);
+    assert_eq!(whole.status.code(), Some(3), "{}", stderr(&whole));
+    assert!(
+        !stderr(&whole).contains("conn.ts"),
+        "a reader who can already see the row does not need to be sent to find it: {}",
+        stderr(&whole)
+    );
+}
+
 /// The shape errors, and the one lane that refuses the flag outright. A gate that accepts its flag and
 /// can never fire is worse than no gate: the build goes green and looks like it proved something.
 #[test]
@@ -2702,4 +3178,209 @@ fn fail_on_rejects_bad_values_and_is_refused_on_cross() {
         "the refusal must say WHY and name the lane that does work: {}",
         stderr(&out)
     );
+}
+
+// --- `--baseline`: the ratchet gate (ledger V216) -----------------------------------------
+
+/// The whole adoption story in one test, because the parts are only worth anything together.
+///
+/// External review round 20 measured the problem this answers: across twelve real third-party
+/// repositories, 101 of 101 `critical` findings were ones that code's owner would dismiss, and three
+/// popular repos exit 3 on `--fail-on critical` the first time anyone runs them. The only tuning was
+/// `rules: off` and `exclude`, both of which silence the real case along with the false one.
+#[test]
+fn baseline_records_what_is_there_and_then_fails_only_on_what_is_added() {
+    let dir = TempDir::new("zzop-cli-baseline");
+    dir.write(
+        "a.ts",
+        "export const API_KEY = \"sk-not-a-real-key-abcdefgh\";\n",
+    );
+    init_config(dir.path());
+    let path = dir.path().display().to_string();
+    let file = dir.path().join("zzop-baseline.json");
+    let file_s = file.display().to_string();
+
+    // The finding is there and, without a baseline, it gates.
+    let gated = run(&["analyze", &path, "--fail-on", "warning"]);
+    assert_eq!(gated.status.code(), Some(3), "{}", stderr(&gated));
+
+    // 1. An absent file RECORDS, and that run passes by definition — one command, no editing.
+    let recorded = run(&["analyze", &path, "--baseline", &file_s]);
+    assert_eq!(
+        recorded.status.code(),
+        Some(0),
+        "recording must not fail the run that records: {}",
+        stderr(&recorded)
+    );
+    assert!(file.exists(), "it must actually write the file");
+    let body: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).expect("valid JSON");
+    assert!(
+        body["byRule"].as_object().is_some_and(|m| !m.is_empty()),
+        "the ratchet is `byRule`: {body}"
+    );
+    assert!(
+        body["meaning"]
+            .as_str()
+            .is_some_and(|m| m.contains("exits 3")),
+        "the file must say what it is — it gets committed and read by someone who did not write it"
+    );
+
+    // 2. Nothing changed, so nothing fails.
+    let unchanged = run(&["analyze", &path, "--baseline", &file_s]);
+    assert_eq!(
+        unchanged.status.code(),
+        Some(0),
+        "an unchanged tree must stay green, or the baseline is just a slower --fail-on: {}",
+        stderr(&unchanged)
+    );
+
+    // 3. A rule the baseline never saw is a regression from ZERO. Both fixtures below were checked to
+    //    actually fire before being asserted on — a "new finding" that the engine does not report
+    //    would make this test pass for the wrong reason, which is how a gate ends up trusted and
+    //    blind. Measured: a.ts alone gives {high-entropy-secret: 1}; adding b.ts adds
+    //    {hardcoded-secret: 1}; adding c.ts takes that to 2.
+    dir.write("b.ts", "export const K = \"sk-9f3Kq2mZx7Lp0WvB4tRn\";\n");
+    let new_rule = run(&["analyze", &path, "--baseline", &file_s]);
+    assert_eq!(
+        new_rule.status.code(),
+        Some(3),
+        "a rule absent from the baseline counts as zero and must fail on its first finding: {}",
+        stderr(&new_rule)
+    );
+    let err = stderr(&new_rule);
+    assert!(
+        err.contains("security/hardcoded-secret") && err.contains("0 -> 1"),
+        "it must name the rule and both counts, or a CI log says nothing usable: {err}"
+    );
+
+    // 4. And a rule ALREADY in the baseline that grows. Re-record first, so this asserts the count
+    //    path and not the one above.
+    std::fs::remove_file(&file).unwrap();
+    let rerecorded = run(&["analyze", &path, "--baseline", &file_s]);
+    assert_eq!(rerecorded.status.code(), Some(0), "{}", stderr(&rerecorded));
+    dir.write("c.ts", "export const K2 = \"sk-4tYw8nQ1pR6vX3mL0zJd\";\n");
+    let grew = run(&["analyze", &path, "--baseline", &file_s]);
+    assert_eq!(
+        grew.status.code(),
+        Some(3),
+        "an accepted rule finding MORE must fail — otherwise a baseline accepts a rule forever: {}",
+        stderr(&grew)
+    );
+    assert!(stderr(&grew).contains("1 -> 2"), "{}", stderr(&grew));
+
+    // 5. The reply still goes to stdout in full, so the gate composes with a pipeline.
+    assert!(
+        serde_json::from_str::<serde_json::Value>(&stdout(&grew)).is_ok(),
+        "{}",
+        stdout(&grew)
+    );
+}
+
+/// THE OTHER DIRECTION — a rule that now finds FEWER than the baseline records (review ledger V233).
+///
+/// # Why this is a test and not a nicety
+/// Slack is the only thing a reader can act on in a passing run, and it is visible for exactly as long
+/// as it stands. Measured on a synthetic tree: record three secrets, fix one — this line fires — then
+/// add one back, and the run exits 0 with an EMPTY stderr, because the count is three again and the
+/// baseline records three. The tree got worse and the gate said nothing, correctly: a baseline holds
+/// one number per rule, never a low-water mark, so a reading that has been re-consumed no longer
+/// exists to report. Recording the best-ever count instead would make a PASSING run write to a
+/// committed file, which a CI step must not do.
+///
+/// So the one moment it is visible has to be worth acting on, and it was not: the message printed a
+/// bare COUNT ("1 rule(s) now find FEWER") while the growth half — the direction that does NOT ask the
+/// reader to do anything — has always named its rules as `rule: was -> now`. On a tree with forty
+/// recorded rules that count has no next step. This asserts the two directions now report alike.
+#[test]
+fn a_rule_that_shrinks_is_named_the_same_way_a_rule_that_grows_is() {
+    let dir = TempDir::new("zzop-cli-baseline-slack");
+    dir.write("a.ts", "export const K = \"sk-9f3Kq2mZx7Lp0WvB4tRn\";\n");
+    dir.write("b.ts", "export const K2 = \"sk-4tYw8nQ1pR6vX3mL0zJd\";\n");
+    init_config(dir.path());
+    let path = dir.path().display().to_string();
+    let file = dir.path().join("zzop-baseline.json");
+    let file_s = file.display().to_string();
+
+    let recorded = run(&["analyze", &path, "--baseline", &file_s]);
+    assert_eq!(recorded.status.code(), Some(0), "{}", stderr(&recorded));
+    // FLOOR: the recording has to hold TWO of one rule, or "it shrank to one" below is a statement
+    // about a rule that was never there and this test proves nothing.
+    let body: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).expect("valid JSON");
+    assert_eq!(
+        body["byRule"]["security/hardcoded-secret"], 2,
+        "the fixture must record two of one rule before one can be removed: {body}"
+    );
+
+    // Remove one of the two. The run still passes — that is the point, it is slack, not a failure.
+    std::fs::remove_file(dir.path().join("b.ts")).unwrap();
+    let shrank = run(&["analyze", &path, "--baseline", &file_s]);
+    assert_eq!(
+        shrank.status.code(),
+        Some(0),
+        "finding FEWER must never fail the gate: {}",
+        stderr(&shrank)
+    );
+    let err = stderr(&shrank);
+    assert!(
+        err.contains("security/hardcoded-secret") && err.contains("2 -> 1"),
+        "the shrink report must name the rule and both counts, exactly as the growth report does — a \
+         bare count is a number with no next step: {err}"
+    );
+    assert!(
+        err.contains("tighten"),
+        "it must say what to DO with the slack, or naming it changes nothing: {err}"
+    );
+}
+
+/// Two gates over one exit code is a question only the caller can answer. Refused BEFORE the run, so
+/// nobody pays for a full analysis to be told they have to choose.
+#[test]
+fn baseline_and_fail_on_together_are_a_usage_error() {
+    let dir = TempDir::new("zzop-cli-baseline-pair");
+    dir.write("a.ts", "export const x = 1;\n");
+    init_config(dir.path());
+    let path = dir.path().display().to_string();
+
+    let out = run(&[
+        "analyze",
+        &path,
+        "--baseline",
+        "b.json",
+        "--fail-on",
+        "critical",
+    ]);
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "a usage error is 2, never the gate's own 3: {}",
+        stderr(&out)
+    );
+    let err = stderr(&out);
+    assert!(
+        err.contains("--baseline") && err.contains("--fail-on"),
+        "it must name BOTH flags — a refusal that names one leaves the reader guessing: {err}"
+    );
+}
+
+/// A file that parses but carries no `byRule` is not a baseline. Treating its absent map as "every
+/// rule was zero" would fail every rule while looking like a real verdict.
+#[test]
+fn a_json_file_that_is_not_a_baseline_is_refused_rather_than_read_as_zeroes() {
+    let dir = TempDir::new("zzop-cli-baseline-bogus");
+    dir.write("a.ts", "export const x = 1;\n");
+    dir.write("not-a-baseline.json", "{\"hello\": 1}\n");
+    init_config(dir.path());
+    let path = dir.path().display().to_string();
+    let bogus = dir.path().join("not-a-baseline.json").display().to_string();
+
+    let out = run(&["analyze", &path, "--baseline", &bogus]);
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "zzop could not answer — not the gate's 3, which would read as a real regression: {}",
+        stderr(&out)
+    );
+    assert!(stderr(&out).contains("byRule"), "{}", stderr(&out));
 }

@@ -265,7 +265,7 @@ fn turning_the_cache_off_leaves_the_other_defaults_alone() {
     .unwrap();
     let req = analyze_request(&mapped.request);
     assert_eq!(req["git"], json!({}));
-    assert_eq!(req["packDefs"].as_array().unwrap().len(), 11);
+    assert_eq!(req["packDefs"].as_array().unwrap().len(), 8);
 }
 
 #[test]
@@ -285,8 +285,8 @@ fn pack_defs_carries_every_bundled_pack_with_no_parse_warnings() {
     let pack_defs = req["packDefs"].as_array().unwrap();
     assert_eq!(
         pack_defs.len(),
-        11,
-        "expected exactly the 11 bundled DSL packs"
+        8,
+        "expected exactly the 8 bundled DSL packs"
     );
     assert!(mapped.warnings.iter().all(|w| !w.contains("bundled pack")));
 }
@@ -296,7 +296,7 @@ fn every_tree_in_an_analyze_trees_request_gets_its_own_pack_defs() {
     let mapped = config_to_request(&json!({"roots": ["./a", "./b"]}), Path::new("/base")).unwrap();
     let trees = mapped.request["trees"].as_array().unwrap();
     for tree in trees {
-        assert_eq!(tree["packDefs"].as_array().unwrap().len(), 11);
+        assert_eq!(tree["packDefs"].as_array().unwrap().len(), 8);
     }
 }
 
@@ -368,7 +368,7 @@ fn representative_config_maps_to_the_expected_request_shape() {
     });
 
     assert_eq!(actual, expected);
-    assert_eq!(pack_defs_len, 11);
+    assert_eq!(pack_defs_len, 8);
     assert!(mapped
         .warnings
         .iter()
@@ -410,5 +410,56 @@ fn git_commit_subject_patterns_is_recognized_and_passes_through_verbatim() {
             .all(|w| !w.contains("unknown config key")),
         "a dictionary-listed key must not drift-warn: {:?}",
         mapped.warnings
+    );
+}
+
+/// THE ONE DISABLED LIST, pinned — and with it the sentence the starter template is allowed to make.
+///
+/// `packs.disabled` and `rules: { "<id>": "off" }` write into the SAME vector (see
+/// `mapper::options::rules_map`'s own module doc: "there is one disabled list, and both halves of the
+/// surface write to it"). The consequence, which nothing stated until 2026-09-14, is that
+/// `packs.disabled` accepts ANY valid id — including a NATIVE ANALYSIS, which is not a pack at all —
+/// and it works.
+///
+/// 📏 The shipped starter config asserted the opposite for months: "Both are about PACKS: the native
+/// analyses ... are not packs, so NEITHER KEY REACHES THEM". Measured on `corpus/frameworks/fastapi`
+/// with the release binary: `"packs": {"disabled": ["circular"]}` and `"rules": {"circular": "off"}`
+/// each take the run from 511 findings to 509 with `circular` absent from `byRule` — identical
+/// outcomes, and `circular` is a native analysis (`rules/native/rules-graph`), not a pack (review
+/// ledger V235).
+///
+/// The BEHAVIOUR is the intended architecture and is not changed here; the template's claim was
+/// corrected instead. This test is what keeps the two from drifting apart again: it fails if the
+/// mapper ever starts filtering `packs.disabled` down to pack ids, which is the change that would make
+/// the old sentence true and this comment false.
+///
+/// `packs.only` is the twin that genuinely cannot reach a native analysis, and it is pinned by its own
+/// engine-side report (`analyze_diagnostics`) rather than here, because the SELECTION is the engine's.
+#[test]
+fn packs_disabled_and_a_rule_set_to_off_fill_the_same_list_even_for_a_native_analysis() {
+    let via_packs = config_to_request(
+        &json!({"roots": ["."], "packs": {"disabled": ["circular"]}}),
+        Path::new("/base"),
+    )
+    .unwrap();
+    let via_rules = config_to_request(
+        &json!({"roots": ["."], "rules": {"circular": "off"}}),
+        Path::new("/base"),
+    )
+    .unwrap();
+
+    let packs_disabled = analyze_request(&via_packs.request)["disabledRules"].clone();
+    let rules_off = analyze_request(&via_rules.request)["disabledRules"].clone();
+
+    assert_eq!(
+        packs_disabled, rules_off,
+        "the two spellings write the same list, which is why the template may not say `packs.disabled` \
+         cannot reach a native analysis"
+    );
+    assert!(
+        packs_disabled
+            .as_array()
+            .is_some_and(|a| a.iter().any(|v| v == "circular")),
+        "FLOOR: both sides being empty would make the equality above vacuous: {packs_disabled}"
     );
 }

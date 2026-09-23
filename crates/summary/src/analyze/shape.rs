@@ -65,10 +65,16 @@ pub(super) fn shape_analyze_output(
     // degrades to "nothing to forward" rather than a null. An array of numbers whose legend reached
     // only the raw facade lane would leave the MCP reader — the primary reader — with the numbers
     // alone, which is the state the auditor measured.
-    if let Some(packs_loaded_meaning) = output_view.get("packsLoadedMeaning") {
+    // FOLDED since 2026-09-01, not forwarded: the sentence that changes what a ZERO means (a row with
+    // `didNotRun` was never evaluated, so its zero findings are NOT ANALYZED rather than clean) stays
+    // on the wire in `note`; the rest is byte-identical on every run and ships once from the
+    // reply-legends document — see `output::legends`. The presence test is unchanged, so "no pack
+    // loaded" still means "no legend" rather than a pointer to an explanation of rows that do not
+    // exist.
+    if output_view.get("packsLoadedMeaning").is_some() {
         summary.insert(
             "packsLoadedMeaning".to_string(),
-            packs_loaded_meaning.clone(),
+            output::legends::folded_object("packsLoadedMeaning"),
         );
     }
     // The NATIVE half of the same question, and its legend — which of this build's native analyses
@@ -83,10 +89,15 @@ pub(super) fn shape_analyze_output(
     if let Some(native_analyses) = output_view.get("nativeAnalyses") {
         summary.insert("nativeAnalyses".to_string(), native_analyses.clone());
     }
-    if let Some(native_analyses_meaning) = output_view.get("nativeAnalysesMeaning") {
+    // FOLDED for the reason one field up, and with the same split: the three readings under which an
+    // id's ABSENCE from `findings` is not a measured zero — the whole reason this key exists — stay on
+    // the wire in `note`, and the vocabulary behind them ships once. The JOIN lane's legend of the same
+    // name is NOT folded: its `zeroInCrossLayerFindings` sentence is computed per run from the
+    // findings' own `data.replaces`, so it has no "identical every run" to appeal to.
+    if output_view.get("nativeAnalysesMeaning").is_some() {
         summary.insert(
             "nativeAnalysesMeaning".to_string(),
-            native_analyses_meaning.clone(),
+            output::legends::folded_object("nativeAnalysesMeaning"),
         );
     }
     // The tree's own manifest declaration of which files are BUILD surface, read off the engine view and

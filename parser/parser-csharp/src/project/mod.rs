@@ -126,8 +126,13 @@ mod walk_entrypoint {
 
     /// Extracts ASP.NET Core HTTP route `IoProvide`s across an entire C# corpus — see module doc. Never
     /// panics: a file that fails to parse is silently skipped (degrades to "no rows from this file").
+    ///
+    /// `vocab` reaches the re-run of the per-file minimal-API producer and nothing else, for the reason
+    /// the module doc gives: the attribute-controller half resolves CONSTANTS across the corpus, and a
+    /// route constant is a name this build reads out of the source rather than one the project declares.
     pub fn extract_csharp_http_provides_project(
         files: &[(String, String)],
+        vocab: &crate::CSharpRouteVocab<'_>,
     ) -> CSharpProjectProvidesReport {
         let mut rows_by_name: HashMap<String, Vec<ClassRow>> = HashMap::new();
         // Minimal-API routes are per-file (no corpus resolution) — collected straight into `provides`.
@@ -137,7 +142,7 @@ mod walk_entrypoint {
                 continue;
             };
             collect::collect_from_root(rel, tree.root_node(), text, &mut rows_by_name);
-            minimal_api::extract(rel, tree.root_node(), text, &mut provides);
+            minimal_api::extract(rel, tree.root_node(), text, vocab, &mut provides);
         }
 
         // Name resolution (module doc's "Partial classes"): a name declared once is used directly; 2+ rows

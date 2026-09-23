@@ -32,7 +32,18 @@ the demo page shows the run's own format):
   "PUT /api/users/me"  @ be-express  src/app/routes/auth/auth.controller.ts:61   ← the route nobody calls
 ```
 
-That page is a **narrated walkthrough**: every command and the output it produced are written out, so it
+**You can run that in seconds**, on a pair this repository ships and with nothing to fetch:
+
+```bash
+bash docs/demo/break-a-route-shipped.sh    # needs only a zzop binary
+```
+
+It asserts the join state at each step instead of printing it, so it fails rather than narrating a
+claim that has stopped being true. CI runs it on pushes to `main` and on pull requests; on a
+development branch `scripts/ci-local.sh` is the lane that sees it.
+
+The page itself is a **narrated walkthrough** of the same change on two independently-authored
+repositories: every command and the output it produced are written out, so it
 reads end to end without you running anything. The script behind it, `docs/demo/break-a-route.sh`, is a
 maintainer tool rather than a first-run command — it builds a `cargo` example (so it needs a **source
 checkout**, not a released binary) and analyzes two repositories **you supply** at
@@ -81,6 +92,13 @@ Neither binary needs Node.js, npm, or a compiler. Get them one of four ways:
   download, and it is a hook for anyone who obtained the digest through another channel. It does
   **not** defend against a compromised release origin — an attacker who can swap an asset can swap
   `SHA256SUMS` beside it — and TLS already refuses MITM.
+  **What each platform is actually verified to do differs, and it is worth knowing before you pick one.**
+  The test suite runs on Linux x64 only. Every release build is smoke-tested by running `version` and
+  comparing it against the manifest — on Windows x64, macOS arm64 and Linux x64; the two
+  cross-compiled targets (macOS x64, Linux arm64) cannot execute on the runner that built them and
+  are not smoke-tested at all. So on macOS and Windows what is proven is that the binary loads and
+  links; the analysis behaviour is proven on Linux and assumed to carry. The engine has no
+  platform-specific code path, which is why that assumption is a reasonable one and not a promise.
 - **Claude Code plugin.** `/plugin marketplace add eezz4/zzop`, then `/plugin install zzop@zzop` —
   see [Use in Claude Code](#use-in-claude-code-mcp-plugin) below. (Windows: the install hook needs a
   POSIX shell — Git for Windows is the supported path; details in
@@ -109,7 +127,8 @@ once and then ask questions in plain language — the agent picks the tool.
    stdout too). Once installed, a newer release is reported to you, never installed behind your back.
 
 The server exposes the tools `analyze_repo`, `cross_repo`, `check_file`, `check_endpoint`,
-`analyze_envelope`, `validate_envelope`, `validate_rule_pack` — plus the `zzop://contract/*` resources
+`check_coverage`, `module_map`, `analyze_envelope`, `validate_envelope`, `validate_rule_pack` — plus the
+`zzop://contract/*` resources
 carrying the authoring contracts (among them the envelope schema, the DSL reference, the rule catalog,
 the config surface and an annotated starter config), so an adapter or rule pack can be written with
 nothing but the binary. `zzop-mcp` itself takes no analysis subcommands: bare or `mcp` serves stdio,
@@ -182,12 +201,19 @@ a route leaving the join cannot hide above a summary's caps. `diff` refuses two 
 zzop builds unless you pass `--allow-tool-drift` (which then discloses the drift), and tags a removal
 attributable to a source that lost coverage as `blindnessSuspect` rather than calling it a deletion.
 
+**That refusal gives the manifest a lifetime of one release.** `tool` carries the release number, all
+eight parser fingerprints and the engine fingerprint, so it moves on every release — including one that
+changed nothing you use. A committed baseline therefore expires at your next upgrade, and re-running
+`zzop manifest` to re-commit it is part of upgrading. Reach for `--allow-tool-drift` for a one-off
+comparison you have decided to interpret yourself, not as a habit: it is also the only check that the
+two files share a manifest FORMAT, since nothing else compares their row shape.
+
 `facts` is the other uncapped lane, and the consumer half of the custom-rule extension point: when the
 DSL cannot express your rule, zzop emits everything it knows after assembly and the cross-layer join —
 each tree's whole `CommonIr` plus every join bucket, verbatim — and your own program decides what counts
 as a problem. zzop neither runs your program nor reads its findings back; see
 [docs/modules/facade.md](docs/modules/facade.md#custom-rules-consumer-side-zzop-facts) for the shape.
-`manifest`, `diff`, `facts`, `coverage`, `graph`, `explain` and `init` are CLI-only lanes with no MCP tool twin.
+`manifest`, `diff`, `facts`, `graph`, `explain` and `init` are CLI-only lanes with no MCP tool twin.
 
 The rest of the surface: `analyze-envelope`, `validate-envelope`, `validate-rule-pack`, `endpoint`,
 `file` (everything zzop knows about ONE file — its tree, symbols, io facts, dependency edges both
@@ -216,21 +242,18 @@ checkout**: `zzop analyze --config cases/trees/api-be/zzop.config.jsonc`.
 
 **Which binary you reproduce them with is part of the claim.** `zzop version` prints the release
 number alone, and `main` keeps that number between releases — so an installed `@zzop/cli` and a build
-of this checkout can both answer `0.33.0` and legitimately report different findings, because they
+of this checkout can both answer `0.35.0` and legitimately report different findings, because they
 are different builds of one version string. `zzop version --verbose` is what tells them apart: it
 prints each parser's fingerprint and the engine hash. If your counts differ from the block below,
 compare that line before assuming either side is wrong.
 
 (To the next editor: these numbers move whenever `cases/trees/api-be` changes **and whenever a
-release changes what is measured** — re-run that command and re-measure them, never patch one in
-isolation. Three of them were stale for exactly that second reason until 2026-08-11 — and the whole
-block was again on 2026-08-15, after v0.31.0 exported the `code-hygiene` pack out of the bundle and
-114 findings became 85. It happened a THIRD time on 2026-08-21, and that time nothing about the
-fixture moved: a Prisma delegate-accessor fix changed what `schema/unreferenced-field-name` counts as
-referenced, one info finding went away, and 85 became 84 with this block untouched. The lesson the
-first two did not teach is in this paragraph's first sentence — "whenever a release changes what is
-measured" includes every rule change, not only the loud ones, and no guard here can catch it,
-because the only machine that knows the number is the run.
+release changes what is measured** — and that second one includes every rule change, not only the
+loud ones. Re-run the command and re-measure; never patch one number in isolation. This block went
+stale four times before a machine held it (2026-08-11, 08-15, 08-21, 09-02), and the fourth shipped
+in v0.34.0 with every guard green. It is held now: `scripts/measure/readme-result-block.sh` builds a
+`zzop` from this checkout, runs it, and compares **every** number in the block, so a partial edit
+reds in CI instead of shipping. Do not hand-patch and trust the read — re-run it.
 
 An outside reader reported 87/73 for this block on the same day and was NOT reading a stale README:
 they measured with the published `@zzop/cli` 0.33.0, a different BUILD of the same version string,
@@ -241,8 +264,8 @@ and got a legitimately different answer. That is what the paragraph above this o
 tree could actually be measured on, and `pain: null` means no metric had a population at all — absence of
 data, never a clean bill.
 
-**And `pain` is not a defect score.** It contains no rule findings whatever: the run below reports 84
-findings, 5 of them critical, while its `defect` pain is `0`. `painByAxis` splits the number so that is
+**And `pain` is not a defect score.** It contains no rule findings whatever: the run below reports 92
+findings, 7 of them critical, while its `defect` pain is `0`. `painByAxis` splits the number so that is
 visible instead of implied — `defect` (import cycles, the only entry), `opinion` (barrel discipline, FSD
 layering, SDP/Main Sequence, Newman modularity, LOC ceilings — a project that deliberately does the
 opposite is not wrong, it scores low), and `history` (rename churn, bus factor). The three sit on `pain`'s
@@ -251,23 +274,23 @@ code is arranged.
 
 ```json
 {
-  "fileCount": 84,
+  "fileCount": 89,
   "findings": {
-    "total": 84,
-    "bySeverity":  { "critical": 5, "warning": 71, "info": 8 },
+    "total": 92,
+    "bySeverity":  { "critical": 7, "warning": 54, "info": 31 },
     "byRule":      { "security/weak-crypto": 6, "db/unawaited-write": 1 },
     "shown":       [ /* 50 here — the listed slice, capped by --limit; each entry has ruleId, severity, file, line, message */ ]
   },
-  "architecture": { "pain": 7.5, "painMeasuredWeight": 13.8, "painTotalWeight": 18.6,
+  "architecture": { "pain": 7.7, "painMeasuredWeight": 13.8, "painTotalWeight": 18.6,
                     "painByAxis": [ { "axis": "defect",  "pain": 0.0, "totalWeight": 3.0 },
-                                    { "axis": "opinion", "pain": 7.5, "totalWeight": 15.0 },
+                                    { "axis": "opinion", "pain": 7.7, "totalWeight": 15.0 },
                                     { "axis": "history", "pain": 0.0, "totalWeight": 0.6 } ],
                     "topRecommendation": null, "criticalTop": [],
                     /* + painMeaning / topRecommendationMeaning / criticalTopMeaning: the sentences
                        that say what each of the three above is, and is NOT, on the wire */ },
   "coverage":     { /* how much of the tree zzop actually saw, per extension */ },
   "coverageGaps": { /* which principal extensions reached no resolved import edge, always present —
-                       each row's `kind` ("source" vs "data-config") is what says whether the zero
+                       each row's `kind` ("source", "data-config", "unclassified") says whether the zero
                        means a missing parser or a filetype you have to open to judge */ },
   "disclosure":   { /* the census of zzop's OWN known silent-failure classes, keyed
                        classes / asserted / partial / notYetDetected, plus the `note`,
@@ -281,8 +304,12 @@ code is arranged.
 }
 ```
 
-Every finding carries a rule id, severity, a `file:line` location, and a message naming the config key
-that silences it — the records themselves ride in `shown`. `bySeverity`/`byRule` always count the WHOLE
+Every finding carries a rule id, severity, a `file:line` location, and a message — the records
+themselves ride in `shown`. That message is usually a POINTER rather than the rule's prose: a finding
+whose text its own rule already owns carries a `messageBy` field instead, and you read the full text by
+that finding's `ruleId` (`zzop explain <ruleId>`, or the MCP resource `zzop://rule/{id}`), which is
+also where the config key that silences it is spelled. Check the `messageBy` field, not the sentence.
+The reply says so itself in `findings.messageByIdMeaning`. `bySeverity`/`byRule` always count the WHOLE
 run, so a `--limit` that shortens that list never changes them; that split is why `findings` is an object.
 
 The per-metric `scores` block, the `health` object and `recommendations` are **not** on this wire: the

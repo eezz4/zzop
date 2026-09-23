@@ -67,6 +67,16 @@ pub const FRAMEWORK_RECOGNIZERS: &[FrameworkRecognizer] = &[
         extensions: &["go"],
         emits: &[channel::PROVIDES],
     },
+    // The shape-gated lane (`adapters::router_wrapper`). It is declared beside the import-gated two
+    // because this list answers *"can this build see routes in .go"*, and a consumer that reads it to
+    // decide whether a zero is a capability gap or a real absence must be told about every reader —
+    // including the one that has no framework NAME to gate on. The framework field says what it reads
+    // rather than naming a library, because the thing it reads is the project's own router type.
+    FrameworkRecognizer {
+        framework: "router wrapper",
+        extensions: &["go"],
+        emits: &[channel::PROVIDES],
+    },
     FrameworkRecognizer {
         framework: "gorm",
         extensions: &["go"],
@@ -149,7 +159,7 @@ const TOP_LEVEL_DECLARATION_KINDS: &[&str] = &[
 pub(crate) fn parse_tree(text: &str) -> Option<tree_sitter::Tree> {
     let mut parser = tree_sitter::Parser::new();
     parser.set_language(&go_language()).ok()?;
-    let tree = parser.parse(text, None)?;
+    let tree = util::parse_within_depth(&mut parser, text)?;
     let root = tree.root_node();
     if root.is_error() {
         return None;

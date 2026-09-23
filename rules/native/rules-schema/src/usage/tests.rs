@@ -238,16 +238,20 @@ fn cross_check_dead_field_not_reported_when_parent_is_dead_model() {
 // --- applyChurnRule ---
 
 #[test]
-fn churn_rule_at_least_5_is_warning() {
+fn churn_rule_at_least_5_reports() {
     let issues = apply_churn_rule(&[model("User", &["id"])], &churn_attrs(&[("User", 5)]));
     assert_eq!(issues.len(), 1);
-    assert_eq!(issues[0].severity, Severity::Warning);
+    assert_eq!(issues[0].severity, Severity::Info);
 }
 
+/// The second tier was removed on 2026-09-06 (see `usage.rs`'s churn-line doc): a threshold the code
+/// itself calls unmeasurable must not hand out the loudest band. This pins the REPLACEMENT — a count
+/// far past the old escalation line still reports in the one band — so a tier cannot come back unnoticed.
 #[test]
-fn churn_rule_at_least_10_is_critical() {
+fn churn_rule_well_past_the_old_escalation_line_stays_one_band() {
     let issues = apply_churn_rule(&[model("User", &["id"])], &churn_attrs(&[("User", 12)]));
-    assert_eq!(issues[0].severity, Severity::Critical);
+    assert_eq!(issues[0].severity, Severity::Info);
+    assert_eq!(issues[0].params.as_ref().unwrap()["count"], 12);
 }
 
 #[test]
@@ -351,7 +355,7 @@ fn analyze_with_usage_signals_add_dead_model_field_and_churn_issues() {
         Some(SchemaUsage::default()),
         &churn_attrs(&[("Ghost", 12)]),
     );
-    // Ghost is unbound -> unreferenced-model-name; churn 12 -> model-churn critical. unreferenced-field-name is skipped under unreferenced-model-name.
+    // Ghost is unbound -> unreferenced-model-name; churn 12 -> model-churn (one band). unreferenced-field-name is skipped under unreferenced-model-name.
     assert!(analysis
         .issues
         .iter()
@@ -359,7 +363,7 @@ fn analyze_with_usage_signals_add_dead_model_field_and_churn_issues() {
     assert!(analysis
         .issues
         .iter()
-        .any(|i| i.rule == "model-churn" && i.severity == Severity::Critical));
+        .any(|i| i.rule == "model-churn" && i.severity == Severity::Info));
 }
 
 #[test]

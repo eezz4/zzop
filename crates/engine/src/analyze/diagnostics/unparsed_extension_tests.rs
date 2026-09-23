@@ -27,15 +27,17 @@ fn empty_map_warns_nothing() {
 }
 
 #[test]
-fn one_fact_line_per_extension_in_sorted_order_plus_one_on_ramp() {
+fn one_fact_line_per_extension_plus_one_on_ramp_last() {
     let warnings = unparsed_extension_warning(&unparsed(&[
         ("sql", 2, &["a.sql", "b.sql"]),
         ("py", 1, &["c.py"]),
     ]));
     assert_eq!(warnings.len(), 3, "{warnings:?}");
-    // BTreeMap key order: "py" < "sql".
-    assert!(warnings[0].contains(".py"), "{warnings:?}");
-    assert!(warnings[1].contains(".sql"), "{warnings:?}");
+    // Unread-count descending: 2 `.sql` files ahead of 1 `.py`. The ORDER itself is
+    // `fact_lines_are_ordered_by_unread_file_count_not_by_extension_name`'s subject; what this test
+    // holds is the SHAPE — one line per extension, and the on-ramp note exactly once, last.
+    assert!(warnings[0].contains(".sql"), "{warnings:?}");
+    assert!(warnings[1].contains(".py"), "{warnings:?}");
     assert!(warnings[2].starts_with("No native parser exists for 2 extension(s)"));
 }
 
@@ -254,5 +256,68 @@ fn two_calls_over_the_same_map_are_byte_for_byte_identical() {
     assert_eq!(
         unparsed_extension_warning(&map),
         unparsed_extension_warning(&map)
+    );
+}
+
+/// The ORDER of these lines is derived from the one property every entry already carries — how many
+/// files this run could not read — and not from the extension's name. The name is an accident of
+/// spelling, and sorting on it puts the largest gap wherever its first letter happens to fall.
+///
+/// Measured before this landed: nocodb's `.vue` line (962 unread files) was the 42nd of 49 `warnings`
+/// entries, below eight extensions of 1-10 files each, because "v" sorts last; koel's `.php` (1412
+/// files) sat 10th, one line under a single `.psd`. The channel exists so a reader learns what this run
+/// could not see, and the entry that answers that best was the one furthest from the first screen.
+#[test]
+fn fact_lines_are_ordered_by_unread_file_count_not_by_extension_name() {
+    let warnings = unparsed_extension_warning(&unparsed(&[
+        ("bash", 1, &["a.bash"]),
+        ("vue", 962, &["a.vue"]),
+        ("sh", 7, &["a.sh"]),
+    ]));
+    assert!(warnings[0].contains(".vue"), "{warnings:?}");
+    assert!(warnings[1].contains(".sh"), "{warnings:?}");
+    assert!(warnings[2].contains(".bash"), "{warnings:?}");
+}
+
+/// The tie-break, and the reason this order is TOTAL rather than merely deterministic by accident:
+/// equal counts fall back to the extension name, so no pair of entries is ever left to the order the
+/// caller happened to insert them in.
+#[test]
+fn equal_counts_break_the_tie_on_the_extension_name() {
+    // The two tied extensions are chosen so that the name axis alone would put them on OPPOSITE sides
+    // of the larger one: alphabetically `aa` leads and `zz` trails, so a run that still sorted by name
+    // would report `aa, mm, zz` and this test would see it.
+    let warnings = unparsed_extension_warning(&unparsed(&[
+        ("zz", 4, &["b.zz"]),
+        ("aa", 4, &["a.aa"]),
+        ("mm", 9, &["a.mm"]),
+    ]));
+    assert!(warnings[0].contains(".mm"), "{warnings:?}");
+    assert!(warnings[1].contains(".aa"), "{warnings:?}");
+    assert!(warnings[2].contains(".zz"), "{warnings:?}");
+}
+
+/// The summary line names a SAMPLE of the extensions, and it must sample the order the fact lines above
+/// it are actually in. Naming the five alphabetically-first while the entries lead with the largest
+/// would make the one line a skimming reader does read point away from the gap the ordering just
+/// surfaced — the same failure, moved one line down.
+#[test]
+fn the_on_ramp_note_samples_the_same_order_the_fact_lines_are_in() {
+    let entries: &[(&str, usize, &[&str])] = &[
+        ("bash", 1, &["a.bash"]),
+        ("bats", 4, &["a.bats"]),
+        ("db", 2, &["a.db"]),
+        ("env", 4, &["a.env"]),
+        ("eta", 10, &["a.eta"]),
+        ("sh", 7, &["a.sh"]),
+        ("vue", 962, &["a.vue"]),
+    ];
+    let w = on_ramp(entries);
+    assert!(
+        w.starts_with(
+            "No native parser exists for 7 extension(s) in this tree (.vue, .eta, .sh, .bats, .env, \
+             +2 more)"
+        ),
+        "{w}"
     );
 }

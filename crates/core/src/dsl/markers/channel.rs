@@ -97,3 +97,33 @@ pub fn suppress_hint(rule: &RuleDef) -> Option<String> {
         )),
     }
 }
+
+/// The WHOLE engine-owned tail of a DSL finding's message, assembled: `base`, then
+/// [`suppress_hint`] when that rule has one, then `crate::disable_hint`. One owner, because it now
+/// has TWO consumers that must reach byte-identical answers.
+///
+/// The second consumer is the reason this exists. `zzop-facade` replaces a message its rule declared
+/// VERBATIM with `crate::BY_ID_MESSAGE` (`output-philosophy.md` §3.5), and deciding that means asking
+/// whether the finding's text is exactly what this function WOULD have produced from the rule alone.
+/// Asking it by re-assembling the tail at the second site is the defect class this repo has already
+/// paid for twice — 106 hand-copied suppress sentences, and four comment-leader tables — so the
+/// engine's append and the facade's comparison call the same function instead.
+///
+/// `base` is the finding's own text, not `rule.message`: a near-miss rewrite
+/// (`super::message_with_near_miss`) has already spliced a source token into it by this point, and
+/// that is precisely the finding the facade must NOT shorten. Passing the rule's declared message
+/// instead is what makes the facade's comparison a question rather than a tautology.
+///
+/// `rule` is an OPTION because the engine's call site can miss: a finding whose pack was not passed
+/// in gets no suppress sentence and still gets the disable hint, which is what that site did before
+/// this function existed. Folding the miss in here keeps that arm identical in a release build,
+/// where the `debug_assert` guarding it is compiled out.
+pub fn message_with_hints(rule: Option<&RuleDef>, rule_id: &str, base: &str) -> String {
+    let mut out = match rule.and_then(suppress_hint) {
+        Some(sentence) => format!("{base} {sentence}"),
+        None => base.to_string(),
+    };
+    out.push(' ');
+    out.push_str(&crate::disable_hint(rule_id));
+    out
+}

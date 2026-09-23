@@ -102,7 +102,7 @@ pub(super) fn project_file_io(
         // `router_mount_fragments` arm) and `HttpClient` egress consumes. Unlike the egress-only arms
         // above, this is NOT gated `if !degraded`: `extract_csharp_file_io` runs its route-PROVIDES side
         // unconditionally (Java-parity), gating only the consumes internally — see its own doc.
-        Some(Language::CSharp) => crate::io::extract_csharp_file_io(rel, text, degraded),
+        Some(Language::CSharp) => crate::io::extract_csharp_file_io(rel, text, degraded, vocab),
         _ => None,
     }
 }

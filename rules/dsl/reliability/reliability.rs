@@ -1,6 +1,8 @@
 //! End-to-end tests for `rules/dsl/reliability/reliability.json` — exercised via `zzop_engine::analyze_tree` so `Matcher::MethodScan` rules run against real parser-derived `SourceSymbol` body spans (not hand-built spans), same convention as `sql/sql.rs`/`http/http.rs`.
 //!
-//! Covers all rules in the pack: `async-route-no-catch`, `sync-fs-in-handler`, `map-async-no-promise-all`, `promise-all-and-writes`, `json-parse-no-try`, `fetch-no-timeout`, `emitter-async-listener`, `fs-check-then-use`, `stream-open-no-close-in-loop`, `listener-subscribe-in-loop` (method-scan; the last two via `trigger_in_loop` loop-span containment — see `perf/api-in-loop`'s convention); `debug-true-committed`, `body-limit-missing`, `interval-no-clear` (line-scan, uses the `require_file_absent` DSL extension), `await-inside-promise-all-array` (line-scan); `reqwest-no-timeout` (method-scan, `.rs`).
+//! Covers all rules in the pack: `async-route-no-catch`, `sync-fs-in-handler`, `map-async-no-promise-all`, `promise-all-and-writes`, `json-parse-no-try`, `fetch-no-timeout`, `emitter-async-listener`, `fs-check-then-use`, `stream-open-no-close-in-loop`, `listener-subscribe-in-loop` (method-scan; the last two via `trigger_in_loop` loop-span containment — same `trigger_in_loop` convention as `api-in-loop` below); `debug-true-committed`, `body-limit-missing`, `interval-no-clear` (line-scan, uses the `require_file_absent` DSL extension), `await-inside-promise-all-array` (line-scan); `reqwest-no-timeout` (method-scan, `.rs`).
+//!
+//! THREE rules arrived on 2026-09-03 from packs that shipped one rule each — `goroutine-in-loop` (was `go/`), `api-in-loop` (was `perf/`), `setstate-after-async-unguarded` (was `react/`). A pack whose whole content is one rule teaches a reader nothing the rule id did not already say, and it charged three `[[test]]` targets and three fixture rosters for that. They landed HERE because this pack's subject is already "work started and not finished" — `fs-in-loop-serial`, `stream-open-no-close-in-loop`, `interval-no-clear`, `emitter-async-listener` — and because it was already multi-language before they arrived (`reqwest-no-timeout` is Rust). That makes the pack axis CONCERN, not environment or language, which is the axis the other surviving packs (`db`, `http`, `sql`, `security`, `redis`, `browser`, `egress`) already use.
 //!
 //! SIX rules left this pack on 2026-08-12 — `env-nonnull-assert`, `process-exit-in-lib`, `console-in-be`, `console-in-loop`, `env-outside-config`, `promise-race-no-cancel` — exported to `examples/packs/code-hygiene.json` as the last increment of the `axis: opinion` export. Their tests went with them (`examples/packs/tests/`), and so did the whole Mode-B overlay helper set (`scan_with`, `env_config_overlay`, `deny_env_config_for_file`), which existed only for the declaration-gated `env-outside-config` and had no consumer left here. That also means this pack no longer reads the projected `call_sites` channel at all: all three of its call-scan rules were among the six, so the Python/Go/Java/C#/Rust fixtures that used to live here are now in `examples/packs/tests/w2_languages.rs`.
 //!
@@ -16,11 +18,15 @@ use zzop_core::{load_dsl_packs, RulePackDef};
 use zzop_engine::{analyze_tree, AnalyzeOutput, EngineConfig};
 
 mod allsettled_landing;
+mod api_in_loop;
 mod config_flags;
 mod fetch_and_process;
+mod goroutine_in_loop;
+mod request_deadline_landing;
 mod routes_and_handlers;
 mod rust_reqwest;
 mod server_hygiene;
+mod setstate_after_async_unguarded;
 mod suppression;
 mod writes_and_parsing;
 

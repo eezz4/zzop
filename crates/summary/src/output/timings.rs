@@ -42,7 +42,20 @@ const MEANING: &str = "Wall-clock time attributed to each DSL rule and whole-gra
      diffing raw `nanos` across runs. Timing never changes which rules run or what they report. The \
      `findings` column beside `nanos` is a FINDING count, not a count of places, and the two diverge \
      per rule — this is the only ranked per-rule table zzop ships, so read that column under \
-     `findings.byRuleMeaning`, which owns the explanation.";
+     `findings.byRuleMeaning`, which owns the explanation. SECOND STRUCTURAL GAP, and on a large tree \
+     it is the bigger one: this table times RULES, and the per-file pipeline that runs before any rule \
+     timer starts — read, parse, project, build the IR — sits outside it by construction, and so \
+     does the call-graph pass. On some trees that untimed remainder is most of the run: compare this \
+     table's `totalNanos` against your own wall clock, which is the only measurement that is about \
+     YOUR tree. (No number is quoted here on purpose. This string ships in every profiled reply, and a \
+     figure measured on one repository would be a dated snapshot riding along in all of them.) \
+     The remainder is not one thing, and the call-graph term in particular is a property of the TREE \
+     rather than a constant: it re-reads and re-parses call sites, so a route-dense or import-dense \
+     tree pays it and a tree with almost nothing to re-parse does not. What IS constant: turning the \
+     call-graph rules off does \
+     not remove the pass, which also runs whenever a loaded pack has an io-scan rule reading \
+     `auth-guarded` — the shipped `http` pack does, so \"mutating-route-no-auth\": \"off\" silences the RULE \
+     and keeps the PASS.";
 
 /// Shapes the facade's `ruleTimings` array into the reply's `ruleTimings` object, or `None` when
 /// profiling was off (the facade serializes `null` there, and an absent key — never a `null` one — is

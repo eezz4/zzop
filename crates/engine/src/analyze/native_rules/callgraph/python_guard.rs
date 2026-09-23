@@ -51,8 +51,10 @@ pub(super) fn parse_calls_and_guards(
     rels.sort();
     let mut texts: Vec<(&str, String)> = Vec::new();
     for rel in rels {
-        if let Ok(bytes) = std::fs::read(root.join(rel)) {
-            let text = String::from_utf8_lossy(&bytes).into_owned();
+        // `read_for_parse`, not `fs::read`: `rels` is a filter of `ts_paths`, which carries files the
+        // recursion gate refused (`pipeline::fresh::ts_slot` does not consult `degrade_cause`).
+        // Python's frontend recurses like the rest (review ledger V127).
+        if let Some(text) = crate::analyze::read_for_parse(root, rel) {
             raw_calls.extend(zzop_parser_python_3::parse_calls(rel, &text));
             texts.push((rel.as_str(), text));
         }
@@ -72,9 +74,15 @@ pub(super) fn parse_calls_and_guards(
 /// `original` unlocks would name a module, not a callee. A specifier resolving to no in-tree file yields
 /// `None` and the edge is dropped, never guessed.
 ///
-/// Known limitation, same class as Java's: a MODULE-attribute receiver (`from pkg import mod; mod.f()`)
-/// resolves as if `mod` were a class, so the edge target id is a node nothing else has outgoing edges
-/// from — a second hop through it is not found. Single-hop is the coverage this wiring buys.
+/// A MODULE-attribute receiver (`from pkg import mod; mod.f()`) still resolves HERE as if `mod` were a
+/// class, because `resolve_method` is language-agnostic and never sees the binding's `original`. The
+/// resulting id (`pkg/__init__.py#mod.f`) is a node nothing else leaves from, so a second hop through
+/// it used to be invisible — and that was a FALSE finding, not a missed one: `mutating-route-no-auth`
+/// reported guarded routes whose handler reached the guard through a module attribute.
+///
+/// [`super::python_bridge`] closes it additively after the graph is built, the same shape
+/// [`super::java_bridge`] uses (2026-09-08, review ledger V100). What is left un-bridged is named
+/// there: a DOTTED receiver (`app.helpers.ensure()`) is a different shape.
 pub(super) fn resolve_python_call_target(
     specifier: &str,
     from_file: &str,

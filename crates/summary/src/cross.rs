@@ -89,6 +89,18 @@ pub fn cross_summary_with(
             if let Some(rule_timings) = output::shape_rule_timings(&t["output"]) {
                 source["ruleTimings"] = rule_timings;
             }
+            // 🔴 The single-tree lane has published cache provenance since the day that silence was
+            // named, and this one never did: `JSON.stringify(crossReply).includes("hitFiles")` was
+            // `false` (review ledger V146). A reader of a join could not tell a recomputed finding
+            // list from a replayed one — the exact question `cache` exists to answer — and the
+            // comment three lines up already knew each tree has its own cache state, which is why
+            // the timings are kept per tree. The provenance was the one thing it knew and did not say.
+            //
+            // PER TREE for the same reason, never summed: `12 hits of 12` in one tree and `0 of 4000`
+            // in its neighbour is two facts, and their sum is a fact about neither.
+            if let Some(cache) = output::shape_cache_numbers(&t["output"]) {
+                source["cache"] = cache;
+            }
             source
         })
         .collect();
@@ -187,8 +199,25 @@ pub fn cross_summary_with(
     }
     // Absent, never an empty object, when no tree loaded a pack — the same "omit rather than publish an
     // empty legend" rule the single-tree lane follows.
+    // ONE legend for every tree's `cache`, at the root — the shape this lane already uses for
+    // `bucketMeaning`/`nativeAnalysesMeaning`/`packsLoadedMeaning`. Omitted, never null, when no tree
+    // used a cache at all: a run with caching off has no provenance question to answer, so it gains
+    // no key, which is the same absent-vs-null contract the single-tree lane keeps.
+    if summary["sources"]
+        .as_array()
+        .is_some_and(|rows| rows.iter().any(|r| r.get("cache").is_some()))
+    {
+        summary["cacheMeaning"] = serde_json::Value::String(output::CACHE_MEANING.to_string());
+    }
     if !packs_loaded_meaning.is_empty() {
-        summary["packsLoadedMeaning"] = serde_json::Value::Object(packs_loaded_meaning);
+        // FOLDED, exactly as the per-tree lane folds it (2026-09-01, see `output::legends`). This
+        // legend is build constants in BOTH lanes — the merge above only ever decided whether the
+        // `didNotRun` entry appeared — so "identical every run" is as true here as there. Folding one
+        // lane while the other shipped the full text would put ONE key in TWO shapes and leave a
+        // consumer needing to know which reply it is holding, which is the drift this crate exists to
+        // prevent. The merge stays because it is still what answers "did any pack load at all", and
+        // this key is still OMITTED when none did.
+        summary["packsLoadedMeaning"] = output::legends::folded_object("packsLoadedMeaning");
     }
     // Run-level warnings (distinct from sources[].warnings) — e.g. the parallel-implementation
     // tripwire ("0 cross-source edges but N duplicate/ambiguous findings"). ALWAYS PRESENT, empty

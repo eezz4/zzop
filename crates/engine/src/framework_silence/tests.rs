@@ -12,6 +12,23 @@ use super::fetch_wrapper::{fetch_wrapper_call_site_warning, WRAPPER_EXPORT_NAMES
 use super::orm_schema_silence::orm_schema_silence_warning;
 use super::server_framework_import::{provide_blind_sources, server_framework_import_warning};
 
+/// S2 with NO measurement (`visible == 0`) — the branch where the lexical scan has nothing to say and
+/// the tripwire behaves exactly as it did before that scan existed. Every test below that asks about the
+/// import VOCABULARY goes through here on purpose: their subject is which specifiers fire, and handing
+/// them a count would test something else.
+fn s2(
+    map: &std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
+    http_provides_count: usize,
+) -> Option<String> {
+    server_framework_import_warning(map, http_provides_count, 0)
+}
+
+/// The lexical count for a fixture tree, taken the same way production takes it.
+fn visible(dir: &TempDir, rels: &[&str]) -> usize {
+    let owned: Vec<String> = rels.iter().map(|r| (*r).to_string()).collect();
+    super::server_framework_import::visible_route_registrations(dir.path(), &owned)
+}
+
 /// Policy-value divergence pin: `coverage::CoverageCensus::join_contribution_zero` asserts on
 /// EXACT zero JOINABLE io (an unconditional structural fact — files > 0 with 0 provides and 0
 /// KEYED consumes; unresolved consumes don't count, they cannot join),
@@ -250,7 +267,7 @@ fn package_import_files(entries: &[(&str, &[&str])]) -> BTreeMap<String, BTreeSe
 #[test]
 fn express_import_with_near_zero_provides_warns() {
     let map = package_import_files(&[("express", &["src/app.ts"])]);
-    let warning = server_framework_import_warning(&map, 1);
+    let warning = s2(&map, 1);
     assert!(
         warning
             .as_deref()
@@ -262,14 +279,14 @@ fn express_import_with_near_zero_provides_warns() {
 #[test]
 fn healthy_provides_count_short_circuits_even_with_a_server_import() {
     let map = package_import_files(&[("express", &["src/app.ts"])]);
-    let warning = server_framework_import_warning(&map, 3);
+    let warning = s2(&map, 3);
     assert!(warning.is_none(), "got: {warning:?}");
 }
 
 #[test]
 fn no_server_framework_import_never_warns() {
     let map = package_import_files(&[("react", &["src/App.tsx"]), ("lodash", &["src/x.ts"])]);
-    let warning = server_framework_import_warning(&map, 0);
+    let warning = s2(&map, 0);
     assert!(warning.is_none(), "got: {warning:?}");
 }
 
@@ -285,7 +302,7 @@ fn no_server_framework_import_never_warns() {
 #[test]
 fn the_server_framework_vocabulary_states_its_own_incompleteness() {
     let map = package_import_files(&[("express", &["src/app.ts"])]);
-    let w = server_framework_import_warning(&map, 0).expect("S2 must fire");
+    let w = s2(&map, 0).expect("S2 must fire");
     assert!(
         w.contains("not a complete list"),
         "S2 does not disclose that its vocabulary is incomplete: {w}"
@@ -308,7 +325,7 @@ fn an_unlisted_server_framework_leaves_s2_silent() {
         &["internal/route/web.go"],
     )]);
     assert!(
-        server_framework_import_warning(&map, 0).is_none(),
+        s2(&map, 0).is_none(),
         "the vocabulary matched a specifier it does not carry"
     );
 }
@@ -318,7 +335,7 @@ fn http_client_libraries_are_not_server_frameworks() {
     // axios/got/etc. say nothing about whether THIS tree serves routes — deliberately excluded from
     // `SERVER_FRAMEWORK_SPECIFIERS`.
     let map = package_import_files(&[("axios", &["src/api.ts"]), ("got", &["src/api2.ts"])]);
-    let warning = server_framework_import_warning(&map, 0);
+    let warning = s2(&map, 0);
     assert!(warning.is_none(), "got: {warning:?}");
 }
 
@@ -344,7 +361,7 @@ fn go_server_framework_imports_trip_s2() {
         "github.com/gofiber/fiber/v2",
     ] {
         let map = package_import_files(&[(specifier, &["main.go"])]);
-        let warning = server_framework_import_warning(&map, 0);
+        let warning = s2(&map, 0);
         assert!(warning.is_some(), "{specifier} did not trip S2");
     }
 }
@@ -362,7 +379,7 @@ fn go_standard_library_net_http_trips_neither_side() {
     // extraction, not a blindness heuristic) — deliberately absent from both vocab lists, since
     // adding it would break this exact disjoint-pin expectation.
     let map = package_import_files(&[("net/http", &["main.go"])]);
-    assert!(server_framework_import_warning(&map, 0).is_none());
+    assert!(s2(&map, 0).is_none());
     assert!(client_library_import_warning(&map, 0).is_none());
 }
 
@@ -371,13 +388,13 @@ fn go_server_and_client_vocab_stay_disjoint() {
     let server_map = package_import_files(&[("github.com/gin-gonic/gin", &["main.go"])]);
     assert!(client_library_import_warning(&server_map, 0).is_none());
     let client_map = package_import_files(&[("github.com/go-resty/resty", &["client.go"])]);
-    assert!(server_framework_import_warning(&client_map, 0).is_none());
+    assert!(s2(&client_map, 0).is_none());
 }
 
 #[test]
 fn java_server_framework_import_trips_s2() {
     let map = package_import_files(&[("org.springframework", &["Controller.java"])]);
-    assert!(server_framework_import_warning(&map, 0).is_some());
+    assert!(s2(&map, 0).is_some());
 }
 
 #[test]
@@ -390,7 +407,7 @@ fn java_realistic_census_grain_keeps_server_and_client_disjoint() {
     // NOT reach far enough (the client vocab entry requires the `org.springframework.web.client` prefix)
     // to also fire S4.
     let map = package_import_files(&[("org.springframework", &["RestClient.java"])]);
-    assert!(server_framework_import_warning(&map, 0).is_some());
+    assert!(s2(&map, 0).is_some());
     assert!(client_library_import_warning(&map, 0).is_none());
 }
 
@@ -415,7 +432,7 @@ fn java_client_vocab_literal_prefix_overlaps_server_vocab_documented_not_a_bug()
         "org.springframework.web.client",
         &["client/RestClient.java"],
     )]);
-    assert!(server_framework_import_warning(&map, 0).is_some());
+    assert!(s2(&map, 0).is_some());
     assert!(client_library_import_warning(&map, 0).is_some());
 }
 
@@ -423,14 +440,14 @@ fn java_client_vocab_literal_prefix_overlaps_server_vocab_documented_not_a_bug()
 fn a_lookalike_specifier_does_not_match_via_substring() {
     // "expressive" must not match the "express" vocab entry (not a whole-segment match).
     let map = package_import_files(&[("expressive", &["src/x.ts"])]);
-    let warning = server_framework_import_warning(&map, 0);
+    let warning = s2(&map, 0);
     assert!(warning.is_none(), "got: {warning:?}");
 }
 
 #[test]
 fn a_subpath_import_of_a_server_framework_still_matches() {
     let map = package_import_files(&[("express/lib/router", &["src/x.ts"])]);
-    let warning = server_framework_import_warning(&map, 0);
+    let warning = s2(&map, 0);
     assert!(warning.is_some(), "got: {warning:?}");
 }
 
@@ -439,7 +456,7 @@ fn a_subpath_import_of_a_server_framework_still_matches() {
 #[test]
 fn fastapi_import_with_near_zero_provides_warns() {
     let map = package_import_files(&[("fastapi", &["app/main.py"])]);
-    let warning = server_framework_import_warning(&map, 1);
+    let warning = s2(&map, 1);
     assert!(
         warning
             .as_deref()
@@ -452,7 +469,7 @@ fn fastapi_import_with_near_zero_provides_warns() {
 fn flask_and_django_bare_imports_match() {
     for vocab in ["flask", "django"] {
         let map = package_import_files(&[(vocab, &["app.py"])]);
-        let warning = server_framework_import_warning(&map, 0);
+        let warning = s2(&map, 0);
         assert!(warning.is_some(), "{vocab} got: {warning:?}");
     }
 }
@@ -462,7 +479,7 @@ fn fastapi_dotted_subpath_specifier_still_matches() {
     // `from fastapi.routing import APIRoute` -> specifier `fastapi.routing` (Python's absolute-dotted
     // convention, distinct from npm's slash-subpath form) — must still count as `fastapi`.
     let map = package_import_files(&[("fastapi.routing", &["app/main.py"])]);
-    let warning = server_framework_import_warning(&map, 0);
+    let warning = s2(&map, 0);
     assert!(warning.is_some(), "got: {warning:?}");
 }
 
@@ -472,7 +489,7 @@ fn a_python_lookalike_specifier_does_not_match_via_substring_or_prefix() {
     // leading segment at all) may match — same exact-segment-boundary discipline the npm vocab
     // already gets from `a_lookalike_specifier_does_not_match_via_substring` above.
     let map = package_import_files(&[("fastapi2", &["app.py"]), ("myfastapi", &["app2.py"])]);
-    let warning = server_framework_import_warning(&map, 0);
+    let warning = s2(&map, 0);
     assert!(warning.is_none(), "got: {warning:?}");
 }
 
@@ -502,11 +519,24 @@ fn provide_counts(entries: &[(&str, usize)]) -> Vec<(String, usize)> {
         .collect()
 }
 
+/// No source measured. Every test below whose subject is the FLOOR passes this, because that is the
+/// state an unmeasured run is in — and the floor's verdict has to stand there unchanged.
+fn unmeasured() -> BTreeMap<String, usize> {
+    BTreeMap::new()
+}
+
+fn visible_counts(entries: &[(&str, usize)]) -> BTreeMap<String, usize> {
+    entries
+        .iter()
+        .map(|(source, count)| ((*source).to_string(), *count))
+        .collect()
+}
+
 #[test]
 fn framework_importer_with_two_provides_is_blind() {
     let imports = package_import_sites(&[("be", "express")]);
     let counts = provide_counts(&[("be", 2)]);
-    let blind = provide_blind_sources(&imports, &counts);
+    let blind = provide_blind_sources(&imports, &counts, &unmeasured());
     assert_eq!(blind, BTreeSet::from(["be".to_string()]));
 }
 
@@ -515,7 +545,7 @@ fn framework_importer_with_three_provides_is_not_blind() {
     // MIN_PROVIDES_FLOOR is 3 — the floor itself already clears the gate (strict less-than).
     let imports = package_import_sites(&[("be", "express")]);
     let counts = provide_counts(&[("be", 3)]);
-    let blind = provide_blind_sources(&imports, &counts);
+    let blind = provide_blind_sources(&imports, &counts, &unmeasured());
     assert!(blind.is_empty(), "got: {blind:?}");
 }
 
@@ -524,7 +554,7 @@ fn non_framework_importer_with_zero_provides_is_not_blind() {
     // Importing react/lodash says nothing about whether this tree serves routes — same S2 rationale.
     let imports = package_import_sites(&[("fe", "react")]);
     let counts = provide_counts(&[("fe", 0)]);
-    let blind = provide_blind_sources(&imports, &counts);
+    let blind = provide_blind_sources(&imports, &counts, &unmeasured());
     assert!(blind.is_empty(), "got: {blind:?}");
 }
 
@@ -533,13 +563,13 @@ fn framework_importer_missing_from_provide_counts_defaults_to_zero_and_is_blind(
     // A source with 0 http provides tree-wide may legitimately have no entry in http_provide_counts;
     // the helper must treat a missing entry as 0, not silently skip the source.
     let imports = package_import_sites(&[("be", "@nestjs/common")]);
-    let blind = provide_blind_sources(&imports, &[]);
+    let blind = provide_blind_sources(&imports, &[], &unmeasured());
     assert_eq!(blind, BTreeSet::from(["be".to_string()]));
 }
 
 #[test]
 fn no_package_imports_at_all_yields_no_blind_sources() {
-    let blind = provide_blind_sources(&[], &provide_counts(&[("be", 0)]));
+    let blind = provide_blind_sources(&[], &provide_counts(&[("be", 0)]), &unmeasured());
     assert!(blind.is_empty(), "got: {blind:?}");
 }
 
@@ -1058,4 +1088,123 @@ get({}, 'a'); get({}, 'b'); get({}, 'c'); get({}, 'd'); get({}, 'e');\n",
     ];
     let warning = fetch_wrapper_call_site_warning(dir.path(), &rels, 0, WRAPPER_EXPORT_NAMES);
     assert!(warning.is_none(), "got: {warning:?}");
+}
+
+/// 🔴 The false positive this scan exists to kill (2026-09-06, review ledger V24).
+///
+/// A real two-route Express micro-BE with BOTH routes extracted used to draw
+/// *"only 2 http route(s) were extracted tree-wide … cross-layer joins will be near-silent"*. Nothing
+/// was missing; the floor simply cannot tell "few" from "few because that is all there is". A wrong
+/// alarm is the twin of a missed one — on a small tree it IS the whole first screen — so the tripwire
+/// now has to see a gap before it claims one.
+#[test]
+fn a_micro_be_whose_routes_were_all_extracted_is_silent() {
+    let dir = TempDir::new("s2-complete");
+    dir.write(
+        "server.ts",
+        "import express from 'express';\nconst app = express();\napp.get('/users', h);\napp.post('/users', h);\n",
+    );
+    let map = package_import_files(&[("express", &["server.ts"])]);
+    let w = server_framework_import_warning(&map, 2, visible(&dir, &["server.ts"]));
+    assert!(
+        w.is_none(),
+        "2 visible registrations and 2 extracted is a COMPLETE extraction — got: {w:?}"
+    );
+}
+
+/// The direction that must never regress: a real gap still fires, and now says how big it is.
+#[test]
+fn a_blind_tree_still_fires_and_names_the_measured_gap() {
+    let dir = TempDir::new("s2-blind");
+    let mut text = String::from("import express from 'express';\n");
+    for i in 0..19 {
+        text.push_str(&format!("registry.get('/thing{i}', h);\n"));
+    }
+    dir.write("routes.ts", &text);
+    let map = package_import_files(&[("express", &["routes.ts"])]);
+    let w = server_framework_import_warning(&map, 0, visible(&dir, &["routes.ts"]))
+        .expect("19 visible vs 0 extracted must fire");
+    assert!(
+        w.contains("19 route-registration line(s) are lexically visible"),
+        "the gap is the number a reader needs — got: {w}"
+    );
+}
+
+/// 🔴 Not knowing must not look like knowing there is nothing.
+///
+/// The framework is imported and the registration idiom is outside this scan's shape, so `visible` is
+/// 0. That is the case where the measurement has NO opinion, and the tripwire has to keep firing on the
+/// import alone — silencing here would turn every unrecognized idiom into a green tree, which is the
+/// exact hole the near-zero floor was built to close.
+#[test]
+fn an_idiom_outside_the_scan_still_fires_and_claims_no_gap() {
+    let dir = TempDir::new("s2-unknown-idiom");
+    dir.write(
+        "app.ts",
+        "import express from 'express';\nregisterAll(express(), routes);\n",
+    );
+    let map = package_import_files(&[("express", &["app.ts"])]);
+    let w = server_framework_import_warning(&map, 0, visible(&dir, &["app.ts"]))
+        .expect("an unknown idiom must still fire");
+    assert!(
+        !w.contains("lexically visible"),
+        "with nothing measured the message must claim no gap — got: {w}"
+    );
+}
+
+/// An accessor that merely SHARES a verb name is not a route: the string-literal first argument is what
+/// separates them, and it does so without any vocabulary. Without this, every `map.get(key)` in a tree
+/// would inflate `visible` and the comparison would drift toward always firing.
+#[test]
+fn same_named_accessors_do_not_count_as_route_registrations() {
+    let dir = TempDir::new("s2-accessors");
+    dir.write(
+        "util.ts",
+        "import express from 'express';\nconst v = cache.get(key);\nheaders.get(name);\nlist.delete(item);\n",
+    );
+    let map = package_import_files(&[("express", &["util.ts"])]);
+    let w = server_framework_import_warning(&map, 0, visible(&dir, &["util.ts"]))
+        .expect("still fires on the import");
+    assert!(
+        !w.contains("lexically visible"),
+        "no string-literal path means no registration was seen — got: {w}"
+    );
+}
+
+/// 🔴 The severity half of the same false positive (2026-09-06, review ledger V49).
+///
+/// A healthy micro-BE — express imported, two routes, BOTH extracted — used to count as provide-blind
+/// here, and a run containing one silently downgraded `cross-layer/unprovided-mutation-call` from
+/// Warning to Info. That is worse than the prose false positive S2 stopped emitting: a reader can
+/// dismiss a sentence, but nobody sees a grade that was quietly lowered. The measurement clears it now,
+/// on exactly the evidence S2 uses.
+#[test]
+fn a_source_whose_visible_routes_were_all_extracted_is_not_blind() {
+    let imports = package_import_sites(&[("be", "express")]);
+    let counts = provide_counts(&[("be", 2)]);
+    let blind = provide_blind_sources(&imports, &counts, &visible_counts(&[("be", 2)]));
+    assert!(
+        blind.is_empty(),
+        "2 visible and 2 extracted is a complete extraction, not blindness — got: {blind:?}"
+    );
+}
+
+/// The direction that must never regress: a measured GAP is still blindness.
+#[test]
+fn a_source_with_more_visible_routes_than_extracted_is_still_blind() {
+    let imports = package_import_sites(&[("be", "express")]);
+    let counts = provide_counts(&[("be", 2)]);
+    let blind = provide_blind_sources(&imports, &counts, &visible_counts(&[("be", 19)]));
+    assert_eq!(blind, BTreeSet::from(["be".to_string()]));
+}
+
+/// 🔴 Zero visible is NOT evidence of no routes — it is an idiom the scan does not know, which is the
+/// most blind state there is. Collapsing it into "nothing to see" would turn every unrecognized
+/// framework into a cleared source, silently, run-wide.
+#[test]
+fn a_source_with_zero_visible_registrations_stays_blind() {
+    let imports = package_import_sites(&[("be", "express")]);
+    let counts = provide_counts(&[("be", 0)]);
+    let blind = provide_blind_sources(&imports, &counts, &visible_counts(&[("be", 0)]));
+    assert_eq!(blind, BTreeSet::from(["be".to_string()]));
 }

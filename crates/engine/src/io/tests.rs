@@ -11,6 +11,19 @@ fn extract_file_io_default(rel: &str, text: &str, opts: &IoOptions) -> Option<zz
     extract_file_io(rel, text, opts, &declared.resolve())
 }
 
+/// `extract_csharp_file_io` under zzop's OWN suggested vocabulary — `built_in()` rather than
+/// `default()`, because the C# route arm now reads a declared list
+/// (`vocabulary.csharpRootRouteBuilderVariableNames`) and a case written against an empty one would be
+/// pinning the undeclared shape while claiming to pin the shipped one.
+fn extract_csharp_file_io_built_in(
+    rel: &str,
+    text: &str,
+    degraded: bool,
+) -> Option<zzop_core::IoFacts> {
+    let declared = crate::VocabularyConfig::built_in();
+    extract_csharp_file_io(rel, text, degraded, &declared.resolve())
+}
+
 #[test]
 fn no_io_in_a_plain_file_is_none() {
     assert!(extract_file_io_default("a.ts", "export const a = 1;\n", &opts()).is_none());
@@ -36,7 +49,7 @@ fn csharp_route_provides_project_when_degraded_but_consumes_are_gated_off() {
         "}\n",
     );
     let degraded =
-        extract_csharp_file_io("Users.cs", src, true).expect("routes even when degraded");
+        extract_csharp_file_io_built_in("Users.cs", src, true).expect("routes even when degraded");
     assert!(
         !degraded.provides.is_empty(),
         "routes must project when degraded"
@@ -46,7 +59,8 @@ fn csharp_route_provides_project_when_degraded_but_consumes_are_gated_off() {
         "consumes must be gated off when degraded"
     );
 
-    let fresh = extract_csharp_file_io("Users.cs", src, false).expect("both when not degraded");
+    let fresh =
+        extract_csharp_file_io_built_in("Users.cs", src, false).expect("both when not degraded");
     assert!(!fresh.provides.is_empty());
     assert!(
         !fresh.consumes.is_empty(),

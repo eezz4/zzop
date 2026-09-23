@@ -9,7 +9,7 @@
 
 use std::collections::BTreeSet;
 
-use super::message::{self, individual_finding};
+use super::message::{self, individual_finding, PathSpace};
 use super::UnmatchedConsume;
 
 /// Fold threshold for "foreign" unprovided consumes (first path segment outside the tree's provided key
@@ -29,7 +29,7 @@ pub(super) fn findings(
 ) -> Vec<zzop_core::Finding> {
     let mut findings: Vec<zzop_core::Finding> = overlapping
         .iter()
-        .map(|u| individual_finding(&u.key, u.raw, u.file, u.line))
+        .map(|u| individual_finding(&u.key, u.raw, u.file, u.line, PathSpace::Overlapping))
         .collect();
 
     if foreign.len() >= MIN_FOREIGN_UNPROVIDED_GROUP {
@@ -85,7 +85,7 @@ pub(super) fn findings(
         findings.extend(
             foreign
                 .iter()
-                .map(|u| individual_finding(&u.key, u.raw, u.file, u.line)),
+                .map(|u| individual_finding(&u.key, u.raw, u.file, u.line, PathSpace::Foreign)),
         );
     }
 

@@ -21,6 +21,8 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::path::Path;
 
+use zzop_core::posix_path::{ancestor_dirs, dirname};
+
 /// `go.mod`'s own directory (tree-relative, `""` for the tree root) -> that manifest's `module <path>`
 /// directive value. Every distinct `go.mod`-bearing ancestor directory of the walked `.go` files gets an
 /// entry; a directory with no `go.mod`, or whose `go.mod` has no (or an unparseable) `module` directive,
@@ -77,28 +79,6 @@ pub(crate) fn governing_go_module<'a>(
             Some(idx) => dir[..idx].to_string(),
             None => String::new(),
         };
-    }
-}
-
-/// Every ancestor directory of `rel` (its own dirname, then each parent up to and including the tree
-/// root `""`), most specific first — same shape as `rust_workspace::ancestor_dirs`, duplicated locally
-/// rather than shared (that function is a private helper with no public home, same reasoning
-/// `dispatch.rs`'s own `matches_glob` doc gives for not importing a sibling module's private helper).
-fn ancestor_dirs(rel: &str) -> Vec<String> {
-    let mut dir = dirname(rel).to_string();
-    let mut out = vec![dir.clone()];
-    while let Some(idx) = dir.rfind('/') {
-        dir.truncate(idx);
-        out.push(dir.clone());
-    }
-    out.push(String::new());
-    out
-}
-
-fn dirname(p: &str) -> &str {
-    match p.rfind('/') {
-        Some(i) => &p[..i],
-        None => "",
     }
 }
 

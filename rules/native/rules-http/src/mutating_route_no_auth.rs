@@ -36,8 +36,13 @@
 //! extractor (`RawCall`'s own doc, `crates/core/src/callgraph.rs`); (2) engine wiring in
 //! `run_callgraph_rules` to gather that language's calls; neither is this crate's to make (`rules/**`
 //! cannot depend on parser/engine internals). Java did both first, with an opaque-specifier `resolve_file`
-//! stand-in rather than real package resolution; Python followed with a REAL module resolver
-//! (`python_import_candidates` against the tree's own path set); Rust is the fourth and the ONE case
+//! stand-in rather than real package resolution — which turned out to cost a FALSE finding rather than a
+//! missing one (a guard two hops out went unseen and the route fired), and the engine now bridges the
+//! whole-corpus type index onto that graph afterwards (`callgraph::java_bridge`, 2026-09-07); Python
+//! followed with a REAL module resolver
+//! (`python_import_candidates` against the tree's own path set) — and still needed a bridge, because a
+//! real resolver places the FILE while `resolve_method` reads `from pkg import mod` as a class binding
+//! (`callgraph::python_bridge` and its doc, 2026-09-08, review ledger V100); Rust is the fourth and the ONE case
 //! where the guard half needed no side-channel — its extractor evidence
 //! (`zzop_parser_rust::parse_extractor_guards`) is an edge out of the handler, so the vocabulary below
 //! matches it unchanged, and its resolver is real and crate-aware. Rust residual, mainstream rather
@@ -91,7 +96,12 @@
 //! (the guard must be REACHABLE FROM the handler) doesn't apply — its application is metadata, not a call
 //! edge (the same blind spot as route-level middleware). The exemption is a framework-neutral side-channel
 //! `HashSet<(file, line)>` ([`ScanMutatingRouteNoAuthInput::decorator_guarded`]); its producers:
-//! - **NestJS `@UseGuards(...)`** (class/method) — `zzop_parser_typescript::extract_controller_guarded_lines`.
+//! - **NestJS `@UseGuards(...)`** (class/method), and since 2026-09-05 any decorator whose own NAME says it
+//!   authenticates or gates (`@Authenticated`, `@AuthGuard`) — the HOUSE decorator a codebase writes once it
+//!   has wrapped its guard a single time. `zzop_parser_typescript::extract_controller_guarded_lines` owns that
+//!   vocabulary and its two deliberate exclusions: a decorator that merely DOCUMENTS a scheme
+//!   (`@ApiBearerAuth`) and one that opts OUT of auth (`@SkipAuth`) both carry auth words and are read as
+//!   neither, which is why the accept side requires the full `authentic`/`authoriz` stem rather than `auth`.
 //! - **Spring method security** `@PreAuthorize`/`@PostAuthorize`/`@Secured`/`@RolesAllowed` (class/method, SpEL
 //!   never interpreted) — `zzop_parser_java_21::extract_spring_guarded_lines` (the route's own mapping-
 //!   annotation line, the same anchor its `IoProvide` carries).
@@ -113,6 +123,23 @@
 //! path-scoped (`securityMatcher`), carry `WebSecurity.ignoring()`, hold more than one authorization
 //! chain, or whose matchers/`anyRequest` terminal aren't literally readable (a property-bound whitelist,
 //! an `.access(mgr == null ? ... : mgr)` terminal) aren't modeled — a route relying ENTIRELY on those fires.
+//!
+//! **Second residual, and the only one with NO self-report: a tree carrying TWO OR MORE readable Spring
+//! chains gets none of them.** The bails above are per-config and each one publishes its reason
+//! (the `Spring Security config read but NOT applied` disclosure). This one is not a bail at all — every
+//! config parsed, and the engine then discards the whole set, because `assemble_decorator_guarded`
+//! (`crates/engine/.../callgraph/decorator_gate.rs`) consumes the postures through an exactly-one slice
+//! pattern. Measured 2026-09-11 on a planted two-module tree (`svc-a` and `svc-b`, each with its own
+//! secure-by-default `anyRequest().authenticated()` chain and one mutating route): both configs present
+//! -> 2 findings (`/a/thing` AND `/b/thing`, so the posture that really does govern `/a/thing` was
+//! thrown away); delete `svc-b`'s config -> 1 finding (`/b/thing` only, `/a/thing` correctly exempt);
+//! restore it -> 2 again. In all three runs the posture disclosure count was ZERO. So on a multi-module
+//! Spring monorepo — the layout where a second chain is ordinary rather than exotic — this rule reports
+//! every mutating route and NOTHING in the reply says the evidence was read and dropped. The direction
+//! is the safe one (over-reporting, never a false exemption), which is why it is a residual rather than
+//! a defect; what it is not is honest yet. Do not read a per-config bail reason's ABSENCE as "no Spring
+//! config interfered" — that is exactly the inference this case defeats. Fixing it is engine work
+//! (a per-route-module posture map, plus a disclosure for the discard), not this crate's.
 
 use zzop_core::callgraph::SymbolGraph;
 use zzop_core::{Finding, Severity, SourceSymbol};
@@ -266,7 +293,14 @@ pub fn scan_mutating_route_no_auth(input: &ScanMutatingRouteNoAuthInput) -> Vec<
                 "path": path,
                 "handler": handler_ref,
                 "handlerSymbol": handler_symbol,
-                "hint": hint,
+                // 🔴 NO `hint` KEY HERE, and its absence is the repair. This rule used to emit
+                // `"hint": hint` beside `message: hint.clone()` — the SAME string twice in one finding.
+                // Harmless while both were inline; expensive once the prose fold landed, because the fold
+                // shrinks `message` to a pointer and `data.hint` kept shipping the full text per finding,
+                // cancelling the saving exactly. 📏 Measured 2026-09-13 (ledger V231) on
+                // `analyze corpus/frameworks/fastapi --limit 1000`: `data.hint` was 624,774 of the reply's
+                // 1,167,742 bytes (60%), and 117 of 117 hints were byte-identical to their own finding's
+                // message. The text is not lost — it is in `message`, which is the field that carries it.
                 // Present only when there is something to say, the additive-disclosure convention: an
                 // always-present empty array reads as "the resolver placed every call", which is a
                 // stronger claim than "this handler had none it could not place".

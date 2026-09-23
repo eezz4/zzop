@@ -64,7 +64,7 @@ mod tests {
     /// and comparing it to an inline `parse_module` + walk would only restate this module's own body.
     /// Its value is asserted directly by `the_pin_source_is_not_vacuous` below, by
     /// `export_aliases`' own unit tests over the same walk, and end to end by
-    /// `crates/engine/tests/analyze_dead_exports.rs`' alias cases.
+    /// `crates/engine/tests/integration/analyze_dead_exports.rs`' alias cases.
     #[test]
     fn bundle_equals_the_standalone_entrypoints() {
         let sources = [

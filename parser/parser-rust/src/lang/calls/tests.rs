@@ -234,3 +234,56 @@ fn every_from_symbol_is_a_symbol_parse_symbols_emits() {
         );
     }
 }
+
+/// 🔴 A module qualifier is never a receiver TYPE — and the FILE-module half of that was missing
+/// (2026-09-06, review ledger V29).
+///
+/// `super::io_projection::project_file_io(..)` used to come out with `receiver_type:
+/// Some("io_projection")`, so the resolver looked for `<file>#io_projection.project_file_io` — an id
+/// that cannot exist, because `io_projection` is a module. The edge was then dropped, and the drop was
+/// invisible: a rule that watches call edges over this repo's own source reported a clean zero while
+/// being blind to every call written this way.
+///
+/// The fix removes a false fact rather than inventing an edge. Resolving the callee would need a Rust
+/// module-path-to-file mapping this extractor does not have; the honest output until then is a bare
+/// name with no receiver, which is a MISS — the direction this module's doc requires.
+#[test]
+fn a_file_module_qualifier_is_not_reported_as_a_receiver_type() {
+    let calls = crate::parse_calls(
+        "a.rs",
+        "mod io_projection;\nfn caller() { super::io_projection::project_file_io(1); }\n",
+    );
+    assert_eq!(calls.len(), 1, "{calls:?}");
+    assert_eq!(calls[0].callee_name, "project_file_io", "{calls:?}");
+    assert_eq!(
+        calls[0].receiver_type, None,
+        "a module is not a type: {calls:?}"
+    );
+}
+
+/// The sibling that must not move: a real `Type::assoc()` still sets `receiver_type`, because that is
+/// what lets a cross-file `<file>#<Type>.<assoc>` edge resolve at all. The fix above narrows one arm,
+/// it does not disarm the reading.
+#[test]
+fn a_type_qualifier_still_sets_a_receiver_type() {
+    let calls = crate::parse_calls("a.rs", "fn caller() { Widget::build(1); }\n");
+    assert_eq!(calls.len(), 1, "{calls:?}");
+    assert_eq!(
+        calls[0].receiver_type.as_deref(),
+        Some("Widget"),
+        "{calls:?}"
+    );
+}
+
+/// And the inline-mod arm keeps its qualified same-file name — the case that already worked, pinned so
+/// the three arms stay told apart.
+#[test]
+fn an_inline_module_qualifier_still_yields_a_qualified_same_file_name() {
+    let calls = crate::parse_calls(
+        "a.rs",
+        "mod helpers { pub fn go() {} }\nfn caller() { helpers::go(); }\n",
+    );
+    assert_eq!(calls.len(), 1, "{calls:?}");
+    assert_eq!(calls[0].callee_name, "helpers::go", "{calls:?}");
+    assert_eq!(calls[0].receiver_type, None, "{calls:?}");
+}

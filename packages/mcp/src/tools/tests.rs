@@ -77,6 +77,61 @@ fn assert_packs_loaded_entries(loaded: &serde_json::Value, context: &str) {
     assert_eq!(ids, sorted, "{context}: packsLoaded must be id-sorted");
 }
 
+/// The session FIXED COST — what an agent pays before it can ask anything.
+///
+/// # This freezes a number, it does not bless one
+///
+/// Review ledger V124 measured the bet this server makes: an agent receives the whole `tools/list`
+/// reply before its first call, and nothing capped it. Whether that size is what this product wants
+/// to spend is an open USER decision and this test does not answer it — it answers the other half,
+/// which is that the number must not grow while nobody is looking.
+///
+/// So the ceiling sits deliberately just above today's measurement. A change that pushes past it is
+/// not forbidden; it is required to come back here, read this paragraph, and move the number on
+/// purpose. That is the same ratchet shape `scripts/check-max-file-lines.sh` uses, and for the same
+/// reason: an unbounded surface grows by accident, one reasonable sentence at a time.
+///
+/// Counted as WIRE bytes (`serde_json::to_string`), because that is what the transport carries and
+/// what the agent's context pays for. Measuring the decoded strings undercounts by the JSON escaping.
+/// # Moved once, on purpose (2026-09-15, review ledger V226)
+///
+/// 34,000 -> 36,500, and what the 2,000-odd extra bytes buy is the `module_map` tool: the answer to
+/// "what IS this codebase", which until this commit existed only behind `zzop graph --domain dep
+/// --fold N` and so was reachable only from a terminal, while this product's named audience is an
+/// agent. Measured over the wire the same day, its reply at `fold` 1 on this engine's own tree is
+/// 3,032 bytes where `analyze_repo` on the same tree is 30,587 and carries no module map at all —
+/// so the fixed cost bought here is recovered by the first orientation question an agent would
+/// otherwise answer with the larger reply.
+///
+/// The description was written at 3,622 bytes and cut to 2,425 BEFORE this number moved, by deleting
+/// the per-key definitions the reply's own folded `meaning` already owns. That order is the rule, not
+/// an anecdote: the ceiling is raised by what remains after the sentence has been made to earn its
+/// place, never to accommodate the first draft.
+const SESSION_FIXED_COST_CEILING: usize = 36_500;
+
+#[test]
+fn the_session_fixed_cost_has_a_ceiling_and_it_is_not_an_endorsement() {
+    let listed = super::list();
+    let wire = serde_json::to_string(&listed).expect("tools/list serializes");
+    let total = wire.len();
+
+    assert!(
+        total <= SESSION_FIXED_COST_CEILING,
+        "tools/list is {total} wire bytes, past the {SESSION_FIXED_COST_CEILING}-byte ceiling. \
+         Every agent pays this before its first question. If the growth is deliberate, raise the \
+         constant in the same commit and say in the message what the extra bytes buy; if it is not, \
+         this is the accident the ceiling exists to catch."
+    );
+
+    // A ceiling with nothing under it would pass on an empty reply, which is the shape this repo
+    // calls a measurement failure rather than a clean result.
+    assert!(
+        total > SESSION_FIXED_COST_CEILING / 2,
+        "tools/list is only {total} wire bytes — far under the ceiling. That is not 'small', it is \
+         evidence the surface collapsed; check that every tool is still listed."
+    );
+}
+
 /// Pins the `tools/list` surface: tool names, each schema's `required` array, and the
 /// source-exclusivity `oneOf` constraints — so the schema surface cannot drift silently (it had
 /// zero test coverage before this pin). Values, not just presence: a renamed tool, a dropped
@@ -93,6 +148,8 @@ fn tools_list_pins_names_required_arrays_and_source_exclusivity() {
             "cross_repo",
             "check_file",
             "check_endpoint",
+            "check_coverage",
+            "module_map",
             "analyze_envelope",
             "validate_envelope",
             "validate_rule_pack"
@@ -190,7 +247,19 @@ fn tools_list_pins_names_required_arrays_and_source_exclusivity() {
 fn tool_annotations_never_claim_read_only_for_the_cache_writing_tools() {
     let list = super::list();
     let tools = list["tools"].as_array().expect("tools array");
-    const CACHE_WRITERS: [&str; 4] = ["analyze_repo", "cross_repo", "check_file", "check_endpoint"];
+    const CACHE_WRITERS: [&str; 6] = [
+        "analyze_repo",
+        "cross_repo",
+        "check_file",
+        "check_endpoint",
+        // Runs the same `analyzeTrees` path before post-processing, so the injected `.zzop/cache`
+        // default applies to it exactly as to the four above. A visibility REPORT reads read-only,
+        // which is precisely why the honesty rule above is a list and not an inference from the name.
+        "check_coverage",
+        // Same reason one step further: a MAP reads read-only to a caller, and it gets there by
+        // running the full analysis first.
+        "module_map",
+    ];
     const PURE_JUDGES: [&str; 3] = [
         "analyze_envelope",
         "validate_envelope",
@@ -539,6 +608,14 @@ fn analyze_repo_rejects_an_out_of_range_or_wrong_type_limit_and_a_non_string_sev
     assert!(err.contains("zzop error: unknown severity 5"), "got: {err}");
 }
 
+/// The subject is `findings.note` reaching a caller through the REAL dispatch, and it is unchanged.
+///
+/// One incidental line moved on 2026-09-01. This test used to assert `isError` was ABSENT — scaffolding
+/// for reading `content[0]` — and that line had quietly become a pin on the exact asymmetry
+/// `an_unmatchable_rule_filter_is_an_error_on_this_host_as_it_is_on_the_cli` repairs: `nonexistent-xyz`
+/// is an id this run can PROVE could never match, and the `zzop analyze` twin exits 2 on it. What this
+/// test actually needs is that the document is still `content[0]` and still parses, which is asserted
+/// below and is now the stronger statement of the two.
 #[test]
 fn analyze_repo_rule_filter_zero_match_note_fires_end_to_end_through_the_real_tool_call() {
     let dir = TempDir::new("zzop-mcp-rule-note-e2e");
@@ -548,7 +625,6 @@ fn analyze_repo_rule_filter_zero_match_note_fires_end_to_end_through_the_real_to
         "analyze_repo",
         serde_json::json!({ "path": dir.path().display().to_string(), "rule": "nonexistent-xyz" }),
     );
-    assert!(reply.get("isError").is_none(), "got: {reply}");
     let v: serde_json::Value =
         serde_json::from_str(reply["content"][0]["text"].as_str().unwrap()).unwrap();
     let note = v["findings"]["note"]
@@ -606,6 +682,189 @@ fn every_advertised_tool_has_a_call_dispatch_arm() {
 }
 
 #[test]
+fn a_bare_native_tail_in_the_rule_filter_is_resolved_not_denied() {
+    // `god-model` IS the bare form of `schema/god-model`, so the shared warning saying "which is not
+    // a native analysis id" was simply false — on this host only, because the CLI resolves the tail in
+    // its own pre-check and exits 2 before the shared sentence is ever built. One binary, two verdicts
+    // on whether the thing the caller typed exists, and the half that reached an MCP client was wrong.
+    // Pins the truthful half; the CLI's own half is pinned in packages/cli-bin/tests/cli.rs.
+    let params = serde_json::json!({
+        "name": "analyze_repo",
+        "arguments": {
+            "configPath": "../../cases/trees/api-be/zzop.config.jsonc",
+            "rule": "god-model",
+            "limit": 0
+        }
+    });
+    let reply = super::call(Some(&params));
+    let text = reply["content"][0]["text"].as_str().unwrap_or_default();
+    let body: serde_json::Value = serde_json::from_str(text).unwrap_or(serde_json::Value::Null);
+    let warnings = body["warnings"].as_array().cloned().unwrap_or_default();
+    let hit = warnings
+        .iter()
+        .filter_map(|w| w.as_str())
+        .find(|w| w.contains("`rule` filter"))
+        .unwrap_or_else(|| panic!("no rule-filter warning in the reply: {text:.400}"));
+
+    assert!(
+        hit.contains("schema/god-model"),
+        "the warning must name the FULL id the bare form resolves to: {hit}"
+    );
+    // The falsehood this test exists to keep out.
+    assert!(
+        !hit.contains("is not a native analysis id"),
+        "the reply denies an id that exists: {hit}"
+    );
+    // Host-neutral: the shared sentence names the id, never how to pass it.
+    assert!(
+        !hit.contains("--rule"),
+        "CLI-only spelling leaked into a shared warning: {hit}"
+    );
+}
+
+#[test]
+fn module_map_refusals_name_the_module_map_and_no_cli_only_lane() {
+    // `module_map` and the CLI `map` lane share one helper in `zzop_summary::graph`, and that helper
+    // hardcoded the operation name `"graph"` -- a lane `surface-parity.json` declares CLI-only and
+    // this binary does not carry. So a client was told to "run graph", which it cannot. Third round of
+    // this class here (`zzop pack validate`, then `zzop contract envelope-guide`), and TWO guards are
+    // structurally blind to it: the shared-crate vocabulary contract subtracts every file under a
+    // CLI-only lane, and its space-free-literal exemption would have skipped the bare word anyway --
+    // the same exemption that let `"cross_repo"` leak the other direction and needed a human to catch.
+    // A test is therefore the only gate this can have.
+    let dir = std::env::temp_dir().join(format!("zzop-mcp-mapop-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("A/web")).unwrap();
+    std::fs::create_dir_all(dir.join("A/api")).unwrap();
+    std::fs::create_dir_all(dir.join("B")).unwrap();
+    std::fs::write(dir.join("A/web/a.ts"), "export const a = 1;\n").unwrap();
+    std::fs::write(dir.join("A/api/b.ts"), "export const b = 1;\n").unwrap();
+    std::fs::write(dir.join("B/c.ts"), "export const c = 1;\n").unwrap();
+    std::fs::write(
+        dir.join("A/zzop.config.jsonc"),
+        r#"{ "trees": [{ "root": "./web" }, { "root": "./api" }] }"#,
+    )
+    .unwrap();
+    std::fs::write(dir.join("B/zzop.config.jsonc"), r#"{ "roots": ["."] }"#).unwrap();
+
+    let params = serde_json::json!({
+        "name": "module_map",
+        "arguments": {
+            "paths": [dir.join("A").to_string_lossy(), dir.join("B").to_string_lossy()],
+            "fold": 2
+        }
+    });
+    let reply = super::call(Some(&params));
+    std::fs::remove_dir_all(&dir).ok();
+
+    let text = reply["content"][0]["text"].as_str().unwrap_or_default();
+    assert_eq!(
+        reply["isError"], true,
+        "a path carrying its own tree set must refuse: {reply}"
+    );
+    assert!(
+        text.contains("the module map"),
+        "the refusal must name the operation the CALLER asked for: {text}"
+    );
+    // The load-bearing half. `graph` is CLI-only; naming it here is advice this client cannot take.
+    assert!(
+        !text.contains("run graph"),
+        "a CLI-only lane name reached the MCP wire: {text}"
+    );
+}
+
+#[test]
+fn paths_mode_refusal_reaching_an_mcp_client_names_an_argument_not_a_flag() {
+    // Third member of the same class, pinned the same day the gap was found (2026-09-23). "CONFIG
+    // MODE" is deliberately not a spelling: on this host the way in is an ARGUMENT name, and a
+    // `--config` flag would be advice a client with no shell cannot take.
+    let dir = std::env::temp_dir().join(format!("zzop-mcp-paths-mode-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("A/web")).unwrap();
+    std::fs::create_dir_all(dir.join("A/api")).unwrap();
+    std::fs::create_dir_all(dir.join("B")).unwrap();
+    std::fs::write(dir.join("A/web/a.ts"), "export const a = 1;\n").unwrap();
+    std::fs::write(dir.join("A/api/b.ts"), "export const b = 1;\n").unwrap();
+    std::fs::write(dir.join("B/c.ts"), "export const c = 1;\n").unwrap();
+    std::fs::write(
+        dir.join("A/zzop.config.jsonc"),
+        r#"{ "trees": [{ "root": "./web" }, { "root": "./api" }] }"#,
+    )
+    .unwrap();
+    std::fs::write(dir.join("B/zzop.config.jsonc"), r#"{ "roots": ["."] }"#).unwrap();
+
+    let params = serde_json::json!({
+        "name": "cross_repo",
+        "arguments": { "paths": [dir.join("A").to_string_lossy(), dir.join("B").to_string_lossy()] }
+    });
+    let reply = super::call(Some(&params));
+    std::fs::remove_dir_all(&dir).ok();
+
+    assert_eq!(
+        reply["isError"], true,
+        "a path carrying its own tree set must refuse: {reply}"
+    );
+    let text = reply["content"][0]["text"].as_str().unwrap_or_default();
+    assert!(
+        text.contains(zzop_summary::contracts::PATHS_MODE_CONFIG_MARKER),
+        "the refusal must be the shared paths-mode message, recognizable by its marker: {text}"
+    );
+    assert!(
+        text.contains("configPath"),
+        "the refusal must name the argument that answers on THIS host: {text}"
+    );
+    assert!(
+        !text.contains("--config"),
+        "CLI-only prescription leaked into the MCP wire: {text}"
+    );
+}
+
+#[test]
+fn multi_tree_refusal_reaching_an_mcp_client_names_this_host_s_tool_not_a_shell_line() {
+    // The sibling of the test below, for the refusal the 2026-08-09 ruling was never applied to. The
+    // shared string names the cross-layer join in PROSE and stays spelling-free (a CLI line is useless
+    // to a shell-less client, and a tool name is useless in a terminal) -- so until 2026-09-23 neither
+    // host spelled it, and both of the message's remedies failed when transcribed. This pins the MCP
+    // half: the client must be told which TOOL answers, never a shell line.
+    let dir = std::env::temp_dir().join(format!("zzop-mcp-multi-tree-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("web")).unwrap();
+    std::fs::create_dir_all(dir.join("api")).unwrap();
+    std::fs::write(dir.join("web/a.ts"), "export const a = 1;\n").unwrap();
+    std::fs::write(dir.join("api/b.ts"), "export const b = 1;\n").unwrap();
+    let cfg = dir.join("zzop.config.jsonc");
+    std::fs::write(
+        &cfg,
+        r#"{ "trees": [{ "root": "./web" }, { "root": "./api" }] }"#,
+    )
+    .unwrap();
+
+    let params = serde_json::json!({
+        "name": "analyze_repo",
+        "arguments": { "configPath": cfg.to_string_lossy() }
+    });
+    let reply = super::call(Some(&params));
+    std::fs::remove_dir_all(&dir).ok();
+
+    assert_eq!(
+        reply["isError"], true,
+        "a multi-tree config must refuse the single-tree lane: {reply}"
+    );
+    let text = reply["content"][0]["text"].as_str().unwrap_or_default();
+    assert!(
+        text.contains(zzop_summary::contracts::MULTI_TREE_MARKER),
+        "the refusal must be the shared multi-tree message, recognizable by its marker: {text}"
+    );
+    assert!(
+        text.contains("cross_repo"),
+        "the refusal must name the tool that answers on THIS host: {text}"
+    );
+    // A shell line here would be advice this client cannot take -- the mirror of the assertion in the
+    // test below, and the reason the shared string carries neither spelling.
+    assert!(
+        !text.contains("zzop cross --config"),
+        "CLI-only prescription leaked into the MCP wire: {text}"
+    );
+}
+
+#[test]
 fn missing_config_refusal_reaching_an_mcp_client_carries_no_cli_only_prescription() {
     // The 2026-08-09 ruling split the missing-config answer in two: the SHARED string names only the
     // `config-template` artifact (host-neutral, guarded in crates/** by host_vocabulary contracts
@@ -641,5 +900,237 @@ fn missing_config_refusal_reaching_an_mcp_client_carries_no_cli_only_prescriptio
     assert!(
         !text.contains("zzop init"),
         "CLI-only prescription leaked into the MCP wire: {text}"
+    );
+    // 🔴 And the other half must BE there. The assertion above is one-sided: it forbids the CLI's
+    // spelling without requiring this host's, and for a long time nothing required it — the MCP
+    // refusal named the artifact and never said where to get it, so `resources/read` was reachable
+    // only by an agent that already knew the URI space. An external review (2026-09-10, `4f5d05d0`)
+    // measured it: URI present 0 times. A forbid-only pin lets a real gap sit green, which is this
+    // repo's own headline failure shape — green means "what this check looks at is fine".
+    let uri = format!(
+        "{}{}",
+        zzop_summary::contracts::URI_PREFIX,
+        zzop_summary::contracts::CONFIG_TEMPLATE_NAME
+    );
+    assert!(
+        text.contains(&uri),
+        "the refusal must carry the address this host can actually serve ({uri}): {text}"
+    );
+}
+
+/// 🔴 A `rule` filter that could not have matched anything is a FAILED call on THIS host too.
+///
+/// Measured 2026-09-01 on koel: `analyze_repo` with `rule: "definitely-not-a-rule"` returned a
+/// 28,757-byte success with no `isError`, its reason at byte offset 28,406 — while `zzop analyze`
+/// refused the identical argument with exit 2. Same binary family, same judgment available, opposite
+/// answers, and the weaker one is the agent's surface.
+///
+/// CANARY, both directions: a REAL rule id through the same path must stay a clean success, or
+/// "isError on a bad id" would be indistinguishable from "isError on everything".
+#[test]
+fn an_unmatchable_rule_filter_is_an_error_on_this_host_as_it_is_on_the_cli() {
+    let dir = TempDir::new("zzop-mcp-rule-filter");
+    dir.write("src/a.ts", "export const a = 1;\n");
+    dir.write_starter_config();
+    let path = dir.path().display().to_string();
+
+    let bad = call_tool(
+        "analyze_repo",
+        serde_json::json!({ "path": path, "rule": "definitely-not-a-rule" }),
+    );
+    assert_eq!(
+        bad["isError"], true,
+        "an id that can be PROVEN to match no rule must not read as a clean run: {bad}"
+    );
+
+    // The reply itself stays `content[0]`, still parseable as the same JSON document the CLI twin
+    // prints — the surface-parity contract is about the document, and an exit code is not part of it.
+    let payload = bad["content"][0]["text"].as_str().expect("the reply text");
+    let parsed: serde_json::Value =
+        serde_json::from_str(payload).expect("content[0] must still be the analyze document");
+    assert!(
+        parsed["findings"]["total"].is_number(),
+        "the analysis must still be delivered, exactly as the CLI delivers it on stdout while exiting \
+         2: {payload}"
+    );
+
+    // And the REASON is one glance away rather than 28KB in.
+    let reason = bad["content"][1]["text"]
+        .as_str()
+        .expect("the refusal must ride its own block");
+    assert!(
+        reason.contains("definitely-not-a-rule") && reason.contains("not a native analysis id"),
+        "the second block must say which id and why it can never match: {reason}"
+    );
+
+    let good = call_tool(
+        "analyze_repo",
+        // The canary id must be one this build EVALUATES, not merely one it registers. It was
+        // `dead-candidates` until 2026-09-05, and that id has SHIPPED OFF since 2026-09-03 — so the
+        // canary was green only because the filter had no arm for "registered but never evaluated",
+        // which is the very silence the rest of this test exists to refuse. A canary standing on a
+        // defect asserts the defect: it went red the hour that arm landed, having vouched for
+        // nothing in between.
+        serde_json::json!({ "path": path, "rule": "circular" }),
+    );
+    std::fs::remove_dir_all(dir.path()).ok();
+    assert!(
+        good.get("isError").is_none(),
+        "CANARY: a native analysis this run actually evaluated must stay a clean success, or the check above is a \
+         statement about every rule filter rather than about unmatchable ones: {good}"
+    );
+    assert_eq!(
+        good["content"].as_array().map(Vec::len),
+        Some(1),
+        "a clean call carries the document and nothing else: {good}"
+    );
+}
+
+/// V226's landing pin. The module map existed — `zzop graph --domain dep --fold N` draws it — and
+/// was reachable only from a terminal, while this product's named audience is an agent. Three
+/// recorded reasons said no twin was needed; all three were measured false or half-false, which is
+/// what opened this rather than any new want.
+///
+/// Asserts the properties the reply would be worthless without, not the whole document: `fold` is
+/// REQUIRED here where the CLI twin defaults it, the fold really folded (two planted directories
+/// become two modules with the import between them as ONE module edge), and the two honesty pairs
+/// survive the MCP hop — `lines` never without `linesMeasuredOver`, and no truncation channel at all,
+/// because nothing in this reply is capped.
+#[test]
+fn module_map_requires_its_grain_and_folds_the_graph_without_capping_anything() {
+    let dir = TempDir::new("zzop-mcp-module-map");
+    dir.write_starter_config();
+    dir.write("lib/util.ts", "export const load = () => 1;\n");
+    dir.write(
+        "src/api.ts",
+        "import { load } from '../lib/util';\nexport const go = () => load();\n",
+    );
+    let path = dir.path().to_string_lossy().to_string();
+
+    // REQUIRED on the wire: an agent deciding how much of a tree to pull into a context window has
+    // to say which grain it meant, where a terminal caller is looking at the answer already.
+    let missing = call_tool("module_map", serde_json::json!({ "paths": [path.clone()] }));
+    assert!(
+        error_text(&missing).contains("missing `fold` argument"),
+        "{missing}"
+    );
+
+    let reply = call_tool(
+        "module_map",
+        serde_json::json!({ "paths": [path], "fold": 1 }),
+    );
+    assert!(
+        reply.get("isError").is_none(),
+        "ONE path must be legal — a map is a question about a tree before it is about a join: {reply}"
+    );
+    let doc: serde_json::Value =
+        serde_json::from_str(reply["content"][0]["text"].as_str().expect("text")).unwrap();
+
+    let ids: Vec<&str> = doc["modules"]
+        .as_array()
+        .expect("modules array")
+        .iter()
+        .map(|m| m["id"].as_str().expect("a module id is a string"))
+        .collect();
+    assert!(
+        ids.contains(&"lib") && ids.contains(&"src"),
+        "the fold must produce one module per planted directory: {ids:?}"
+    );
+    assert_eq!(doc["edges"][0]["from"], "src", "{doc}");
+    assert_eq!(doc["edges"][0]["to"], "lib", "{doc}");
+    assert_eq!(
+        doc["edges"][0]["fileEdges"], 1,
+        "one file-level import collapsed into this module edge: {doc}"
+    );
+
+    for m in doc["modules"].as_array().expect("modules array") {
+        assert_eq!(
+            m.get("lines").is_some(),
+            m.get("linesMeasuredOver").is_some(),
+            "`lines` is a SUM and never ships without the count of files it covers: {m}"
+        );
+    }
+    // The absence IS the claim: this lane has no cap, so it has no channel to disclose one with.
+    assert!(doc.get("truncated").is_none(), "{doc}");
+    assert!(doc.get("filtered").is_none(), "{doc}");
+    assert!(
+        doc["meaning"].as_str().is_some_and(|m| m.len() > 200),
+        "the reply carries its own legend: {doc}"
+    );
+}
+
+/// C6's landing pin. `check_coverage` exists because the visibility surface — the one reply built to
+/// say whether a zero from the four analyzing tools means anything — was reachable only from the CLI,
+/// which locked the AGENT persona out of the disclosure lane while the parity registry recorded a
+/// deferral ("promote if agent demand arrives") as though it were a judgment. The demand never
+/// arrives spelled "show me that list"; it arrives as "analyze_repo said 0 — is that clean?".
+///
+/// Asserts the three things the tool would be worthless without, not the whole document (the facade
+/// core's own suite owns the cells): a ONE-path call is legal here where `cross_repo` demands two,
+/// the CAPABILITY rosters the CLI twin carries are on this wire too, and `unmeasured` — the field
+/// that exists so recall cannot be dropped in transit — survives the MCP hop as a FIELD.
+#[test]
+fn check_coverage_answers_for_one_tree_and_carries_the_capability_and_unmeasured_axes() {
+    let dir = TempDir::new("zzop-mcp-check-coverage");
+    dir.write_starter_config();
+    dir.write("src/a.ts", "export const a = 1;\n");
+    let path = dir.path().to_string_lossy().to_string();
+
+    let reply = call_tool("check_coverage", serde_json::json!({ "paths": [path] }));
+    assert!(
+        reply.get("isError").is_none(),
+        "ONE path must be legal — the question is about a tree before it is about a join: {reply}"
+    );
+    let doc: serde_json::Value =
+        serde_json::from_str(reply["content"][0]["text"].as_str().expect("text")).unwrap();
+
+    let trees = doc["trees"].as_array().expect("trees array");
+    assert_eq!(trees.len(), 1, "{doc}");
+    assert!(
+        trees[0]["blindSpotBasis"].is_string(),
+        "the sentence that keeps an empty `blindSpots` from reading as an all-clear must ride the \
+         MCP hop too: {doc}"
+    );
+
+    // CAPABILITY axis: facts of the BUILD, true before any tree is walked. These are the half a
+    // per-run reply can never carry, and the reason forwarding `coverage` inside analyze_repo was
+    // not the same answer.
+    assert!(
+        doc["frameworkRecognizers"]
+            .as_array()
+            .is_some_and(|r| !r.is_empty()),
+        "the compiled-in recognizer table is the build-capability half: {doc}"
+    );
+    assert!(
+        doc["nativeAnalysesMeaning"].is_object() || doc["nativeAnalysesMeaning"].is_string(),
+        "the native-analysis roster's legend is stated once at the root: {doc}"
+    );
+
+    // UNMEASURED axis: a FIELD, never a caveat sentence, precisely so it cannot be dropped in
+    // transit the way prose is — and this hop is the transit that would have dropped it.
+    let unmeasured = doc["unmeasured"].as_array().expect("unmeasured array");
+    assert!(
+        unmeasured.iter().any(|u| u["axis"] == "recall"),
+        "recall must arrive as a field: {doc}"
+    );
+    // And the ruling it enforces: no single score, on this wire either.
+    assert!(
+        doc.get("score").is_none() && doc.get("coverageScore").is_none(),
+        "by the 2026-07-31 ruling no folded score exists in this schema, host-independently: {doc}"
+    );
+    std::fs::remove_dir_all(dir.path()).ok();
+}
+
+/// The source-mode half: `paths` and `configPath` are exclusive, and the ERROR is the shared
+/// handler's wording rather than a second sentence written for this arm — the same drift the
+/// `cross_repo` arm's own comment records paying for.
+#[test]
+fn check_coverage_source_mode_errors_are_the_shared_handlers_verbatim() {
+    let reply = call_tool("check_coverage", serde_json::json!({}));
+    let text = error_text(&reply);
+    assert!(
+        text.contains("pass one tree root, 2+ tree roots, or a config file"),
+        "this must be the SHARED front end's sentence, not one written for this arm — the CLI twin \
+         answers a source-less `zzop coverage` with the same bytes: {text}"
     );
 }

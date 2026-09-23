@@ -3,7 +3,7 @@
 //! enclosing method/constructor body (the smallest body span covering the call's line — the same
 //! "innermost enclosing body wins" rule TS's `find_enclosing` uses), so this crate's output rides the
 //! SAME whole-repo `SymbolGraph`/BFS the engine's call-graph-BFS native rules already build from
-//! TypeScript (`crates/engine/src/analyze/native_rules/callgraph.rs`).
+//! TypeScript (`crates/engine/src/analyze/native_rules/callgraph/mod.rs`).
 //!
 //! ## Lambda bodies ARE covered — no special-casing needed
 //! A lambda passed to `.map(...)`/`.filter(...)`/etc is not a symbol-bearing declaration in

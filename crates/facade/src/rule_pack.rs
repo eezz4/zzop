@@ -35,6 +35,13 @@ pub fn validate_rule_pack_json(pack_json: &str) -> String {
     // Read from the RAW text, and do it on BOTH arms: a pack that fails to parse for some other
     // reason still has its retired fields worth naming, and by this point the parsed value (when there
     // is one) has already dropped them — `RuleDef` carries no `deny_unknown_fields`, deliberately.
+    // Duplicate rule ids (review ledger V179). Parsed-arm only: this asks about the rule LIST, and
+    // a pack that failed to parse has none. Both copies fire, so this is not a dead-rule issue -- it is
+    // an ADDRESSABILITY one, and the engine already warns about its suppress-marker half at analysis
+    // time. A pre-load validator that passes what the engine will complain about is not offline parity.
+    if let Ok(pack) = zzop_core::parse_dsl_pack(pack_json) {
+        issues.extend(zzop_core::pack_duplicate_id_issues(&pack));
+    }
     issues.extend(zzop_core::pack_retired_field_issues(pack_json));
     let report = ValidateReport {
         valid: issues.is_empty(),

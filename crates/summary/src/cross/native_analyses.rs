@@ -281,11 +281,18 @@ fn meaning(replaced: &BTreeMap<&str, BTreeSet<&str>>) -> Value {
     );
     m.insert(
         "everythingElse",
-        "a registered analysis in NEITHER list judges ONE TREE rather than the join, and reports into \
-         that tree's own `findings` — which this reply does not carry: `sources[].findingCount` is a \
-         count of it and nothing more. So its absence here is not a verdict about your code in either \
-         direction; to get those verdicts, analyze the source you care about on its own. The two \
-         exceptions `registered` names apply here too."
+        "a registered analysis in NEITHER list judges ONE TREE rather than the join, so this reply is \
+         not where its verdict lives — and there are TWO reasons it might not be in the tree's reply \
+         either, which this reply cannot tell apart. Usually it ran and reported into that tree's own \
+         `findings`, which this reply does not carry: `sources[].findingCount` is a count of it and \
+         nothing more. But some analyses SHIP OFF (unused-code hygiene — see `nativeAnalyses.shippedOff` \
+         on a per-tree reply), and those were not evaluated at all unless that tree's config named them. \
+         Either way the answer is in the tree's own reply, not here: analyze the source you care about \
+         on its own, and read its roster. The join gate is EXCLUDE-ONLY and cannot turn anything on, so \
+         nothing this reply says can settle it — which is why there is no `shippedOff` key at this root \
+         and why one would be a guess: a config that opted in for one tree and not another would have \
+         no honest entry, and a union or an intersection would each be wrong for half the trees. The \
+         two exceptions `registered` names apply here too."
             .to_string(),
     );
     serde_json::to_value(m).unwrap_or(Value::Null)

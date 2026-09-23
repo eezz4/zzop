@@ -2,13 +2,16 @@
 //! token-bomb guard for MCP responses, built to never lie by omission: full counts always ride along,
 //! every applied cap announces `{shown, totalMatching, hint}` (a silent cap would read as "that's
 //! everything") plus, on the findings lane, `severitiesNotShown` — which severity bands the cut
-//! removed OUTRIGHT, because ordering by deployment role means a whole `critical` band can sit past
-//! the cap while `bySeverity` still counts it ([`truncation`]) — warnings are never capped (the
+//! removed OUTRIGHT and the first few rows of each, because ordering by deployment role means a
+//! whole `critical` band can sit past the cap while `bySeverity` still counts it, and a count alone
+//! leaves a reader whose build just broke with nothing to open ([`truncation`]) — warnings are never capped (the
 //! honest self-report channel outranks brevity), and
-//! ordering is deterministic — deployment role descending ([`deployment_role`]), then severity rank
-//! descending, then rule round-robin (every rule's Nth finding ahead of any rule's N+1th, so a window
-//! shows subjects rather than one rule's alphabetically-first cluster), with original engine order as the
-//! final tiebreak — so the same analysis produces byte-identical tool output.
+//! ordering is deterministic and lives one module over ([`ordering`], which owns the five keys and the
+//! measurement behind each) — deployment role descending, then severity rank descending, then three
+//! diversity keys that interleave places and rules so a window shows subjects rather than one cluster,
+//! with original engine order as the final tiebreak, so the same analysis produces byte-identical tool
+//! output. The key list is NOT restated here: it moved out on 2026-09-05 precisely because it had grown
+//! two owners, and a second copy of an ordering is a copy that stops matching the sort.
 
 /// Default cap for findings lists. Deliberately small: the default answer is a summary an agent can
 /// reason over; the `severity`/`rule`/`limit` tool arguments are the drill-down.
@@ -23,27 +26,31 @@ pub const DEFAULT_DEGRADED_LIMIT: usize = 50;
 /// Upper bound for a caller-supplied `limit` — keeps a single tool reply bounded no matter what.
 const MAX_LIMIT: usize = 1000;
 
+mod architecture_legends;
 mod bucket_keys;
+mod by_directory;
 mod by_rule_legend;
 mod cache_signal;
 mod deployment_role;
 mod disclosure;
 mod filters;
-mod rule_prose;
+pub(crate) mod legends;
+mod ordering;
+pub(crate) mod rule_prose;
+mod shown_legend;
 #[cfg(test)]
 mod tests;
 mod timings;
 mod truncation;
 
 pub(crate) use bucket_keys::{distinct_bucket_keys, KEY_BUCKETS};
-use by_rule_legend::BY_RULE_MEANING;
-pub(crate) use cache_signal::shape_cache_signal;
-use deployment_role::{build_paths_disclosure, deployment_role, is_build_surface, is_test_path};
+pub(crate) use cache_signal::{shape_cache_numbers, shape_cache_signal, MEANING as CACHE_MEANING};
+use deployment_role::{build_paths_disclosure, is_build_surface, is_test_path};
 pub(crate) use disclosure::fold as fold_disclosure;
 pub use filters::severity_rank;
 pub use filters::FindingFilters;
 #[cfg(test)]
-pub(crate) use rule_prose::message_ref_key;
+pub(crate) use rule_prose::{message_ref_key, template_parts_key};
 pub(crate) use timings::shape_rule_timings;
 pub use timings::RunKnobs;
 
@@ -75,85 +82,18 @@ pub(crate) fn shape_findings(
         .as_deref()
         .map(severity_rank)
         .unwrap_or(0);
-    // Round-robin counters, keyed by the BAND a finding lands in (deployment role + severity rank) plus
-    // its rule id, and filled in ENGINE ORDER by the `map` below — so a finding's occurrence index is the
-    // number of same-rule findings that preceded it inside its own band, and the whole key stays a pure
-    // function of the pre-sort list. The band belongs in the key because the two outer keys have already
-    // partitioned the list by the time this one is consulted: a rule that fires in two severity bands has
-    // two independent turns, and a shared counter would let one band's traffic reorder another's.
-    let mut seen_per_rule: std::collections::HashMap<(u8, u8, &str), u32> = Default::default();
-    let mut matching: Vec<(usize, &serde_json::Value, u8, u8, u32)> = findings
-        .iter()
-        .enumerate()
-        .filter(|(_, f)| {
-            let sev = f.get("severity").and_then(|v| v.as_str()).unwrap_or("");
-            if severity_rank(sev) < min_rank {
-                return false;
-            }
-            match &filters.rule {
-                Some(rule) => f.get("ruleId").and_then(|v| v.as_str()) == Some(rule.as_str()),
-                None => true,
-            }
-        })
-        .map(|(i, f)| {
-            let sev = f.get("severity").and_then(|v| v.as_str()).unwrap_or("");
-            let rank = severity_rank(sev);
-            let role = deployment_role(f, build_script_paths);
-            let rule = f.get("ruleId").and_then(|v| v.as_str()).unwrap_or("");
-            let counter = seen_per_rule.entry((role, rank, rule)).or_insert(0);
-            let occurrence = *counter;
-            *counter += 1;
-            (i, f, rank, role, occurrence)
-        })
-        .collect();
-    // DEPLOYMENT ROLE descending, THEN severity-desc within a role, original engine order as the stable
-    // tiebreak — deterministic. See [`deployment_role`] for what the three roles are, why, and why role
-    // is the OUTER key: a reader stops when the list stops paying, and the place they stop is the end of
-    // the `critical` band, so a `critical` band made of fixtures and build scripts is a first screen that
-    // found nothing. Shaping-only in both directions: nothing is dropped, counts never move, and BOTH
-    // demotions announce themselves (`testPaths`/`buildPaths` below) — a demotion nobody is told about is
-    // a silent filter.
-    //
-    // Roles are computed ONCE above rather than inside the comparator: the outer key is consulted on every
-    // comparison, and it is two regex matches plus a set lookup.
-    //
-    // The THIRD key is RULE ROUND-ROBIN (2026-08-26): every rule's 1st finding, then every rule's 2nd, and
-    // so on, with the engine index still breaking ties inside a round. Without it the tiebreak inside a
-    // band was the engine index, which for a merged registry is the full path in lexicographic order — so
-    // the first screen was never "the worst 40", it was "the alphabetically-first 40", and a rule whose
-    // findings all sit under a late-sorting directory could not reach it at ANY count. Measured on
-    // cal.com: `db/pagination-no-orderby` first appeared at rank 8 and `schema/fk-no-index` at rank 239,
-    // same role, same severity, 231 places decided entirely by the letters in a path — and `apps/` (44
-    // findings) filled the whole window while `packages/` (459) started at rank 48.
-    //
-    // Diversity, not importance: this key ranks by NOTHING about a finding except how many siblings its
-    // own rule already spent, which is exactly why it can be computed here. It is deliberately CHEAP and
-    // deliberately a proxy — the shipping form of "worst first" is a result-size feature, and this is the
-    // step that opens the window far enough to see the material for one.
-    //
-    // Never emitted. The index is not a wire field, and that is the line `output-philosophy` §12 draws:
-    // what is forbidden is a scalar a caller can threshold on (`confidence > 0.8`), not the act of
-    // ordering — zzop already ordered by two keys before this one. Computed but not published stays out.
-    matching.sort_by(|a, b| {
-        b.3.cmp(&a.3)
-            .then(b.2.cmp(&a.2))
-            .then(a.4.cmp(&b.4))
-            .then(a.0.cmp(&b.0))
-    });
+    let matching = ordering::window_order(findings, filters, min_rank, build_script_paths);
 
     let total_matching = matching.len();
     let limit = filters.limit.unwrap_or(DEFAULT_FINDINGS_LIMIT);
-    let mut shown: Vec<serde_json::Value> = matching
-        .iter()
-        .take(limit)
-        .map(|(_, f, _, _, _)| (*f).clone())
-        .collect();
+    let mut shown: Vec<serde_json::Value> =
+        matching.iter().take(limit).map(|f| (*f).clone()).collect();
     // THE PROSE FOLD, applied to the WIRE and only the wire: `shown` is already cut, so a text
     // repeated only among findings the cap dropped is not repeated here and stays inline. AFTER the
     // cap deliberately — folding the full set would table prose this reply does not contain.
     // Presentation only, like the three ordering keys above: nothing dropped, no count moved, every
     // byte still reachable in this same document ([`rule_prose`] has the measurement and the pins).
-    let rule_messages = rule_prose::fold(&mut shown);
+    let folded = rule_prose::fold(&mut shown);
 
     let mut out = serde_json::json!({
         "total": findings.len(),
@@ -161,19 +101,25 @@ pub(crate) fn shape_findings(
         "byRule": by_rule,
         // The legend for the field one line up, UNCONDITIONAL — see [`by_rule_legend`] for why a
         // count here is not a count of places, why the repair is a sentence rather than a derived
-        // site count, and why the reply where every count IS a place count still carries it.
-        "byRuleMeaning": BY_RULE_MEANING,
+        // site count, and why the reply where every count IS a place count still carries it. FOLDED
+        // since 2026-09-01: the caveat and the instruction it qualifies stay on the wire, in that
+        // order; the vocabulary behind them is byte-identical on every run and ships once from the
+        // reply-legends document instead ([`legends`]).
+        "byRuleMeaning": legends::folded_string("findings.byRuleMeaning"),
         "shown": shown,
+        // Unconditional, exactly like `byRuleMeaning` beside `byRule` and for the same reason: the key
+        // it explains is on every reply, so a reader who could be misled is on every reply too. What it
+        // stops is not a wrong sentence but an ABSENT one — `shown` is an order and reads as a ranking,
+        // and nothing told anybody otherwise until 2026-09-05. See [`shown_legend`].
+        "shownMeaning": legends::folded_string("findings.shownMeaning"),
     });
-    // Additive-only, the contract `truncated`/`testPaths`/`buildPaths` keep: present when it has
-    // something to say, ABSENT (never `{}`) otherwise, so a tree whose every message is unique pays
-    // nothing. The legend rides here rather than in each pointer — that is what lets a pointer stay
-    // an address; a table with no legend and a legend with no table are both red in `tests`.
-    if let Some(table) = rule_messages {
-        out["ruleMessages"] = table;
-        out["ruleMessagesMeaning"] =
-            serde_json::Value::String(rule_prose::RULE_MESSAGES_MEANING.to_string());
-    }
+    // Additive-only, the contract `truncated`/`testPaths`/`buildPaths` keep: each of the fold's two
+    // tables is present when it has something to say and ABSENT (never `{}`) otherwise, so a tree
+    // whose every message is unique pays nothing. Each legend rides once beside its own table rather
+    // than in each pointer — that is what lets a pointer stay an address; a table with no legend and
+    // a legend with no table are both red in `tests`. [`rule_prose::Folded::publish`] writes both,
+    // with the key names spelled there, so nothing here has to know there are two.
+    folded.publish(&mut out);
     // Additive-only, like `truncated`: present exactly when it has something to say. Counted over the
     // FULL set (the same contract as `bySeverity`/`byRule`), not the filtered one, so the number a
     // reader quotes does not shrink with their filter.
@@ -183,6 +129,19 @@ pub(crate) fn shape_findings(
     // counts are computed independently and MAY overlap (a manifest-named script under `fixtures/` is in
     // both); each states a true thing about the full set, and neither claims to be a partition. That is
     // also why this count is unchanged by the new tier: its published sentence is about test paths.
+    // WHERE the findings sit, as a distribution over the first path segment and nothing more. Over the
+    // FULL set, like the counts above: findings concentrate hard (94.7% of fastapi's 511 under one
+    // directory) and no channel of this reply said so, so a `bySeverity` that reads as a statement
+    // about the project could in fact be a statement about its documentation examples.
+    // [`by_directory`] carries the corpus table and the reason this channel names no directory "noise".
+    //
+    // ADDITIVE-ONLY since 2026-09-15 (ledger V243), which moved it onto the contract its two siblings
+    // below already keep. It shipped unconditionally from birth, so one `findings` object held three
+    // emission doctrines and a release would have frozen each one as it happened to be. The builder
+    // owns the condition and the argument for why it is not the share threshold that module refuses.
+    if let Some(block) = by_directory::by_directory(findings) {
+        out["byDirectory"] = block;
+    }
     let test_path_count = findings.iter().filter(|f| is_test_path(f)).count();
     if test_path_count > 0 {
         out["testPaths"] = serde_json::json!({
@@ -202,17 +161,54 @@ pub(crate) fn shape_findings(
     if build_path_count > 0 {
         out["buildPaths"] = build_paths_disclosure(build_path_count);
     }
+    // THE FILTER'S OWN DISCLOSURE — the half `truncated` does not cover (2026-09-14, external review
+    // round 22, ledger V246).
+    //
+    // `truncated` fires when the CAP cut the window. A `severity`/`rule` filter cuts it EARLIER, in
+    // `window_order` above, and left no trace at all: measured on `corpus/frameworks/nest`,
+    // `analyze --severity critical` shipped `shown: 1` beside `total: 326` with no `truncated` key and
+    // no key anywhere naming a filter — a reply indistinguishable from a complete one except by
+    // arithmetic the reply's own legend told the reader not to do ("nothing is dropped"). And
+    // `messageByIdMeaning` asserted `truncated` was the ONLY key meaning rows were left out, which this
+    // case made false.
+    //
+    // Additive-only, like `truncated`/`testPaths`/`buildPaths`: present exactly when a filter actually
+    // removed something, so an unfiltered run pays nothing and the key's ABSENCE is the honest "your
+    // view is the whole set". The counts stay over the FULL set, unchanged — what is disclosed is the
+    // WINDOW, which is the thing that silently narrowed.
+    let elided = findings.len().saturating_sub(total_matching);
+    if elided > 0 && (filters.min_severity.is_some() || filters.rule.is_some()) {
+        let mut applied = serde_json::Map::new();
+        if let Some(sev) = filters.min_severity.as_deref() {
+            applied.insert("severity".to_string(), serde_json::json!(sev));
+        }
+        if let Some(rule) = filters.rule.as_deref() {
+            applied.insert("rule".to_string(), serde_json::json!(rule));
+        }
+        out["filtered"] = serde_json::json!({
+            "applied": applied,
+            "elided": elided,
+            "meaning": "YOUR REQUEST narrowed this window before any cap did. `elided` is how many \
+                        findings the filter above removed from `shown`; they are still counted in \
+                        `total`, `bySeverity` and `byRule`, which are always over the full set. Read \
+                        this key as \"the rows you are looking at are not all the rows\" — without it \
+                        a filtered reply and a complete one are the same bytes, which matters most \
+                        when the reply is saved, forwarded, or read in a later turn than the one that \
+                        passed the filter. `truncated` beside it is a DIFFERENT cut: that one is the \
+                        list cap acting on what survived this filter.",
+        });
+    }
     if total_matching > limit {
         // The one surface where the tool arguments really do move the cap — `shape_list`'s callers
         // must NOT reuse this hint (see `shape_list`). The disclosure is built from the SORTED
         // severities of the matching set, so it can say which severity bands the cut removed
         // outright rather than only how many rows it dropped — see [`truncation`] for why that
         // sentence exists and why its population is the post-filter set.
-        let ordered: Vec<&str> = matching
-            .iter()
-            .map(|(_, f, _, _, _)| f.get("severity").and_then(|v| v.as_str()).unwrap_or(""))
-            .collect();
-        out["truncated"] = truncation::findings(&ordered, limit);
+        //
+        // The whole finding is handed over, not just its severity: the disclosure names the first
+        // rows of a silenced band by `ruleId`/`file`/`line`, and the ONE list it receives is what
+        // makes `shown` and the named rows provably the same partition of the same sort order.
+        out["truncated"] = truncation::findings(&matching, limit);
     }
     // Zero-match rule-filter disclosure: `shown: []` from a real rule with zero findings this run is
     // indistinguishable from `shown: []` from a TYPO'd/nonexistent rule id — both look identical on the

@@ -215,3 +215,137 @@ fn the_cross_reply_carries_and_omits_exactly_what_the_registry_says() {
     let reg = registry();
     assert_shape(&out, &reg["multiAnalyzeOutputView"], "cross_repo");
 }
+
+/// The join reply must answer "was this replayed or recomputed?" PER TREE, and must say what that
+/// means exactly ONCE.
+///
+/// 🔴 It answered neither until 2026-09-09: `hitFiles` appeared in no byte of a cross reply, while the
+/// single-tree lane had published cache provenance since the day that silence was named (review ledger
+/// V146). A reader of a join could not tell a recomputed finding list from a replayed one.
+///
+/// ⚠ The second half of this test is the one that will actually catch a regression. Reusing
+/// `shape_cache_signal` here instead of `shape_cache_numbers` would look correct, pass every other
+/// test, and quietly put a 1,045-byte run-invariant string in every `sources[]` row — 26 KB on a
+/// 25-tree join, in a reply whose size is already an open question. `1` is the assertion; `N` is the
+/// bug that reads like a fix.
+#[test]
+fn cache_provenance_rides_per_tree_and_its_meaning_ships_once() {
+    let fe = tmp_tree("cache-fe");
+    fs::write(fe.join("a.ts"), "export const a = 1;\n").unwrap();
+    let be = tmp_tree("cache-be");
+    fs::write(be.join("b.ts"), "export const b = 2;\n").unwrap();
+    let paths = vec![fe.display().to_string(), be.display().to_string()];
+    let doc = zzop_summary::cross_summary(&paths, None, &default_filters())
+        .expect("cross must succeed on two configured trees");
+    let out: serde_json::Value = serde_json::from_str(&doc).expect("the reply is a JSON document");
+
+    let sources = out["sources"].as_array().expect("sources[]");
+    assert_eq!(sources.len(), 2, "two trees in, two rows out");
+    for row in sources {
+        let cache = &row["cache"];
+        assert!(
+            cache.get("hitFiles").is_some() && cache.get("missFiles").is_some(),
+            "a sources[] row carries no cache provenance: {row}"
+        );
+        assert_eq!(
+            cache["fileCount"], row["fileCount"],
+            "the ratio must be readable without joining two keys, so the denominator rides inside"
+        );
+        assert!(
+            cache.get("meaning").is_none(),
+            "the run-invariant sentence belongs at the root of this lane, not in every row: {cache}"
+        );
+    }
+
+    let meaning = out["cacheMeaning"]
+        .as_str()
+        .expect("cacheMeaning at the root");
+    assert!(
+        meaning.contains("REPLAYED"),
+        "the legend must say what a hit does to findings"
+    );
+    assert_eq!(
+        doc.matches("were served whole from the cache").count(),
+        1,
+        "the cache legend appears more than once -- N trees must not cost N copies of it"
+    );
+}
+
+/// `module_map` — the orientation reply, declared in the same commit that put it on the wire.
+///
+/// That ordering is the point, and it is what the two tests below this one were written after the
+/// fact to recover: `check_coverage` shipped for weeks with no declaration, and the coverage reply's
+/// own block says how that was found — a key was added and NOTHING went red. A new surface gets its
+/// row set on the way in, not after someone notices.
+///
+/// Like the coverage lane, this one has no facade-view block, so the `block` passed to
+/// [`assert_shape`] is empty on purpose: no key can be covered by a field row, and every one of them
+/// has to be declared in `_replyRootKeys.module_map` or this fails naming it.
+#[test]
+fn the_module_map_reply_declares_every_key_it_ships() {
+    let dir = tmp_tree("module-map");
+    fs::create_dir_all(dir.join("lib")).unwrap();
+    // TWO modules with an import ACROSS them, so `edges` has a row and the floor below is about a map
+    // rather than about an empty one. A one-directory fixture folds to a single box with no edges,
+    // which would satisfy "every key is declared" while proving nothing about the rows.
+    fs::write(
+        dir.join("lib/util.ts"),
+        "export const load = () => fetch('/api/users');\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("api.ts"),
+        "import { load } from './lib/util';\nexport const go = () => load();\n",
+    )
+    .unwrap();
+    let out = zzop_summary::module_map(&[dir.display().to_string()], None, 1)
+        .expect("the module map must succeed on a configured tree");
+
+    // FLOOR: a real map, not an empty envelope. Both halves, because either one alone is satisfiable
+    // by a reply that answered nothing.
+    let v: serde_json::Value = serde_json::from_str(&out).expect("a reply is JSON");
+    assert!(
+        v["modules"].as_array().is_some_and(|m| m.len() >= 2)
+            && v["edges"].as_array().is_some_and(|e| !e.is_empty()),
+        "the fixture produced no multi-module map with an edge, so the declaration check below would \
+         be about an empty reply: {out}"
+    );
+
+    assert_shape(&out, &serde_json::json!({}), "module_map");
+}
+
+/// `check_coverage` — the aggregate-visibility reply, which had NO declaration at all until
+/// 2026-09-14 (review ledger W2).
+///
+/// # Why this test is later than the other two, and what that cost
+/// The registry declared `analyze_repo` and `cross_repo`. Every top-level key of the coverage reply
+/// was undeclared, so a key added to or removed from this surface went past every guard in the repo —
+/// the same blind spot `_replyRootKeys`' own `_doc` describes for nested keys, one whole surface over.
+/// It was found the way such things are: a key was added here and NOTHING went red.
+///
+/// This lane has no facade-view block (there is no `queryCoverageView` row set), so the `block`
+/// passed to [`assert_shape`] is empty on purpose — no key can be covered by a field row, and every
+/// one of them has to be declared in `_replyRootKeys.check_coverage` or this fails naming it.
+#[test]
+fn the_coverage_reply_declares_every_key_it_ships() {
+    let dir = tmp_tree("coverage");
+    fs::write(
+        dir.join("api.ts"),
+        "export const load = () => fetch('/api/users');\n",
+    )
+    .unwrap();
+    let out = zzop_summary::coverage_summary(&[dir.display().to_string()], None)
+        .expect("coverage must succeed on a configured tree");
+
+    // FLOOR: the reply has to be a real one. An empty object would satisfy "every key is declared"
+    // while saying nothing, and the `always` half below would then be the only thing working.
+    let keys = top_level_keys(&out);
+    assert!(
+        keys.len() >= 10,
+        "the coverage reply carries {} top-level keys — that is not a real reply, and the declaration \
+         check below would be vacuous: {keys:?}",
+        keys.len()
+    );
+
+    assert_shape(&out, &serde_json::json!({}), "check_coverage");
+}

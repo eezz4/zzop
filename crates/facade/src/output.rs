@@ -11,8 +11,7 @@ use serde::Serialize;
 use zzop_core::{CommonIr, FileNode, Finding};
 use zzop_engine::AnalyzeOutput;
 use zzop_metrics::{
-    CoChangeEdge, CriticalFile, CrossLayerCoChurn, FolderAggregates, HealthIndex, Recommendation,
-    Scores, SeamCandidate,
+    CoChangeEdge, CriticalFile, HealthIndex, Recommendation, Scores, SeamCandidate,
 };
 
 mod mirrors;
@@ -28,7 +27,15 @@ mod packs_legend;
 /// while the action it licenses inverts.
 pub use native_analyses_legend::{
     NATIVE_ANALYSES_DISABLED_MEANING, NATIVE_ANALYSES_REGISTERED_MEANING,
+    NATIVE_ANALYSES_SHIPPED_OFF_MEANING,
 };
+
+/// The two legends' RUN-FREE views, for the one consumer that needs them with no analysis in hand:
+/// `zzop_summary`'s reply-legends contract document, which serves the full text these two keys used to
+/// ship on every call. Each function's own doc says why a document rendered from a run would be the
+/// wrong document.
+pub use native_analyses_legend::native_analyses_legend;
+pub use packs_legend::packs_loaded_legend;
 
 pub(crate) use mirrors::{disclosure_views, BlindnessClassView};
 use mirrors::{
@@ -101,28 +108,18 @@ pub(crate) struct AnalyzeOutputView<'a> {
     /// under it.
     nodes: &'a [FileNode],
     scores: &'a Option<Scores>,
-    /// What each `scores` key MEANS, one sentence apiece — the same self-describing-reply device
-    /// `verdictMeaning` uses, for the same reason and after the same measurement. Several score keys
-    /// are bare acronyms (`sdp`, `file_size_compliance`, `feature_sliced_design`) whose expansion existed only in Rust
-    /// doc-comments: a 2026-08-04 name survey found `docs/` and `site/` carried zero occurrences of
-    /// "Stable Dependencies Principle", and the MCP tool descriptions name no score field at all. A
-    /// consumer holding `scores.sdp = 41.2` had no vocabulary on any surface.
-    ///
-    /// Present exactly when `scores` is — a legend for numbers that did not run explains nothing, and
-    /// this repo reads a present field as "the capability ran". The definitions have ONE owner
-    /// (`zzop_metrics::SCORE_MEANINGS`), whose completeness is pinned against serde's own key set, so a
-    /// new score cannot ship a bare key here.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    score_meanings: Option<std::collections::BTreeMap<&'a str, &'a str>>,
     health: &'a Option<HealthIndex>,
     recommendations: &'a [Recommendation],
     /// Files ranked by `blastRadius` (transitive dependents). Same treatment as `nodes` above: the term
     /// is correct about the graph it is measured over, and that graph's membership rule is disclosed
     /// once, from [`zzop_core::DEP_GRAPH_RESOLVED_ONLY`] — a blast radius counts in-tree dependents.
     critical: &'a [CriticalFile],
+    /// Rows the `critical` cap dropped — `0` on a complete list, and ALWAYS serialized so that an
+    /// absent field can never stand in for a complete one. See
+    /// [`zzop_engine::AnalyzeOutput::critical_truncated`]; the sibling `criticalTop` legend publishes
+    /// only the three paths it lifts, so without this the 20-row wall behind it was unnamed.
+    critical_truncated: u32,
     seams: &'a [SeamCandidate],
-    folders: &'a Option<FolderAggregates>,
-    layer_co_churn: &'a Option<Vec<CrossLayerCoChurn>>,
     /// Undirected file-pair co-change edges — the git-history relation over the same nodes `nodes`/the
     /// dep graph describe, and the substrate `graph --domain cochange` draws. `null` and `[]` say
     /// DIFFERENT things and must not be folded together: `null` = git inactive or collection failed, so
@@ -189,18 +186,11 @@ impl<'a> AnalyzeOutputView<'a> {
             file_count: output.file_count,
             nodes: &output.nodes,
             scores: &output.scores,
-            score_meanings: output.scores.as_ref().map(|_| {
-                zzop_metrics::SCORE_MEANINGS
-                    .iter()
-                    .map(|(k, m)| (*k, *m))
-                    .collect()
-            }),
             health: &output.health,
             recommendations: &output.recommendations,
             critical: &output.critical,
+            critical_truncated: output.critical_truncated,
             seams: &output.seams,
-            folders: &output.folders,
-            layer_co_churn: &output.layer_co_churn,
             co_change: &output.co_change,
             packs_loaded: output
                 .packs_loaded

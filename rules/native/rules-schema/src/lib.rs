@@ -110,6 +110,28 @@ const NATIVE_ANALYSES: &[(&str, &[RuleIoChannel])] = &[
     ("enum-string-drift", NO_IO),
 ];
 
+/// The subset of [`NATIVE_ANALYSES`] whose ids gate a family and therefore CANNOT appear as any
+/// finding's `rule_id` — findings of those passes carry the finer `schema/<label>` ids
+/// [`schema_issue_rule_id`] builds. The other three rows are ordinary rules that report under their
+/// own id.
+///
+/// # Why this is spelled rather than derived, and why it is exported at all
+/// Nothing in the registration distinguishes the two classes: a gate and a join rule are registered
+/// the same way, read the same channels, and occupy the same `RuleConfig` id space. The distinction
+/// lives in what the pipeline DOES with the id (`zzop_engine`'s `schema_findings` consults
+/// `"schema-structural"` once and then labels each finding `schema/<label>`), which no table here can
+/// observe. So it is stated once, beside the ids it describes, and pinned in tests rather than
+/// derived from a shape that does not carry it.
+///
+/// It became `pub` on 2026-09-05 for a measured reason. The fact was known — five shipped prose
+/// surfaces say "an umbrella registration reports under the finer `schema/<label>` ids" — but it was
+/// known only to READERS. `--rule schema-structural` therefore passed the "could this filter ever
+/// match?" refusal (which tests membership in the registry, the wrong set) and returned `shown: 0`
+/// with an empty stderr and no warning, on a tree holding 92 findings: the exact silent failure that
+/// check exists to end, one id class further in. Prose that a machine cannot read is not a
+/// distinction the product HAS; `zzop_engine::ids_that_carry_no_finding` is where it became one.
+pub const SCHEMA_FAMILY_GATES: [&str; 2] = ["schema-structural", "schema-usage"];
+
 /// This crate's half of the rule→io-channel declaration, composed with the other crates' own by
 /// `zzop_engine::native_rule_channels` — the same aggregator shape as [`register_native_analyses`].
 ///
@@ -142,7 +164,6 @@ pub use join::{
 pub use message::{join_issue_message, rule_sightlines, schema_issue_message};
 pub use structural::{
     analyze_schema, apply_schema_rules, SchemaAnalysis, SchemaIssue, MONEY_TOKENS,
-    STRUCTURAL_RULES_VERSION,
 };
 pub use usage::{
     analyze_schema_with_usage, apply_churn_rule, cross_check_schema, field_usage_tokens,

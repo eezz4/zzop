@@ -146,7 +146,7 @@ impl FragmentBuilder<'_> {
                 if call.args.len() < 2 {
                     return Vec::new();
                 }
-                let Some(path) = string_lit_arg(call.args.first()) else {
+                let Some(path) = route_path_lit_arg(call.args.first()) else {
                     return Vec::new();
                 };
                 let handler = call
@@ -206,7 +206,7 @@ impl FragmentBuilder<'_> {
                     .collect()
             }
             "route" => {
-                let Some(prefix) = string_lit_arg(call.args.first()) else {
+                let Some(prefix) = route_path_lit_arg(call.args.first()) else {
                     return Vec::new();
                 };
                 let Some(ident_arg) = call.args.get(1) else {
@@ -253,6 +253,58 @@ pub(super) fn handler_name(e: &Expr) -> Option<String> {
         }
         _ => None,
     }
+}
+
+/// A route PATH or PREFIX literal — [`string_lit_arg`] with this vocabulary's `{…}` groups removed.
+///
+/// # The phantom this exists to stop, measured
+///
+/// In the Express 5 / Hono path vocabulary a `{…}` group is NOT a path parameter. It is an OPTIONAL
+/// group (Express 5: `/user/:id{/:op}`, `/:name{.:format}`, `/user{s}`, `/user{/*user}`) or a regex
+/// CONSTRAINT on the parameter before it (Hono: `/post/:date{[0-9]+}`). Core's `normalize_http_path`
+/// reads braces as Spring/JAX-RS path variables — correct for `@GetMapping("/users/{id}")` and wrong
+/// here — so it rewrote each group to a `{}` placeholder of its own.
+///
+/// Measured on `corpus/frameworks/express` (5.2.1), `examples/route-separation/index.js:41`:
+/// `app.all('/user/:id{/:op}', user.load)` keyed as **`/user/{}{}`** — two placeholders with no
+/// separator between them. No server can serve that path and no reader can grep for it, and it was
+/// every one of that tree's `mutating-route-no-auth` findings.
+///
+/// v0.20.0 (`79eb0595`) item 1 already governs this: *"route-path tri-state drops a non-literal path
+/// instead of COLLAPSING IT TO A PHANTOM empty base"*. A brace group read as a parameter is that
+/// collapse, one axis over.
+///
+/// # Why removal is the honest answer rather than a guess
+///
+/// Both meanings make the group's content ABSENT from a real request: an optional segment may be
+/// omitted, and a regex constraint narrows the parameter that already became `{}`. So the path with
+/// every group removed is a path the router genuinely serves, in every shape the corpus holds —
+/// `/user/:id{/:op}` -> `/user/{}`, `/:name{.:format}` -> `/{}`, `/search/{:query}` -> `/search`,
+/// `/user{s}` -> `/user`, `/post/:date{[0-9]+}` -> `/post/{}`.
+///
+/// What it does NOT do, said out loud: an optional group also serves the LONGER form
+/// (`/user/{}/{}`), and that form is not emitted. Under-reporting one real path is the safe direction
+/// here and the alternative is not: emitting both would fan the path axis out the way item 1 abolished
+/// for verbs, and emitting the collapsed spelling is the phantom this function removes.
+///
+/// Nesting is handled by depth rather than by a regex, so `{/:a{/:b}}` removes the whole outer group
+/// instead of stopping at the first `}`.
+pub(super) fn route_path_lit_arg(arg: Option<&ExprOrSpread>) -> Option<String> {
+    string_lit_arg(arg).map(|p| strip_optional_groups(&p))
+}
+
+fn strip_optional_groups(path: &str) -> String {
+    let mut out = String::with_capacity(path.len());
+    let mut depth = 0usize;
+    for ch in path.chars() {
+        match ch {
+            '{' => depth += 1,
+            '}' => depth = depth.saturating_sub(1),
+            _ if depth == 0 => out.push(ch),
+            _ => {}
+        }
+    }
+    out
 }
 
 pub(super) fn string_lit_arg(arg: Option<&ExprOrSpread>) -> Option<String> {

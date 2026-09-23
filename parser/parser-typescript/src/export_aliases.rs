@@ -24,13 +24,24 @@ use crate::imports::export_name;
 /// order. `export { X as default }` is included: `default` is just another public name, and emitting
 /// it keeps this fact complete rather than relying on a second mechanism.
 ///
-/// Takes an ALREADY-PARSED `Module` because its one caller, `crate::dead_export_facts`, wants three
-/// facts out of one parse. There is deliberately no `(file, source)` entrypoint beside it: the
-/// standalone `parse_local_export_aliases` shell lost its last non-test caller when that bundle
-/// landed, and a public entrypoint nobody calls is surface to keep true, not capability. (Its two
-/// siblings `parse_re_exports`/`parse_dynamic_imports` keep theirs — `project.rs`'s Common-IR build
-/// and `pipeline::fresh`'s projector table still call them by that signature.) The graceful degrade
-/// on an unparseable file therefore lives in the bundle, which owns the `parse_module` call.
+/// Takes an ALREADY-PARSED `Module` so a caller wanting several facts from one file pays for ONE
+/// parse — the same shape as its two siblings' `*_from_module` walks.
+///
+/// A `(file, source)` entrypoint came BACK on 2026-09-08 (see below). It had been deleted in the
+/// bundle's batch as "surface nobody calls", which was true then and stopped being true when the
+/// per-file lane started producing this fact: that lane already holds the module, so it wants the
+/// walk by name rather than the whole bundle it does not need (review ledger V110).
+/// This file's from-less `export { X as Y }` renames, parsed from source.
+///
+/// The graceful degrade on an unparseable file is the same one every sibling entrypoint performs:
+/// no aliases, not an error. Behind `parse_module`'s one-entry memo, so a caller that has already
+/// parsed this exact `(file, source)` pays a walk and not a parse.
+pub fn parse_export_aliases(file: &str, source: &str) -> Vec<(String, String)> {
+    let Some(module) = crate::parse::parse_module(file, source) else {
+        return Vec::new();
+    };
+    local_export_aliases_from_module(&module)
+}
 pub(crate) fn local_export_aliases_from_module(module: &Module) -> Vec<(String, String)> {
     let mut out = Vec::new();
     for item in &module.body {

@@ -4,7 +4,7 @@ use crate::{hits, scan, TempDir};
 //
 // The rule this channel exists to make expressible. `console-in-be` asks WHERE a console write is;
 // this one asks whether the parser PROVED it runs once per iteration, which is a containment question
-// no text matcher can answer — the same question `perf/api-in-loop` was rebuilt around after a field
+// no text matcher can answer — the same question `reliability/api-in-loop` was rebuilt around after a field
 // audit found its loop-token co-occurrence version 11/11 false positives.
 //
 // Two facts must both be present for a finding: a projected call site (`call_sites`, the TypeScript and

@@ -5,6 +5,7 @@ mod diagnosed;
 mod join_maps;
 mod merge_config;
 mod partition;
+mod tree_blindness;
 mod unconsumed_family;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -13,6 +14,8 @@ use std::path::PathBuf;
 use zzop_core::{Finding, SourceIo};
 
 use crate::EngineConfig;
+
+pub(crate) use tree_blindness::TreeBlindness;
 
 /// Runs the `cross-layer/*` native rules (`zzop_rules_cross_layer::cross_layer`) over `cross_layer`, returning their merged, sorted findings.
 ///
@@ -41,6 +44,7 @@ pub(crate) fn compute_cross_layer_findings(
     cross_layer: &zzop_core::CrossLayerResult,
     trees: &[(PathBuf, EngineConfig)],
     package_imports: &[zzop_rules_cross_layer::PackageImportSite],
+    blindness: TreeBlindness<'_>,
     trpc_participating_sources: &BTreeSet<String>,
     attribute_stores: &BTreeMap<String, &zzop_core::AttributeStore>,
 ) -> Vec<Finding> {
@@ -107,6 +111,9 @@ pub(crate) fn compute_cross_layer_findings(
         trpc_participating_sources,
         &extraction_blindness_caveat,
         &vocab.externally_fetched_paths,
+        &blindness_caveat::zero_contribution_sources(source_ios),
+        &zzop_rules_cross_layer::sdk_import_blind_sources(package_imports, &http_consume_totals),
+        blindness.mostly_unread_by_source,
     );
     sources.push(unconsumed_findings);
     if zzop_core::is_enabled(&gate, "cross-layer/method-mismatch") {
@@ -239,8 +246,11 @@ pub(crate) fn compute_cross_layer_findings(
         }
         let http_provide_counts: Vec<(String, usize)> =
             http_provide_counts_map.into_iter().collect();
-        let provide_blind_sources =
-            crate::framework_silence::provide_blind_sources(package_imports, &http_provide_counts);
+        let provide_blind_sources = crate::framework_silence::provide_blind_sources(
+            package_imports,
+            &http_provide_counts,
+            blindness.visible_by_source,
+        );
         sources.push(zzop_rules_cross_layer::unprovided_mutation_call_findings(
             &unprovided_filtered,
             &provide_blind_sources,

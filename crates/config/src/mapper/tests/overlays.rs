@@ -231,9 +231,10 @@ fn unknown_key_warning_fires_inside_vocabulary_and_its_nested_scope() {
 }
 
 /// `parsers` was the SECOND declared scope the unknown-key walk never descended into (wired
-/// 2026-08-14, `vocabulary` being the first). What makes it worse than an unbuilt feature: `VERSIONING.md`
-/// publishes "Unknown keys are ignored with a warning, never a hard error" as a compatibility promise, so
-/// the silence was a published promise that was already false for every key under this scope.
+/// 2026-08-14, `vocabulary` being the first). What makes it worse than an unbuilt feature:
+/// `VERSIONING.md`'s flags-and-keys row publishes the unknown-key promise, so the silence was a
+/// published promise already false for every key under this scope. (Not quoted: a copy of that
+/// sentence here is the drift this very test exists to catch, one level up.)
 ///
 /// The typo used here is the singular `globOverride` on purpose — it is both the likeliest slip and the
 /// spelling `config-surface.json` declares as a SCOPE name, which is not a config key and must warn.

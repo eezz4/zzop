@@ -1,4 +1,4 @@
-//! The per-extension CENSUS this cell judges, and the two share predicates that judge it — bucketing
+//! The per-extension CENSUS this cell judges, and the share predicate that judges it — bucketing
 //! the tree's walked files by extension, and deciding which of those buckets is a PRINCIPAL filetype.
 //!
 //! Split out of the parent on 2026-08-20 for the repo's per-file line cap; the code moved unchanged
@@ -7,6 +7,10 @@
 //! and nothing here knows what a row looks like or what the reply says about one. The parent still
 //! sums these buckets — those totals ARE the denominators it feeds back to [`is_principal`], so they
 //! belong at the call site that owns the question rather than in the pass that filled the buckets.
+//!
+//! The bucket carries no LINE tally, and that is a deletion rather than an omission: a second share
+//! test over `ir.loc`'s line counts gated this cell until 2026-09-01. The parent's module doc owns
+//! why it went and what still holds its half of the argument.
 
 use std::collections::{BTreeMap, HashSet};
 
@@ -29,12 +33,8 @@ const PRINCIPAL_SHARE_PCT: usize = zzop_facade::MIN_UNCOVERED_EXTENSION_SHARE_PC
 #[derive(Default)]
 pub(super) struct ExtCounts {
     pub(super) files: usize,
-    pub(super) lines: u64,
     pub(super) structural: usize,
     pub(super) in_dep_graph: usize,
-    /// Lines held by this extension's SINGLE largest file — the only field here that is not a tally,
-    /// and the one [`is_principal_population`] subtracts. See that function for the measurement.
-    pub(super) largest_file_lines: u64,
 }
 
 /// Lowercased tail after the last `.` of the last path segment; the whole name (lowercased) when there
@@ -93,12 +93,9 @@ pub(super) fn by_extension(ir: &Value, degraded: &HashSet<&str>) -> BTreeMap<Str
     let Some(loc) = ir.get("loc").and_then(Value::as_object) else {
         return by_ext;
     };
-    for (rel, lines) in loc {
+    for rel in loc.keys() {
         let entry = by_ext.entry(ext_of(rel)).or_default();
-        let this_file = lines.as_u64().unwrap_or(0);
         entry.files += 1;
-        entry.lines += this_file;
-        entry.largest_file_lines = entry.largest_file_lines.max(this_file);
         if !degraded.contains(rel.as_str()) && structural.contains(rel.as_str()) {
             entry.structural += 1;
         }
@@ -115,44 +112,46 @@ pub(super) fn by_extension(ir: &Value, degraded: &HashSet<&str>) -> BTreeMap<Str
 
 /// `true` when `part` is at least [`PRINCIPAL_SHARE_PCT`] of `whole`. An empty `whole` is never a
 /// principal share of anything (and never a division by zero).
+///
+/// This is now the ONLY share predicate this module has, and the parent calls it once per row rather
+/// than twice — the file-count leg for the no-parser kind, the structural-population leg for the
+/// parsed one. What is gone is a THIRD call over line counts; the parent's module doc owns why.
 pub(super) fn is_principal(part: u64, whole: u64) -> bool {
     whole > 0 && part * 100 >= whole * PRINCIPAL_SHARE_PCT as u64
 }
 
-/// The LINE leg of the principal-filetype test.
+/// The extensions the share bar held back from the parent's row list — the same predicate those rows
+/// use, minus its share leg, sorted largest first.
 ///
-/// # A largest-file exclusion was tried here on 2026-08-20 and REVERTED the same day
-/// The two-share test answers "is this a filetype the tree is MADE OF", and a share ONE file can buy
-/// single-handedly is a statement about that file rather than about a filetype. That reasoning is
-/// sound and the noise it targeted was real: `corpus/oss/be-express` `.json` is 13 files / 10,229
-/// lines of which `package-lock.json` alone is 9,898 (**96.8%**), and `be-nest` `.json` is 6 files of
-/// which the lock is **99.0%** — both pure tooling config with nothing to lose. Subtracting the
-/// single largest file removed exactly those two rows and left every other row on 19 trees standing.
+/// # Why this is disclosed rather than simply excluded
+/// The row list is a SHORTLIST and earns its bar: without it a twelve-file tree with one `.jsonc`
+/// reports a coverage gap, which is the locale noise the bar was built for and which
+/// `coverage_gaps_tests` pins against. But the bar cannot tell signal from noise — one project's 114
+/// `.xml` MyBatis mappers clear it at 15.8% and are named, while another app's mappers at 7.7%,
+/// holding every SQL statement that app has, are deleted. Same filetype, same content, opposite
+/// answer.
 ///
-/// It was reverted because the adversarial pass measured what it ALSO removes. Two trees, identical
-/// unread payload — 10 MyBatis mappers, ~2,990 XML lines of `${}`-interpolated SQL, 20 `.java` files
-/// beside them — differing only in whether the XML lines sit in one file:
-///   one 2,600-line mapper + 9 small  -> `coverageGaps.extensions: []`
-///   ten 296-line mappers            -> `[{"ext":"xml","files":10,"kind":"data-config",...}]`
-/// Same blind spot, opposite answers, and `zzop coverage`'s `unreadExtensions` still reported the
-/// concentrated tree — so the two surfaces disagreed about a whole row rather than at the margin.
-/// The defence was also one-shot: a second lock-shaped file restores the row.
+/// Both are true because they are about different channels, and only one of them was lying: `basis`
+/// exists so an empty `extensions` cannot read as a verdict, and it said what was crossed while never
+/// saying anything had been withheld. So the bar keeps picking rows and this list keeps `basis`
+/// honest. Nothing is deleted from the reply; a shortlist stays a shortlist.
 ///
-/// The deciding argument is DIRECTION, not the count. This leg ERASES a row, and it erased on an
-/// INFERENCE (line concentration implies "not a filetype the tree is made of"). A finding removed by
-/// an inference leaves no trace for the reader, which is the asymmetry this repo requires a
-/// DECLARATION for. The noise it bought back is disclosed rather than silent: every such row now
-/// carries `kind: "data-config"`, and this cell's `MEANING` states that such a row is not a verdict
-/// and that the cost depends on what the files hold. A labelled row a reader can dismiss in seconds
-/// beats an erased row they cannot see is missing.
-///
-/// Reopening it needs a signal that separates a 12-file `tsconfig` population from a 10-file MyBatis
-/// one, which line concentration provably does not. Two candidates are already measured dead: a
-/// filename axis (`*-lock.json`, `tsconfig*`) is a hand list the next ecosystem falls outside of, and
-/// "is this extension in any loaded rule's scope" deletes real rows too, since `.vue`/`.svelte` sit
-/// in bundled patterns while `.xml` sits in none — and it would make this suppression's correctness
-/// depend on an unrelated regex. What is left is reading a little of the CONTENT, which is the only
-/// candidate that asks the question the row actually poses.
-pub(super) fn is_principal_population(counts: &ExtCounts, total_lines: u64) -> bool {
-    is_principal(counts.lines, total_lines)
+/// Largest first because the actionable one is always the biggest — a reader who stops after the first
+/// name has stopped at the right one.
+pub(super) fn withheld_by_share(
+    by_ext: &BTreeMap<String, ExtCounts>,
+    total_files: u64,
+) -> Vec<(String, u64)> {
+    let mut out: Vec<(String, u64)> = by_ext
+        .iter()
+        .filter(|(ext, c)| {
+            c.in_dep_graph == 0
+                && c.structural == 0
+                && zzop_facade::extraction_can_lose_facts(ext)
+                && !is_principal(c.files as u64, total_files)
+        })
+        .map(|(ext, c)| (ext.clone(), c.files as u64))
+        .collect();
+    out.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    out
 }

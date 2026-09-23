@@ -1,0 +1,23 @@
+# Workspace crates whose NORMAL dependency closure reaches a vendored parser.
+# Regenerate: bash scripts/check-dep-closure.sh --update   (see that script's header for why
+# this is a baseline and not an allowlist, and why syn is not censused).
+ruff_python_parser zzop-cli-bin
+ruff_python_parser zzop-engine
+ruff_python_parser zzop-facade
+ruff_python_parser zzop-mcp
+ruff_python_parser zzop-parser-python-3
+ruff_python_parser zzop-summary
+swc_core zzop-cli-bin
+swc_core zzop-engine
+swc_core zzop-facade
+swc_core zzop-mcp
+swc_core zzop-parser-typescript
+swc_core zzop-summary
+tree-sitter zzop-cli-bin
+tree-sitter zzop-engine
+tree-sitter zzop-facade
+tree-sitter zzop-mcp
+tree-sitter zzop-parser-csharp
+tree-sitter zzop-parser-go
+tree-sitter zzop-parser-java-21
+tree-sitter zzop-summary

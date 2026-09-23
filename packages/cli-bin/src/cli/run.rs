@@ -14,6 +14,61 @@ use super::{print_or_exit, read_or_exit};
 /// a silently-ignored option. `--top` has no upper bound on purpose — this is a file/pipe surface like
 /// `facts`/`manifest`, not the cap-governed MCP wire — so the only rejections are "not a number" and
 /// "negative", both of which `usize` parsing already refuses.
+/// `zzop map <path>... | map --config <file> [--fold <n>]` — the module map as DATA.
+///
+/// The picture lane's twin question with no picture in it: same fold, JSON out, and an MCP tool of the
+/// same name on the other surface. `--fold` is the only knob, and it is optional here (1) rather than
+/// required as on the wire, because a terminal caller reaches for the top-level map first.
+///
+/// The NAME is the picture lane's: `graph --domain dep --fold <n>` computes the same collapse, and
+/// this repo does not carry two words for one operation. `--depth` was written first and taken back
+/// the same day — `crates/metrics`' thin-history warning legitimately names GIT's own `--depth`, and
+/// contract 16 cannot tell two tools' identical flag token apart, so declaring ours would have cost
+/// an exemption on a message that is honest. A word already in this repo's vocabulary cost nothing.
+pub fn run_map(args: &[String]) -> ! {
+    let usage = "usage: zzop map <path>... | map --config <zzop.config.jsonc> [--fold <n>]";
+    let mut rest: Vec<String> = args[..2.min(args.len())].to_vec();
+    let mut depth: Option<usize> = None;
+    let mut i = 2;
+    while i < args.len() {
+        if args[i] == "--fold" {
+            super::args::refuse_repeated_flag(depth.is_some(), "--fold", usage);
+            // A depth of zero folds every path to the empty prefix — one box holding the tree, which
+            // is not a map. Refused rather than clamped, for the reason every knob here is: a value
+            // silently corrected answers a question the caller did not ask.
+            match args.get(i + 1).and_then(|v| v.parse::<usize>().ok()) {
+                Some(n) if n >= 1 => depth = Some(n),
+                _ => {
+                    eprintln!("{usage} (--fold takes a whole number of path segments, 1 or more)");
+                    std::process::exit(2);
+                }
+            }
+            i += 2;
+            continue;
+        }
+        rest.push(args[i].clone());
+        i += 1;
+    }
+    // An unrecognized flag is a MISTAKE, not a path. Without this it reaches `parse_trees_args` as a
+    // tree root and comes back as "no such directory", which tells the caller the wrong thing about
+    // the wrong argument — `--depth 2` (the spelling this knob briefly had) is exactly the shape that
+    // would land there.
+    // `--config` is the source-mode selector and `parse_trees_args` owns it (including the "no extra
+    // paths beside it" refusal), so it is skipped here; everything else dash-shaped is refused.
+    let positional = if rest.get(2).map(String::as_str) == Some("--config") {
+        &rest[4.min(rest.len())..]
+    } else {
+        &rest[2.min(rest.len())..]
+    };
+    super::args::reject_flag_like_args(positional.iter().map(String::as_str), usage);
+    let (paths, config_path) = super::args::parse_trees_args(&rest, "map", 1);
+    print_or_exit(zzop_summary::module_map(
+        &paths,
+        config_path,
+        depth.unwrap_or(1),
+    ))
+}
+
 pub fn run_graph(args: &[String]) -> ! {
     // DERIVED, not spelled: `WIRE_NAMES` says it is the one owner of the accepted set so that a new
     // domain cannot ship with a usage line that omits it — and this line spelled the set by hand until
@@ -28,6 +83,10 @@ pub fn run_graph(args: &[String]) -> ! {
     let (mut scope, mut top, mut fold) = (None, None, None);
     let mut domain: Option<zzop_summary::GraphDomain> = None;
     let mut format = zzop_summary::GraphFormat::Mermaid;
+    // Every knob here is single-valued, and `--format` is not even an `Option` (it defaults to
+    // Mermaid), so "was this already given?" cannot be read off the slots — it is tracked. See
+    // `super::args::refuse_repeated_flag` for the measurement that made a repeated flag a refusal.
+    let mut seen: Vec<&str> = Vec::new();
     let mut i = 2;
     while i < args.len() {
         let flag = args[i].as_str();
@@ -41,6 +100,8 @@ pub fn run_graph(args: &[String]) -> ! {
                 eprintln!("{usage_graph} ({flag} needs a value)");
                 std::process::exit(2);
             };
+            super::args::refuse_repeated_flag(seen.contains(&flag), flag, usage_graph);
+            seen.push(flag);
             if flag == "--scope" {
                 scope = Some(value.clone());
             } else if flag == "--format" {
@@ -235,6 +296,7 @@ pub fn run_explain(args: &[String]) -> ! {
                     eprintln!("{USAGE} (--config needs a path)");
                     std::process::exit(2);
                 };
+                super::args::refuse_repeated_flag(config.is_some(), "--config", USAGE);
                 config = Some(path.as_str());
             }
             other => ids.push(other),

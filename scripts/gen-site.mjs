@@ -297,8 +297,23 @@ const ROOT_PAGE_FILES = ["x-showcase", "rules", "reference", "graph", "privacy",
 // from DOCUMENTS means adding a translated page cannot forget this step, because there is no step.
 const ROOT_PAGES = ROOT_PAGE_FILES.filter((p) => !TRANSLATED_ROOT_PAGES.has(p));
 const ROOT_LINK_RE = new RegExp(`href="((?:${ROOT_PAGES.join("|")})\\.html)`, "g");
+// The same climb, for the shared assets. This was missing until 2026-09-23 and the Korean edition
+// shipped with NO stylesheet and NO script from v0.34.0 onward: six pages request `assets/site.css`
+// relative to `site/ko/`, where no `assets/` exists. 404, on every one of them, reachable from every
+// English page's language switch.
+//
+// 🔴 Why nothing was red. `site-render-check` builds its subject set with a NON-RECURSIVE readdir of
+// `site/`, so `site/ko/` was never in its population at all — and its own header says 404s are not
+// failures there anyway. `check-site-generated` compares bytes against this generator, and this
+// generator faithfully produced the broken link. A guard that reproduces the bug agrees with it.
+//
+// Only the two index pages escaped, because `buildDocument()` inlines their CSS rather than linking it
+// — which is why the breakage looked like a styling quirk on some pages instead of a missing file.
+const ASSET_LINK_RE = /(href|src)="(assets\/[^"]+)"/g;
 const fixRootLinks = (html, mode) =>
-  mode === "ko" ? html.replace(ROOT_LINK_RE, 'href="../$1') : html;
+  mode === "ko"
+    ? html.replace(ROOT_LINK_RE, 'href="../$1').replace(ASSET_LINK_RE, '$1="../$2"')
+    : html;
 
 // Published origin. Only hreflang uses it: those links have to be fully qualified to be honoured,
 // while every other link on the page stays relative so site/ keeps working over file://.
@@ -723,7 +738,13 @@ function buildRedirect(stub, mode) {
     console.error(`  ${stub.file} asks for these and buildRedirect has none.\n`);
     process.exit(1);
   }
-  return html;
+  // The stubs take the SAME climb every other ko page takes. They were the two still carrying a bare
+  // `assets/site.css` after the 2026-09-23 fix, because this builder returned its html raw while every
+  // other ko page went through fixRootLinks.
+  // Safe by construction: ROOT_LINK_RE only matches href= for UNtranslated root pages, and this page's
+  // only other target is a meta-refresh to `index.html`, which from site/ko/ already means the Korean
+  // index — which is what it should mean, and is not an href at all.
+  return fixRootLinks(html, mode);
 }
 
 // ---------------------------------------------------------------------------

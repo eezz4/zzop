@@ -19,6 +19,8 @@ use crate::EngineConfig;
 
 mod artifact;
 mod csharp_index;
+mod deep_stack;
+mod degrade_cause;
 pub(crate) mod findings;
 mod fresh;
 mod go_module;
@@ -31,6 +33,7 @@ mod rust_workspace;
 #[cfg(test)]
 mod testutil;
 mod tsconfig;
+pub(crate) use deep_stack::with_parse_stack;
 mod walking;
 
 pub(crate) use csharp_index::{scan_csharp_index, CSharpIndex};
@@ -42,34 +45,11 @@ pub(crate) use java_index::{scan_java_index, JavaIndex};
 pub(crate) use package_json::package_json_entries;
 // Re-exported so the pre-split `crate::pipeline::PackageJsonScan` path keeps resolving; `assemble`'s
 // `dep_graph`/`provides`/`rules` all name it through here.
+pub(crate) use degrade_cause::DegradeCause;
+pub(crate) use fresh::{text_exceeds_recursion_caps, RecursionNeedle};
 pub(crate) use package_json::PackageJsonScan;
 pub(crate) use rust_workspace::{scan_rust_workspace, RustWorkspaceMap};
 pub(crate) use tsconfig::{tsconfig_preserves_type_imports, tsconfig_scan};
-
-/// WHY a file fell back to the lexical projection — the three, and only three, ways `FileArtifact`
-/// can be degraded. Each arm is a different LEVER for the caller, which is the whole reason the fact is
-/// carried instead of collapsed into a bool: an oversized file is a `size_cap` decision the caller can
-/// change, an unreadable one is an environment fault, and a parse failure is a bug report or an
-/// unsupported syntax level. `analyze::diagnostics::degraded_files` is the consumer that turns them
-/// back into those three sentences.
-///
-/// The set is closed by construction, not by convention: the ONLY places that build a degraded
-/// `FileArtifact` are the read-error early return in [`artifact::process_file`], the oversized branch and
-/// the parse-verdict tail of [`fresh::compute_fresh_artifact`], and [`artifact::artifact_from_ir`]'s
-/// warm-cache reconstruction — which derives the same verdict from the same predicate rather than
-/// remembering one (see its doc for why that cannot drift).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) enum DegradeCause {
-    /// `fs::read` failed — a permission error, or a race with a concurrent delete/replace. Nothing ran on
-    /// this file at all: no parse, no rule of any kind, and `loc` is 0.
-    Unreadable,
-    /// The file's byte length exceeded `EngineConfig::size_cap`, so no parser was invoked. `loc` is still
-    /// counted lexically and line-scan DSL rules still ran against the raw text.
-    Oversized,
-    /// A parser was invoked for this file's language and did not produce a usable tree (or panicked, which
-    /// every frontend here catches and treats as the same verdict). Same lexical fallback as `Oversized`.
-    ParseFailure,
-}
 
 /// One file's contribution to the tree-wide assembly (`analyze::assemble`) — plain data only.
 /// `imports` is `Some` for files this engine can place in the shared dep graph (dispatched to a
@@ -207,6 +187,15 @@ pub(crate) struct FileArtifact {
     /// value — `zzop_core::string_literals`'s no-plaintext contract, load-bearing here because this
     /// struct is what the cache serializes.
     pub string_literals: Vec<zzop_core::BoundStringLiteral>,
+    /// This file's contribution to the whole-tree call graph — call sites plus the NestJS guard
+    /// evidence that used to be gathered by the call-graph pass's own read loop. Produced here
+    /// because the parse memo is warm here and nowhere else; see
+    /// `zzop_core::callgraph::CallGraphFacts` for the measurement that moved it.
+    pub call_graph: zzop_core::callgraph::CallGraphFacts,
+    /// `unimported-export`'s two remaining per-file inputs — see `FileIrSlice`'s note for why they
+    /// are carried rather than re-read.
+    pub export_aliases: Vec<(String, String)>,
+    pub has_generated_banner: bool,
 }
 
 /// Runs the fused per-file pass over every file under `root` (skipping `config.dispatch.skip_dirs`) and
@@ -248,21 +237,27 @@ pub(crate) fn run_file_pass(
     // resolving inside the rayon body would rebuild the same lists for every file.
     let vocab = config.vocabulary.resolve();
 
-    let mut artifacts: Vec<FileArtifact> = files
-        .par_iter()
-        .map(|(rel, abs)| {
-            artifact::process_file(
-                rel,
-                abs,
-                config,
-                &vocab,
-                &enabled_packs,
-                cache,
-                ruleset_fp.as_deref(),
-                counters,
-            )
-        })
-        .collect();
+    // Every parser here is recursive-descent, so source nesting becomes stack depth and a deep
+    // enough file ABORTS the process — no JSON, no warning naming it, nothing for the other files in
+    // the tree. `deep_stack` gives the pass (workers AND the thread that joins them) room that no
+    // measured input comes near; its module doc carries the table of what used to die. Review ledger V99.
+    let mut artifacts: Vec<FileArtifact> = deep_stack::with_parse_stack(|| {
+        files
+            .par_iter()
+            .map(|(rel, abs)| {
+                artifact::process_file(
+                    rel,
+                    abs,
+                    config,
+                    &vocab,
+                    &enabled_packs,
+                    cache,
+                    ruleset_fp.as_deref(),
+                    counters,
+                )
+            })
+            .collect()
+    });
     artifacts.sort_by(|a, b| a.rel.cmp(&b.rel));
     artifacts
 }
@@ -289,6 +284,31 @@ pub(crate) fn gate_pack_rules(pack: &RulePackDef, config: &EngineConfig) -> Rule
     if let (Some(extra), _) = crate::vocabulary::extra_test_path_tail(&config.vocabulary) {
         gated.extend_test_path_exclusions(&extra);
     }
+    // The project's own secret NAMES, replacing the seven `security/hardcoded-secret` compiles in.
+    // Same seam and the same two reasons: every lane funnels through here, and the rewrite lands
+    // inside the ruleset fingerprint for free, so a changed declaration misses the warm entries
+    // written under the old one instead of being served their answers.
+    //
+    // 🔴 It runs UNCONDITIONALLY, `None` included, and that is the contract rather than an
+    // optimization: `None` means the config declared nothing, and for a replacing key that is "do not
+    // make this judgment", which the rewriter spells as a pattern nothing satisfies. Making the call
+    // conditional on a declaration would silently restore the built-ins for an author who deleted the
+    // key — the exact fallback this repo removed on 2026-07-27.
+    //
+    // A pack that carries none of it is rewritten zero times and that is correct — every pack but the
+    // bundled `security` one is in exactly that position, as is any pack an author writes.
+    //
+    // 🔴 The count is NOT checked here, and the first draft's attempt to is worth recording: it read
+    // `pack.id != "security" || rewritten == PACK_ARMS`, which treats a NAME as identity. Twenty-nine
+    // tests across three binaries build their own fixture pack, some of them called `security`, and
+    // every one of them fired the assertion — as would any user whose own pack picks that id. The
+    // subject of that check is the SHIPPED pack text, not whatever is passing through this function,
+    // so it lives where that text does: `the_pack_spells_the_owned_alternation_in_exactly_the_declared
+    // _number_of_arms` in `rules/dsl/security/secrets.rs` reads `security.json` and holds it to
+    // `secret_names::PACK_ARMS`.
+    gated.rewrite_secret_names(
+        zzop_core::dsl::secret_names::alternation_from(&config.vocabulary.secret_names).as_deref(),
+    );
     if gated.rules.len() != pack.rules.len() {
         // The clone's rules vec changed shape, so it must not share the original's POSITIONAL
         // prefilter state — see `RegexCache::fork_for_mutated_rules` (pattern memo kept, prefilter

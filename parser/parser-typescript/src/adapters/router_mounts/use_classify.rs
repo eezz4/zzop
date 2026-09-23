@@ -6,7 +6,7 @@
 use swc_core::ecma::ast::{CallExpr, Callee, Expr};
 use zzop_core::{ImportMap, RouterMountEntry};
 
-use super::build::string_lit_arg;
+use super::build::{route_path_lit_arg, string_lit_arg};
 use super::chain::unwrap_expr;
 use super::guard::{judge_guard_arg, AUTH_GUARDED_ATTR_KEY};
 use super::RouterMountVocab;
@@ -140,7 +140,7 @@ pub(super) fn classify_use_call(
         2 if string_lit_arg(call.args.first()).is_some() => {
             // Re-fetched (cheap — a short string literal) rather than threading the `Option`
             // through the match guard.
-            let prefix = string_lit_arg(call.args.first()).unwrap();
+            let prefix = route_path_lit_arg(call.args.first()).unwrap();
             let arg = &call.args[1];
             match unwrap_expr(&arg.expr) {
                 Expr::Ident(id) => {
@@ -186,7 +186,7 @@ pub(super) fn classify_use_call(
         // rateLimit())` emits exactly one `ScopedAttr` (for the judged `requireAuth()` call), not
         // zero or two.
         _ => {
-            let prefix = string_lit_arg(call.args.first()).unwrap_or_else(|| "/".to_string());
+            let prefix = route_path_lit_arg(call.args.first()).unwrap_or_else(|| "/".to_string());
             call.args
                 .iter()
                 .filter_map(|a| {

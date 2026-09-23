@@ -271,12 +271,17 @@ pub fn analyze_envelope(envelope: &NormalizedEnvelope, config: &EngineConfig) ->
         file_count,
         coverage,
         package_imports,
+        // `None` (never measured), not `Some(0)`: Mode A has no source text to scan — field doc has why.
+        visible_route_registrations: None,
         attributes: attribute_store,
         nodes,
         scores: None,
         health: None,
         recommendations: Vec::new(),
         critical: Vec::new(),
+        // Mode B runs no criticality pass at all, so nothing was capped. The empty list is what says
+        // "not computed"; a non-zero here would claim a cap that never ran.
+        critical_truncated: 0,
         seams: Vec::new(),
         folders,
         layer_co_churn: None,

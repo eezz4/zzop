@@ -5,7 +5,7 @@
 //! what [`net_gain`] prices, and a gate that priced a different sentence than the one that ships
 //! would be wrong in a way no test of either half would notice.
 
-use super::{MESSAGE_REF, RULE_MESSAGES_MEANING};
+use super::{MESSAGE_REF, RULE_MESSAGES_MEANING, RULE_MESSAGE_TEMPLATES_MEANING, TEMPLATE_PARTS};
 
 /// The sentence a folded finding carries in place of its prose. Shared by the rewrite in [`super`]
 /// AND by [`net_gain`] on purpose: the gate's arithmetic is only honest while it measures the string
@@ -77,4 +77,87 @@ pub(super) fn net_gain(n: usize, text: &str, key: &str) -> i64 {
         - n * json_bytes(&pointer_sentence(key))
         - n * (REF_FIELD_BYTES + json_bytes(key))
         - (json_bytes(key) + text + TABLE_ROW_BYTES)
+}
+
+// ---------------------------------------------------------------------------
+// THE TEMPLATE FOLD'S ARITHMETIC. Same shape, different terms: a template pays a LIST per finding
+// instead of one key, so the pretty lane's per-element newline and indent become a real term rather
+// than a rounding error. Kept here beside [`net_gain`] on purpose — two byte models for one wire,
+// living in two files, is how one of them stops describing the reply.
+// ---------------------------------------------------------------------------
+
+/// The sentence a template-folded finding carries in place of its prose. Shared by the rewrite in
+/// [`super::template`] and by [`template_net_gain`], for the reason [`pointer_sentence`] is.
+pub(super) fn template_pointer_sentence(key: &str) -> String {
+    format!(
+        "[templated] this rule's shared text is carried once in this reply at \
+         ruleMessageTemplates[\"{key}\"] beside this list — splice `templateParts` into its gaps; \
+         see ruleMessageTemplatesMeaning."
+    )
+}
+
+/// One pretty-printed array of strings: the brackets, and per element a newline, its indent, its
+/// serialized value and the comma joining it to the next. `elem_indent` and `close_indent` are
+/// zzop's own envelope depths, which is why they are arguments rather than two more literals —
+/// the same list is priced at two different depths (a finding's field, and a table row).
+///
+/// Not defined for an empty list, which cannot occur: a template has at least two parts and
+/// therefore at least one residue.
+fn array_bytes(values: &[String], elem_indent: i64, close_indent: i64) -> i64 {
+    let elems: i64 = values
+        .iter()
+        .map(|v| 1 + elem_indent + json_bytes(v) + 1)
+        .sum();
+    // '[' ... last element takes no comma ... newline, indent, ']'
+    1 + elems - 1 + 1 + close_indent + 1
+}
+
+/// What ONE added `"templateParts": [...]` field costs beyond the list itself — read from
+/// [`TEMPLATE_PARTS`] for the reason [`REF_FIELD_BYTES`] is read from [`MESSAGE_REF`].
+const TEMPLATE_FIELD_BYTES: i64 = (TEMPLATE_PARTS.len() as i64 + 2) + 2 + 1 + 1 + 8;
+
+/// Whether a middle part of `len` bytes, on a group of `n` findings, costs more than it saves.
+///
+/// Dropping it merges the residues on either side: each finding loses one array element (its
+/// newline, its ten spaces of indent and its comma) and one pair of quotes, and gains the part's own
+/// bytes; the table loses that element too. A SHAPE heuristic only — escapes are not modelled here
+/// because [`template_net_gain`] re-prices the pruned template exactly.
+pub(super) fn template_part_is_dead_weight(len: i64, n: i64) -> bool {
+    n * (len - 2 - 12) - (12 + len) < 0
+}
+
+/// Bytes this reply SAVES by folding one rule group onto `parts` — negative when the template costs
+/// more than the prose it replaces. Excludes [`template_one_time_bytes`], charged once against the
+/// sum, exactly as [`one_time_bytes`] is.
+///
+/// The `"message"` field name, its indent and its comma are on both sides and cancel; only the
+/// VALUES differ, plus the whole `templateParts` field, which is new on each folded finding.
+pub(super) fn template_net_gain(
+    key: &str,
+    parts: &[String],
+    msgs: &[&str],
+    splits: &[Vec<String>],
+) -> i64 {
+    let pointer = json_bytes(&template_pointer_sentence(key));
+    let before: i64 = msgs.iter().map(|m| json_bytes(m)).sum();
+    let per_finding: i64 = splits
+        .iter()
+        .map(|res| pointer + TEMPLATE_FIELD_BYTES + array_bytes(res, 10, 8))
+        .sum();
+    // The table row: its key, `: `, the `,`, the newline and six spaces of indent, then the list.
+    let row = json_bytes(key) + 2 + 1 + 1 + 6 + array_bytes(parts, 8, 6);
+    before - per_finding - row
+}
+
+/// The cost a reply pays ONCE the moment anything templates, however many rules do: the
+/// `"ruleMessageTemplates"` field with its braces, and the whole legend beside it. Charged against
+/// the SUM for the reason [`one_time_bytes`] is — per rule, it would conclude that nothing ever pays.
+pub(super) fn template_one_time_bytes() -> i64 {
+    // `"ruleMessageTemplates": {` — name(22) + `: `(2) + `{`(1) + `,`(1) + newline(1) + indent(4) ...
+    22 + 2 + 1 + 1 + 1 + 4
+        // ... and its `}` on its own line at the same depth.
+        + 1 + 1 + 4
+        // `"ruleMessageTemplatesMeaning": "..."` — name(29) + `: `(2) + `,`(1) + newline(1) + indent(4).
+        + 29 + 2 + 1 + 1 + 4
+        + json_bytes(RULE_MESSAGE_TEMPLATES_MEANING)
 }

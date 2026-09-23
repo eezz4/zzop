@@ -2,7 +2,7 @@
 //! declaration-level SQLAlchemy eager loader strategy (`lazy="joined"/"subquery"/"selectin"/"immediate"`,
 //! the legacy `lazy=False`, and the SQLModel `sa_relationship_kwargs` string-key spelling). Uses its own
 //! `sqla_scan` helper (mirrors `perf.rs::scan`'s harness shape) since the shared `scan` helper filters to
-//! `perf/api-in-loop` only.
+//! `reliability/api-in-loop` only.
 //!
 //! This is the FIRST line-scan rule in the shipped packs whose `file_pattern` targets `.py` (the two
 //! existing `.py`-scoped rules in `http` are io-scan), so several tests below seal not just the rule but

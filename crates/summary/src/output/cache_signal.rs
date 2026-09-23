@@ -27,7 +27,7 @@
 /// stronger thing, because the alternative is a reader who cannot audit the answer they were given. (The digest itself was silently self-refuting until 2026-08-20:
 /// it was taken over `serde_json` output, whose object key order follows a `HashMap`'s per-instance
 /// seed, so ~40 entries per run failed their own check and the cache never went warm.)
-const MEANING: &str = "`hitFiles` of `fileCount` files were served whole from the cache: their findings \
+pub(crate) const MEANING: &str = "`hitFiles` of `fileCount` files were served whole from the cache: their findings \
      in this reply were REPLAYED from the cache directory, not recomputed from the file as it is now. \
      Reuse is decided by fingerprints over the file's content, the ruleset, the declared vocabulary and \
      the engine version, and every accidental-staleness path they cover was measured as correctly \
@@ -37,6 +37,26 @@ const MEANING: &str = "`hitFiles` of `fileCount` files were served whole from th
      detects corruption rather than proving authorship, and an edit that recomputed the digest too would \
      pass unnoticed. If a zero here has to be trusted, recompute the whole tree — delete the cache \
      directory, or set `cacheDir` to null — and compare. `missFiles` were computed by this run.";
+
+/// The NUMBERS alone, for a lane that ships the prose once at the reply root.
+///
+/// The single-tree reply carries one `cache` object, so its meaning ships inside it — a consumer
+/// who reads the numbers cannot fail to have read what they prove. A cross reply carries N of them,
+/// and repeating a 1,045-byte run-invariant string N times is the shape that lane already refuses:
+/// `bucketMeaning`, `nativeAnalysesMeaning` and `packsLoadedMeaning` all sit at the root, once,
+/// beside the per-source arrays they describe (review ledger V146). This is the same split, so the
+/// two lanes disagree about WHERE the sentence lives and never about what it says.
+pub(crate) fn shape_cache_numbers(output_view: &serde_json::Value) -> Option<serde_json::Value> {
+    let cache = output_view.get("cache")?;
+    Some(serde_json::json!({
+        "hitFiles": cache.get("hits")?.as_u64()?,
+        "missFiles": cache.get("misses").and_then(serde_json::Value::as_u64)?,
+        // Repeated inside the object even though the row already carries it, for the reason the
+        // single-tree lane repeats it: `22 / 22` and `22 / 4000` are different claims, and the
+        // ratio should not need assembling. Twenty bytes buys one key with ONE shape in both lanes.
+        "fileCount": output_view.get("fileCount").cloned().unwrap_or(serde_json::Value::Null),
+    }))
+}
 
 /// Shapes the facade output's `cache` field into the reply's `cache` object, or `None` when this run
 /// used no cache at all.

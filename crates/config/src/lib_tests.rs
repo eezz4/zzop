@@ -598,6 +598,10 @@ fn config_paths_are_derived_from_config_keys() {
             // replacement granularity stays the LEAF, exactly as `packs.` and `git.` already work.
             "featureSlicedDesign" => Some("vocabulary.featureSlicedDesign."),
             "parsers" => Some("parsers."),
+            // Structural-score POLICY, a sibling roof to `parsers` rather than a `vocabulary` key —
+            // what it holds is a decision about which files a score may count, not a name the project
+            // picked. Leaf replacement, like every other scope here.
+            "scores" => Some("scores."),
             // `globOverride` looks like dead vocabulary from the unknown-key walk's side and is not:
             // that walk deliberately stops at `parsers.` (a misspelled entry key fails the LOAD, see
             // `mapper/warnings.rs`), so THIS derivation is the scope's only consumer. Deleting the
@@ -608,6 +612,16 @@ fn config_paths_are_derived_from_config_keys() {
             "report" => Some("report."),
             "tree" => Some("trees[]."),
             "mount" => Some("trees[].topology.mounts[]."),
+            // The two git pattern tables' ELEMENT scopes. Added 2026-09-14 (review ledger V236): the
+            // parent keys were listed and their element fields were not, so `git.commitTypePatterns[]`
+            // `.pattern`/`.tag` and `git.commitSubjectPatterns[]` `.pattern`/`.label` — spellings an
+            // author writes and the facade's git request reads — were absent from the surface.
+            // 🔴 This derivation could not have caught it: it walks the scopes that EXIST, so a table
+            // with no scope at all is outside its population. It fails loudly on an UNKNOWN scope and
+            // is blind to a MISSING one, which is the asymmetry that let these four sit unlisted. The
+            // guard that closes it is `every_array_of_objects_request_field_…` below.
+            "commitTypePattern" => Some("git.commitTypePatterns[]."),
+            "commitSubjectPattern" => Some("git.commitSubjectPatterns[]."),
             "topology" => Some("trees[].topology."),
             "route" => Some("trees[].routes[]."),
             _ => return None,
@@ -708,5 +722,126 @@ fn the_repo_ignore_rules_hide_the_derived_zzop_dir_and_keep_the_authored_one_tra
     assert!(
         ignored("packages/api/.zzop/cache/ir/entry.bin"),
         "the derived .zzop/ must be ignored in every sub-tree — a per-path run creates one per base"
+    );
+}
+/// Every request field typed as an ARRAY OF OBJECTS must have its element fields on the surface.
+///
+/// 🔴 This exists because its sibling `config_paths_are_derived_from_config_keys` structurally cannot
+/// catch the case it was written for. That test walks the scopes that EXIST in `configKeys` and checks
+/// their dotted spellings — so it fails loudly on an UNKNOWN scope and is BLIND to a MISSING one.
+/// Measured 2026-09-14 (external review round 21, ledger V236): `git.commitTypePatterns[].pattern` /
+/// `.tag` and `git.commitSubjectPatterns[].pattern` / `.label` are read by the facade's git request and
+/// were absent from the surface, while every sibling array key (`parsers.globOverrides[]`,
+/// `trees[].topology.mounts[]`, `trees[].routes[]`) listed its element fields. Convention, not
+/// exemption — and nothing checked the convention.
+///
+/// ⚠ THE POPULATION IS THE RUST TYPES, not the starter template, and this test's first draft got that
+/// wrong: it walked the template for a filled `[{...}]` example and found NONE, because the template
+/// ships `git: {}` and `globOverrides: []` — those shapes live in its COMMENTS. Its own non-vacuity
+/// assertion caught that, which is the only reason it is not still passing vacuously.
+#[test]
+fn every_array_of_objects_request_field_has_its_element_fields_on_the_surface() {
+    use std::collections::BTreeSet;
+
+    // (request file, the Rust field, the dotted prefix an author writes)
+    const SUBJECTS: &[(&str, &str, &str)] = &[
+        (
+            "git.rs",
+            "commit_type_patterns",
+            "git.commitTypePatterns[].",
+        ),
+        (
+            "git.rs",
+            "commit_subject_patterns",
+            "git.commitSubjectPatterns[].",
+        ),
+        ("parsers.rs", "glob_overrides", "parsers.globOverrides[]."),
+    ];
+
+    let surface: serde_json::Value = serde_json::from_str(CONFIG_SURFACE_JSON).unwrap();
+    let paths: BTreeSet<&str> = surface["configPaths"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+
+    let mut missing: Vec<String> = Vec::new();
+    let mut checked = 0usize;
+    for (file, field, prefix) in SUBJECTS {
+        let path = format!(
+            "{}/../facade/src/request/{file}",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let src = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+
+        // The element TYPE, read off the field's own declaration, so a renamed struct cannot leave
+        // this test checking a type nobody uses.
+        let decl = format!("pub {field}: ");
+        let after = src
+            .split(&decl)
+            .nth(1)
+            .unwrap_or_else(|| panic!("{file} no longer declares that field — update SUBJECTS"));
+        let elem: String = after
+            .split("Vec<")
+            .nth(1)
+            .unwrap_or_default()
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect();
+        assert!(
+            elem.ends_with("Request"),
+            "{file}'s element type read as {elem:?}, which is not a request struct — the extraction \
+             is broken, not the source"
+        );
+
+        // That struct's serde names, camelCased the way `rename_all` does it.
+        let body = src
+            .split(&format!("pub struct {elem} {{"))
+            .nth(1)
+            .unwrap_or_else(|| panic!("{file} declares no such struct — update SUBJECTS"))
+            .split("\n}")
+            .next()
+            .unwrap_or_default()
+            .to_string();
+        for line in body.lines() {
+            let Some(rest) = line.trim().strip_prefix("pub ") else {
+                continue;
+            };
+            let Some(name) = rest.split(':').next().map(str::trim) else {
+                continue;
+            };
+            let mut camel = String::new();
+            let mut up = false;
+            for c in name.chars() {
+                if c == '_' {
+                    up = true;
+                } else if up {
+                    camel.push(c.to_ascii_uppercase());
+                    up = false;
+                } else {
+                    camel.push(c);
+                }
+            }
+            if camel.is_empty() {
+                continue;
+            }
+            checked += 1;
+            let dotted = format!("{prefix}{camel}");
+            if !paths.contains(dotted.as_str()) {
+                missing.push(dotted);
+            }
+        }
+    }
+
+    assert!(
+        checked >= 6,
+        "expected at least two fields from each subject, read {checked} — the struct extraction is \
+         broken, not the surface"
+    );
+    assert!(
+        missing.is_empty(),
+        "these element spellings are what an author writes into a config array, and no surface \
+         declares them: {missing:?}"
     );
 }

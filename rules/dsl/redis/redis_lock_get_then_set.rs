@@ -1,4 +1,7 @@
-use super::{assert_disqualifier_summary_precedes_imperative, hits, scan, TempDir};
+use super::{
+    assert_disqualifier_clause_precedes_imperative,
+    assert_disqualifier_summary_precedes_imperative, hits, scan, TempDir,
+};
 
 // --- lock-get-then-set ---
 
@@ -237,5 +240,82 @@ fn a_value_computed_one_line_earlier_is_out_of_the_vetos_reach_and_carries_the_c
         "THIS KEY IS A COUNTER AND NOT A LOCK",
         "acquire the lock atomically instead with `SET key value NX`",
         "`NX` IS THE WRONG FIX",
+    );
+}
+
+// --- leg 3 on the COUNTER arm: the two-call prescription now states its own cost (2026-09-11) ---
+//
+// rule-quality.md 27 leg 3 asks whether a message states the COST of the edit it prescribes. On the
+// counter arm this rule said "Increment it atomically instead — `INCR`/`INCRBY`/`HINCRBY` ... and keep
+// the window with a separate `EXPIRE` on the same key", which is the next STEP of the edit and not its
+// cost. `MULTI`, Lua and `EX`/`PX` were all present in the message and all of them sat inside the
+// "WHEN THE KEY REALLY IS A MUTEX" arm — measured 2026-09-11, the two-call sentence at byte 1938 and
+// that arm's heading at byte 3406 — so a reader on the counter arm never reached them.
+//
+// The batch that declined to make this rule a second carrier recorded "the sibling already warns", and
+// the sibling does: `redis/counter-get-set` spells the interrupted-window failure out. But the sibling
+// is SILENT on the population this arm exists for. Its trigger requires the arithmetic to sit inside
+// the `.set(` call's own parentheses, so a value computed on an earlier line
+// (`const next = parseInt(count) + 1`) reaches this rule alone —
+// `a_value_computed_one_line_earlier_is_out_of_the_vetos_reach_and_carries_the_clause` above pins
+// exactly that, asserting the sibling reports NOTHING there. For that reader this message is the only
+// warning, and until now it prescribed two calls without saying what happens between them.
+
+/// Same fixture population as the pin above (the sibling is silent; this rule is the only warning), and
+/// it asserts the COST rather than the next step — a TTL of `-1`, what that does to a lockout window,
+/// and the two guarded spellings that close the gap.
+///
+/// INVALIDATION: delete the `THAT IS TWO ROUND TRIPS` sentence from the message and this goes red while
+/// every other pin in this file stays green — run it before believing the green.
+#[test]
+fn the_counter_arm_states_the_cost_of_its_own_two_call_prescription() {
+    let dir = TempDir::new("zzop-redis");
+    dir.write(
+        "src/autoLockCost.ts",
+        "import { redis } from \"./redis\";\nexport async function bumpCost(identifier: string) {\n  const lockKey = `autolock:${identifier}.count`;\n  const count = await redis.get(lockKey);\n  const next = parseInt(String(count), 10) + 1;\n  await redis.set(lockKey, String(next));\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "lock-get-then-set");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert!(
+        hits(&out, "counter-get-set").is_empty(),
+        "the sibling must still be silent here — the whole point of this pin is that this message is \
+         the reader's only warning on this shape. {:?}",
+        out.findings
+    );
+    let m = &h[0].message;
+
+    for needle in [
+        // the cost, named as a cost
+        "THAT IS TWO ROUND TRIPS AND THE GAP BETWEEN THEM IS THE COST OF THIS EDIT",
+        // the concrete end state, which is what the reader has to be able to recognise
+        "a TTL of `-1`",
+        // the consequence in the product, not in Redis
+        "stays locked until somebody deletes the key by hand",
+        // and the two guarded spellings, so following the caveat ends GREEN rather than stuck
+        "issue the `EXPIRE` only when `INCR` RETURNS 1",
+        "a `MULTI` transaction or a one-line Lua script",
+    ] {
+        assert!(
+            m.contains(needle),
+            "lock-get-then-set's counter arm lost the cost of its own prescription — missing \
+             {needle:?}. A reader who follows `INCR` + a separate `EXPIRE` and is interrupted between \
+             them leaves a lockout counter with no expiry, and the locked account never unlocks. \
+             In: {m}"
+        );
+    }
+
+    // POSITION, through the shared helper so the subject is readable off the source: the cost has to
+    // sit with the prescription it belongs to, which means AHEAD of the mutex arm's own imperative.
+    // Every alternative spelling down there is for a different key, and a reader on the counter arm
+    // stops before that heading — which is the whole defect this pin was written for.
+    //
+    // INVALIDATION PROBE: move the cost sentence behind `acquire the lock atomically instead` with
+    // every token above still present — all the `contains` assertions stay green and this goes red.
+    assert_disqualifier_clause_precedes_imperative(
+        "lock-get-then-set",
+        m,
+        "THAT IS TWO ROUND TRIPS AND THE GAP BETWEEN THEM IS THE COST OF THIS EDIT",
+        "acquire the lock atomically instead with `SET key value NX`",
     );
 }

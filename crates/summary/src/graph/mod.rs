@@ -89,7 +89,7 @@ pub fn graph_mermaid(
     domain: GraphDomain,
     fold: Option<usize>,
 ) -> Result<String, String> {
-    let v = analyze(paths, config_path)?;
+    let v = analyze("graph", paths, config_path)?;
     // Each domain owns its own default cap — see `GraphDomain::default_top`, which is also what the
     // help text reads, so the number a caller is told is the number they get.
     let top = top.unwrap_or(domain.default_top());
@@ -108,14 +108,101 @@ pub fn graph_mermaid(
 
 /// The analysis half, shared by every format so a second serialization cannot become a second answer:
 /// both lanes read the SAME `analyzeTrees` output through the same three source modes.
-fn analyze(paths: &[String], config_path: Option<&str>) -> Result<serde_json::Value, String> {
+/// `operation` names the CALLER, never this helper — it is interpolated into every refusal
+/// `zzop_config::trees` builds, and those sentences reach whichever host asked. Hardcoding it here
+/// shipped `module_map` (an MCP tool) telling its reader to "run graph", a CLI-only lane that
+/// binary does not carry: the third round of this class in this repo. A lane with one host may pass
+/// its own name; a lane with two must pass a surface-neutral phrase.
+fn analyze(
+    operation: &str,
+    paths: &[String],
+    config_path: Option<&str>,
+) -> Result<serde_json::Value, String> {
     let (path, rest) = match paths {
         [one] => (Some(one.as_str()), &paths[..0]),
         many => (None, many),
     };
-    let loaded = zzop_config::trees::resolve_trees_request("graph", path, rest, config_path)?;
+    let loaded = zzop_config::trees::resolve_trees_request(operation, path, rest, config_path)?;
     let out = zzop_facade::analyze_trees_json(&loaded.request.to_string())?;
     serde_json::from_str::<serde_json::Value>(&out).map_err(|e| e.to_string())
+}
+
+/// ONE folded box, as data. No prose and no format: the `module_map` lane shapes and names these, and
+/// it has to live OUTSIDE this module tree — every `.rs` under a `_cliOnlyLanes` lane is subtracted
+/// from the guard that keeps CLI vocabulary off the MCP wire, and the map IS on that wire.
+pub(crate) struct ModuleBox {
+    pub(crate) id: String,
+    pub(crate) files: usize,
+    /// `(lines, how many of the box's files that sum covers)`. `None` when this run measured none of
+    /// them — not `0`, which would spell "this module is empty" in the same bytes.
+    pub(crate) loc: Option<(u32, usize)>,
+    pub(crate) in_cycle: bool,
+}
+
+/// The whole folded import graph plus the census of what folding it cost.
+pub(crate) struct ModuleFold {
+    pub(crate) modules: Vec<ModuleBox>,
+    /// `(from, to, how many file-level imports collapsed into this module edge)`.
+    pub(crate) edges: Vec<(String, String, usize)>,
+    pub(crate) files: usize,
+    pub(crate) file_edges: usize,
+    pub(crate) unfoldable: usize,
+    pub(crate) file_cycles: usize,
+}
+
+/// The import graph of `paths`/`config_path`, collapsed to `depth` leading path segments.
+///
+/// Reuses the picture lane's own `dep::collect` + fold, for the same reason the two picture formats
+/// share it: a second walk of the same output is a second answer about one repo. Nothing is capped and
+/// nothing is scoped — those knobs belong to a DRAWN picture, and this returns the whole graph.
+pub(crate) fn module_fold(
+    paths: &[String],
+    config_path: Option<&str>,
+    depth: usize,
+) -> Result<ModuleFold, String> {
+    let v = analyze("the module map", paths, config_path)?;
+    let dep::DepUniverse {
+        nodes: all_nodes,
+        edges: all_edges,
+        cycle_files,
+        cycles,
+        ..
+    } = dep::collect(&v);
+    let in_scope: std::collections::BTreeMap<&String, &dep::DepNode> = all_nodes.iter().collect();
+    let folded = dep::collapse(
+        fold::Fold::of(Some(depth)),
+        &in_scope,
+        &all_edges,
+        &cycle_files,
+    );
+
+    let modules = folded
+        .nodes
+        .keys()
+        .map(|id| {
+            let c = folded.census.get(id);
+            ModuleBox {
+                id: id.clone(),
+                files: c.map_or(0, |c| c.files),
+                loc: c.filter(|c| c.loc_files > 0).map(|c| (c.loc, c.loc_files)),
+                in_cycle: folded.in_cycle.contains(id),
+            }
+        })
+        .collect();
+    let edges = folded
+        .edges
+        .iter()
+        .map(|((from, to), n)| (from.clone(), to.clone(), *n))
+        .collect();
+
+    Ok(ModuleFold {
+        modules,
+        edges,
+        files: in_scope.len(),
+        file_edges: folded.file_edges,
+        unfoldable: folded.unfoldable,
+        file_cycles: cycles,
+    })
 }
 
 /// A cosmograph table plus the census the CLI prints on stderr. Two fields rather than one string
@@ -145,7 +232,7 @@ pub fn graph_cosmograph(
     scope: Option<&str>,
     links: bool,
 ) -> Result<CosmographOutput, String> {
-    let v = analyze(paths, config_path)?;
+    let v = analyze("graph", paths, config_path)?;
     let universe = dep::collect(&v);
     let (data, census) = if links {
         cosmograph::links_ndjson(&universe, scope)

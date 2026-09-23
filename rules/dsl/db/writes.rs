@@ -737,3 +737,120 @@ fn unawaited_write_message_puts_the_array_transaction_condition_before_the_await
         "still fires, which is the safe direction",
     );
 }
+
+// --- the DEFERRED SPREAD: the shape that survived the veto, and the whole live population (2026-09-11) ---
+//
+// The 2026-08-21 blind audit recorded 18 findings on cal.com in three shapes — `$transaction([` 13,
+// `Promise.all([` 4, `arr.push(` 1 — and said the third could not be reached by any enclosing-call
+// veto. The upward veto has since landed and taken the first two: re-measured 2026-09-11 against
+// cal.com at its pinned commit, `zzop analyze --rule db/unawaited-write` reports **1** finding in the
+// whole tree, and it is the third shape —
+// `packages/features/bookings/lib/handleSeats/reschedule/owner/combineTwoSeatedBookings.ts:62`,
+// `moveAttendeeCalls.push(prisma.attendee.update({...}))` spread into
+// `await prisma.$transaction([...moveAttendeeCalls, ...])` 22 lines below.
+//
+// So the disclosure is no longer one residual among three. It is what the rule says on every finding
+// it currently produces in the measured corpus, and the remedy printed above it BREAKS that code: the
+// element runs immediately and outside the transaction. R7 below pins that the shape still fires;
+// these two pin that the reader is told, at the imperative, to look DOWN rather than only up.
+
+/// The measured cal.com shape at full distance — the push and the spread 20+ lines apart, with the
+/// array built in a loop, so the finding is not an artifact of a three-line fixture.
+///
+/// INVALIDATION: this is the FIRING direction, so the probe is the opposite one — give
+/// `enclosing_call_exclude_pattern` a downward twin that matches `$transaction(` anywhere in the body
+/// and this goes to 0 findings. That is precisely the veto the rule declines to build (it would waive
+/// every fire-and-forget write in any function that happens to run a transaction later), which is why
+/// the shape is DISCLOSED instead.
+#[test]
+fn a_builder_pushed_in_a_loop_and_spread_twenty_lines_later_still_fires() {
+    let dir = TempDir::new("zzop-db");
+    dir.write(
+        "src/combine.ts",
+        r#"declare const prisma: any;
+declare const attendees: { id: string }[];
+export async function combine(targetId: string) {
+  const moveAttendeeCalls = [];
+  for (const attendeeToMove of attendees) {
+    moveAttendeeCalls.push(
+      prisma.attendee.update({
+        where: {
+          id: attendeeToMove.id,
+        },
+        data: {
+          bookingId: targetId,
+          f1: targetId,
+          f2: targetId,
+          f3: targetId,
+          f4: targetId,
+          f5: targetId,
+          f6: targetId,
+          f7: targetId,
+          f8: targetId,
+        },
+      })
+    );
+  }
+  await prisma.$transaction([
+    ...moveAttendeeCalls,
+  ]);
+}
+"#,
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "unawaited-write");
+    assert_eq!(
+        h.len(),
+        1,
+        "the deferred-spread element must still fire — it is the population this rule's disclosure \
+         is written for: {:?}",
+        out.findings
+    );
+    assert_eq!(h[0].line, 7, "{:?}", out.findings);
+}
+
+/// POSITION pin (rule-quality.md 27): the condition on the imperative has to reach FORWARD, because
+/// the shape it disqualifies sits BELOW the reported line and the veto only walks up. A reader looking
+/// at `ops.push(prisma.x.update(...))` sees no array transaction anywhere near the call, satisfies
+/// "IF THE CALL IS NOT AN ELEMENT OF AN ARRAY TRANSACTION" in good faith, awaits it, and takes the
+/// write out of the transaction — which is the exact failure the clause two sentences later describes.
+#[test]
+fn the_unawaited_write_condition_reaches_forward_to_the_deferred_spread_before_the_imperative() {
+    let dir = TempDir::new("zzop-db");
+    dir.write(
+        "src/audit.ts",
+        "declare const prisma: any;\nexport async function recordAuditForward(actorId: string) {\n  prisma.audit.create({ data: { actorId } });\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "unawaited-write");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    let m = &h[0].message;
+
+    for needle in [
+        // the condition itself has to say "later", not only "here"
+        "INCLUDING ONE IT ONLY REACHES FURTHER DOWN THE FUNCTION",
+        // the mechanism, so the reader knows why the tool cannot see it
+        "the transaction is not an enclosing call of this line at all",
+        // the measurement that makes this the main case rather than a footnote
+        "ONE finding in the whole tree and that finding is this shape",
+        // and the actionable instruction that replaces the veto
+        "search the REST of the function",
+    ] {
+        assert!(
+            m.contains(needle),
+            "unawaited-write lost its deferred-spread disclosure — missing {needle:?}. That shape is \
+             this rule's only measured corpus population, and the remedy above it breaks the code \
+             there. In: {m}"
+        );
+    }
+
+    // INVALIDATION PROBE: move the forward-reaching half of the condition behind the verb with every
+    // token above still present — every contains assertion stays green and this call goes red.
+    assert_disqualifier_summary_precedes_imperative(
+        "unawaited-write",
+        m,
+        "INCLUDING ONE IT ONLY REACHES FURTHER DOWN THE FUNCTION",
+        "await the call (or return it",
+        "the transaction is not an enclosing call of this line at all",
+    );
+}

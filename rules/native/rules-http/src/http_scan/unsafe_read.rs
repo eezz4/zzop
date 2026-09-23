@@ -1,8 +1,7 @@
 //! `scan_unsafe_read_endpoint` — see the parent `http_scan` module doc for the shared BFS design.
 
-use std::collections::HashMap;
-
-use zzop_core::callgraph::{bfs_reachable, SymbolGraph};
+use super::landing::SAFE_METHOD_MOVE_LANDING;
+use zzop_core::callgraph::{bfs_reachable_in, Adjacency, SymbolGraph};
 use zzop_core::{
     disable_hint, ApiEndpoint, Finding, NonIdempotentKind, Severity, SourceSymbol, WriteSite,
 };
@@ -17,9 +16,13 @@ pub struct ScanUnsafeReadEndpointInput<'a> {
     pub api_endpoints: &'a [ApiEndpoint],
     pub symbols: &'a [SourceSymbol],
     pub symbol_graph: &'a SymbolGraph,
-    /// rel path -> full source text, for the `idempotent-ok` whitelist lookback only (write-site
-    /// detection reads `symbol.write_sites`, precomputed at parse time — see the module doc).
-    pub files: &'a HashMap<String, String>,
+    /// Reads ONE file's full text by rel path, on demand, for the `idempotent-ok` whitelist
+    /// lookback only (write-site detection reads `symbol.write_sites`, precomputed at parse time).
+    ///
+    /// A reader rather than a map of the whole tree, and that is a measurement: see
+    /// [`super::scan_marker_window`] for what the map cost. `None` means "could not read", which
+    /// suppresses nothing — a file that cannot be read cannot be shown to carry a marker.
+    pub read_file: &'a dyn Fn(&str) -> Option<String>,
 }
 
 /// The first (lowest-position) write site in `sym.write_sites` that counts as "any write" for this rule —
@@ -57,17 +60,22 @@ pub fn scan_unsafe_read_endpoint(input: &ScanUnsafeReadEndpointInput) -> Vec<Fin
             .cloned()
     };
 
+    // ONE adjacency index for the whole loop. Building it inside `bfs_reachable` — which is where it
+    // used to live — made this rule and its sibling **91% of a 22.9s run on a 3,000-route tree while
+    // reporting nothing**, because the index is O(edges) and the loop is O(routes). See `Adjacency`
+    // (review ledger V112).
+    let adjacency = Adjacency::build(input.symbol_graph);
     let mut out = Vec::new();
     for e in reads {
         let Some(handler_symbol) = resolve_handler(&e.handler, &name_index) else {
             continue; // unresolved handler — do not guess
         };
-        if is_whitelisted(&handler_symbol, input.symbols, input.files) {
+        if is_whitelisted(&handler_symbol, input.symbols, input.read_file) {
             continue;
         }
-        let Some((write_id, depth)) = bfs_reachable(input.symbol_graph, &handler_symbol, |id| {
-            site_at(id).is_some()
-        }) else {
+        let Some((write_id, depth)) =
+            bfs_reachable_in(&adjacency, &handler_symbol, |id| site_at(id).is_some())
+        else {
             continue;
         };
         let site = site_at(&write_id).expect("predicate true implies a site exists");
@@ -84,11 +92,12 @@ pub fn scan_unsafe_read_endpoint(input: &ScanUnsafeReadEndpointInput) -> Vec<Fin
         // stay the same string (both are `hint` below).
         let hint = with_ok_marker_near_miss(
             format!(
-            "{where_} — GET/HEAD must be safe & idempotent. Move the write behind a mutating method \
-             (POST/PUT/PATCH/DELETE), or make this endpoint genuinely read-only. If the write is \
-             deliberate and safe to repeat (e.g. a fire-and-forget audit log), mark it with \
-             `// idempotent-ok: <reason>` on the {}, or disable {} if this applies \
-             more broadly. {sightline}",
+            "{where_} — GET/HEAD must be safe & idempotent. If the write is deliberate and safe to \
+             repeat (e.g. a fire-and-forget audit log), this is a false positive here: mark it with \
+             `// idempotent-ok: <reason>` on the {} and nothing else has to change. \
+             {SAFE_METHOD_MOVE_LANDING} IF IT IS NOT: move the write behind a mutating method \
+             (POST/PUT/PATCH/DELETE), or make this endpoint genuinely read-only. Or disable {} if this \
+             applies more broadly. {sightline}",
                 super::marker_window_phrase(),
             // `disable_hint` always starts with "Disable " — this site already supplies "disable"
             // mid-sentence (after "or"), so only the "via config ..." remainder is spliced in, same
@@ -100,7 +109,7 @@ pub fn scan_unsafe_read_endpoint(input: &ScanUnsafeReadEndpointInput) -> Vec<Fin
             ),
             &handler_symbol,
             input.symbols,
-            input.files,
+            input.read_file,
         );
         out.push(Finding {
             rule_id: "unsafe-read-endpoint".to_string(),
@@ -119,7 +128,14 @@ pub fn scan_unsafe_read_endpoint(input: &ScanUnsafeReadEndpointInput) -> Vec<Fin
                 "writeLine": site.line,
                 "sink": site.sink,
                 "depth": depth,
-                "hint": hint,
+                // 🔴 NO `hint` KEY HERE, and its absence is the repair. This rule used to emit
+                // `"hint": hint` beside `message: hint.clone()` — the SAME string twice in one finding.
+                // Harmless while both were inline; expensive once the prose fold landed, because the fold
+                // shrinks `message` to a pointer and `data.hint` kept shipping the full text per finding,
+                // cancelling the saving exactly. 📏 Measured 2026-09-13 (ledger V231) on
+                // `analyze corpus/frameworks/fastapi --limit 1000`: `data.hint` was 624,774 of the reply's
+                // 1,167,742 bytes (60%), and 117 of 117 hints were byte-identical to their own finding's
+                // message. The text is not lost — it is in `message`, which is the field that carries it.
             })),
         });
     }

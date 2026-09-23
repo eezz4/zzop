@@ -5,11 +5,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 mod feature_sliced_design;
+mod population;
 
 pub use feature_sliced_design::{
     FeatureSlicedDesignConfig, FeatureSlicedDesignMatcher, DEFAULT_FSD_BASE_DIRS,
     DEFAULT_FSD_ENTRY, DEFAULT_FSD_SHARED, DEFAULT_FSD_SLICE_CONTAINERS,
 };
+pub use population::PopulationFilter;
 use serde::{Deserialize, Serialize};
 
 /// Fallback LOC limit for a role with no `loc_limits` entry — the cap `fileSizeCompliance` scores
@@ -186,6 +188,9 @@ pub struct ScoresConfig {
     pub hierarchy_shared_dirs: BTreeSet<String>,
     /// FSD directory-convention matcher, held here instead of as global state.
     pub feature_sliced_design: FeatureSlicedDesignMatcher,
+    /// WHICH FILES THE SCORES COUNT — the scored population, see [`PopulationFilter`]. Default
+    /// excludes nothing, which is the population every score counted before this field existed.
+    pub population: PopulationFilter,
 }
 
 /// Cross-cutting directory names exempt from layering violations when a project declares none — the
@@ -213,6 +218,7 @@ impl Default for ScoresConfig {
                 .map(|s| (*s).to_string())
                 .collect(),
             feature_sliced_design: FeatureSlicedDesignMatcher::default(),
+            population: PopulationFilter::keep_everything(),
         }
     }
 }

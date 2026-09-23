@@ -1,16 +1,22 @@
 //! The CAUSE axis of the degraded-file census: files this engine read and then could not project
-//! structure from, split by the three reasons that can happen — because the three are three different
-//! LEVERS, and a reader holding only a count cannot pull any of them.
+//! structure from, split by CAUSE — because the causes are different LEVERS, and a reader holding only
+//! a count cannot pull any of them.
 
 use crate::analyze::assemble::DegradedFile;
-use crate::pipeline::DegradeCause;
+use crate::pipeline::{DegradeCause, RecursionNeedle};
 use crate::EngineConfig;
 
 /// Capability self-report: files this run produced no structural projection for, counted per CAUSE,
 /// with the lever each cause hands the caller.
 ///
+/// 🔴 This doc said "the three causes" while there were four, and the message named two needles while
+/// the gate had three (review ledger V139). Neither number is written down any more: the reading
+/// order is the enum's, the clause is [`phrase`], and the bound inside a recursion clause comes from
+/// the [`RecursionNeedle`] the gate actually returned. A count in prose beside a growing set is the
+/// defect this file exists to prevent, and it was committing it about itself.
+///
 /// The summary sentence deliberately does NOT say "fell back to a lexical projection", true as that is
-/// for two of the three arms: an unreadable file got no projection of any kind, not a lesser one, and a
+/// for the quiet arms: an unreadable file got no projection of any kind, not a lesser one, and a
 /// lead sentence that generalizes the two quiet causes over the loud one is the same overclaim the
 /// per-cause paragraph below exists to prevent.
 ///
@@ -19,7 +25,7 @@ use crate::EngineConfig;
 /// and it produced little or nothing. The fact was already published twice, and neither channel could
 /// say why: `AnalyzeOutput::degraded` is a sorted PATH LIST (capped at 50 with a `degradedTruncated`
 /// disclosure by the summary layer) and `coverage.degraded` is its uncapped COUNT. Both answer WHICH and
-/// HOW MANY; the three causes were collapsed into one boolean before either could see them, so an
+/// HOW MANY; the causes were collapsed into one boolean before either could see them, so an
 /// oversized file (a `sizeCap` decision the caller can change), an unreadable one (an environment fault)
 /// and a parse failure (a bug report, or a syntax level this frontend does not accept) arrived
 /// indistinguishable. `unparsed_extension_warning` owns the ADJACENT and orthogonal fact — a
@@ -31,7 +37,7 @@ use crate::EngineConfig;
 /// owns files the caller excluded on purpose.
 ///
 /// ## What it may claim, and what it must not
-/// "Skipped" would be a lie for two of the three causes. An oversized or parse-failed file still runs
+/// "Skipped" would be a lie for most of the causes. An oversized or parse-failed file still runs
 /// every `line-scan` DSL rule against its raw text and still contributes a lexically counted `loc`; what
 /// it loses is the STRUCTURAL projection, and with it the matchers that read one (`symbol-scan`,
 /// `method-scan`, `call-scan`, `literal-scan`, `io-scan`) plus its outgoing dep-graph edges. Only
@@ -52,8 +58,8 @@ use crate::EngineConfig;
 /// * no degraded file survived the filter above — including a run whose only degrades were undispatched
 ///   oversized data files, which is silence on purpose, not a missed report.
 /// * envelope mode (`analyze_envelope`). Its `degraded` list is copied from what an external producer
-///   DECLARED about files this engine never read, so none of the three causes here is knowable there and
-///   none of the three levers would be actionable. That lane does not run `assemble` at all, so the
+///   DECLARED about files this engine never read, so no cause here is knowable there and
+///   no lever here would be actionable. That lane does not run `assemble` at all, so the
 ///   exclusion is structural rather than a filter anyone has to maintain.
 ///
 /// ONE aggregate entry with a per-cause example list, never one line per file
@@ -66,6 +72,39 @@ use crate::EngineConfig;
 ///
 /// Deterministic: the input arrives in `rel` order (`assemble` sorts it before the sweep) and this
 /// function only partitions and truncates it.
+/// The clause naming one cause, derived from the cause rather than written beside it.
+fn phrase(cause: DegradeCause) -> String {
+    match cause {
+        DegradeCause::Unreadable => {
+            "unreadable (permission error, or deleted/replaced during the run)".to_string()
+        }
+        DegradeCause::Oversized => "over the size cap, so no parser was invoked".to_string(),
+        DegradeCause::PastRecursionCap(needle) => format!(
+            "past a parser-recursion cap -- {} -- so no parser was invoked (a refusal this engine \
+             makes, not a parser that failed)",
+            bound(needle)
+        ),
+        DegradeCause::ParseFailure => {
+            "dispatched to a native parser that failed to parse them".to_string()
+        }
+    }
+}
+
+/// The bound a recursion refusal actually hit. Each needle names ITS OWN number, because the reader's
+/// next move is to go and measure the thing this sentence points at — and the old sentence pointed at
+/// brackets for a file that had none, which sends them to disprove a claim nobody made about it.
+fn bound(needle: RecursionNeedle) -> String {
+    match needle {
+        RecursionNeedle::Brackets { cap } => format!("more than {cap} nested brackets"),
+        RecursionNeedle::OperatorRun { cap } => {
+            format!("a chain of more than {cap} binary operators")
+        }
+        RecursionNeedle::StatementTokens { cap } => {
+            format!("one statement of more than {cap} significant tokens (the cap is per-language)")
+        }
+    }
+}
+
 pub(in crate::analyze) fn degraded_files_warning(
     degraded: &[DegradedFile],
     config: &EngineConfig,
@@ -78,23 +117,17 @@ pub(in crate::analyze) fn degraded_files_warning(
         return None;
     }
     let cap = super::SAMPLE;
-    // Cause order is the message's reading order, and it is fixed rather than count-sorted: a self-report
-    // whose sentence order moves with the data is one a reader cannot diff between two runs.
+    // Cause order is the message's reading order, and it is now the ENUM's order rather than a list
+    // written out beside it. 🔴 That list named three causes when there were four and two needles when
+    // there were three, so a file refused for statement length was told it had more than 256 nested
+    // brackets -- it had none (review ledger V139). A `BTreeSet` over the causes actually present
+    // cannot fall behind the enum: a new variant either has a `phrase` arm or does not compile.
     let mut clauses: Vec<String> = Vec::new();
-    for (cause, phrase) in [
-        (
-            DegradeCause::Oversized,
-            "over the size cap, so no parser was invoked",
-        ),
-        (
-            DegradeCause::ParseFailure,
-            "dispatched to a native parser that failed to parse them",
-        ),
-        (
-            DegradeCause::Unreadable,
-            "unreadable (permission error, or deleted/replaced during the run)",
-        ),
-    ] {
+    let present: std::collections::BTreeSet<DegradeCause> =
+        subjects.iter().map(|d| d.cause).collect();
+    for cause in present {
+        let phrase = phrase(cause);
+        let phrase = phrase.as_str();
         let hits: Vec<&str> = subjects
             .iter()
             .filter(|d| d.cause == cause)
@@ -126,7 +159,12 @@ pub(in crate::analyze) fn degraded_files_warning(
          clean, plus its outgoing dep-graph edges. An UNREADABLE file lost all of that AND the raw text: \
          no rule of any kind ran on it and its line total is 0. The lever differs too. Oversized is your \
          decision and you can change it: `sizeCap` (zzop.config.jsonc; embedders: the facade request's \
-         `sizeCap`), currently {size_cap} bytes. Unreadable is the environment, not the tree -- check \
+         `sizeCap`), currently {size_cap} bytes. A RECURSION refusal has no config lever on purpose: the \
+         bound exists because past it a frontend exhausts its stack and takes the whole \
+         run down, so making it raisable would sell you a setting whose only effect is to lose every \
+         other file too. Every bound here sits well above the deepest real code measured for it, so a \
+         file here is generated or bundled output -- analyze the source it was built from. Unreadable \
+         is the environment, not the tree -- check \
          permissions, or a file the walk listed and something removed mid-run. A parse failure is \
          either a syntax level this frontend does not accept or a bug worth reporting with the path; \
          re-running will not change it. Files with no native parser for their extension are a DIFFERENT \

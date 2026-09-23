@@ -168,4 +168,26 @@ pub struct HealthIndex {
     /// while unmeasured ones are kept, because "this axis was dark" is the fact the old zero-filter
     /// destroyed.
     pub contributors: Vec<HealthContributor>,
+    /// WHICH FILES `pain` WAS COMPUTED OVER — `true` when this run's config asked for test files to
+    /// leave the scored population (`scores.excludeTestFilesFromFileMetrics`).
+    ///
+    /// It rides ON the index rather than beside it because `pain` is a SYNTHESIZED NUMBER and a
+    /// synthesized number ships with the statement of what it measures. Without this flag two `pain`
+    /// values are not comparable and nothing on the wire says so: measured on the fixed
+    /// `corpus/frameworks/express` checkout, the same bytes score `30.0` with the key off and `11.5`
+    /// with it on. Reproduce: add `"scores": {"excludeTestFilesFromFileMetrics": true}` to a
+    /// copy of that tree's `zzop.config.jsonc` beside the tree, and diff
+    /// `zzop analyze --config <copy> --limit 0`.
+    /// A reader diffing two runs would read that as the code improving.
+    ///
+    /// **It is a statement about the FILE-KEYED contributors only.** Ten of the fourteen metrics in
+    /// [`HEALTH_METRIC_WEIGHTS`] take the per-file subject gate and are narrowed by it; the four keyed
+    /// on a directory rollup (`sdp`, `mainSequence`, `modularity`, `cohesion`) still score the whole
+    /// tree either way. `crate::scores::compute` owns why. So `true` means "narrowed", never "no test
+    /// file influenced any number here", and `architecture.painMeaning` says so in those words.
+    ///
+    /// `#[serde(default)]` so a `HealthIndex` deserialized from output written before this field
+    /// existed reads as `false` — which is what those runs did.
+    #[serde(default)]
+    pub test_files_excluded: bool,
 }

@@ -17,7 +17,7 @@
 //!   does not carry. The envelope-native way to express "this route is guarded by metadata the graph
 //!   can't see" is the generic attribute channel (`attributes` with key `auth-guarded`), which this
 //!   pass passes through (`route_attr_store`) exactly like the native rule wiring does.
-//! - **No `file_texts`** — the two scanners' `// idempotent-ok:` marker lookback reads source lines,
+//! - **No source text** — the two scanners' `// idempotent-ok:` marker lookback reads source lines,
 //!   which an envelope does not carry, so the suppression window is honestly inert here (an envelope
 //!   producer has no comment to write; disclosure-only degrade, never a lost finding).
 //! - **No `cache-lane-file-read`** — that rule is not a consumer of this channel: its trigger is a
@@ -132,10 +132,15 @@ pub(super) fn run_envelope_callgraph(
         })
         .collect();
 
-    // No source text in an envelope -> empty text map; the `idempotent-ok` lookback is honestly
-    // inert (module doc). Write-site evidence itself is NOT text-dependent — it rides
-    // `SourceSymbol::write_sites`, which a producer may populate on the wire.
-    let file_texts: HashMap<String, String> = HashMap::new();
+    // No source text in an envelope, so the reader always answers "cannot read" and the
+    // `idempotent-ok` lookback is honestly inert (module doc). Write-site evidence itself is NOT
+    // text-dependent — it rides `SourceSymbol::write_sites`, which a producer may populate on the wire.
+    //
+    // A reader that always declines, rather than an empty map: the rule asks "give me this file" and
+    // this mode answers "there is no such thing here", which is the same verdict said in the mode's
+    // own terms. The native sibling pass moved to a reader to stop holding the whole tree in memory
+    // (see its `read_file`); this side inherits the shape for free.
+    let read_file = |_rel: &str| -> Option<String> { None };
     if run_unsafe_read {
         let t0 = profile.then(Instant::now);
         let found = zzop_rules_http::scan_unsafe_read_endpoint(
@@ -143,7 +148,7 @@ pub(super) fn run_envelope_callgraph(
                 api_endpoints: &api_endpoints,
                 symbols: all_symbols,
                 symbol_graph: &symbol_graph,
-                files: &file_texts,
+                read_file: &read_file,
             },
         );
         record_native_timing(rule_time, t0, "unsafe-read-endpoint", found.len());
@@ -156,7 +161,7 @@ pub(super) fn run_envelope_callgraph(
                 api_endpoints: &api_endpoints,
                 symbols: all_symbols,
                 symbol_graph: &symbol_graph,
-                files: &file_texts,
+                read_file: &read_file,
             },
         );
         record_native_timing(rule_time, t0, "non-idempotent-write", found.len());

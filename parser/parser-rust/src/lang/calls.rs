@@ -103,12 +103,20 @@ pub(super) struct Level {
     declared: HashSet<String>,
     /// Inline `mod` names this level's own item list declares.
     inline_mods: HashSet<String>,
+    /// FILE `mod` names this level declares (`mod x;`, no body here).
+    ///
+    /// Kept apart from [`Self::inline_mods`] because the two have opposite callee resolutions and only
+    /// one thing in common: **neither is a type**. An inline mod's items live in THIS file, so
+    /// `q::f()` resolves to a qualified same-file name; a file mod's items live in another file, so the
+    /// honest output is the bare leaf with NO receiver — see [`Self::is_module_qualifier`].
+    file_mods: HashSet<String>,
 }
 
 impl Level {
     fn of(items: &[Item], path: &[String]) -> Self {
         let mut declared = HashSet::new();
         let mut inline_mods = HashSet::new();
+        let mut file_mods = HashSet::new();
         for item in items {
             let ident = match item {
                 Item::Fn(f) => Some(f.sig.ident.to_string()),
@@ -123,6 +131,12 @@ impl Level {
                     inline_mods.insert(m.ident.to_string());
                     None
                 }
+                // `mod x;` — a module whose items are in another file. Not `declared` (nothing here
+                // carries that name) and not a type, which is the whole reason it is tracked.
+                Item::Mod(m) => {
+                    file_mods.insert(m.ident.to_string());
+                    None
+                }
                 _ => None,
             };
             if let Some(ident) = ident {
@@ -133,6 +147,7 @@ impl Level {
             path: path.to_vec(),
             declared,
             inline_mods,
+            file_mods,
         }
     }
 
@@ -143,6 +158,24 @@ impl Level {
         } else {
             name.to_string()
         }
+    }
+
+    /// Whether `qualifier` names a MODULE declared at this level — inline or file.
+    ///
+    /// 🔴 The file-mod half was missing until 2026-09-06 (review ledger V29), and its absence produced a
+    /// FALSE fact rather than a missing one. A call written `super::io_projection::project_file_io(..)`
+    /// came out as `callee_name: "project_file_io", receiver_type: Some("io_projection")` — a module
+    /// presented to the resolver as a TYPE. The resolver then looked for
+    /// `<file>#io_projection.project_file_io`, which cannot exist, and dropped the edge.
+    ///
+    /// This module's own doc already stated the rule ("a module is not a type, so `receiver_type` must
+    /// be dropped"); the code just knew only one kind of module. Dropping the receiver here does not by
+    /// itself create the edge — the callee still lives in another file that this call does not import,
+    /// and resolving it needs a Rust module-path-to-file mapping this extractor does not have. What it
+    /// does is stop asserting something untrue, which is this module's stated direction: "a MISS, never
+    /// a wrong edge". The name also survives into `unresolved_callees`, where a rule can still read it.
+    pub(super) fn is_module_qualifier(&self, qualifier: &str) -> bool {
+        self.inline_mods.contains(qualifier) || self.file_mods.contains(qualifier)
     }
 
     /// `q::f()` written at this level, when `q` is an inline `mod` declared here — `Some` carries the

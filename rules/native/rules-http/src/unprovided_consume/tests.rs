@@ -1,5 +1,5 @@
 //! Unit tests for `unprovided_consume_findings`'s join + veto logic in isolation (e2e coverage —
-//! real FE/BE fixtures — lives in `crates/engine/tests/analyze_io_natives.rs`).
+//! real FE/BE fixtures — lives in `crates/engine/tests/integration/analyze_io_natives.rs`).
 use super::*;
 
 fn provide(key: &str, file: &str, line: u32) -> zzop_core::IoProvide {
@@ -1104,6 +1104,33 @@ fn a_call_served_by_an_ant_catch_all_is_not_unprovided_but_its_controls_still_ar
     );
 }
 
+/// The VERB-UNKNOWN partition, single-tree half — the sibling of the wildcard test above and asked
+/// through the same shared predicate the multi-tree linker uses (`zzop_core::unknown_verb_route_path`),
+/// so the two lanes cannot answer differently. Until 2026-09-06 they DID: the linker dropped a consume
+/// whose path a `"? /path"` route serves and this lane reported it, so five cal.com findings told the
+/// reader to declare a route the tool had already extracted from that same repo.
+///
+/// The second consume is the control. Without it this test would pass on a rule that vetoed every
+/// consume once any verb-unknown route existed, which is the over-broad repair of the same bug.
+#[test]
+fn a_call_to_a_path_this_tree_serves_under_an_unknown_method_is_not_unprovided() {
+    let provides = vec![
+        provide("? /api/get-users", "pages/api/get-users.ts", 1),
+        provide("GET /api/other", "pages/api/other.ts", 1),
+    ];
+    let consumes = vec![
+        consume("http", Some("GET /api/get-users"), "app.tsx", 3),
+        consume("http", Some("POST /api/nowhere"), "app.tsx", 4),
+    ];
+    let found = unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN));
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(
+        found[0].message.contains("POST /api/nowhere"),
+        "{}",
+        found[0].message
+    );
+}
+
 /// A tree whose ONLY http provide is a wildcard route still passes the zero-provides veto (it does
 /// provide something) — and every call it does not serve still fires. Guards the lazy fix of treating a
 /// wildcard-only tree as provide-less, which would silence the whole rule for that tree.
@@ -1121,4 +1148,84 @@ fn a_wildcard_only_tree_still_reports_the_calls_its_pattern_does_not_cover() {
         "{}",
         found[0].message
     );
+}
+
+/// The two legs make OPPOSITE claims about the same evidence, and before 2026-09-05 an individual
+/// finding never said which side it was on — in prose OR in `data`. This pins both dialects at once,
+/// over ONE population split by nothing but the first path segment, so the assertions cannot be
+/// satisfied by a message that merely mentions the fold in general.
+///
+/// The foreign leg is deliberately kept BELOW `MIN_FOREIGN_UNPROVIDED_GROUP`: at or above it the
+/// aggregate replaces these findings and states the partial-provider reading outright. The silence
+/// this covers existed only underneath that threshold, which is exactly where nobody was looking.
+#[test]
+fn an_individual_finding_says_which_path_space_it_is_on_in_both_dialects() {
+    let provides = vec![provide("GET /settle/a", "settle.ts", 1)];
+    let consumes = vec![
+        // First segment `settle` IS provided here -> overlapping.
+        consume("http", Some("GET /settle/missing"), "client.ts", 10),
+        // First segment `orders` is not -> foreign, and two is under the fold threshold.
+        consume("http", Some("GET /orders/1"), "client.ts", 11),
+        consume("http", Some("GET /orders/2"), "client.ts", 12),
+    ];
+    let found = unprovided_consume_findings(&provides, &consumes, &[], Some(API_SEGMENT_PATTERN));
+    assert_eq!(
+        found.len(),
+        3,
+        "all three must speak individually, or this test is measuring the aggregate instead: {found:?}"
+    );
+
+    let by_key = |k: &str| {
+        found
+            .iter()
+            .find(|f| f.data.as_ref().unwrap()["key"] == k)
+            .unwrap_or_else(|| panic!("no finding for {k}"))
+    };
+
+    let overlapping = by_key("GET /settle/missing");
+    assert_eq!(
+        overlapping.data.as_ref().unwrap()["pathSpace"],
+        "overlapping",
+        "the machine dialect must carry the classification the engine already computed"
+    );
+    assert!(
+        overlapping
+            .message
+            .contains("IS one of the families this source serves itself"),
+        "the reader dialect must say a local provider is the expected reading: {}",
+        overlapping.message
+    );
+
+    for key in ["GET /orders/1", "GET /orders/2"] {
+        let foreign = by_key(key);
+        assert_eq!(
+            foreign.data.as_ref().unwrap()["pathSpace"],
+            "foreign",
+            "{key}: a foreign consume below the fold threshold is still foreign, and publishing that \
+             is the whole point"
+        );
+        assert!(
+            foreign
+                .message
+                .contains("is NOT one of the families this source serves"),
+            "{key}: the reader must be told this key sits outside the served space: {}",
+            foreign.message
+        );
+        assert!(
+            foreign
+                .message
+                .contains("the provider may simply be outside this analysis"),
+            "{key}: naming the space without naming the CAUSE it implies leaves the reader with the \
+             same three defect causes they had before: {}",
+            foreign.message
+        );
+        assert!(
+            foreign
+                .message
+                .contains(&MIN_FOREIGN_UNPROVIDED_GROUP.to_string()),
+            "{key}: the threshold must be interpolated, never spelled — a hand-written number here \
+             would be a second owner of a value this module already exports: {}",
+            foreign.message
+        );
+    }
 }

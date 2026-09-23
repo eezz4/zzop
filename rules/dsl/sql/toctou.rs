@@ -253,3 +253,64 @@ fn the_toctou_remedy_questions_the_column_pair_before_it_prescribes_the_constrai
         ],
     );
 }
+
+// --- the RECEIVER this trigger never reads (2026-09-11) ---
+//
+// This rule's write arm is the widest of the three in the family: `\b(?:create|upsert|insert)\s*\(`
+// requires no receiver at all, so a free `create(row)` is read as a database write. The measured
+// receiver census lives on `db/find-then-create-no-unique` (cal.com, 38 findings, 2026-09-11) and that
+// rule's message owns it; this pack declines the same single receiver — the literal `this.<verb>(` —
+// and discloses the rest rather than guessing at a vendor list.
+
+/// The veto, with anti-vacuity: a real store write in the same controller still fires, so the silence
+/// at the this-receiver line is a decline and not a dead rule.
+///
+/// INVALIDATION: delete `trigger_call_exclude_pattern` from `race-condition-toctou` and this reports 2
+/// findings with the first at line 6.
+#[test]
+fn a_write_on_the_enclosing_classes_own_this_receiver_is_declined_here_too() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "api/subHandlers.ts",
+        "declare const subStore: any;\nexport class SubController {\n  async viaOwnMethod() {\n    const existing = await subStore.findOne((s: any) => s.id === \"x\");\n    if (!existing) {\n      await this.create({ id: \"y\" });\n    }\n  }\n  async viaStore() {\n    const existing = await subStore.findOne((s: any) => s.id === \"x\");\n    if (!existing) {\n      await subStore.create({ id: \"y\" });\n    }\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "race-condition-toctou");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_eq!(
+        h[0].line, 12,
+        "the anchor must be the store write, not the this-receiver call at line 6: {:?}",
+        out.findings
+    );
+}
+
+/// POSITION pin (rule-quality.md 27) for the half that stays disclosed: the bare-word write arm is
+/// named ahead of the unique-constraint remedy, and it points at the sibling that carries the census.
+#[test]
+fn the_toctou_message_says_the_write_arm_needs_no_receiver_before_it_prescribes_the_constraint() {
+    let dir = TempDir::new("zzop-sql");
+    dir.write(
+        "api/ensureHandlers.ts",
+        "declare const store: any;\nexport async function ensureRow(id: string) {\n  const existing = await store.findOne((s: any) => s.id === id);\n  if (!existing) {\n    await store.create({ id });\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    let h = hits(&out, "race-condition-toctou");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    let m = &h[0].message;
+    for needle in [
+        "THIS TRIGGER NEVER READS IT",
+        "does not even require one to exist",
+        "db/find-then-create-no-unique",
+    ] {
+        assert!(
+            m.contains(needle),
+            "race-condition-toctou lost its receiver clause — missing {needle:?}. In: {m}"
+        );
+    }
+    assert_clauses_precede_imperative(
+        "race-condition-toctou",
+        m,
+        "Where the pair IS unique, add a unique constraint",
+        &["FIRST CHECK THE RECEIVER", "no row and no table"],
+    );
+}

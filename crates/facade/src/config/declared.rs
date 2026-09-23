@@ -71,6 +71,34 @@ pub(crate) fn apply_declared(
         }
     }
 
+    // Structural-score policy. A BOOL, not a list, so the whole-replacement rule above has nothing to
+    // say about it: absent means `false` means "count every file", which is the population every score
+    // has always used. The engine turns the `true` into a `zzop_metrics::PopulationFilter` at compute
+    // time, because that is the layer that can also read this tree's `vocabulary.extraTestPathPatterns`.
+    config.scores_exclude_test_files = req.scores.exclude_test_files_from_file_metrics;
+    // The retired spelling is REPORTED, never honored. Serde drops an unknown field without a word, so
+    // a config upgraded across this rename would otherwise change its own `pain` with nothing said —
+    // which is a worse failure than the naming gap the rename repairs (review ledger V182).
+    //
+    // This is the SECOND of the two moved-key outcomes `VERSIONING.md`s config-keys row names —
+    // reported at exit 0 rather than refused at exit 1 — and which one a key gets follows what its
+    // stale value would silently do: mis-key the cross-tree join (refuse) or move a score (report).
+    // That row stated only the refusing half until 2026-09-23, so the two halves of one release said
+    // opposite things about the same key class. If a future rename lands here, say which outcome it
+    // takes and why, in BOTH places.
+    if req.scores.exclude_test_files_from_population.is_some() {
+        warnings.push(
+            "scores.excludeTestFilesFromPopulation was RENAMED to \
+             scores.excludeTestFilesFromFileMetrics and this run IGNORED it — the structural scores \
+             counted every file, including tests. The old name claimed more than the key ever did: it \
+             narrows the metrics whose subject is a FILE, while the four keyed on a directory rollup \
+             (cohesion, sdp, mainSequence, modularity) and the criticalTop/topRecommendation rankings \
+             always counted the whole tree and still do. Rename the key to restore the behaviour you \
+             had."
+                .to_string(),
+        );
+    }
+
     config.io.router_names = req.vocabulary.router_names.clone();
     config.scores_config.hierarchy_shared_dirs = req
         .vocabulary

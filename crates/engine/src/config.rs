@@ -26,6 +26,39 @@ pub enum PackSource {
 }
 
 impl PackSource {
+    /// What each wire token MEANS, one sentence per token, as `(token, meaning)`.
+    ///
+    /// # Why the meanings live beside the tokens (2026-09-14, review ledger V214)
+    ///
+    /// A reply that prints `source: "inline"` and nothing else makes the reader look the word up, and
+    /// the place they look is a document this project is free to change: field VALUES sit outside
+    /// `VERSIONING.md`'s freeze. The lane one step over already solved that — `zzop_facade`'s io
+    /// `verdict` ships `verdictMeaning` FOR THE TOKEN IT RETURNED — so a value explains itself and no
+    /// list has to be memorized.
+    ///
+    /// Returned as a TABLE rather than per-row, unlike `topRecommendation.idMeaning`, and the shape
+    /// follows the arithmetic: a reply carries one top recommendation but many pack rows, so a
+    /// per-row sentence would ship the same two strings once per pack. The table rides in
+    /// `packsLoadedMeaning`, which is already in the same reply.
+    ///
+    /// Exhaustive by construction: adding a variant without a sentence fails to compile here.
+    pub fn wire_meanings() -> [(&'static str, &'static str); 2] {
+        [
+            (
+                Self::Dir.as_str(),
+                "this pack was read from a directory on disk — a `packsDir`, or the `zzop/rules/` \
+                 convention. Its bytes are the file's, so editing that file changes the next run.",
+            ),
+            (
+                Self::Inline.as_str(),
+                "this pack came in already parsed, as data rather than a path — the packs compiled \
+                 into this binary arrive this way, and so does a pack an embedder handed over \
+                 directly. There is no file on disk for this row, so nothing on disk can be edited \
+                 to change it.",
+            ),
+        ]
+    }
+
     /// The wire string `AnalyzeOutput::packs_loaded` serializes: `"dir"` | `"inline"`.
     pub fn as_str(self) -> &'static str {
         match self {
@@ -62,6 +95,19 @@ pub struct EngineConfig {
     /// Override for `zzop_metrics::compute_scores`'s threshold/vocabulary config. Only consulted when
     /// `git` is `Some` and collection succeeds.
     pub scores_config: ScoresConfig,
+    /// Drop test files from the population every structural score is computed over — the engine-side
+    /// landing of the `scores.excludeTestFilesFromFileMetrics` config key.
+    ///
+    /// `false` (the default) is the population every score has always counted, so a build that never
+    /// sets this is byte-identical to one from before the field existed. `true` builds a
+    /// `zzop_metrics::PopulationFilter` from the shared test-path vocabulary PLUS this run's own
+    /// `vocabulary.extraTestPathPatterns`, and hands it to the score computation — see
+    /// `analyze::assemble::metrics` for where the two are joined, and `PopulationFilter` for what
+    /// leaving the population does and does not change.
+    ///
+    /// A SCORING axis only: rule evaluation never reads this, so no finding appears or disappears
+    /// because of it.
+    pub scores_exclude_test_files: bool,
     /// When `Some`, `analyze_tree` opens (creating if absent) a `zzop_cache::AnalysisCache` at this path
     /// and drives the fused per-file pass through it: a file whose content hash + parser fingerprint +
     /// ruleset fingerprint already has a cached IR *and* findings entry skips parsing and rule
@@ -152,6 +198,7 @@ impl Default for EngineConfig {
             io: IoOptions::default(),
             git: None,
             scores_config: ScoresConfig::default(),
+            scores_exclude_test_files: false,
             cache_dir: None,
             profile_rules: false,
             adapter_overlays: Vec::new(),

@@ -9,6 +9,7 @@
 use zzop_core::io::TaggedConsume;
 use zzop_core::{disable_hint, Finding, Severity};
 
+use super::landing::VENDOR_CONTRACT_LANDING;
 use super::split_external_key;
 
 /// Query parameter names (already lowercased) that commonly carry a secret/credential value. This is the
@@ -84,8 +85,10 @@ pub fn external_secret_in_url_findings(
             "external call `{} {}{}` (source `{}`) puts secret-shaped query parameter(s) `{params_list}` on \
              the URL. Query strings are captured by proxy/CDN/access logs and leak through the `Referer` \
              header and browser history — that's true whether the value is a literal secret or an \
-             interpolated `{{}}` one, so both cases are flagged here. Move `{params_list}` to a request header \
-             (e.g. `Authorization`) or the request body instead of a URL query parameter. {} if this \
+             interpolated `{{}}` one, so both cases are flagged here. A name like `key` can also just be a \
+             non-secret lookup id — read the value before you treat this as a leak. \
+             {VENDOR_CONTRACT_LANDING} IF THE VENDOR ACCEPTS IT ELSEWHERE: move `{params_list}` to a \
+             request header (e.g. `Authorization`) or the request body instead of a URL query parameter. {} if this \
              parameter name is a false positive for this integration (e.g. a non-secret lookup id that just \
              happens to share a name like `key`).",
             url.method, url.host, url.path, c.source,

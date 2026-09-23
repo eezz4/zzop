@@ -1,6 +1,39 @@
-use crate::{hits, label_of, scan, TempDir};
+use crate::{
+    assert_landing_precedes_imperative, hits, label_of, sanitizer_subtraction_landing, scan,
+    TempDir,
+};
 
 // --- template-unescaped-output ---
+
+/// §33/§37 LANDING pin. Found by re-counting the class rather than by the batch brief, and it belongs:
+/// this rule's own message calls `browser/unsafe-html-sink` its sibling — "the server-side
+/// template-engine half that produces the HTML in the first place" — so leaving it out would be a
+/// landing family with a member the pins do not follow, which is the exact silent case
+/// `rules/dsl/message_order_verdicts.rs` was split to catch.
+///
+/// THE RULE ALREADY PROVED THE MECHANISM ON ITS OTHER HALF. Its `include` exclusion argues, at length,
+/// that the escaped form "prints that markup as visible text" and that this is why EJS's own docs use
+/// the raw form for partials. That is the landing's second half exactly — stated about `include`, and
+/// never about the value the reader is being told to escape. The remedy's first arm switches
+/// `<%- bio %>` to `<%= bio %>`, and where `bio` is stored rich text the page then shows its tags.
+///
+/// A `.hbs` fixture rather than the `.ejs` one directly above it: the constant has to be reachable
+/// from any of this rule's three delivered spellings, and pinning the arm that is NOT the one the
+/// message argues about keeps the claim from resting on the `include` paragraph.
+#[test]
+fn template_unescaped_output_landing_precedes_the_imperative() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write("views/item.hbs", "<div>\n{{{ rawHtml }}}\n</div>\n");
+    let out = scan(&dir);
+    let h = hits(&out, "template-unescaped-output");
+    assert_eq!(h.len(), 1, "{:?}", out.findings);
+    assert_landing_precedes_imperative(
+        "template-unescaped-output",
+        &h[0].message,
+        sanitizer_subtraction_landing(),
+        "Use the escaped output form instead",
+    );
+}
 
 #[test]
 fn ejs_raw_output_tag_is_flagged() {

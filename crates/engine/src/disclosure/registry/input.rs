@@ -48,6 +48,9 @@ pub(super) const ROWS: &[BlindnessClass] = &[
         // absent. The sentence was nonetheless wrong in the way a hand-written enumeration goes wrong —
         // it named one seventh of what ships. That direction matters: it UNDERSTATES the disclosure
         // rather than overstating it, which is why the status survived an audit the prose did not.
+        //
+        // FIRING PIN: crates/engine/tests/integration/analyze_rule_config.rs::unknown_severity_override_id_surfaces_a_self_report_warning
+        // FIRING PIN: crates/engine/tests/integration/analyze_rule_config.rs::a_real_severity_override_id_does_not_trigger_the_unknown_id_warning
         status: DisclosureStatus::Asserted,
     },
 ];

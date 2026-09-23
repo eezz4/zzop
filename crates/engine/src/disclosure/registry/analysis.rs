@@ -35,8 +35,8 @@ pub(super) const ROWS: &[BlindnessClass] = &[
                   extension axis: http routes with no response-shape evidence (outside the one built-in \
                   Nest capture, or an unreadable annotation) get a per-tree warning counting them \
                   against the tree's http total. For the rules with a compiled-in sightline \
-                  declaration, the CLI-only `zzop coverage` lane lists exactly this (it has no MCP tool twin; an \
-                  MCP host reads the same declarations out of this document): its `trees[].blindSpots` crosses \
+                  declaration, the visibility lane lists exactly this — `zzop coverage` on the CLI, the \
+                  `check_coverage` tool on MCP: its `trees[].blindSpots` crosses \
                   each declaration with the tree's structural extension mix and names, per tree, which \
                   declared rules lack their evidence channel there. A FOURTH signal is the same class one \
                   layer down, gated by a PATH rather than by a missing fact: a DSL rule runs only on files \
@@ -91,6 +91,8 @@ pub(super) const ROWS: &[BlindnessClass] = &[
         // from the same computation that produced the number, so there is no case where a score ships
         // without it. The residual named above is a different question (is the population big enough to
         // generalize from), which this class deliberately does not claim to answer.
+        //
+        // FIRING PIN: crates/metrics/src/scores/meanings/tests.rs::every_score_field_the_disclosure_prose_names_is_that_scores_population
         status: DisclosureStatus::Asserted,
     },
     BlindnessClass {
@@ -106,14 +108,27 @@ pub(super) const ROWS: &[BlindnessClass] = &[
                   NATIVE analyses (`nativeAnalyses`), which got their own channel on 2026-08-28 after \
                   having none at all — it counts every registered analysis and splits the ones that could \
                   not have produced a `findings.byRule` key by CAUSE, since the remedies differ (off by id \
-                  this run, versus reporting into the cross-layer channel a per-tree reply does not \
-                  carry). \"A present output field means the capability ran\" was written for the first \
+                  this run; shipped off by this build and not turned on, which is the same non-evaluation \
+                  under someone else's choice; or reporting into the cross-layer channel a per-tree reply \
+                  does not carry). \"A present output field means the capability ran\" was written for the first \
                   two and does not carry to the third: the native roster is present unconditionally, and \
-                  what it asserts is which analyses could NOT have contributed — an id in neither list \
+                  what it asserts is which analyses could NOT have contributed — an id in none of those lists \
                   ran, and OUTSIDE the two registration classes that key no finding under their own id \
                   at all (an id gating a score computation emits no finding; an umbrella id's findings \
                   arrive under the finer `schema/<label>` ids, so look for those instead), its absence \
                   from findings is a measured zero.",
+        // 🟢 And since 2026-09-07 that is MEASURED, not reasoned: `tests/integration/
+        // disclosure_capability_absent.rs` withholds all three capabilities in one run and asserts each
+        // channel still speaks. `disclosure/tests.rs` had named this exact hole — its own checks
+        // "measure no FIRING; that needs a fixture tree shaped like the class, one per class, and is
+        // not built" — and an `asserted` row that nothing runs is the worst kind to leave, because a
+        // disclosure registry is the canonical answer to what this tool cannot see.
+        //
+        // ✅ That "one class covered, the rest label-only" residual closed on 2026-09-11: EVERY
+        // `asserted` row now carries a firing-pin line naming a test that runs its claim, and
+        // `disclosure::tests::every_asserted_row_names_a_firing_pin_that_exists_and_names_it_back`
+        // walks each pin from both ends (the file exists, holds that `fn`, and names this class id
+        // back). What it still does not do is read the assertions inside the pinned test.
         // Still `asserted`: each of the three classes emits its channel unconditionally on the run shape
         // it describes, so none of them can be silently absent. Re-judged 2026-08-29 when the residual
         // carve-out was copied in above: the six-row `asserted` audit ran three minutes BEFORE the
@@ -127,6 +142,8 @@ pub(super) const ROWS: &[BlindnessClass] = &[
         // file in `disclosure/`). Adding a fourth class without editing this sentence would be invisible
         // the same way; the standing spec for closing that is to derive the list from the capability
         // self-reports themselves.
+        //
+        // FIRING PIN: crates/engine/tests/integration/disclosure_capability_absent.rs::every_capability_the_class_names_still_reports_itself_when_it_did_not_run
         status: DisclosureStatus::Asserted,
     },
 ];

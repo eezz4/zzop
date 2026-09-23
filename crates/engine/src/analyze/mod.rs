@@ -94,3 +94,30 @@ pub(crate) fn sort_rule_timings(
     });
     out
 }
+
+/// Read `root/rel` for a pass that is about to PARSE it, refusing what the recursion gate refuses.
+///
+/// 🔴 **Any pass in this module that re-reads a file off disk and hands the text to a parser goes
+/// through here.** The caps live in `pipeline::fresh` and are applied as the walk projects each file —
+/// but a second pass that opens the file itself never reaches that stage, so it never reaches the gate
+/// either. Measured on this HEAD before this function existed (review ledger V127): ONE 51 KB `.vue`
+/// file, and separately one `composables/deep.ts` inside a Nuxt tree, each took `zzop analyze` to
+/// **exit 127 with zero bytes of stdout** — and the second was a file the gate had correctly refused
+/// moments earlier. The refusal was right; it just did not travel.
+///
+/// Returns `None` for a file past a cap, which every caller already handles: they all skip unreadable
+/// files, and a refused file contributes nothing here for the same reason it contributes nothing from
+/// the per-file lane — no AST means no AST facts.
+///
+/// Passes whose input list is ALREADY gate-filtered do not need this and do not call it: `java_rels`,
+/// `csharp_rels` and `prisma_rels` are built inside `collect`'s `else` branch, after the one that
+/// diverts a degraded artifact, so a refused file is never in them. The lists that are NOT filtered are
+/// `prescan_rels` and `ts_paths` — and those are exactly the four callers here.
+pub(in crate::analyze) fn read_for_parse(root: &std::path::Path, rel: &str) -> Option<String> {
+    let bytes = std::fs::read(root.join(rel)).ok()?;
+    let text = String::from_utf8_lossy(&bytes).into_owned();
+    if crate::pipeline::text_exceeds_recursion_caps(&text, rel).is_some() {
+        return None;
+    }
+    Some(text)
+}

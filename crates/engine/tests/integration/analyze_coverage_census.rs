@@ -102,6 +102,12 @@ fn provide_only_tree_has_nonzero_io_provides_and_is_not_join_contribution_zero()
     assert!(coverage.files > 0, "{coverage:?}");
 }
 
+/// FIRING PIN for the `resolution-gap` blindness class, zero end: `coverage.ioConsumesUnresolved`
+/// rides the per-tree census even when there is nothing to count, so "no unresolved call site" and
+/// "this build does not measure that" are not the same bytes. The nonzero end is
+/// `unresolved_only_tree_is_still_join_contribution_zero` below; the registry row names both, and
+/// `disclosure::tests::every_asserted_row_names_a_firing_pin_that_exists_and_names_it_back` refuses
+/// a pin whose file does not name the class it claims to measure.
 #[test]
 fn no_io_tree_has_zero_counts_and_is_join_contribution_zero() {
     let dark = dark_tree();
@@ -149,6 +155,11 @@ fn unresolved_only_tree() -> TempDir {
 /// against), so a tree with 0 provides, 0 keyed consumes, and 1+ unresolved consumes must still count as
 /// "no JOINABLE contribution" — before this redefinition the flag also required
 /// `io_consumes_unresolved == 0`, which under-fired (stayed `false`) on exactly this tree shape.
+///
+/// Also the FIRING PIN for the `resolution-gap` blindness class, nonzero end: that class is labelled
+/// `asserted`, and what it asserts is that a recognized call site whose target could not be resolved
+/// is COUNTED on every run. A label is not a measurement, so the registry row points here and this
+/// test is the run that makes the count real (0 provides, 0 keyed consumes, `> 0` unresolved).
 #[test]
 fn unresolved_only_tree_is_still_join_contribution_zero() {
     let dir = unresolved_only_tree();

@@ -128,14 +128,18 @@ fn finding_message_is_byte_identical_to_the_pre_sweep_text() {
     assert_eq!(out.len(), 2);
     assert_eq!(out[0].rule_id, "unreachable");
     assert_eq!(
-            out[0].message,
+        out[0].message,
+        format!(
             "file has 1 importer(s) in this tree but is unreachable from any entrypoint — its importers \
              form a closed island nothing outside it can reach, so it's effectively dead despite having \
-             in-repo references. Delete the island, or wire it back to a real entrypoint if it should be \
-             reachable. Disable via config `rules: { \"unreachable\": \"off\" }` (embedders: \
-             `disabledRules`) if this island is reached by a mechanism this graph doesn't see (e.g. \
-             dynamic `require`, a plugin loader)."
-        );
+             in-repo references. Whether that is true rests entirely on the entrypoint set, so read it \
+             before you treat this as dead. {} IF NO SUCH LOADER EXISTS: delete the island, or wire it \
+             back to a real entrypoint if it should be reachable. Disable via config `rules: {{ \
+             \"unreachable\": \"off\" }}` (embedders: `disabledRules`) if this island is reached by a \
+             mechanism this graph doesn't see (e.g. dynamic `require`, a plugin loader).",
+            super::landing::ISLAND_DELETION_LANDING
+        )
+    );
 }
 
 #[test]
@@ -232,7 +236,7 @@ fn rust_entry_pattern_positives() {
         "src/main.rs",
         "crates/core/src/lib.rs",
         "tests/integration.rs",
-        "crates/engine/tests/analyze_rust_self.rs",
+        "crates/engine/tests/integration/analyze_rust_self.rs",
         "examples/fastapi_overlay_adapter/main.rs",
         "benches/parse_bench.rs",
         "src/bin/cli.rs",
@@ -395,4 +399,55 @@ fn tool_config_file_positives_and_negatives() {
         !is_tool_entry_file("docs/.vitepress/theme/index.ts"),
         "depth two is neither"
     );
+}
+
+/// The §27 ORDER pin: DISQUALIFIER < LANDING < IMPERATIVE. Position, not existence -- the invalidation
+/// probe moves the landing behind `IF NO SUCH LOADER EXISTS` and leaves every token present.
+#[test]
+fn the_island_deletion_landing_precedes_the_delete_imperative() {
+    let d = dep(&[("dead1.ts", &["dead2.ts"]), ("dead2.ts", &["dead1.ts"])]);
+    let nodes = vec![node("dead1.ts", 1, 10), node("dead2.ts", 1, 5)];
+    let out = unreachable_findings(&nodes, &d, &no_extra());
+    let msg = &out[0].message;
+    for (name, needle) in [
+        ("the disqualifier", "read it before you treat this as dead"),
+        (
+            "the landing clause",
+            super::landing::ISLAND_DELETION_LANDING,
+        ),
+        (
+            "the imperative",
+            "IF NO SUCH LOADER EXISTS: delete the island",
+        ),
+    ] {
+        assert_eq!(
+            msg.matches(needle).count(),
+            1,
+            "unreachable: {name} must be spelled ONCE, or an index comparison means nothing: {msg}"
+        );
+    }
+    let dq = msg
+        .find("read it before you treat this as dead")
+        .expect("disqualifier missing");
+    let land = msg
+        .find(super::landing::ISLAND_DELETION_LANDING)
+        .expect("landing missing");
+    let verb = msg
+        .find("IF NO SUCH LOADER EXISTS: delete the island")
+        .expect("imperative missing");
+    assert!(dq < land, "disqualifier at {dq}, landing at {land}: {msg}");
+    assert!(
+        land < verb,
+        "the landing is at {land} and the imperative at {verb} -- a reader who acts on the instruction \
+         never reaches the caveat behind it: {msg}"
+    );
+    // The facts the clause exists to carry. Presence, unlike order, is what a reword loses.
+    for needle in [
+        "COUNT THE FILES IN THE ISLAND",
+        "does not list the other members",
+        "start NO walk here",
+        "Find the loader before you count the files",
+    ] {
+        assert!(msg.contains(needle), "landing lost {needle:?}: {msg}");
+    }
 }

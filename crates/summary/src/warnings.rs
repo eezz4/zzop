@@ -79,6 +79,34 @@ mod rule_filter;
 
 pub(crate) use rule_filter::unknown_rule_filter_warning;
 
+/// The findings-view `rule` filter's honesty check, asked of a SHAPED REPLY rather than of an engine
+/// output — `Some(reason)` when the id can be PROVEN to name no rule this run could report.
+///
+/// # Why a host needs this at all, when the reason is already in the reply
+/// It is, and that is exactly the defect. Measured 2026-09-01 on koel: `analyze_repo` with
+/// `rule: "definitely-not-a-rule"` returned a 28,757-byte SUCCESS with no `isError`, the sentence
+/// sitting at byte offset 28,406. The `zzop analyze` CLI twin refuses the identical input with exit 2.
+/// A reply a reader has to get 99% of the way through before learning that it answers nothing is the
+/// silent-failure shape this output exists to prevent — and the surface where it was weaker is the one
+/// an agent uses.
+///
+/// # Why the JUDGMENT lives here rather than in either host
+/// The CLI reaches the same conclusion by reading STRUCTURED data off the reply, and its own doc
+/// records why it must not sniff prose: an exit code that depends on a sentence's wording moves the day
+/// someone rewords the sentence. That argument applies twice over to a second host, so this exposes the
+/// ONE derivation the shaper already runs ([`unknown_rule_filter_warning`]) rather than letting a host
+/// grow its own.
+///
+/// Deliberately takes the ANALYZE-shaped reply. The fields it reads (`packsLoaded[].id` and
+/// `packsLoaded[].ruleIds`) sit at the root there; a cross-tree join reply carries them per `sources[]`
+/// and its findings all carry NATIVE ids, so that lane needs its own check rather than this one aimed
+/// at it — the same carve-out the underlying function's doc already states. A reply that is not JSON,
+/// or that publishes no roster, returns `None`: no data is not a refusal.
+pub fn unmatchable_rule_filter(reply: &str, rule: &str) -> Option<String> {
+    let view: serde_json::Value = serde_json::from_str(reply).ok()?;
+    unknown_rule_filter_warning(&view, rule)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{engine_warnings, facade_config_warnings, tree_config_warnings};

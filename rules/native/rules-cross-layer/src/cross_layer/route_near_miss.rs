@@ -24,6 +24,7 @@ use std::collections::BTreeMap;
 use zzop_core::io::TaggedConsume;
 use zzop_core::{disable_hint, Finding, Severity};
 
+use super::landing::CALLER_BREAKAGE_LANDING;
 use super::{is_all_slot_path, path_segments, split_key, HttpProvideSite};
 
 mod dimensions;
@@ -204,14 +205,16 @@ pub fn route_near_miss_results(
 
         let message = format!(
             "consume `{method} {path}` (source `{}`) has no exact provider, but `{}` provides `{}` at \
-             {}:{}{extra_note} — {dimension_detail}. This could be genuine route drift (align the call path \
-             with the served route, or vice versa), or two unrelated routes that happen to be one dimension \
+             {}:{}{extra_note} — {dimension_detail}. This could be genuine route drift, or two \
+             unrelated routes that happen to be one dimension \
              apart — verify manually before treating this as drift. A prefix difference in particular can be \
              deployment topology the source does not carry — a gateway/ingress mount prefix or a config-file \
              path rewrite zzop does not read; inject it via `trees[].topology` if so. The \
              consume-side method and path reflect \
              what static extraction read at the call site; a helper/wrapper around the call can make them \
-             differ from the runtime request. {} if one-dimension-apart-but-unrelated routes are common in \
+             differ from the runtime request. {CALLER_BREAKAGE_LANDING} IF IT IS DRIFT: align the call path \
+             with the served route — or, once you have that count, the served route with the call path. \
+             {} if one-dimension-apart-but-unrelated routes are common in \
              your stack.",
             c.source, first.source, first.key, first.file, first.line,
             disable_hint("cross-layer/route-near-miss"),

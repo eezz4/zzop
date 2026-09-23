@@ -55,7 +55,26 @@ pub fn run_init(args: &[String]) -> ! {
         },
         Err(_) => String::new(),
     };
-    print_or_exit(written.map(|_| note));
+    // THE NEXT STEP, said out loud (2026-09-14, external review round 22, ledger V248).
+    //
+    // This command wrote a ~29 KB annotated config and then stopped. 📏 Measured on a fresh two-file
+    // tree: the run that follows returns 22,536 bytes across 17 root keys, of which 509 are the
+    // findings — so a first-time reader's opening act was deciding which key is the answer, with
+    // nothing here having pointed at one.
+    //
+    // Two lines, and the second is not a courtesy: the config's whole contract is that zzop judges
+    // what you DECLARE and stays silent on what you do not, and `coverage` is the only surface that
+    // says which half is which (`vocabularyDeclared`). A reader who deletes keys they did not
+    // recognize — the common first edit of a file this size — otherwise has no way to see that the
+    // checks went with them, and for the auth keys that deletion makes the reply LOUDER rather than
+    // quieter.
+    let next = format!(
+        "next: `zzop analyze {}` to see what it finds, then `zzop coverage {}` — that one says which \
+         of this config's conventions zzop actually judged by, and which it left silent.",
+        base.display(),
+        base.display()
+    );
+    print_or_exit(written.map(|_| format!("{note}\n{next}")));
 }
 
 /// Append the anchored cache-dir ignore to `<base>/.gitignore`, unless that exact pattern is already

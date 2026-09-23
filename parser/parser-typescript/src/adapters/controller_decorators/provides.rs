@@ -189,8 +189,60 @@ impl Visit for GuardedLineCollector<'_> {
     }
 }
 
+/// True when a decorator's own NAME says it authenticates or gates. Deliberately its own vocabulary
+/// rather than a reuse of `router_mounts::guard`'s middleware one, and MUCH narrower — two shapes, and
+/// it holds no list, which is the point rather than an economy.
+///
+/// # Why not the middleware vocabulary
+/// That one accepts `permission`, `acl`, `token` and `loggedin`, which are the right words for an
+/// argument sitting in front of a handler and the wrong ones here. NestJS puts authorization METADATA
+/// decorators BESIDE the guard rather than instead of it — `@Roles('admin')` carries the policy and a
+/// `@UseGuards(RolesGuard)` enforces it — so a controller carrying `@Roles` and NO guard is precisely
+/// the shape the consuming rules exist to report, and every one of those four words would clear it.
+///
+/// # The two accepted shapes, and why they need no veto list
+/// A name containing the full stem `authentic`/`authoriz`, or a name ending in `guard`. Requiring the
+/// STEM rather than the bare word `auth` is what keeps two whole families out without a list to
+/// maintain:
+///
+/// * DOCUMENTATION. Every `@nestjs/swagger` security decorator ends in an auth word and enforces
+///   nothing at all — `@ApiBearerAuth`, `@ApiOAuth2`, `@ApiSecurity`, `@ApiCookieAuth`,
+///   `@ApiBasicAuth`. None carries the stem, so none is read as evidence, and the day the package adds
+///   a sixth it is already covered.
+/// * NEGATION. `@SkipAuth`, `@NoAuth`, `@OptionalAuth`, `@BypassAuth` are opt-OUT markers that mean the
+///   opposite of what they spell, and they sit on exactly the route a reader most needs told about.
+///   None carries the stem either.
+///
+/// The ONE spelling that gets past the stem and still means its opposite is `@Unauthenticated` /
+/// `@Unauthorized`, so `un` is vetoed outright — one condition, not a vocabulary.
+///
+/// # The accepted cost, stated rather than discovered
+/// `@RequireAuth`, `@JwtAuth` and a bare `@Auth` go UNRECOGNIZED. That is under-recognition: the
+/// finding still fires and a human still looks, whereas a false guard silently suppresses a real
+/// missing gate — the same direction `router_mounts::guard`'s own doc argues for, and the reason this
+/// predicate would rather miss a real guard than invent one.
+///
+/// Added 2026-09-05 off a measurement that opened every first-screen row of three real projects against
+/// the source: `http/protected-path-no-auth-evidence` was wrong on 4 of 4, and a HOUSE decorator whose
+/// own name says it authenticates was one of the three shapes it could not see. The module doc's "Known
+/// residual" section had already named and rejected `@Licensed`/`@GlobalScope`/`@ProjectScope` as
+/// `@UseGuards` equivalents — correctly, since none of them authenticates — but a decorator that says
+/// it does had never been considered.
+fn is_auth_decorator_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    // `@Unauthenticated`/`@Unauthorized` carry the accepted stem and mean its opposite.
+    if lower.starts_with("un") {
+        return false;
+    }
+    lower.contains("authentic") || lower.contains("authoriz") || lower.ends_with("guard")
+}
+
+/// `@UseGuards` by its exact framework spelling, plus any decorator [`is_auth_decorator_name`] judges.
+/// The literal stays spelled out rather than folded into the predicate: `UseGuards` ends in `guards`,
+/// not `guard`, and letting the framework's own name survive a vocabulary edit is cheaper than the day
+/// it does not.
 fn has_use_guards(decorators: &[Decorator]) -> bool {
-    decorators
-        .iter()
-        .any(|d| decorator_name(&d.expr).as_deref() == Some("UseGuards"))
+    decorators.iter().any(|d| {
+        decorator_name(&d.expr).is_some_and(|n| n == "UseGuards" || is_auth_decorator_name(&n))
+    })
 }

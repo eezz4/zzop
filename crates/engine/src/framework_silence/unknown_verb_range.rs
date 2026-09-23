@@ -78,8 +78,14 @@ pub fn unknown_verb_range_warning(io_provides: &[IoProvide]) -> Option<String> {
          an all-clear. This is by construction for route tables that name a view without a verb (a \
          Django URLconf entry is the common case), not a parse failure. Two ways to bring them in \
          range: declare the real routes with `trees[].routes` ({{ \"key\": \"POST /path\" }}), or \
-         supply them through an adapter overlay (Mode B). Rules that do not gate on method — every \
-         cross-layer join rule included — see these routes normally.",
+         supply them through an adapter overlay (Mode B). The CROSS-LAYER JOIN does not see them either, and \
+         that is deliberate rather than a second gap: a \"? /path\" key can match no consume key, so \
+         the engine lifts these routes out of the exact-key join — out of the unconsumed rules (a \
+         verb-unknown route is disclosed here, never reported as a dead route) and out of the \
+         near-miss family, where a suggestion computed off a key nobody can call would be nonsense \
+         in the loudest place. What they DO drive is this disclosure and the consume side: a call to \
+         a path one of them serves is not reported unprovided. The two remedies above are therefore \
+         what brings these routes into the join.",
         exts.join(", "),
         examples.join(", "),
     ))

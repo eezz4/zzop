@@ -15,7 +15,8 @@ use super::{cochange, dep, posture, risk, DEFAULT_GRAPH_TOP};
 /// usage error, never a silently-different output.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum GraphFormat {
-    /// The default and the only format the four domains all support.
+    /// The default and the only format EVERY [`GraphDomain`] supports. Not "the four domains" — that
+    /// spelling outlived a fifth variant landing (2026-09-12, ledger V168); the enum below is the roster.
     Mermaid,
     /// The dep domain's points table.
     CosmographNodes,

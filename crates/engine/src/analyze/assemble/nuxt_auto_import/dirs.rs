@@ -68,10 +68,10 @@ pub(super) fn declared_dirs(
     configs.sort();
     let mut out: Vec<AutoImportDir> = Vec::new();
     for rel in configs {
-        let Ok(bytes) = std::fs::read(root.join(rel.as_str())) else {
+        // Same reason as its sibling in `nuxt_auto_import.rs`: `ts_paths` carries refused files.
+        let Some(text) = crate::analyze::read_for_parse(root, rel.as_str()) else {
             continue;
         };
-        let text = String::from_utf8_lossy(&bytes);
         for entry in zzop_parser_typescript::parse_nuxt_imports_dirs(rel, &text) {
             if let Some(dir) = normalize_declared_dir(&entry) {
                 if !out.contains(&dir) {

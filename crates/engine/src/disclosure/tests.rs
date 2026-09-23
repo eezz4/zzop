@@ -14,13 +14,11 @@ use std::collections::BTreeSet;
 /// whatever about whether the status is TRUE. A row can name a mechanism that was since narrowed, or
 /// omit one that since shipped, and this table stays green. Measured 2026-08-29, when an outside audit
 /// put a counter-example to each of the six `asserted` rows and three did not survive — every one of
-/// the three sat under this green pin. Exactly one row in the registry has a prose-to-mechanism pin of
-/// its own (`score-population-empty`, whose prose tokens are crossed against the real score population
-/// fields in `crates/metrics/src/scores/meanings/tests.rs`), and that pin's subject set is score keys
-/// by construction, so it can see no other row. The two checks added below are the sliver of the gap
-/// this file can close from inside the registry — a mirrored pair may not disagree about its own
-/// status, and an `asserted` claim may not stand without a written reason. Neither measures FIRING;
-/// that needs a fixture tree shaped like the class, one per class, and is not built.
+/// the three sat under this green pin. What closes that gap is not here but BESIDE each row:
+/// `every_asserted_row_names_a_firing_pin_that_exists_and_names_it_back` requires every `asserted` row
+/// to name a test that runs its claim, and requires that test to name the row back. This table's own
+/// job stays what it was — a status may not move unnoticed — and its green is not evidence of anything
+/// more.
 const EXPECTED: &[(&str, &str)] = &[
     ("capability-absent-vs-empty", "asserted"),
     ("channel-empty-family-dark", "partial"),
@@ -212,18 +210,133 @@ fn mirrored_channel_rows_carry_the_same_status() {
 /// against the live registry so a broken scan cannot pass by finding nothing.
 #[test]
 fn every_asserted_row_states_why_it_cannot_be_silently_missed() {
+    let rows = asserted_rows_in_source();
+    let unjustified: Vec<&str> = rows
+        .iter()
+        .filter(|r| r.reason_lines < 2)
+        .map(|r| r.label.as_str())
+        .collect();
+    assert!(
+        unjustified.is_empty(),
+        "`asserted` row(s) with no reason written beside them: {unjustified:?}. `asserted` promises a \
+         signal that cannot be absent on any run — write, immediately above the `status:` line, WHAT \
+         carries it unconditionally and what the class deliberately does not claim. Every other status \
+         in this registry that was argued for carries such a block; the rows that did not are the ones \
+         an outside audit broke."
+    );
+}
+
+/// **An `asserted` row must name a TEST that runs its claim, and that test must name the row back.**
+///
+/// This is the check the pin at the top of this file says it is not: that pin compares each row with a
+/// hand-written copy of itself, and the prose gate above accepts a wrong reason exactly as it accepts a
+/// right one. Both were green on 2026-08-29 while an outside audit put a counter-example to three of
+/// the six `asserted` rows. A label nothing executes is this repo's "green is not what you think it
+/// is" shape, and `asserted` is the worst place to leave it: a disclosure registry is the canonical
+/// answer to what this tool cannot see.
+///
+/// So every `asserted` row carries `// FIRING PIN: <repo-relative path>::<test fn>` in the comment
+/// block above its `status:` line, and this test walks that pin FROM BOTH ENDS — the shape
+/// `crates/summary/tests/legend_fold.rs` already uses on the folded legends:
+///
+/// * the named file exists in this checkout,
+/// * it holds a `fn <name>(`, and
+/// * it names the CLASS ID verbatim — which is what makes the pin un-fakeable by pointing at whatever
+///   test happened to be nearby. Pin and test now have to be edited together or one of them goes red.
+///
+/// What this still does NOT do, written here so its green is never cited as more: it does not read the
+/// assertions inside the pinned test, so a test that names the class and measures something adjacent
+/// to it passes. It moves the failure from "nobody ever ran this label" to "somebody had to write a
+/// run shaped like it and say which label it is", and it makes a class that loses its mechanism go red
+/// in the test that lost it instead of staying green here.
+#[test]
+fn every_asserted_row_names_a_firing_pin_that_exists_and_names_it_back() {
+    let rows = asserted_rows_in_source();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+
+    let mut resolved = 0usize;
+    let mut problems: Vec<String> = Vec::new();
+    for row in &rows {
+        if row.pins.is_empty() {
+            problems.push(format!(
+                "{} (`{}`) carries no `// FIRING PIN: <path>::<test fn>` line",
+                row.label, row.id
+            ));
+            continue;
+        }
+        for pin in &row.pins {
+            let Some((rel, func)) = pin.rsplit_once("::") else {
+                problems.push(format!(
+                    "{} (`{}`): pin {pin:?} is not `<repo-relative path>::<test fn>`",
+                    row.label, row.id
+                ));
+                continue;
+            };
+            let Ok(text) = std::fs::read_to_string(root.join(rel)) else {
+                problems.push(format!(
+                    "{} (`{}`): pin names `{rel}`, which this checkout does not have",
+                    row.label, row.id
+                ));
+                continue;
+            };
+            if !text.contains(&format!("fn {func}(")) {
+                problems.push(format!(
+                    "{} (`{}`): `{rel}` holds no `fn {func}(` — the pin points at a test that was \
+                     renamed or removed",
+                    row.label, row.id
+                ));
+            } else if !text.contains(row.id.as_str()) {
+                problems.push(format!(
+                    "{} (`{}`): `{rel}` never names `{}`, so the pin is one-ended — a test that does \
+                     not say which disclosure class it measures cannot be audited as measuring it",
+                    row.label, row.id, row.id
+                ));
+            } else {
+                resolved += 1;
+            }
+        }
+    }
+
+    assert!(
+        problems.is_empty(),
+        "`asserted` is the one status that promises something unconditional, and these rows have no \
+         run standing behind them: {problems:#?}"
+    );
+    assert!(
+        resolved >= rows.len(),
+        "{resolved} pin(s) resolved for {} `asserted` row(s) — this guard would have passed while \
+         proving less than one run per row, which is the vacuous green it exists to refuse.",
+        rows.len()
+    );
+}
+
+/// One `asserted` row as the registry SOURCE spells it — the subject set both meta tests judge.
+struct AssertedRow {
+    /// `<file>:<line>` of the `status:` line, so a failure names the row a reader has to open.
+    label: String,
+    /// The row's own `id`, read from the nearest `id: "…"` line above it.
+    id: String,
+    /// Comment lines in the contiguous block immediately above `status:`.
+    reason_lines: usize,
+    /// Every `FIRING PIN:` payload in that block, in source order.
+    pins: Vec<String>,
+}
+
+/// Scan the registry source for `asserted` rows, cross-checking the scan's own count against the live
+/// registry so a broken scan (a moved file, a reformatted `status:` line) cannot pass by finding
+/// nothing — the vacuous green this repo has now measured several times.
+fn asserted_rows_in_source() -> Vec<AssertedRow> {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/disclosure/registry");
     let entries =
         std::fs::read_dir(&dir).unwrap_or_else(|e| panic!("failed to read {}: {e}", dir.display()));
 
-    let mut scanned = 0usize;
-    let mut unjustified: Vec<String> = Vec::new();
+    let mut rows: Vec<AssertedRow> = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
         if path.extension().is_none_or(|x| x != "rs") {
             continue;
         }
-        let label = path
+        let file = path
             .file_name()
             .unwrap_or_default()
             .to_string_lossy()
@@ -235,15 +348,35 @@ fn every_asserted_row_states_why_it_cannot_be_silently_missed() {
             if line.trim() != "status: DisclosureStatus::Asserted," {
                 continue;
             }
-            scanned += 1;
-            let reason_lines = lines[..i]
+            let block: Vec<&str> = lines[..i]
                 .iter()
                 .rev()
                 .take_while(|l| l.trim_start().starts_with("//"))
-                .count();
-            if reason_lines < 2 {
-                unjustified.push(format!("{label}:{}", i + 1));
-            }
+                .copied()
+                .collect();
+            let id = lines[..i]
+                .iter()
+                .rev()
+                .find_map(|l| l.trim_start().strip_prefix("id: \""))
+                .and_then(|rest| rest.split('"').next())
+                .unwrap_or_else(|| panic!("no `id:` line above {file}:{}", i + 1))
+                .to_string();
+            // Anchored at the start of the comment line, not a substring search: this block is prose
+            // as well as machine input, and a sentence ABOUT the pin convention is not a pin. Caught
+            // by this very test on 2026-09-11, when a comment two rows down explaining the convention
+            // was read as a malformed pin.
+            let mut pins: Vec<String> = block
+                .iter()
+                .filter_map(|l| l.trim_start().strip_prefix("// FIRING PIN:"))
+                .map(|rest| rest.trim().to_string())
+                .collect();
+            pins.reverse();
+            rows.push(AssertedRow {
+                label: format!("{file}:{}", i + 1),
+                id,
+                reason_lines: block.len(),
+                pins,
+            });
         }
     }
 
@@ -252,18 +385,12 @@ fn every_asserted_row_states_why_it_cannot_be_silently_missed() {
         .filter(|c| c.status == DisclosureStatus::Asserted)
         .count();
     assert_eq!(
-        scanned, asserted,
-        "the source scan found {scanned} `asserted` row(s) while the registry holds {asserted} — the \
-         scan is reading a different set than it is judging (a moved file, a reformatted `status:` \
-         line), so its verdict below is about nothing. Working-agreements: a guard that passes while \
-         scanning nothing is the failure this repo has now measured several times."
+        rows.len(),
+        asserted,
+        "the source scan found {} `asserted` row(s) while the registry holds {asserted} — the scan is \
+         reading a different set than it is judging (a moved file, a reformatted `status:` line), so \
+         every verdict built on it is about nothing.",
+        rows.len()
     );
-    assert!(
-        unjustified.is_empty(),
-        "`asserted` row(s) with no reason written beside them: {unjustified:?}. `asserted` promises a \
-         signal that cannot be absent on any run — write, immediately above the `status:` line, WHAT \
-         carries it unconditionally and what the class deliberately does not claim. Every other status \
-         in this registry that was argued for carries such a block; the rows that did not are the ones \
-         an outside audit broke."
-    );
+    rows
 }

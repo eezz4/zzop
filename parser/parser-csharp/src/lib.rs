@@ -25,6 +25,7 @@
 
 pub mod adapters;
 pub mod lang;
+mod parse_census;
 mod project;
 mod util;
 
@@ -54,7 +55,9 @@ mod node_kinds;
 
 pub use adapters::ef_core::extract_ef_core_db_table_provides;
 pub use adapters::http_clients::extract_csharp_http_consumes;
-pub use adapters::provides::extract_csharp_http_provides;
+pub use adapters::provides::{
+    extract_csharp_http_provides, CSharpRouteVocab, DEFAULT_ROOT_ROUTE_BUILDER_VARIABLE_NAMES,
+};
 pub use lang::call_sites::extract_call_sites;
 pub use lang::imports::parse_imports;
 pub use lang::loop_spans::extract_loop_spans;
@@ -62,6 +65,7 @@ pub use lang::namespaces::csharp_namespaces_of;
 pub use lang::string_literals::extract_string_literals;
 pub use lang::symbols::parse_symbols;
 pub use lang::used_names::parse_local_identifier_refs;
+pub use parse_census::{parse_count, reset_parse_count};
 pub use project::{extract_csharp_http_provides_project, CSharpProjectProvidesReport};
 
 /// Cache-bust token for `zzop-cache`: `parser-id/pinned-toolchain/last-change-version`. The
@@ -112,9 +116,14 @@ const TOP_LEVEL_DECLARATION_KINDS: &[&str] = &[
 /// file (zero named children) short-circuits the `> 0` guard and is NOT degraded, matching every
 /// sibling parser. Internal-only: `tree_sitter::Tree` never crosses this crate's public API.
 pub(crate) fn parse_tree(text: &str) -> Option<tree_sitter::Tree> {
+    // Counted, not memoized. Sixteen call sites in this crate ask for the same text in a row and each
+    // pays a full parse — fourteen per file, measured. A one-entry memo cuts that to three and moves
+    // the wall clock by nothing at all, so it is not here; `parse_census`'s module doc holds the A/B
+    // and the condition under which it would come back (review ledger V116).
+    parse_census::record_parse();
     let mut parser = tree_sitter::Parser::new();
     parser.set_language(&csharp_language()).ok()?;
-    let tree = parser.parse(text, None)?;
+    let tree = util::parse_within_depth(&mut parser, text)?;
     let root = tree.root_node();
     if root.is_error() {
         return None;

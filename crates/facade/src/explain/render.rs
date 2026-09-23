@@ -30,6 +30,16 @@ pub(super) fn render(pack: &RulePackDef, rule: &RuleDef) -> String {
         format!("severity: {}", severity_str(rule.severity)),
         format!("message: {}", rule.message),
         format!("suppress marker: {}", suppress_marker_str(rule)),
+        // The third leg of the "how do I stop seeing this" answer, and the one this command did NOT
+        // carry until findings stopped carrying it. A DSL finding used to end with the whole disable
+        // sentence appended (`pipeline::findings::append_hints`); since `zzop_core::BY_ID_MESSAGE`
+        // replaces a verbatim message with a pointer HERE, a reader who followed that pointer would
+        // otherwise arrive to find the marker answered and the knob gone. Rendered through the same
+        // `disable_hint` the appended sentence uses, so the two cannot word it differently.
+        format!(
+            "disable: {}",
+            zzop_core::disable_hint(&format!("{}/{}", pack.id, rule.id))
+        ),
         format!("matcher: {}", matcher_kind(&rule.matcher)),
     ];
     lines.extend(scope_lines(&rule.matcher));

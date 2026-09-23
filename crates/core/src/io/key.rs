@@ -150,9 +150,24 @@ fn re_multi_slash() -> &'static regex::Regex {
 /// answers from one cause: `http/duplicate-route` false-fired on two distinct endpoints; the exact
 /// join linked a consume of one to the provide of the OTHER (a WRONG edge, worse than silence, which
 /// also hid the true unconsumed/unprovided pair); and near-miss suggestions off the key were nonsense.
+/// The path-parameter vocabulary: a `{brace}` param, or a `:colon` param with the two suffixes a router
+/// may attach to it — an inline regex constraint (`:n(\\d+)`) and an optional marker (`:id?`).
+///
+/// 🔴 Both suffixes used to survive into the key (2026-09-07, review ledger V34), and a surviving suffix
+/// is not a cosmetic blemish: the key is the JOIN's only identity, so `GET /posts/{}?` and
+/// `GET /items/{}(d+)` could never match the `GET /posts/{}` / `GET /items/{}` a caller spells. Two of
+/// five measured exact-key misses on a constructed pair were this, and the only signal a reader got was
+/// a visibly malformed key with nothing naming the cause.
+///
+/// ⚠ The suffixes are bound to the colon arm ON PURPOSE. A bare `?` elsewhere in a route PATTERN is
+/// Spring's single-character wildcard, which is a real path character — [`http_consume_interface_key`]'s
+/// doc states that asymmetry, and eating `?` anywhere would break it. Anchoring both suffixes to a
+/// matched `:param` keeps this change to the routers that actually spell them (Express/Koa).
 fn re_param() -> &'static regex::Regex {
     static R: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    R.get_or_init(|| regex::Regex::new(r"\{[^}]+\}|([/.-]):[A-Za-z_][A-Za-z0-9_]*").unwrap())
+    R.get_or_init(|| {
+        regex::Regex::new(r"\{[^}]+\}|([/.-]):[A-Za-z_][A-Za-z0-9_]*(?:\([^)]*\))?\??").unwrap()
+    })
 }
 fn re_trailing() -> &'static regex::Regex {
     static R: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
@@ -160,140 +175,4 @@ fn re_trailing() -> &'static regex::Regex {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn http_key_normalizes_params_slashes_and_method() {
-        assert_eq!(
-            http_interface_key("get", "authen/getUserInfo"),
-            "GET /authen/getUserInfo"
-        );
-        assert_eq!(http_interface_key("get", "/users/{id}"), "GET /users/{}");
-        assert_eq!(http_interface_key("get", "/users/:id"), "GET /users/{}");
-        // duplicate slashes collapsed, trailing slash dropped, method upper-cased
-        assert_eq!(http_interface_key("post", "//a//b/"), "POST /a/b");
-        // root path preserved (single slash, no trailing-drop)
-        assert_eq!(http_interface_key("get", ""), "GET /");
-    }
-
-    #[test]
-    fn colon_is_a_param_sigil_only_when_the_segment_has_no_content_before_it() {
-        // AIP / gRPC-Gateway / Buf custom methods: the token after `:` is a SUFFIX on a segment that
-        // already has content, and it is the most identity-bearing part of the path. Eating it made
-        // `:activate` and `:deactivate` the SAME key — a false `http/duplicate-route` plus a WRONG
-        // cross-layer edge (a consume of one joined to the provide of the other).
-        assert_eq!(
-            http_interface_key("post", "/v1/users/{id}:activate"),
-            "POST /v1/users/{}:activate"
-        );
-        assert_eq!(
-            http_interface_key("post", "/v1/users/{id}:deactivate"),
-            "POST /v1/users/{}:deactivate"
-        );
-        assert_ne!(
-            http_interface_key("post", "/v1/users/{id}:activate"),
-            http_interface_key("post", "/v1/users/{id}:deactivate")
-        );
-        // Custom method directly on a collection (AIP-231 `:batchGet`) — content is a plain literal.
-        assert_eq!(
-            http_interface_key("post", "/v1/users:batchGet"),
-            "POST /v1/users:batchGet"
-        );
-        assert_eq!(http_interface_key("get", "/a/b:c"), "GET /a/b:c");
-        // The consume side must reach the same key, including after `${id}` -> `{}` interpolation
-        // normalization upstream (`{}` is not a `{x}` param, so the suffix survives there too).
-        assert_eq!(
-            http_consume_interface_key("post", "/v1/users/{}:activate?force=1"),
-            "POST /v1/users/{}:activate"
-        );
-
-        // Express/Rails/NestJS `:param` — the segment has NO content before the colon. Unchanged.
-        assert_eq!(http_interface_key("get", "/users/:id"), "GET /users/{}");
-        // Express's documented multi-param segment spellings, where the param follows an in-segment
-        // separator rather than a `/`: `/flights/:from-:to` and `/plantae/:genus.:species`.
-        assert_eq!(
-            http_interface_key("get", "/flights/:from-:to"),
-            "GET /flights/{}-{}"
-        );
-        assert_eq!(
-            http_interface_key("get", "/plantae/:genus.:species"),
-            "GET /plantae/{}.{}"
-        );
-        // Rails' `.:format` suffix, and a brace param followed by a separator-led param.
-        assert_eq!(
-            http_interface_key("get", "/posts/:id.:format"),
-            "GET /posts/{}.{}"
-        );
-        assert_eq!(
-            http_interface_key("get", "/users/{id}-:rev"),
-            "GET /users/{}-{}"
-        );
-    }
-
-    #[test]
-    fn http_consume_key_drops_query_and_fragment_suffix() {
-        // Literal query — the fe-axios RealWorld corpus shape (`axios.get('articles?limit=10')`)
-        // whose keyed form could never join `GET /articles` (dogfood round 6, 2026-07-10).
-        assert_eq!(
-            http_consume_interface_key("get", "articles?limit=10"),
-            "GET /articles"
-        );
-        // Interpolated query is normalized to `?{}` upstream — same drop.
-        assert_eq!(
-            http_consume_interface_key("get", "/articles?{}"),
-            "GET /articles"
-        );
-        // Query after a path param, and fragment suffix.
-        assert_eq!(
-            http_consume_interface_key("get", "/articles/{slug}?include=author"),
-            "GET /articles/{}"
-        );
-        assert_eq!(
-            http_consume_interface_key("get", "/docs#anchor"),
-            "GET /docs"
-        );
-        // No suffix -> identical to http_interface_key.
-        assert_eq!(
-            http_consume_interface_key("post", "//a//b/"),
-            http_interface_key("post", "//a//b/")
-        );
-        // Query-only URL degrades to the root path (the egress extractor vetoes this shape
-        // earlier — see `base_relative_path` — so it only arises from an explicit `/?x=1`).
-        assert_eq!(http_consume_interface_key("get", "/?page=2"), "GET /");
-    }
-
-    #[test]
-    fn key_carries_route_identity_rejects_only_all_placeholder_paths() {
-        // The head-drop artifact this gate exists for: an unresolved `${BASE}` prefix leaves a key
-        // that names no endpoint (mono-hub `joke-generator/fetchJoke.ts`, 2026-07-25).
-        assert!(!key_carries_route_identity("GET /{}"));
-        assert!(!key_carries_route_identity("POST /{}/{}"));
-        assert!(!key_carries_route_identity("GET /{}/{}/{}"));
-        // One literal segment anywhere is enough — the key can still be joined/compared.
-        assert!(key_carries_route_identity("GET /api/{}"));
-        assert!(key_carries_route_identity("GET /{}/users"));
-        assert!(key_carries_route_identity("DELETE /users/{}"));
-        // A root route is fully known, not a lost target.
-        assert!(key_carries_route_identity("GET /"));
-        // Non-"VERB /path" shapes are outside the `{}` vocabulary and always pass.
-        assert!(key_carries_route_identity("table:users"));
-        assert!(key_carries_route_identity("{}"));
-        // Absolute-URL keys never reach this gate in the linker (the `://` egress gate fires first),
-        // but the predicate is total: a host makes the key non-all-placeholder anyway.
-        assert!(key_carries_route_identity("GET https://api.example.com/{}"));
-    }
-
-    #[test]
-    fn db_table_channel_casing_lower_firsts_only_the_first_character() {
-        // PascalCase model name -> Prisma client accessor casing (the shape this transform exists for).
-        assert_eq!(db_table_channel_casing("Article"), "article");
-        assert_eq!(db_table_channel_casing("UserProfile"), "userProfile");
-        // Already-lowercase / snake_case DDL names are a no-op (the common hand-written-SQL case).
-        assert_eq!(db_table_channel_casing("users"), "users");
-        assert_eq!(db_table_channel_casing("article_tags"), "article_tags");
-        // Single character and empty string are edge cases both call sites can hit after quote-stripping.
-        assert_eq!(db_table_channel_casing("A"), "a");
-        assert_eq!(db_table_channel_casing(""), "");
-    }
-}
+mod tests;

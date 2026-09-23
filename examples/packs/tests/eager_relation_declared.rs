@@ -1,7 +1,7 @@
 //! Exercises `examples/packs/orm-eager.json`'s `eager-relation-declared` line-scan rule: TypeORM's
 //! `eager: true` relation option and Sequelize's same-line `include: [{ ... all: true` association-
 //! select-everything shape. Uses its own `eager_scan` helper (mirrors `perf.rs::scan`'s harness shape)
-//! since the shared `scan` helper filters to `perf/api-in-loop` only.
+//! since the shared `scan` helper filters to `reliability/api-in-loop` only.
 
 use std::fs;
 use std::path::{Path, PathBuf};

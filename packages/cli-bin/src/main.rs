@@ -15,6 +15,7 @@
 //!   zzop diff <a.json> <b.json>      — the delta between two manifests: bucket transitions first.
 //!   zzop facts <path>...             — the run's post-assembly facts (per-tree CommonIr + the whole cross-layer join, uncapped) for your own rule program.
 //!   zzop file <path> <tree>...       — what does zzop know about THIS FILE: its tree, its verdict (analyzed / lexical-only / degraded / not-found), symbols, io, both edge directions, findings.
+//!   zzop map <path>...               — the same import graph as DATA: modules, the imports between them, and the census of what folding cost. `--fold <n>` is the one knob — the picture lane's own word for the same collapse — and nothing is capped. The lane `graph --domain dep --fold <n>` draws; this one is what an agent can read, and it has an MCP twin (`module_map`) where the picture lane deliberately has none.
 //!   zzop graph <path>...             — a picture for an EXTERNAL renderer, never drawn here. `--format mermaid` (default) serializes any `--domain` as a flowchart, scoped (`--top`, `--scope`) with every cap disclosed in the document; `--format cosmograph-nodes|cosmograph-links` serializes `--domain dep` as UNCAPPED NDJSON tables for an interactive viewer, with the census on stderr so stdout stays a parseable table.
 //!   zzop init [<dir>] [--force]      — write the embedded starter zzop.config.jsonc into <dir> (default: the current directory).
 //!   zzop contract [<name>]           — list the embedded authoring contracts / print one to stdout.
@@ -56,7 +57,7 @@ mod cli;
 /// It said `cross <path>...` / `manifest <path>...` until 2026-08-20 while both parsers demanded two —
 /// `<path>...` is "one or more" in every CLI grammar, so this line offered a form the binary refuses.
 pub(crate) fn usage() -> String {
-    format!("usage: zzop <analyze <path> | analyze --config <path> | analyze-envelope <envelope.json> | validate-envelope <envelope.json> | validate-rule-pack <pack.json> | cross <path> <path>... (2+ paths) | cross --config <path> | file <path> [--source-id <id>] <tree>... | file <path> [--source-id <id>] --config <path> | endpoint <pattern> <path>... | endpoint <pattern> --config <path> | manifest <path> <path>... (2+ paths) | manifest --config <path> | diff <a.json> <b.json> [--allow-tool-drift] | facts <path>... | facts --config <path> | coverage <path>... | coverage --config <path> | graph <path>... | graph --config <path> [--domain <{}>] [--format <mermaid|cosmograph-nodes|cosmograph-links>] [--scope <prefix>] [--top <n>] [--fold <n>] | init [<dir>] [--force] | contract [<name>] | explain <rule-id> [--config <path>] | version [--verbose]> (analyze, analyze-envelope and cross also take [--severity <critical|warning|info>] [--rule <id>] [--limit <n>] [--profile-rules]; every subcommand takes --help)",
+    format!("usage: zzop <analyze <path> | analyze --config <path> | analyze-envelope <envelope.json> | validate-envelope <envelope.json> | validate-rule-pack <pack.json> | cross <path> <path>... (2+ paths) | cross --config <path> | file <path> [--source-id <id>] <tree>... | file <path> [--source-id <id>] --config <path> | endpoint <pattern> <path>... | endpoint <pattern> --config <path> | manifest <path> <path>... (2+ paths) | manifest --config <path> | diff <a.json> <b.json> [--allow-tool-drift] | facts <path>... | facts --config <path> | coverage <path>... | coverage --config <path> | graph <path>... | graph --config <path> [--domain <{}>] [--format <mermaid|cosmograph-nodes|cosmograph-links>] [--scope <prefix>] [--top <n>] [--fold <n>] | map <path>... | map --config <path> [--fold <n>] | init [<dir>] [--force] | contract [<name>] | explain <rule-id> [--config <path>] | version [--verbose]> (analyze, analyze-envelope and cross also take [--severity <critical|warning|info>] [--rule <id>] [--limit <n>] [--profile-rules]; every subcommand takes --help)",
         zzop_summary::GraphDomain::WIRE_NAMES.join("|")
     )
 }
@@ -69,7 +70,7 @@ const BARE_INVOCATION_HINT: &str =
 use cli::analysis::{run_analyze, run_analyze_envelope, run_cross, run_endpoint, run_file};
 use cli::{
     parse_trees_args, print_help, reject_flag_like_args, run_diff, run_explain, run_file_validate,
-    run_graph, run_init,
+    run_graph, run_init, run_map,
 };
 
 fn main() {
@@ -122,9 +123,15 @@ fn main() {
         // extension-by-dispatch table plus the census with its meaning attached — and, by ruling
         // (2026-07-31), NO single score: the unmeasured axis (recall) is a schema field instead, so
         // it cannot be dropped in transit the way a caveat sentence is. Same one-path split as
-        // `facts`. CLI-only — no MCP tool twin (recorded in `docs/contracts/surface-parity.json`'s
-        // `_cliOnlyLanes`; the aggregate is an authoring/ops view, and the MCP agent surface already
-        // has the per-file half via `check_file`).
+        // `facts`. 🔴 STALE UNTIL 2026-09-15: these three lines read "CLI-only — no MCP tool twin
+        // (recorded in surface-parity.json's `_cliOnlyLanes`; the aggregate is an authoring/ops view,
+        // and the MCP agent surface already has the per-file half via `check_file`)". Both halves
+        // were false and had been for some time — `check_coverage` is a shipped MCP tool
+        // (`packages/mcp/src/tools/definitions.rs`), and `_cliOnlyLanes` has never held a `zzop
+        // coverage` entry. Nothing went red, because no guard reads a comment: the lane declaration
+        // is machine-checked in BOTH directions, and a sentence beside it claiming the opposite is
+        // outside every population. Found while wiring the `map` twin below, by reading the tool
+        // list. The twin is `check_coverage`.
         Some("coverage") => {
             let (paths, config_path) = parse_trees_args(&args, "coverage", 1);
             print_result(zzop_summary::coverage_summary(&paths, config_path));
@@ -136,6 +143,14 @@ fn main() {
         // in `docs/contracts/surface-parity.json`'s `_cliOnlyLanes`; `zzop_summary::graph`'s module doc
         // answers the neighbouring question, why the product is mermaid text at all).
         Some("graph") => run_graph(&args),
+        // The picture lane's question answered as DATA — "what IS this codebase", as modules and the
+        // imports between them. Unlike `graph`, this one HAS an MCP twin (`module_map`), which is the
+        // whole reason it exists: the folded import map was the best short answer zzop had to that
+        // question and it was reachable only from a terminal, while this product's named audience is
+        // an agent. See `zzop_summary::module_map`'s module doc for the measurement and for why it is
+        // a shaper rather than an MCP twin of `graph` itself.
+        Some("map") => run_map(&args),
+
         // The structural-drift lane: the SAME two source modes as `cross` (one shared argv parser),
         // projecting the same analysis into identity rows instead of a capped summary. CLI-only —
         // no MCP tool twin (that judgment is recorded in `docs/contracts/surface-parity.json`'s
@@ -172,7 +187,7 @@ fn main() {
                     Some(doc) => {
                         use std::io::Write;
                         std::io::stdout()
-                            .write_all(doc.content.as_bytes())
+                            .write_all(zzop_summary::contracts::served_content(doc).as_bytes())
                             .expect("write contract document to stdout");
                     }
                     None => {

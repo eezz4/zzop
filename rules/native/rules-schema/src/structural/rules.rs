@@ -1,5 +1,5 @@
 //! Rule bodies and index-coverage helpers for the structural schema rules — moved verbatim from
-//! `structural.rs` (the thin root keeps `STRUCTURAL_RULES_VERSION`, the census-pinned consts, the
+//! `structural.rs` (the thin root keeps the census-pinned consts, the
 //! IR-facing types, and the `analyze_schema`/`apply_schema_rules` orchestrators).
 
 use zzop_core::{SchemaField, SchemaModel, Severity};
@@ -26,7 +26,10 @@ pub(super) fn rule_god_model(model: &SchemaModel, out: &mut Vec<SchemaIssue>) {
     if model.fields.len() < GOD_THRESHOLD {
         return;
     }
-    let mut i = issue("god-model", Severity::Warning, &model.name, None);
+    // Ships `info` (2026-09-06). The message already says the 15-field line is "a convention, not a
+    // measurement" and that one field moves the count by 4-5, which is a rule declaring that it reports
+    // a shape rather than judging one. Nothing is dropped; it sits behind the defect claims.
+    let mut i = issue("god-model", Severity::Info, &model.name, None);
     i.params = Some(serde_json::json!({ "fieldCount": model.fields.len() }));
     out.push(i);
 }

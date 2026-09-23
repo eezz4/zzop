@@ -1,6 +1,6 @@
 //! `reqwest-no-timeout` — the Rust counterpart of `fetch-no-timeout`, and the reason it is a separate
 //! rule rather than a widened `file_pattern`: `fetch-no-timeout`'s `require_file` pre-gate looks for a
-//! Node/Workers server shape (an `express`/`fastify`/`hono` import, `createServer(`, a D1
+//! Node/Workers server shape (an `express`/`fastify`/`hono` import, a receiver-qualified `http.createServer(`, a D1
 //! `prepare(` call, ...), none of which a Rust file can ever satisfy — so admitting `.rs` there would
 //! have shipped a rule that is structurally silent on every Rust tree while the catalog listed it.
 

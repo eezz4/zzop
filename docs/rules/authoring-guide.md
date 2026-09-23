@@ -138,9 +138,29 @@ Disable via config `rules: { "<pack>/<rule>": "off" }` (embedders: `disabledRule
 
 Both appended sentences come from `crates/engine/src/pipeline/findings.rs`'s `append_hints`, which every DSL
 finding-construction site routes through — the fused per-file pass, `envelope::file_pass` (Mode B), and
-the whole-tree io-scan pass — one shared builder, never a second hand-written copy. This happens once,
-before the finding reaches `AnalysisCache::put_findings`, so both sentences are baked into the cached
-`message` and are not re-appended on a warm cache hit.
+the whole-tree io-scan pass — one shared builder, never a second hand-written copy. It assembles them
+through `zzop_core::dsl::message_with_hints`, which has one other caller for a reason given below. This
+happens once, before the finding reaches `AnalysisCache::put_findings`, so both sentences are baked into
+the cached `message` and are not re-appended on a warm cache hit.
+
+**Where they end up on the wire, since 2026-09-13.** A finding whose text is exactly this assembled
+string — your `message` plus both appended sentences, with nothing spliced in from the scanned source —
+does not ship that string, **if this binary carries your pack**. It ships a short pointer plus a
+`messageBy` field, and a reader resolves it by the finding's own `ruleId` through `zzop explain <ruleId>`
+or the MCP resource `zzop://rule/{id}`, both of which print the message, the suppress marker and the
+disable knob. The comparison that decides it calls `message_with_hints` too, which is why that assembly
+has exactly one owner: a second copy would let the question drift away from the text it asks about. See
+[modules/facade.md](../modules/facade.md#the-third-lane--messageby-the-one-that-points-out-of-the-reply).
+
+⚠ **A pack of your own, loaded from `zzop/rules/` or `packs.extraDirs`, is never pointed away** — both
+resolvers answer only for rules compiled into the binary, so your rule's findings keep their prose in
+full. You never have to think about this lane while authoring.
+
+**Nothing here changes for you as an author.** Write the cause and the fix; the reader still receives
+every word of it. The one case worth knowing is the exception: when a matcher finds a marker-shaped
+comment your rule does not honour, it splices that token — read out of the scanned file — into the
+prose, and that finding ships whole, because no rule id could rebuild a token that came from someone
+else's source.
 
 **What this means for your `message` field**: write the cause and the fix. That is the whole contract
 for what you author. Do NOT hand-write either appended sentence — the engine adds them, and a copy
@@ -242,12 +262,17 @@ What it checks:
 - **Derived-marker uniqueness** — markers are derived `zzop-<id>-ok`, so presence and the `-ok` shape are
   construction guarantees; what the test still enforces is that no two rules — in any pack — derive the same
   marker (i.e. rule ids are globally unique), since a shared marker would silently co-suppress both.
-- **Message triple** — every DSL rule's message **as a reader receives it** (your `message` plus the
-  engine-appended suppress sentence) names its own derived marker (or, for a disable-only
+- **Message triple** — every DSL rule's message **as `zzop explain` renders it** (your `message` plus the
+  engine-appended suppress sentence and disable hint) names its own derived marker (or, for a disable-only
   rule, the literal `disabledRules` string — `disabledRules` is the wire spelling every embedder
   request surface actually accepts; the contract also still recognizes the retired snake_case
   `disabled_rules`) somewhere in the text — the "how to exclude"
-  leg every finding must carry alongside its problem/fix explanation.
+  leg every finding must carry alongside its problem/fix explanation. ⚠ Since 2026-09-13 a finding whose
+  text is exactly this assembled string does not SHIP it — it ships a short pointer plus a `messageBy`
+  field, and the reader resolves it by `ruleId` (see
+  [modules/facade.md](../modules/facade.md#the-third-lane--messageby-the-one-that-points-out-of-the-reply)).
+  Nothing changes for you as an author: the text you write is still what a reader ends up reading, and
+  this contract still judges the assembled string, because that is what `explain` serves.
 - **Native message contract** — a pragmatic grep over `rules/native/*/src/**/*.rs`: any file that
   constructs a `Finding` via a literal `rule_id: "..."` must also mention `disabledRules` (or the Rust
   field spelling `disabled_rules`, or call `zzop_core::disable_hint`) somewhere in the
@@ -379,7 +404,7 @@ through before it ships:
    `\bUPDATE\b`), never a bare word alone. Machine-checked by the `rule_contracts` meta-test's
    `dangerous_bare_words_are_syntax_anchored_not_bare_prose_matches` test (see that test's own doc comment
    for the curated word list and exactly what the check can/cannot prove) — this is the fix that shipped for
-   `perf/api-in-loop` (bare `\bdo\b`) and `security/sql-string-concat` (bare `UPDATE`).
+   `reliability/api-in-loop` (bare `\bdo\b`) and `security/sql-string-concat` (bare `UPDATE`).
 7. **What is the nearest benign lookalike, and is it pinned as a negative fixture?** Before shipping,
    name the most common INNOCENT code that matches the same surface shape the rule keys on, and pin it
    as a negative test in the pack's `.rs` — not a synthetic near-miss, but the real-world idiom a scan
@@ -388,18 +413,22 @@ through before it ships:
    boolean prop AND Tailwind's `truncate` utility class), `security/private-key-committed` (a PEM
    header carrying a key vs a doc/i18n sentence merely *naming* the header),
    `reliability/sync-fs-in-handler` (Express's `res` vs `const res = await fetch(...)`), and
-   `perf/api-in-loop` (a request-per-iteration loop vs the universal single-fetch-then-`.map()`
+   `reliability/api-in-loop` (a request-per-iteration loop vs the universal single-fetch-then-`.map()`
    response transform). A positive fixture proves the rule CAN fire; only the benign-lookalike negative
    proves it knows when NOT to.
 8. **Does the claim need structure the matcher doesn't have?** `line-scan`/`method-scan` see text
    co-occurrence within a span — they cannot see containment (X *inside* a loop), order (X *then* Y), or
    dataflow (X *flows into* Y). If the rule's value depends on such a relation, either (a) use a
    structural fact the parser projects (e.g. `MethodScan::trigger_in_loop` over `loop_spans`, the fix
-   that replaced `perf/api-in-loop`/`sql/nplus1`/`sql/count-in-loop`'s loop-token co-occurrence after a
+   that replaced `reliability/api-in-loop`/`sql/nplus1`/`sql/count-in-loop`'s loop-token co-occurrence after a
    field audit found 11/11 false positives), or (b) keep the co-occurrence matcher but make the message
    SAY co-occurrence, in the `db/multi-write-no-tx` house style ("This is a co-occurrence heuristic,
-   not proof ..."), and cap severity at `warning` — `critical` is reserved for matchers that PROVE their
-   claim (a closed literal, an unambiguous token). Never ship a structural claim on a textual matcher.
+   not proof ..."), and cap severity at `info` — not `warning`. `critical` is reserved for matchers that
+   PROVE their claim (a closed literal, an unambiguous token), and `warning` for matchers whose halves
+   are joined by something tighter than a function body. **The cap was `warning` until 2026-09-03**, when
+   the rule below was applied to the whole class and 27 rules moved down; a new co-occurrence rule that
+   starts at `warning` is starting one band above where its evidence puts it. Never ship a structural
+   claim on a textual matcher.
 
 1. **Does a finding of this rule GATE, and can the rule check what the gate assumes?** Severity is not
    only a confidence label — `warning` and above fail a CI run under the default threshold, so choosing
@@ -411,11 +440,24 @@ through before it ships:
      spend the gate on it: report at `info`, say the premise in the message, and let `--fail-on info`
      be the user's opt-in.
 
-   **The scope of that second rule is narrow and stating it matters**, because read loosely it would
-   demote every co-occurrence rule on this page — all of which already say in their own messages that
-   they cannot prove their claim, and all of which are correctly `warning`. Unprovenness is NOT the
-   trigger. The trigger is a **measured positive signal that the premise fails for THIS finding**:
-   `duplicate-route` stays `warning` in general and drops to `info` only for a pair whose two sites are
-   found to straddle a deployment manifest, i.e. only where the rule has evidence that its
-   same-process assumption is false here. A rule that merely cannot confirm its premise keeps its
-   severity; a rule holding proof the premise is broken gives the gate up.
+   **The scope of that second rule is narrow and stating it matters**, and the line moved once. Read
+   loosely it would demote every rule that cannot fully prove its claim, which is nearly all of them.
+   **Unprovenness is still NOT the trigger.** Two things are, and they are different from each other:
+
+   - **A measured positive signal that the premise fails for THIS finding** takes the gate away for that
+     finding only: `duplicate-route` stays `warning` in general and drops to `info` for a pair whose two
+     sites are found to straddle a deployment manifest — evidence, per finding, that its same-process
+     assumption is false here.
+   - **A disqualifier the rule WROTE DOWN and cannot detect** takes the band down for the whole rule.
+     The distinction that matters is not whether the message carries a caveat — most do — but whether
+     the caveat DISQUALIFIES the finding. "The two halves are matched independently and nothing
+     establishes that they belong to the same call" disqualifies it. "The veto is lexical, so an
+     ordering built by a helper is invisible to it **and the finding still says the pages can shift**"
+     does not: that rule read its own caveat and concluded the finding survives.
+
+   This paragraph said the opposite until 2026-09-03 — it read "all of which are correctly `warning`",
+   and 27 of those rules now ship `info`. The sentence is left here rather than quietly replaced
+   because a guide that changes its mind without saying so teaches the new rule and hides that the old
+   one was ever believed. What changed is not tolerance for unproven claims; it is that a rule which
+   spells out the condition under which its own finding is wrong has already done the analysis a gate
+   would do, and is publishing the result as prose instead of as a band a machine can read.

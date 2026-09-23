@@ -40,6 +40,9 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+    # A hang must name the job that hung rather than burning GitHub's 360-minute default and
+    # reporting 'cancelled' (review ledger V27, widened to this workflow by V187). Site render plus the Pages upload/deploy pair. The same work ci.yml runs in 20 minutes for site-render-check, plus a deploy.
+    timeout-minutes: 20
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

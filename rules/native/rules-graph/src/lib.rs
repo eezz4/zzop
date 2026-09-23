@@ -43,6 +43,25 @@ const NATIVE_ANALYSES: &[(&str, &[RuleIoChannel])] = &[
     ("cache-lane-file-read", NO_IO),
 ];
 
+/// The ids from this crate that SHIP OFF -- registered and gated, evaluated only when a config names
+/// them (`rules: { "dead-candidates": "info" }`).
+///
+/// WHY THESE THREE, measured rather than argued (2026-09-03, U151-m0): across the six dogfood trees
+/// they are 2,570 of 4,164 firings -- 61.7% of everything the tool says -- and all three report `info`,
+/// which is the tool's own statement that they claim no defect. They are unused-code hygiene: the same
+/// list `knip` produces for a JS/TS project as its whole job. A first run whose top half is hygiene
+/// buries the findings that claim a defect, and every evaluator who read one wrote an allowlist by hand.
+///
+/// WHY IN THE ENGINE AND NOT THE STARTER TEMPLATE, which is where this first landed on 2026-09-02:
+/// the template is written by `zzop init` into NEW trees only, so its reach into a tree that already
+/// has a config is ZERO -- measured, on the same six trees, which still saw all 2,570. A default that
+/// cannot reach an existing user is a default in name.
+///
+/// NOTHING IS REMOVED. The analyses ship, run on request, and the reply says in its own
+/// `nativeAnalyses.shippedOff` list that they were not evaluated -- a shipped-off analysis must never
+/// read as an analysed-and-clean one.
+pub const DEFAULT_OFF: &[&str] = &["unimported-export", "dead-candidates", "unreachable"];
+
 /// Registers every native analysis id whose implementation lives in this crate (see `rules/README.md`'s
 /// "Adding a rule" section); `zzop_engine::register_all_native` composes this with the other crates' own.
 pub fn register_native_analyses(registry: &mut RuleRegistry) {

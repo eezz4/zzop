@@ -85,6 +85,7 @@ pub use asset_refs::parse_asset_refs;
 // same one either way.
 pub use call_sites::{extract_call_sites, CONSOLE_WRITE_METHODS};
 pub use dead_export_facts::{parse_dead_export_facts, DeadExportFacts};
+pub use export_aliases::parse_export_aliases;
 pub use exported_names::parse_exported_names;
 pub use function_spans::extract_function_spans;
 pub use ident_refs::parse_local_identifier_refs;
@@ -125,7 +126,7 @@ pub const PARSER_FINGERPRINT: &str =
 /// a plain identifier-property vocabulary (no receiver-type proof, no alias tracking — see
 /// [`extract_function_spans`]'s doc for the full narrowness contract).
 ///
-/// **Do not edit this list alone.** `rules/dsl/react/react.json`'s `setstate-after-async-unguarded` spells
+/// **Do not edit this list alone.** `rules/dsl/reliability/reliability.json`'s `setstate-after-async-unguarded` spells
 /// the same three methods again as the `.(?:then|catch|finally)(` arm of its `async-boundary` pattern — one
 /// policy, two spellings, because a JSON pack cannot reference a Rust constant. Narrowing this list while
 /// the rule keeps the token silently DELETES findings (the callback is no longer merged into the

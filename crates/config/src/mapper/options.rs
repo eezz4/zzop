@@ -261,6 +261,13 @@ pub(super) fn build_shared_options(
     if let Some(parsers) = config.get("parsers") {
         shared.insert("parsers".to_string(), parsers.clone());
     }
+    // `scores` passes through untouched, same contract as `parsers`: no path-shaped content (one
+    // boolean today), and forwarded only when declared, so an absent key stays absent in the request
+    // rather than arriving as an empty object. Shape is the facade deserializer's gate — a non-object
+    // value fails the LOAD there naming the field, which is the same place a malformed `parsers` fails.
+    if let Some(scores) = config.get("scores") {
+        shared.insert("scores".to_string(), scores.clone());
+    }
 
     Ok(shared)
 }

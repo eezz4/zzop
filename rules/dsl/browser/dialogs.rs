@@ -3,7 +3,56 @@
 //! `examples/packs/tests/system_dialogs.rs`, and the two fixtures that judged BOTH rules at once are
 //! duplicated there rather than cut, so neither side's negative lost what it was measured against.
 
-use crate::{scan, TempDir};
+use crate::{assert_landing_precedes_imperative, scan, TempDir};
+
+/// §33/§37 LANDING for `no-document-write`, spliced ahead of "Build DOM nodes (or set textContent)".
+///
+/// WHAT THE READER'S CORRECT EDIT COSTS (`1.architecture/rules/rule-quality.md` §27 leg 3). The
+/// message already names what `document.write` does WRONG — it breaks parsing after load and can
+/// clobber the page — and then names a substitute whose differences it does not name. Three of them,
+/// and two fail without raising: the DOM calls need a parent that exists (a call reached from `<head>`
+/// meets `document.body === null`) and a position the surrounding markup may never have named; a
+/// `<script src>` written into the token stream is parser-blocking while an appended script element
+/// loads asynchronously unless `async` is set false, so the consumer that used to find the library
+/// defined now reads `undefined`; and `textContent`, the message's own second option, prints markup as
+/// characters.
+///
+/// WHY NOT `SANITIZER_SUBTRACTION_LANDING`, the closest sibling in this batch and therefore the most
+/// dangerous reuse (§37). That constant's noun is an ALLOW-LIST, and no sanitizer appears anywhere in
+/// this remedy — splicing it here would ship a paragraph about `sanitize-html` defaults to a reader who
+/// is replacing a parser call. The `textContent` half overlaps, which is exactly why this constant
+/// states that half in its own bytes rather than borrowing them.
+///
+/// NOT A DISQUALIFIER. A reader calling `document.write` has a real finding either way; what changes is
+/// that the substitute is three decisions rather than a rename.
+///
+/// POSITION, not presence. The invalidation probe is to move this constant to the tail of the message:
+/// every token stays present and spelled exactly once, and the pin goes red on ORDER alone.
+const DOCUMENT_WRITE_TIMING_LANDING: &str = "THE DOM CALLS DO NOT INSERT WHERE OR WHEN `document.write` DID, AND TWO OF THE THREE DIFFERENCES FAIL WITHOUT RAISING. `document.write` splices its string into the token stream at the parser's current position, so there is no node to append to yet: a call reached from `<head>` meets a `document.body` that is still `null`, and one that ran mid-body has to be given an explicit parent and a position that the markup around it may never have named. A `<script src=...>` written that way is parser-blocking — the parser stops, fetches it and runs it before the next tag — whereas a script element you create and append loads ASYNCHRONOUSLY unless `async` is set to false, so code that used to find the library defined now runs first and reads `undefined`. And `textContent` is not a substitute for markup at all: it prints tags as characters, so whatever this call was writing as HTML appears as text. Read what the call actually writes before replacing it — a plain string is a one-line change, a script tag is an ordering change, and markup aimed at the parse position needs a container that exists at the moment it runs.";
+
+/// §33/§37 LANDING pin. This rule's axis-A verdict is a `NO_DISQUALIFIER` row (suppression boilerplate
+/// plus, from this change on, a landing); this is the other axis, on a delivered finding.
+#[test]
+fn no_document_write_landing_precedes_the_imperative() {
+    let dir = TempDir::new("zzop-browser");
+    dir.write(
+        "w.ts",
+        "export function f() {\n  document.write(\"<b>x</b>\");\n}\n",
+    );
+    let out = scan(&dir);
+    let hits: Vec<_> = out
+        .findings
+        .iter()
+        .filter(|f| f.rule_id == "browser/no-document-write")
+        .collect();
+    assert_eq!(hits.len(), 1, "{:?}", out.findings);
+    assert_landing_precedes_imperative(
+        "no-document-write",
+        &hits[0].message,
+        DOCUMENT_WRITE_TIMING_LANDING,
+        "Build DOM nodes (or set textContent) instead",
+    );
+}
 
 #[test]
 fn document_write_and_writeln_each_flagged_no_document_write() {

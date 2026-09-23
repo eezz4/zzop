@@ -33,6 +33,32 @@ pub fn file_summary(
     let result = zzop_facade::query_file_json(&out, &query.to_string())?;
     let mut v: serde_json::Value = serde_json::from_str(&result).map_err(|e| e.to_string())?;
     let analysis: serde_json::Value = serde_json::from_str(&out).unwrap_or(serde_json::Value::Null);
+    // THE PROSE FOLD, on this lane too. `shape_findings` has applied it to `findings.shown`
+    // (analyze/cross) since 2026-08-31; this lane never got it, and it is the lane where the waste is
+    // WORST rather than mildest. A single file is bounded, so `findings.list` is deliberately UNCAPPED
+    // — which means N findings of one rule carry N full copies of that rule's prose with no cap to
+    // stop them.
+    //
+    // 📏 Measured (external review round 20, ledger V223), `zzop file
+    // docs_src/app_testing/app_b_an_py310/test_main.py corpus/frameworks/fastapi`: 84,189 bytes, of
+    // which 70,260 were `list[].message` — SIX findings of `security/hardcoded-secret`, all carrying
+    // the same 11,710-byte text. 58,550 bytes, 70% of the whole reply, were five redundant copies of
+    // one essay.
+    //
+    // The fold lives in `output::rule_prose` and is applied HERE rather than in the facade because it
+    // is a wire-presentation concern and `zzop-facade` is the pure core (that module's own doc: "applied
+    // to the WIRE and only the wire"). Its pointer sentence names `ruleMessages` as sitting "beside this
+    // list", which is already surface-neutral — the same words are true next to `shown` and next to
+    // `list`.
+    if let Some(list) = v
+        .pointer_mut("/findings/list")
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        let folded = crate::output::rule_prose::fold(list);
+        if let Some(findings) = v.get_mut("findings") {
+            folded.publish(findings);
+        }
+    }
     // The same host-layer channels every sibling tool stamps, in the same order — the loader's own
     // warnings first, then the engine-side config diagnostics, because they are the same kind of honesty.
     v["config"] = loaded

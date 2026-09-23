@@ -1,6 +1,55 @@
-use crate::{scan, TempDir};
+use crate::{assert_landing_precedes_imperative, sanitizer_subtraction_landing, scan, TempDir};
 
 // --- markdown-and-html-sink-unsanitized ---
+
+/// §33/§37 LANDING pin, plus the one EXIT this carrier needs that the shared constant does not state.
+///
+/// WHY THE SHARED CONSTANT FITS. The remedy's first arm is `DOMPurify`/`sanitize-html` on the render
+/// output — the same allow-list, with the same subtraction — and markdown is the format whose whole
+/// point is that authors embed raw HTML in it, so the population this rule flags is disproportionately
+/// the population that loses content to a default list.
+///
+/// WHY THE EXIT IS NOT THE CONSTANT'S. The remedy's SECOND arm ("enable the renderer's own sanitize
+/// option if it has one") is thinner than it reads, and the shared sentence cannot say so because it is
+/// about sanitizers rather than about markdown renderers. `marked` deprecated and then removed its own
+/// `sanitize` option and hands the job to a dedicated sanitizer; the options that do survive elsewhere
+/// (`markdown-it` ships `html: false` by default) work by ESCAPING the embedded HTML, which is the
+/// text-substitute outcome the landing already prices — an author's `<figure>` becomes visible
+/// characters — rather than an allow-list anyone can widen. A reader who takes the second arm expecting
+/// a configurable filter gets the blunt one.
+#[test]
+fn markdown_and_html_sink_landing_precedes_the_imperative() {
+    let dir = TempDir::new("zzop-browser");
+    dir.write(
+        "Post.tsx",
+        "import { marked } from 'marked';\ndeclare const el: HTMLElement;\ndeclare const article: { body: string };\nexport function render() {\n  const html = marked(article.body);\n  el.innerHTML = html;\n}\n",
+    );
+    let out = scan(&dir);
+    let hits: Vec<_> = out
+        .findings
+        .iter()
+        .filter(|f| f.rule_id == "browser/markdown-and-html-sink-unsanitized")
+        .collect();
+    assert_eq!(hits.len(), 1, "{:?}", out.findings);
+    assert_landing_precedes_imperative(
+        "markdown-and-html-sink-unsanitized",
+        &hits[0].message,
+        sanitizer_subtraction_landing(),
+        "Run the output through DOMPurify/sanitize-html",
+    );
+    for needle in [
+        "THE RENDERER-OPTION ROUTE IS THINNER THAN IT READS",
+        "removed its own `sanitize` option",
+        "work by ESCAPING the embedded HTML",
+    ] {
+        assert!(
+            hits[0].message.contains(needle),
+            "browser/markdown-and-html-sink-unsanitized: the exit lost {needle:?} — the shared \
+             constant does not say it, so nothing else would catch its removal: {}",
+            hits[0].message
+        );
+    }
+}
 
 #[test]
 fn marked_output_into_inner_html_with_no_sanitizer_is_flagged() {

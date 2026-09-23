@@ -214,3 +214,45 @@ mod tests {
         assert_eq!(string_literal_text(lit, src), Some("hi".to_string()));
     }
 }
+
+/// Adapts this crate's cursor to [`zzop_core::cst_depth::CstCursor`], which owns the walk.
+///
+/// 🔵 Three byte-identical copies of that walk used to live here, one per tree-sitter frontend,
+/// each carrying a doc that said core could not own it because core must not depend on
+/// `tree-sitter`. The dependency reason was right; the conclusion was not. A walk over a cursor
+/// needs the cursor's three MOVES, not its type — so the walk moved and core stayed parser-free
+/// (review ledger V132).
+struct Cursor<'a, 'tree>(&'a mut tree_sitter::TreeCursor<'tree>);
+
+impl zzop_core::cst_depth::CstCursor for Cursor<'_, '_> {
+    fn goto_first_child(&mut self) -> bool {
+        self.0.goto_first_child()
+    }
+    fn goto_next_sibling(&mut self) -> bool {
+        self.0.goto_next_sibling()
+    }
+    fn goto_parent(&mut self) -> bool {
+        self.0.goto_parent()
+    }
+}
+
+/// Parse, then refuse a tree past the cap — the two steps that must never drift apart, so they live
+/// in ONE call rather than a chain at the call site. The chain also has a cost this repo has a name
+/// for: rustfmt wraps it, and that wrap alone pushed `parser-java-21/src/lib.rs` from 298 lines onto
+/// the 300-line cap for reasons having nothing to do with that change (review ledger V113).
+pub(crate) fn parse_within_depth(
+    parser: &mut tree_sitter::Parser,
+    text: &str,
+) -> Option<tree_sitter::Tree> {
+    let tree = parser.parse(text, None)?;
+    // The cursor borrows the tree, so the borrow is scoped -- otherwise the tree cannot be moved
+    // into the return value while a walk over it is still alive.
+    let deep = {
+        let mut walk = tree.walk();
+        zzop_core::cst_depth::exceeds_max_depth(&mut Cursor(&mut walk))
+    };
+    (!deep).then_some(tree)
+}
+
+#[cfg(test)]
+mod cst_depth_cap_tests;

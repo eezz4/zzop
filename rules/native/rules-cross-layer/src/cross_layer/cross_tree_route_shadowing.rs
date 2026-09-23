@@ -30,6 +30,7 @@
 
 use std::collections::BTreeMap;
 
+use super::landing::{CALLER_BREAKAGE_LANDING, HANDLER_SUBSTITUTION_LANDING};
 use super::{path_segments, split_key, HttpProvideSite};
 use zzop_core::is_test_file;
 
@@ -128,9 +129,10 @@ pub fn cross_tree_route_shadowing_findings(
              every request the literal route was meant to catch, so a gateway that tries this source's routes \
              first would swallow the other source's literal route before it ever gets there). This is a static \
              analysis and cannot see deploy topology, so this only actually bites when the two sources share a \
-             first-match gateway — confirm that first. Fix: disambiguate the route prefixes between the sources \
-             (e.g. mount each source under its own path prefix), or ensure the gateway registers literal routes \
-             before pattern routes regardless of which source provided them. {} if these sources are never \
+             first-match gateway — confirm that first. {CALLER_BREAKAGE_LANDING} IF YOU SEPARATE THEM: mount \
+             each source under its own path prefix. {HANDLER_SUBSTITUTION_LANDING} IF YOU REORDER THE \
+             GATEWAY INSTEAD: have it register literal routes ahead of pattern routes regardless of which \
+             source provided them. {} if these sources are never \
              routed through one shared gateway.",
             pattern.key,
             pattern.source,

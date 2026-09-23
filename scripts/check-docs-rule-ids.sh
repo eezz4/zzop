@@ -63,6 +63,12 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Fail on the UTILITY, not on the data: without this the GNU-only `xargs -d` surfaces as a claim
+# about this repo (a deleted file, an empty scan, a silently wrong count). See the lib header.
+# shellcheck source=scripts/lib/require-gnu.sh
+. "$repo_root/scripts/lib/require-gnu.sh"
+require_gnu_xargs "check-docs-rule-ids"
 catalog="$repo_root/docs/rules/catalog.md"
 
 [ -f "$catalog" ] || { echo "check-docs-rule-ids: missing $catalog" >&2; exit 1; }
@@ -120,7 +126,14 @@ catalog="$repo_root/docs/rules/catalog.md"
 # itself rather than trusted from this comment.
 files="$(git -C "$repo_root" ls-files -- '*.md' '*.html' \
   | sed "s|^|$repo_root/|" \
-  | xargs grep -lE 'severity|disabledRules|"(off|none|disable|disabled|critical|error|err|high|warning|warn|medium|info|information|note|low)"' 2>/dev/null || true)"
+  | xargs -d '\n' -r grep -lE 'severity|disabledRules|"(off|none|disable|disabled|critical|error|err|high|warning|warn|medium|info|information|note|low)"' 2>/dev/null || true)"
+# `-d '\n'`: without a delimiter, xargs also treats quotes and backslashes as syntax, so a tracked
+# path containing one would be silently mangled into a path that does not exist -- and this pipeline
+# ends in `|| true`, so that becomes a SHORTER file list rather than an error (2026-09-12, review
+# ledger V174). `-r` keeps an empty list from running grep over the whole cwd.
+# The residual assumption is stated rather than hidden: paths must not contain a NEWLINE, since the
+# downstream `$files` word-splitting is newline/space based either way. Measured 2026-09-12:
+# `git ls-files | grep -cE "[ \"'\\\\]"` is 0, so no tracked path exercises any of this today.
 
 # Word-splitting on $files (unquoted) is the enumeration this guard has always used; the array is
 # only a way to hand the very same list to awk as argv instead of re-splitting it per pass.

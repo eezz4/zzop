@@ -32,6 +32,10 @@ use std::fs;
 
 use zzop_summary::contracts::{self, DISCLOSURE_CONTRACT_NAME};
 
+mod reply_needle;
+
+use reply_needle::as_json_body;
+
 fn default_filters() -> zzop_summary::FindingFilters {
     zzop_summary::FindingFilters::new(None, None, None).expect("no-filter view always constructs")
 }
@@ -128,9 +132,47 @@ fn assert_folded(disclosure: &serde_json::Value, surface: &str) {
 }
 
 /// The reply must not carry the registry's PROSE anywhere — the tax this fold exists to remove.
+///
+/// # Why the needle is JSON-ENCODED, and why two canaries run before it
+/// This compared RAW prose against a SERIALIZED reply until 2026-09-02, and that comparison can be
+/// unable to match: a JSON string carries `\"` where the document carries `"`, so a needle that quotes
+/// anything is absent from every reply by construction and the assertion is green whatever the fold
+/// does. Five class bodies quote as of 2026-09-02 — `language-unparsed`, `resolution-gap`,
+/// `score-population-empty`, `capability-absent-vs-empty`, `config-error` — and any of them could be
+/// the one this needle picks.
+///
+/// It was green for a REASON, not by luck, and the reason was not the fold: [`a_class_summary`] takes
+/// the LAST body in registry order, and today that is `join-bucket-unfiltered`, which quotes nothing.
+/// Measured both ways on the same leak (the raw registry put back onto the analyze reply): with the
+/// registry's group order as it ships, the old pin FAILED — it really was watching. With `input` moved
+/// last, so the needle became the quoting `config-error`, the same leak left all five tests green. The
+/// pin's honesty was a property of which class sorted last, which is not a property anyone maintains.
+///
+/// So the needle is encoded ([`as_json_body`]) and two canaries prove the comparison can fail before
+/// any absence is claimed: the reply is first searched for a body it provably carries (the fold's own
+/// `note`), and the needle's encoding is checked against a document that provably holds it. The second
+/// is the one that catches a re-ordering — it is asked of THIS needle, whatever class supplies it.
 fn assert_no_class_prose(reply: &str, surface: &str) {
+    let needle = a_class_summary();
+    let v: serde_json::Value = serde_json::from_str(reply).expect("a reply is JSON");
+    let note = v["disclosure"]["note"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{surface}: the fold's own note must be on the wire: {v}"));
     assert!(
-        !reply.contains(&a_class_summary()),
+        reply.contains(&as_json_body(note)),
+        "{surface}: CANARY — this test cannot find a string the reply provably carries, so the \
+         absence it asserts below would be a statement about the search rather than about the fold"
+    );
+    // The needle's OWN encoding, against a haystack that holds it: the canary above uses whatever the
+    // reply happens to carry, and a needle that quotes fails while that one still passes.
+    let carrier = serde_json::json!({ "summary": &needle }).to_string();
+    assert!(
+        carrier.contains(&as_json_body(&needle)),
+        "{surface}: CANARY — the needle cannot be found even in a document built to contain it, so \
+         `contains` below can never match and this pin is vacuous: {needle}"
+    );
+    assert!(
+        !reply.contains(&as_json_body(&needle)),
         "{surface}: a blindness-class summary paragraph is still riding the reply"
     );
 }

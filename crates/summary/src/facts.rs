@@ -96,9 +96,11 @@ pub fn facts_json(paths: &[String], config_path: Option<&str>) -> Result<String,
 /// means the capability ran"). Concretely: `tool` names the build that produced the facts; every tree
 /// carries its `coverage` census (whose `joinContributionZero` is the positive "this tree extracted
 /// nothing joinable" fact) and its own `warnings` (the framework-silence self-reports); `commonIr.io`
-/// is materialized to `{provides:[],consumes:[]}` where the engine omitted the optional field; and all
-/// seven `crossLayer` buckets are materialized to `[]`. A rule author must never have to read an absent
-/// key as either "zero" or "did not run".
+/// is materialized to `{provides:[],consumes:[]}` where the engine omitted the optional field; and
+/// EVERY `crossLayer` bucket is materialized to `[]` — the roster is `cross_layer`'s own chain
+/// (`edges` + [`crate::output::KEY_BUCKETS`] + the two host/wildcard ones), not a number written here.
+/// It said "all seven" while that chain yielded eight (2026-09-12, ledger V168). A rule author must
+/// never have to read an absent key as either "zero" or "did not run".
 ///
 /// ## Determinism
 /// Byte-stable for the same input. Everything set-shaped is ALREADY ordered upstream — `ir.dep`/`ir.loc`

@@ -13,6 +13,13 @@
 //! immediately found `variable_declarator`/`enum_constant`/`field_access`/`superclass`). Without it a
 //! forward-only pin can only ever validate itself.
 pub(crate) const PINNED_NODE_KINDS: &[&str] = &[
+    // Comments, matched ONLY to be skipped — `spring_security::clauses::collect_groups` walks a
+    // customizer lambda body and a comment carries no clause. They are NAMED kinds in this grammar,
+    // which is exactly why they had to be handled: `util::valid_named_children` filters errors and
+    // missing nodes, so a comment arrived at the walker's catch-all and bailed a whole Spring Security
+    // config (measured on macrozheng/mall, 2026-09-05 — one `//` line was the entire obstacle).
+    "line_comment",
+    "block_comment",
     // Root-level hopeless-input gate (crate root `parse_tree`/`TOP_LEVEL_DECLARATION_KINDS`)
     "package_declaration",
     "import_declaration",

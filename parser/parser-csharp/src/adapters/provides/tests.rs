@@ -1,4 +1,9 @@
-use super::*;
+/// Every case here is about extraction SHAPE, not about which names a project declared, so each runs
+/// under zzop's own suggested vocabulary. SHADOWS the crate entry point of the same name, so the cases
+/// read exactly as they did before `vocabulary.csharpRootRouteBuilderVariableNames` existed.
+fn extract_csharp_http_provides(rel: &str, text: &str) -> Vec<zzop_core::IoProvide> {
+    super::extract_csharp_http_provides(rel, text, &crate::CSharpRouteVocab::built_in())
+}
 
 #[test]
 fn attribute_controller_composes_class_and_method_route() {
@@ -220,10 +225,11 @@ fn minimal_api_non_literal_path_is_skipped() {
 }
 
 #[test]
-fn minimal_api_cross_statement_group_variable_is_not_mis_keyed() {
-    // `api` is a cross-statement `MapGroup("/api")` variable whose prefix this v1 cannot see. Emitting a
-    // bare `GET /ping` would be a WRONG key (real route is `/api/ping`), so it must be SKIPPED entirely —
-    // never a prefix-less guess. Only the `app` root's own bare route is kept.
+fn minimal_api_cross_statement_group_variable_is_keyed_with_its_prefix() {
+    // `api` is a cross-statement `MapGroup("/api")` variable. Until this landed the prefix was unseeable,
+    // so the registration was SKIPPED outright (a bare `GET /ping` would have been a wrong key). It is now
+    // RESOLVED from the declarator, which is what this pin asserts — and the never-guess half it replaces
+    // is asserted by `minimal_api_an_unresolvable_group_variable_is_still_skipped` below.
     let src = r#"
         var app = builder.Build();
         app.MapGet("/health", () => "ok");
@@ -233,10 +239,89 @@ fn minimal_api_cross_statement_group_variable_is_not_mis_keyed() {
     let provides = extract_csharp_http_provides("f.cs", src);
     assert!(provides.iter().any(|p| p.key == "GET /health"));
     assert!(
-        !provides.iter().any(|p| p.key == "GET /ping"),
-        "bare non-`app` receiver must not emit a prefix-less key"
+        provides.iter().any(|p| p.key == "GET /api/ping"),
+        "the group variable's prefix must compose: {provides:?}"
     );
-    assert!(!provides.iter().any(|p| p.key == "GET /api/ping"));
+    assert!(
+        !provides.iter().any(|p| p.key == "GET /ping"),
+        "and it must never be keyed prefix-less"
+    );
+}
+
+#[test]
+fn minimal_api_an_unresolvable_group_variable_is_still_skipped() {
+    // The never-guess floor the pin above used to hold: a bare receiver this file's declarators say
+    // nothing about carries an unknown prefix, so the registration is skipped rather than keyed bare.
+    let src = r#"
+        public static void Map(IEndpointRouteBuilder api)
+        {
+            api.MapGet("/ping", () => "pong");
+        }
+    "#;
+    let provides = extract_csharp_http_provides("f.cs", src);
+    assert!(provides.is_empty(), "{provides:?}");
+}
+
+#[test]
+fn minimal_api_a_builder_call_after_map_group_keeps_the_prefix() {
+    // dotnet/eShop @ae71a061's real shape — EVERY one of its 5 `MapGroup` lines has a builder call after
+    // the group AND assigns to a variable, which is why fixing either half alone moved nothing there.
+    let src = r#"
+        var vApi = app.NewVersionedApi("Catalog");
+        var api = vApi.MapGroup("api/catalog").HasApiVersion(1, 0).HasApiVersion(2, 0);
+        api.MapGet("/items/by", GetItemsByIds).WithName("BatchGetItems");
+    "#;
+    let provides = extract_csharp_http_provides("f.cs", src);
+    let keys: Vec<&str> = provides.iter().map(|p| p.key.as_str()).collect();
+    assert_eq!(keys, vec!["GET /api/catalog/items/by"], "{provides:?}");
+    assert_eq!(provides[0].symbol.as_deref(), Some("GetItemsByIds"));
+}
+
+#[test]
+fn minimal_api_a_non_literal_map_group_poisons_its_chain() {
+    // The segment a non-literal group would contribute is a real part of the path, so continuing without
+    // it would produce a confidently WRONG key. The whole chain is refused instead.
+    let src = r#"
+        var api = app.MapGroup(Prefix).HasApiVersion(1, 0);
+        api.MapGet("/ping", () => "pong");
+    "#;
+    let provides = extract_csharp_http_provides("f.cs", src);
+    assert!(provides.is_empty(), "{provides:?}");
+}
+
+#[test]
+fn minimal_api_a_group_variable_declared_twice_with_two_prefixes_is_ambiguous() {
+    // File-scoped map: two methods in one file each spelling `var api = ...` with DIFFERENT groups
+    // silence each other rather than letting one speak for the other.
+    let src = r#"
+        public static void A(IEndpointRouteBuilder app)
+        {
+            var api = app.MapGroup("/a");
+            api.MapGet("/ping", () => "pong");
+        }
+        public static void B(IEndpointRouteBuilder app)
+        {
+            var api = app.MapGroup("/b");
+            api.MapPost("/pong", () => "ping");
+        }
+    "#;
+    let provides = extract_csharp_http_provides("f.cs", src);
+    assert!(
+        provides.is_empty(),
+        "ambiguous group name must key nothing: {provides:?}"
+    );
+}
+
+#[test]
+fn minimal_api_nested_group_variables_compose() {
+    let src = r#"
+        var api = app.MapGroup("/api");
+        var v1 = api.MapGroup("/v1").WithTags("V1");
+        v1.MapGet("/items", GetItems);
+    "#;
+    let provides = extract_csharp_http_provides("f.cs", src);
+    let keys: Vec<&str> = provides.iter().map(|p| p.key.as_str()).collect();
+    assert_eq!(keys, vec!["GET /api/v1/items"], "{provides:?}");
 }
 
 #[test]

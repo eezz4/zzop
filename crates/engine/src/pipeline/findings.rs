@@ -151,14 +151,15 @@ pub(crate) fn append_hints(packs: &[&RulePackDef], findings: &mut [zzop_core::Fi
              dropped — pass the packs that produced these findings",
             finding.rule_id
         );
-        if let Some(sentence) = rule.and_then(zzop_core::dsl::suppress_hint) {
-            finding.message = format!("{} {sentence}", finding.message);
-        }
-        finding.message = format!(
-            "{} {}",
-            finding.message,
-            zzop_core::disable_hint(&finding.rule_id)
-        );
+        // Assembled by `zzop_core::dsl::message_with_hints` rather than here, because `zzop-facade`
+        // asks the MIRROR question — "is this finding's text exactly what that rule alone would have
+        // produced?" — before it replaces the text with a pointer (`output-philosophy.md` §3.5). Two
+        // sites assembling the same tail is how the answer starts differing from the text.
+        //
+        // The `None` arm is the pre-existing behaviour, unchanged and now owned by that function:
+        // no suppress sentence, disable hint still appended.
+        finding.message =
+            zzop_core::dsl::message_with_hints(rule, &finding.rule_id, &finding.message);
     }
 }
 

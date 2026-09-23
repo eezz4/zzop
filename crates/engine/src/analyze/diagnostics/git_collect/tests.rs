@@ -73,7 +73,7 @@ mod compile_coupling_tests {
     #[test]
     fn an_invalid_pattern_is_judged_invalid_by_the_validator_and_never_tags_in_zzop_git() {
         // An unclosed character class — fails to compile as a regex (same pattern
-        // `crates/engine/tests/analyze_git.rs`'s end-to-end warning-path test uses).
+        // `crates/engine/tests/integration/analyze_git.rs`'s end-to-end warning-path test uses).
         let pattern = "[unclosed";
         let mut warnings = Vec::new();
         warn_on_invalid_commit_type_patterns(

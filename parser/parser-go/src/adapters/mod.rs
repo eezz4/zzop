@@ -1,14 +1,23 @@
 //! Framework-vocabulary producers emitting cross-layer IO facts — see crate root doc's "Layout"
-//! section. `net_http`/`gin` each independently import-gate and produce `RouterMountFragment`s;
-//! `extract_go_router_fragments` (this module) parses ONCE and hands the same tree to both (crate root
-//! doc's "parse once per public fn call" discipline — two sibling PRODUCERS sharing one parse of the
-//! same public call is not a second parse, unlike two different PUBLIC FNS each parsing independently).
-//! `http_clients` is the CONSUME-side counterpart, exposed directly as its own public fn.
+//! section. Each provide-side producer independently decides whether it reads a file and produces
+//! `RouterMountFragment`s; `extract_go_router_fragments` (this module) parses ONCE and hands the same
+//! tree to all of them (crate root doc's "parse once per public fn call" discipline — sibling PRODUCERS
+//! sharing one parse of the same public call is not a second parse, unlike two different PUBLIC FNS
+//! each parsing independently). `http_clients` is the CONSUME-side counterpart, exposed directly as its
+//! own public fn.
+//!
+//! 🔴 **They do not all gate the same way, and that is the load-bearing difference.** `net_http` and
+//! `gin` key on an IMPORT; `router_wrapper` has none to key on, because the router it reads is the
+//! project's own type, so it keys on the SHAPE of the registration call instead. Which files each one
+//! declines is therefore a property no caller can infer from "does this import a framework" — each
+//! producer's module doc owns its own answer, and `router_wrapper`'s additionally owns the boundary
+//! that stops the shape-gated lane from double-emitting what an import-gated one already read.
 
 pub mod gin;
 pub mod gorm;
 pub mod http_clients;
 pub mod net_http;
+pub mod router_wrapper;
 
 use std::collections::HashMap;
 
@@ -18,12 +27,16 @@ use zzop_core::RouterMountFragment;
 
 use crate::util::valid_named_children;
 
-/// Combined `net/http` + `gin` router-mount fragments for one file — see `adapters::net_http` and
-/// `adapters::gin`'s own module docs for each producer's recognized shapes. Empty on parse failure, and
-/// whenever the file imports NEITHER framework (never panics). A file importing both frameworks emits
-/// both producers' fragments concatenated (net/http's first) with no cross-producer name reconciliation
-/// — document rather than engineer around, the same "rare pattern" tradeoff
+/// Every producer's router-mount fragments for one file, concatenated in the fixed order below — see
+/// each producer's own module doc for its recognized shapes. Empty on parse failure, and whenever no
+/// producer recognizes anything (never panics).
+///
+/// A file that two producers both read emits both sets of fragments with no cross-producer name
+/// reconciliation — document rather than engineer around, the same "rare pattern" tradeoff
 /// `zzop_parser_rust::adapters::axum`'s module doc accepts for its own file-global receiver-name model.
+/// The one overlap that would have produced the SAME route twice is prevented at the source instead of
+/// reconciled here: `router_wrapper` declines a gin-importing file outright (its module doc says why
+/// `.Any` is the collision and why gin's reader wins it).
 pub fn extract_go_router_fragments(rel: &str, text: &str) -> Vec<RouterMountFragment> {
     let _ = rel; // accepted for public-API parity with this crate's other extractors — unused, see
                  // `zzop_parser_python_3::adapters::fastapi::extract_fastapi_router_fragments`'s own doc
@@ -34,6 +47,11 @@ pub fn extract_go_router_fragments(rel: &str, text: &str) -> Vec<RouterMountFrag
     let imports = crate::lang::imports::parse_imports(text);
     let mut out = net_http::extract(&tree, &imports, text);
     out.extend(gin::extract(&tree, &imports, text));
+    // Third producer, and the only one with no import to gate on — it reads a project's OWN router type
+    // by the SHAPE of the registration call. Its module doc owns the ownership boundary that keeps the
+    // three from double-emitting (it declines gin-importing files outright, and `Handle`/`HandleFunc`
+    // stay net/http's), and the corpus measurement that says the shape is safe to key on.
+    out.extend(router_wrapper::extract(&tree, &imports, text));
     out
 }
 

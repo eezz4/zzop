@@ -13,8 +13,9 @@
 //   so an automated lane would have nothing to point this at and would either fail permanently or pass
 //   vacuously — and passing vacuously is the exact defect this gate exists to prevent, one level up.
 //
-// So: run it by hand after any vocabulary rename, and after re-fetching the corpus
-// (`.claude/context/0.guides/dogfood-corpus.md`). If the corpus ever becomes tracked, this note and the
+// So: run it by hand after any vocabulary rename, and after re-fetching the corpus (the recipe for
+// that lives in this repo's maintainer notes, which are not published). If the corpus ever becomes
+// tracked, this note and the
 // HAND_RUN_TOOLS entry both come out and it gets a real lane.
 //
 // ## Why this exists

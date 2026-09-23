@@ -4,6 +4,16 @@
 
 use super::*;
 
+/// Both entry points under zzop's own suggested vocabulary, SHADOWING the real ones so every case below
+/// reads as it did before `vocabulary.csharpRootRouteBuilderVariableNames` existed.
+fn extract_csharp_http_provides_project(files: &[(String, String)]) -> CSharpProjectProvidesReport {
+    super::extract_csharp_http_provides_project(files, &crate::CSharpRouteVocab::built_in())
+}
+
+fn per_file_provides(rel: &str, text: &str) -> Vec<zzop_core::IoProvide> {
+    crate::extract_csharp_http_provides(rel, text, &crate::CSharpRouteVocab::built_in())
+}
+
 fn keys(report: &CSharpProjectProvidesReport) -> Vec<String> {
     let mut v: Vec<String> = report.provides.iter().map(|p| p.key.clone()).collect();
     v.sort();
@@ -263,7 +273,7 @@ fn genuinely_distinct_non_partial_same_name_classes_still_drop_as_ambiguous() {
 fn per_file_pass_still_drops_the_non_literal_route_unchanged() {
     // The per-file pass has no corpus — its documented drop/block behavior is byte-identical after this change.
     let src = "[ApiController]\n[Route(\"api\")]\npublic class UsersController {\n  [HttpGet(Routes.List)]\n  public string List() { return \"\"; }\n  [HttpPost(\"create\")]\n  public string Create() { return \"\"; }\n}";
-    let provides = crate::extract_csharp_http_provides("UsersController.cs", src);
+    let provides = per_file_provides("UsersController.cs", src);
     let mut got: Vec<&str> = provides.iter().map(|p| p.key.as_str()).collect();
     got.sort();
     assert_eq!(got, vec!["POST /api/create"]);
@@ -284,7 +294,7 @@ fn literal_routes_match_the_per_file_pass_so_replacement_is_behavior_neutral() {
     // A controller with only literal routes must produce the SAME keys the per-file pass does (the engine
     // REPLACES per-file C# http provides with this pass's output — literal routes must survive intact).
     let src = "[ApiController]\n[Route(\"api/[controller]\")]\npublic class UsersController {\n  [HttpGet(\"{id}\")]\n  public string Get(int id) { return \"\"; }\n}";
-    let per_file = crate::extract_csharp_http_provides("UsersController.cs", src);
+    let per_file = per_file_provides("UsersController.cs", src);
     let report = extract_csharp_http_provides_project(&[(
         "UsersController.cs".to_string(),
         src.to_string(),

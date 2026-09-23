@@ -28,6 +28,7 @@ fn healthy() -> DiagnosticsInput {
         unknown_suppression_rule_ids: Vec::new(),
         unknown_only_pack_ids: Vec::new(),
         only_packs_matched_nothing: false,
+        only_packs_active: false,
     }
 }
 
@@ -252,6 +253,7 @@ fn does_not_warn_about_empty_signals_on_an_empty_repo() {
         unknown_suppression_rule_ids: Vec::new(),
         unknown_only_pack_ids: Vec::new(),
         only_packs_matched_nothing: false,
+        only_packs_active: false,
     });
     assert!(d.warnings.is_empty());
 }
@@ -273,6 +275,7 @@ fn git_none_suppresses_every_git_window_warning_even_with_pathological_file_coun
         unknown_suppression_rule_ids: Vec::new(),
         unknown_only_pack_ids: Vec::new(),
         only_packs_matched_nothing: false,
+        only_packs_active: false,
     });
     assert!(!d
         .warnings
@@ -428,4 +431,62 @@ fn unknown_suppression_rule_ids_are_sorted_and_deduplicated_in_the_warning() {
         .expect("expected an unknown-suppression-rule-id warning");
     assert!(w.contains("2 entries"));
     assert!(w.contains("a-pack/typo, z-pack/typo"));
+}
+
+/// The pack allowlist's WORKING case reports; the un-narrowed run stays silent; and the total-typo
+/// case keeps its own, different sentence.
+///
+/// 🔴 Every other member of this config-report family fires on a config entry that did NOTHING. This
+/// one fires on an entry that did exactly what it says and LESS than the reader expects, so the two
+/// silences below are the test: a run with no allowlist must say nothing (or the sentence becomes
+/// noise on every reply), and the total-typo run must NOT get this wording (it already has one that
+/// says every DSL rule was gated off, and borrowing this softer sentence there would understate it).
+///
+/// 📏 The measurement behind it (review ledger V232), `corpus/frameworks/express` with
+/// `packs: { "only": ["security"] }`: 58 findings -> 51, of which 29 are `duplicate-route` and
+/// `mutating-route-no-auth` — native ids the allowlist never named — while `configWarnings` was `[]`.
+#[test]
+fn an_active_pack_allowlist_says_the_native_analyses_are_not_gated_by_it() {
+    let needle = "gates DSL PACKS ONLY";
+
+    let quiet = build_diagnostics(healthy());
+    assert!(
+        !quiet.config_warnings.iter().any(|w| w.contains(needle)),
+        "a run with no allowlist must not carry this sentence: {:?}",
+        quiet.config_warnings
+    );
+
+    let mut active = healthy();
+    active.only_packs_active = true;
+    let reported = build_diagnostics(active);
+    assert_eq!(
+        reported
+            .config_warnings
+            .iter()
+            .filter(|w| w.contains(needle))
+            .count(),
+        1,
+        "exactly one sentence, once: {:?}",
+        reported.config_warnings
+    );
+
+    // The total-typo case is a DIFFERENT state and keeps its own report: the allowlist admitted no
+    // pack at all, so "native analyses still ran" is true there for the opposite reason.
+    let mut typo = healthy();
+    typo.unknown_only_pack_ids = vec!["nosuchpack".to_string()];
+    typo.only_packs_matched_nothing = true;
+    let typo_out = build_diagnostics(typo);
+    assert!(
+        !typo_out.config_warnings.iter().any(|w| w.contains(needle)),
+        "the total-typo case must keep its own stronger wording: {:?}",
+        typo_out.config_warnings
+    );
+    assert!(
+        typo_out
+            .config_warnings
+            .iter()
+            .any(|w| w.contains("EVERY DSL rule was gated off")),
+        "the total-typo report went missing: {:?}",
+        typo_out.config_warnings
+    );
 }

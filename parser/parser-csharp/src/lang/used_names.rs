@@ -69,17 +69,35 @@ pub fn parse_local_identifier_refs(text: &str) -> BTreeSet<String> {
     };
     let mut refs = BTreeSet::new();
     let mut cursor = tree.walk();
-    walk(&mut cursor, text, &mut refs);
+    walk(&mut cursor, text, &mut refs, None);
     refs
 }
 
-fn walk(cursor: &mut TreeCursor, src: &str, out: &mut BTreeSet<String>) {
+/// `parent_kind` is threaded DOWN rather than looked up, and that is a performance contract rather
+/// than a style choice (review ledger V116).
+///
+/// 📏 [`is_declared_name`] used to ask `node.parent()`. `ts_node_parent` is O(DEPTH) — tree-sitter
+/// finds a parent by descending from the root — and this walk asks it once per identifier. In a
+/// right-nested expression (`b ? 1 : b ? 1 : …`) identifiers sit at every depth, so the sum is
+/// O(n²). Measured on this file, same identifier count, deep vs flat shape: 500/1,000/2,000 terms
+/// cost 61 / 324 / 1,891 ms nested against 17 / 31 / 65 ms flat — 5.3× and 5.8× per doubling on one
+/// side, 2.0× on the other, with the FLAT file 2.8× larger. Removing the `parent()` call made the
+/// nested curve 10 / 21 / 42 ms: linear, and 45× faster at 2,000.
+///
+/// The cursor already knows the parent — it is the node we were standing on before descending. So
+/// the answer is carried down the recursion instead of recomputed from the root at every leaf.
+fn walk(
+    cursor: &mut TreeCursor,
+    src: &str,
+    out: &mut BTreeSet<String>,
+    parent_kind: Option<&'static str>,
+) {
     loop {
         let node = cursor.node();
         if !node.is_error() && !node.is_missing() {
-            let stop_here = visit(node, cursor.field_name(), src, out);
+            let stop_here = visit(node, cursor.field_name(), parent_kind, src, out);
             if !stop_here && cursor.goto_first_child() {
-                walk(cursor, src, out);
+                walk(cursor, src, out, Some(node.kind()));
                 cursor.goto_parent();
             }
         }
@@ -91,9 +109,15 @@ fn walk(cursor: &mut TreeCursor, src: &str, out: &mut BTreeSet<String>) {
 
 /// Visits one node, returning `true` when the walk must NOT descend into its children (the
 /// `qualified_name`/`alias_qualified_name` "rightmost segment only, no further descent" rule).
-fn visit(node: Node, field: Option<&str>, src: &str, out: &mut BTreeSet<String>) -> bool {
+fn visit(
+    node: Node,
+    field: Option<&str>,
+    parent_kind: Option<&str>,
+    src: &str,
+    out: &mut BTreeSet<String>,
+) -> bool {
     match node.kind() {
-        "identifier" if !is_declared_name(node, field) => {
+        "identifier" if !is_declared_name(parent_kind, field) => {
             out.insert(node_text(node, src).to_string());
             false
         }
@@ -128,11 +152,14 @@ fn simple_name_text(node: Node, src: &str) -> Option<String> {
 }
 
 /// See module doc's "excluded declaration positions".
-fn is_declared_name(node: Node, field: Option<&str>) -> bool {
-    let Some(parent) = node.parent() else {
+/// Takes the parent's KIND rather than the node, because asking the node costs O(depth) — see
+/// [`walk`]'s doc for the measurement. Behaviour is unchanged: a node with no parent (the root)
+/// passes `None` and is not a declared name, which is what the old `let Some(parent) = …` arm did.
+fn is_declared_name(parent_kind: Option<&str>, field: Option<&str>) -> bool {
+    let Some(parent_kind) = parent_kind else {
         return false;
     };
-    field == Some("name") && DECLARES_NAME_FIELD.contains(&parent.kind())
+    field == Some("name") && DECLARES_NAME_FIELD.contains(&parent_kind)
 }
 
 #[cfg(test)]

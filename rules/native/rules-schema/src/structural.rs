@@ -7,31 +7,6 @@ use serde::{Deserialize, Serialize};
 
 use zzop_core::{SchemaModel, Severity};
 
-/// Version token for what this crate's rules EMIT, folded into the ruleset cache fingerprint so a stale
-/// cache doesn't keep serving old `schema/*` findings. Restamp with the current `CARGO_PKG_VERSION`
-/// (2026-07-22 version reform: cache-bust tokens are package-version stamps).
-///
-/// TWO LANES, ONE TOKEN — decide a bump on the lane, not on the crate:
-/// - CACHED: `structural.rs`'s rules run in the fused per-file pass (`engine`'s `pipeline::schema_findings`)
-///   and their findings are WRITTEN to and served verbatim from the per-file findings cache entry. Any change
-///   that alters what they emit — a rule body, a threshold, or the shared MESSAGE text in `message.rs` —
-///   needs a bump here, or a warm cache keeps serving the old finding for byte-identical source.
-/// - NOT CACHED: `usage.rs`'s rules run from `analyze::assemble`'s whole-tree stage
-///   (`pipeline::schema_usage_findings`) and are recomputed every run, so a usage-only change needs no bump.
-///
-/// The trap was `message.rs`: it is shared by both lanes, so "usage isn't cached, no bump" does NOT
-/// generalize to it. The 0.22.0 -> 0.24.0 bump was exactly that case — `family_disable_hint` became
-/// `issue_disable_hint`, changing the message text of every cached STRUCTURAL finding, and nothing but
-/// an author's memory connected the two.
-///
-/// **Since 2026-07-29 this const no longer has to be right.** `crates/engine/build.rs` hashes this whole
-/// crate's dependency closure into the cache key alongside this string, so the `message.rs` case — and
-/// every case like it — invalidates on its own. What survives here is the human-readable half: a version
-/// a person can read in a cache path. Bump it when you want to SAY something changed; correctness no
-/// longer depends on you noticing. The lane split above is still worth reading — it explains which
-/// changes have a cache consequence at all — but it is now an explanation, not an obligation.
-pub const STRUCTURAL_RULES_VERSION: &str = "0.33.0";
-
 /// A structural schema issue (source-agnostic; from a single model/field). `camelCase` here matches
 /// every other output-facing type, since this struct serializes verbatim into `Finding.data`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

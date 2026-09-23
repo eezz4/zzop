@@ -190,6 +190,12 @@ fn a_tree_with_no_io_projection_contributes_nothing_but_does_not_panic() {
 /// - `/ping` is provided by ONE backend tree AND matches the default low-confidence table -> edge with
 ///   `lowConfidenceReason` set.
 /// - an absolute-URL fetch -> `external`, never joined even though nothing internal provides it either.
+///
+/// The `/ping` half is the FIRING PIN for the `coincidental-match` blindness class: that row is
+/// labelled `asserted`, and what it asserts is exactly that a key matching the shipped generic-path
+/// table carries its low-confidence reason, with no heuristic in between. `/health` beside it is the
+/// negative control on the other gate (two providers -> ambiguous, no edge at all), so a run that
+/// attached the reason to everything would fail here rather than pass.
 #[test]
 fn analyze_trees_surfaces_ambiguous_external_and_low_confidence_buckets() {
     let fe = TempDir::new("zzop-engine-multi-fe-gates");

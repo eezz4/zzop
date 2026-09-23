@@ -44,7 +44,7 @@
 #
 # It was NOT re-pointed at a revived full copy anywhere (site/reference.html, docs/), and that is a
 # judgment rather than a shrug. That text has exactly one owner and always did:
-# `crates/config/src/template.rs`'s `CONFIG_TEMPLATE_JSONC`, which is what `zzop init` writes, what
+# `crates/config/src/config-template.jsonc`'s `CONFIG_TEMPLATE_JSONC`, which is what `zzop init` writes, what
 # `zzop contract config-template` prints, and what MCP serves as `zzop://contract/config-template`. The
 # site copy was a hand-maintained SECOND copy of it, and a second copy of a document nobody regenerates
 # is this repo's most-paid-for defect class. Its own header records the drift it has already suffered.
@@ -216,6 +216,45 @@ const keyRe = /"([A-Za-z_][A-Za-z0-9_]*)"\s*:/g;
 const stripComments = (body) =>
   body.split("\n").filter((l) => !/^\s*(\/\/|\/\*|\*)/.test(l)).join("\n");
 
+// INSIDE `"rules": { … }` THE KEYS ARE RULE IDS, NOT CONFIG KEYS, so that object is blanked before the
+// key scan runs. Two different vocabularies share this syntax, and only one of them is this guard'"'"'s.
+//
+// The blind spot was structural: keyRe only matches bare-identifier keys, and almost every rule id
+// carries a `-` or a `/` (`sql/count-in-loop`, `dead-candidates`), so they fell out silently and the
+// collision never fired. A SINGLE-WORD native id does not — `docs/getting-started.md` gained
+// `"unreachable": "info"` on 2026-09-03 and this guard reported it as a config key that does not exist.
+// It would have said the same about `"circular": "off"` at any point in the last year.
+//
+// Blanking rather than allowlisting, and NOT skipping the whole block: the sibling keys around a
+// `rules` object are real config keys and stay judged. The ids inside it are already owned — by
+// `check-docs-rule-ids.sh`, which validates every `rules:` example key against `docs/rules/catalog.md`
+// and knows the pack-prefix requirement this guard could not express. Two guards judging one token
+// against two dictionaries is how one of them ends up wrong.
+//
+// The span is found by brace counting from the `{` after the key, so a nested per-rule object
+// (`{ "severity": …, "exclude": [] }`) is covered too — `severity` and `exclude` are legal config
+// words elsewhere, but inside a rule entry they are that entry'"'"'s shape, not top-level keys.
+function blankRuleIdObjects(body) {
+  let out = body;
+  const anchor = /"rules"\s*:\s*\{/g;
+  let m;
+  while ((m = anchor.exec(out))) {
+    let depth = 0;
+    let i = m.index + m[0].length - 1;
+    for (; i < out.length; i++) {
+      if (out[i] === "{") depth++;
+      else if (out[i] === "}") { depth--; if (depth === 0) break; }
+    }
+    // An unbalanced example (a `…` elision, a truncated snippet) runs to the end; blanking to the end
+    // is the safe direction — it under-judges one block rather than misjudging its ids.
+    const stop = i < out.length ? i + 1 : out.length;
+    const start = m.index + m[0].length;
+    out = out.slice(0, start) + out.slice(start, stop).replace(/[^\n]/g, " ") + out.slice(stop);
+    anchor.lastIndex = stop;
+  }
+  return out;
+}
+
 const offenders = [];
 let scanned = 0;
 let scannedSiteConfig = false;
@@ -238,7 +277,7 @@ for (const file of files) {
     //     a file surface" confusion the skip list below exists to prevent. Widening the <pre> needle
     //     above is what made it reachable, so the two changes land together.
     const named = /^[ \t]*\/\/.*zzop\.config/im.test(b.body) || /zzop\.config/i.test(introducing(b.lead));
-    const body = stripComments(b.body);
+    const body = blankRuleIdObjects(stripComments(b.body));
     if (!/[{[]/.test(body)) continue;
     keyRe.lastIndex = 0;
     const first = keyRe.exec(body);

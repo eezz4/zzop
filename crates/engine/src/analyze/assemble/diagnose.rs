@@ -68,6 +68,11 @@ pub(super) fn sweep(
     io_provides: &[IoProvide],
     io_consumes: &[IoConsume],
     warnings: &mut Vec<String>,
+    // The lexically-visible route-registration count, set only when the provide-side trio measured it
+    // (S2's precondition). Rides out of this phase because its second reader is the run-wide
+    // provide-blind severity gate, which cannot re-derive the file set without risking a different
+    // population than the extractor saw — see `provide_side_warnings`.
+    visible_route_registrations_out: &mut Option<usize>,
 ) -> DslScope {
     let config = input.config;
     // One census, three consumers: both pack warnings below and `packs_loaded`'s `files_in_scope` count.
@@ -121,6 +126,7 @@ pub(super) fn sweep(
         &config.vocabulary.resolve().fetch_wrapper_export_names,
         &config.rule_config,
         input.overlay_io,
+        visible_route_registrations_out,
     ));
     // AFTER the tripwires, deliberately. Those say "zzop cannot see this framework"; this says "and
     // here is what a caller handed it instead". Read in that order the pair is one story; reversed, the

@@ -82,6 +82,76 @@ for p in "$cases_dir" "$expected"; do
   fi
 done
 
+# --- THE VERDICT STAMP ---------------------------------------------------------------------------
+#
+# ## The defect this exists for, and it is not a rule
+#
+# MEASURED: this gate was red from 9b89e62 (2026-08-21) for roughly ninety commits and nobody knew.
+# Three unrelated commits each took one expectation, the rule was right all three times, and the key
+# was stale. `detection-gate-if-touched.sh` now runs this script from the commit that causes the next
+# one — but that only closes the case where a commit BOTH stages a trigger path AND runs the gate to
+# completion. What left the eight days invisible is narrower and outlives that fix: A RED RUN LEFT NO
+# TRACE. When this script exits 1, the only place the verdict exists is the terminal it printed to.
+# The next commit that stages nothing under the trigger paths says "detection gate not armed" and
+# exits 0, and so does every commit after it. Silence after a red and silence after no run are the
+# same bytes on screen.
+#
+# `scripts/ci-local.sh` already writes `.zzop/last-verified` (sha, time) after its whole mirror
+# passes, and this repo's maintainer-side review meter reads it every turn. That stamp cannot
+# carry this: it is written ONLY on success, so a red detection gate makes ci-local `fail` before the
+# write and leaves the PREVIOUS sha in place. The reader then reports "stale", which is what it
+# reports when nobody ran anything — the exact conflation that hid the ninety commits.
+#
+# So this stamp records the VERDICT, including the failing one, and is written on the way in as well
+# as on the way out. Its reader is scripts/detection-gate-staleness.sh, which .githooks/pre-commit
+# runs on EVERY commit, armed or not.
+#
+# ## Three states, and why `started` is one of them
+#   started    — this script began and has not reached a verdict. Left behind by a kill, a failed
+#                harness selftest, a failed release build, or a run still in progress. It is NOT
+#                "aborted": from outside, a gate that is still compiling and a gate that died look
+#                identical, and inventing a fourth state to pretend otherwise would be a claim this
+#                script cannot make. What the reader needs is that it is not a verdict.
+#   clean      — benchmark.mjs exited 0 against cases/EXPECTED.jsonc.
+#   regressed  — benchmark.mjs exited nonzero: FN and/or FP against the key.
+#
+# The distinction between `started` and `regressed` is the same one this gate's own preflight was
+# taught on 2026-08-29, when a missing `rustc` printed "re-adjudicate the answer key" over a PATH
+# problem. An environment failure must not be recorded wearing a detection failure's clothes.
+#
+# ## Why .zzop/ and why it may vanish
+# `**/.zzop/` is gitignored, so the stamp is local BY CONSTRUCTION and cannot travel to another
+# checkout to be read as a claim about that tree — the same reasoning ci-local.sh's stamp states. The
+# directory is derived state and anything may delete it; losing the stamp then reads as "never
+# recorded", which is the loud direction, not the silent one.
+#
+# ## What it deliberately does NOT claim
+# A stamp says a run happened at a sha and what it answered. It says nothing about uncommitted edits
+# made after it, and nothing about the paths this run did not cover. The reader prints both caveats.
+GATE_STAMP=".zzop/detection-gate-last-run"
+
+# Four space-separated fields: verdict, HEAD sha, epoch seconds, ISO-8601 UTC. Epoch is stored rather
+# than derived from the ISO field by the reader because the reader runs from `.githooks/pre-commit`,
+# whose PATH on macOS is the BSD userland: `date -d` does not exist there, and a reader that computed
+# an age from the timestamp would be right on Linux and silently wrong here. Both fields are kept —
+# the epoch is for arithmetic, the ISO is for the human reading the file with `cat`.
+#
+# It can never fail this gate. A stamp is a report ABOUT the run; a run that scored 292/292 and then
+# could not write a file under .zzop/ has still scored 292/292, and turning that into a nonzero exit
+# would be a new way for an environment problem to wear a detection failure's clothes — the very thing
+# the state list above exists to prevent.
+gate_stamp() { # <verdict>
+  mkdir -p "$(dirname "$GATE_STAMP")" 2> /dev/null || return 0
+  printf '%s %s %s %s\n' \
+    "$1" \
+    "$(git rev-parse HEAD 2> /dev/null || echo unknown)" \
+    "$(date -u +%s)" \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    > "$GATE_STAMP" 2> /dev/null || return 0
+  return 0
+}
+gate_stamp started
+
 # PREFLIGHT — prove the harness can still go red before trusting a number it produces.
 # Everything below depends on snapshot.mjs ABORTING rather than writing a zero, and the accident this
 # whole harness was built around wrote 22 zero-byte files that read as "460 findings -> 0, all fixed".
@@ -102,6 +172,34 @@ done
 # simply the only automated place snapshot.mjs runs, so it is where the proof gets to run too.
 # Before 2026-07-29 nothing ran it at all: the stub's build-and-run loop was a comment.
 bash scripts/measure/harness-selftest.sh
+
+# SECOND PREFLIGHT — is every fixture that names a rule actually SCORED by the key below?
+#
+# The selftest above proves the harness can still go red. This proves the CORPUS can: a fixture named
+# after a rule but anchored nowhere in cases/EXPECTED.jsonc contributes nothing but silence, and
+# silence is what a working rule and a rule that stopped seeing the file both produce. Any drift
+# inside such a file scores as success — which is how `be-security.timing-unsafe-compare.ts` came to
+# label, as its GOOD half, the exact call shape its own rule's message had begun warning throws
+# (repaired in 4c504978). The script's header carries that case and carries the measurement of the
+# sharper check that was tried first and does NOT carry.
+#
+# It runs HERE — after the selftest, before the release build — for the reason the selftest gives:
+# it costs a node spawn and the build costs minutes, so a corpus that cannot be scored fails before
+# anything pays for a compile.
+#
+# Its failure is reported under its OWN name and never as an FN/FP. That distinction is the lesson of
+# 2026-08-29, when a missing `rustc` printed "re-adjudicate the answer key" over a PATH problem: an
+# input failure wearing a detection failure's clothes sends the next reader to the escape hatch.
+set +e
+node scripts/measure/fixture-anchor-coverage.mjs
+coverage_rc=$?
+set -e
+if [ "$coverage_rc" -ne 0 ]; then
+  echo "detection-gate: the corpus coverage preflight FAILED (exit $coverage_rc)." >&2
+  echo "  This is NOT a detection regression -- nothing was scored. The message above names the" >&2
+  echo "  fixtures the key does not mention, or says the check could not measure at all." >&2
+  exit "$coverage_rc"
+fi
 
 # BUILD — see "Why this takes NO ARGUMENTS" above. Runs after the preflight because the preflight
 # costs ~4s and this costs minutes: fail on a dead validation branch before paying for a release build.
@@ -172,6 +270,24 @@ node scripts/measure/snapshot.mjs \
 # `benchmark.mjs`'s exit code IS the verdict — it is nonzero on any FN or FP, and it prints each one
 # with its anchor. No re-derivation of the score here: a second opinion about what counts as a
 # regression is a second owner of the ground truth.
+#
+# `set +e; rc=$?; set -e` rather than `if node ...; then`: an `if` whose condition fails returns 0, so
+# the status read after the `fi` would be the status of the IF and every failure would stamp `clean`.
+# detection-gate-if-touched.sh carries the same note for the same reason — this is the second reader
+# of an exit code in this pair and the trap is identical.
+set +e
 node scripts/measure/benchmark.mjs \
   --run "$work/runs/ci" \
   --expected "$expected"
+bench_rc=$?
+set -e
+
+# The stamp is written from the SCORER's status and from nothing else. Everything above this line that
+# can fail — the harness selftest, the release build, snapshot.mjs — leaves the `started` stamp in
+# place, which is the honest record: those failures mean the key was never compared to anything.
+if [ "$bench_rc" -eq 0 ]; then
+  gate_stamp clean
+else
+  gate_stamp regressed
+fi
+exit "$bench_rc"

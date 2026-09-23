@@ -9,10 +9,16 @@
 //! already depend on this crate. A local twin in each would make agreement a CONVENTION; a shared symbol
 //! makes drift a compile error.
 //!
-//! **This is not vocabulary and does not breach kernel ignorance.** Nothing here names a rule, a
-//! framework, a config key, or a token — these are text transforms. WHICH transform a given
-//! `vocabulary.*` key gets is a rule-side fact, and it is declared rule-side
-//! (`zzop_engine::vocabulary::normalizers`), not here.
+//! **The transforms are not vocabulary and do not breach kernel ignorance.** Nothing in them names a
+//! rule, a framework, a config key, or a token — they are text transforms.
+//!
+//! ⚠ The TABLE below (`NORMALIZED_VOCABULARY_KEYS`) does name config keys, and until 2026-09-08 this
+//! paragraph said that fact was declared rule-side, in `zzop_engine::vocabulary::normalizers`, "not
+//! here". It is here now — and this paragraph would have gone on vouching for the old shape if the
+//! move had not rewritten it (review ledger V122). The reason it belongs here is the one this doc
+//! already gives for the transforms: the config front end and the consuming rules must not disagree,
+//! and a table only the engine could read forced that front end to depend on the whole engine in
+//! order to see it. Naming a key here is a smaller concession than that edge was.
 //!
 //! ## The failure this closes
 //! A declared list was compared VERBATIM against a normalized input, and nothing checked that the
@@ -30,6 +36,17 @@
 //! DETECTION on a non-ASCII name, and a detection move belongs in a batch that re-measures the corpus,
 //! not in one that adds a warning. The pin in this module's tests is what keeps the difference visible
 //! until that batch happens.
+
+/// Which config keys are compared against a NORMALIZED input, and by which transform. Moved here
+/// from `zzop_engine::vocabulary::normalizers` on 2026-09-08 (review ledger V122).
+///
+/// It lives beside the transforms for the reason this module's doc already gives for them: the
+/// config front end warns about an entry that can never match, and the rules do the matching, and
+/// those two must not drift. A table in the ENGINE could not serve both without the front end
+/// depending on the whole engine — which it did, and that is what dragged swc and eight parser
+/// crates into `zzop-config`'s dependency closure.
+mod keys;
+pub use keys::{normalizer_for, NormalizedKey, NORMALIZED_VOCABULARY_KEYS};
 
 /// ASCII-only lowercase, no separator handling.
 ///

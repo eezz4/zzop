@@ -264,3 +264,69 @@ fn non_identifier_single_arg_use_calls_are_skipped_not_mistaken_for_mounts() {
         "cors()/bodyParser.json()/express.static(...) must not mint a Mount: {out:?}"
     );
 }
+
+#[test]
+fn an_express_5_optional_group_is_not_a_path_parameter() {
+    // 🔴 Measured on express 5.2.1, `examples/route-separation/index.js:41`. Before this, the brace
+    // group was read as a path variable (core's Spring/JAX-RS `{id}` vocabulary) and the route keyed
+    // as `/user/{}{}` — two placeholders with no separator, a path no server serves and no reader can
+    // grep. It was every one of that tree's `mutating-route-no-auth` findings.
+    let src = "const app = express();\napp.get('/user/:id{/:op}', user.load);\n";
+    let out = extract_router_mount_fragments("app.ts", src, &[]);
+    match &frag(&out, "app").entries[0] {
+        RouterMountEntry::Verb { path, .. } => assert_eq!(path, "/user/:id"),
+        e => panic!("expected Verb, got {e:?}"),
+    }
+}
+
+#[test]
+fn every_express_5_optional_group_shape_in_the_corpus_keeps_its_always_served_path() {
+    // The shapes `corpus/frameworks/express` actually registers. An optional group may hold a
+    // separator-led param, a dotted suffix, a bare literal, or a wildcard; in each the served-for-sure
+    // path is the one with the group removed.
+    for (written, want) in [
+        ("/user/:id{/:op}", "/user/:id"),
+        ("/:name{.:format}", "/:name"),
+        ("/search/{:query}", "/search/"),
+        ("/user{s}", "/user"),
+        ("/user{/*user}", "/user"),
+        // Nested groups are removed WHOLE. The discriminating shape is content that follows an
+        // INNER group while still inside the outer one: a scanner that treated the first `}` as the
+        // end would resume emitting at `/:d` and key this as `/a/:d`, a path the router never serves.
+        // (An invalidation drill caught that — `/a{/:b{/:c}}` alone stays green under the broken
+        // scanner, because the trailing brace is consumed either way.)
+        ("/a{/:b{/:c}/:d}", "/a"),
+        ("/a{/:b{/:c}}", "/a"),
+    ] {
+        let src = format!("const app = express();\napp.get('{written}', h);\n");
+        let out = extract_router_mount_fragments("app.ts", &src, &[]);
+        match &frag(&out, "app").entries[0] {
+            RouterMountEntry::Verb { path, .. } => assert_eq!(path, want, "for {written}"),
+            e => panic!("expected Verb, got {e:?}"),
+        }
+    }
+}
+
+#[test]
+fn a_hono_regex_constraint_narrows_the_param_it_does_not_add_one() {
+    // Hono spells a parameter constraint with the same braces: `:date{[0-9]+}` is ONE param, not a
+    // param followed by a second one.
+    let src = "const app = new Hono();\napp.get('/post/:date{[0-9]+}', h);\n";
+    let out = extract_router_mount_fragments("app.ts", src, &[]);
+    match &frag(&out, "app").entries[0] {
+        RouterMountEntry::Verb { path, .. } => assert_eq!(path, "/post/:date"),
+        e => panic!("expected Verb, got {e:?}"),
+    }
+}
+
+#[test]
+fn a_spring_style_brace_path_is_untouched_here_because_this_lane_never_sees_one() {
+    // Guard against over-reach: this strip is TypeScript-vocabulary only. Core's `normalize_http_path`
+    // still turns `{id}` into `{}` for the Java/C# lanes, which is why the strip lives in this adapter
+    // rather than in core — a `@GetMapping("/users/{id}")` must keep its parameter.
+    assert_eq!(
+        zzop_core::normalize_http_path("/users/{id}"),
+        "/users/{}",
+        "core's brace vocabulary must be unchanged by the TS-side strip"
+    );
+}

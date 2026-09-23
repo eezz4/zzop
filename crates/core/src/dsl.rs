@@ -48,6 +48,7 @@ mod markers;
 mod method_scan;
 mod prefilter;
 mod regex_cache;
+pub mod secret_names;
 mod source;
 mod string_mask;
 mod veto_window;
@@ -102,9 +103,9 @@ pub use ir_scan::{eval_pack_io_scan, eval_pack_io_scan_into, IoScanTreeContext};
 // The comment-leader table is public because `zzop-engine`'s generated-banner detector reads the same
 // knowledge and must not keep a second copy of it — see `markers::Leaders`.
 pub use markers::{
-    leaders_for_path, marker_channel, marker_widening_prose, strip_comment_leader, suppress_hint,
-    suppress_marker_sites, Leaders, MarkerChannel, SuppressMarkerSite,
-    NEAR_MISS_MARKER_TOKEN_PATTERN,
+    leaders_for_path, marker_channel, marker_widening_prose, message_with_hints,
+    strip_comment_leader, suppress_hint, suppress_marker_sites, Leaders, MarkerChannel,
+    SuppressMarkerSite, NEAR_MISS_MARKER_TOKEN_PATTERN,
 };
 pub use regex_cache::RegexCache;
 pub use source::{has_minified_line_shape, RuleContext, RuleTiming, SourceFile};

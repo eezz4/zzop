@@ -2,7 +2,7 @@
 //! `orderby-unindexed`, and `enum-string-drift` (`zzop_rules_schema::join`, rule-pack catalog rows
 //! #27/#28/#29) — are wired into `zzop_engine::analyze_tree`
 //! end to end: `.prisma` schema on disk + `.ts` BE source on disk -> real `Finding`s, gated per-id via
-//! `RuleConfig::disabled_rules` (`crates/engine/src/analyze.rs`'s `run_schema_join_rules`).
+//! `RuleConfig::disabled_rules` (`crates/engine/src/analyze/mod.rs`'s `run_schema_join_rules`).
 //!
 //! Fixture shape: one `prisma/schema.prisma` with three models —
 //! - `Item { id, ownerId, deletedAt }` — soft-delete-bypass fixture (a soft-delete marker field, no index

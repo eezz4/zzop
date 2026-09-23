@@ -8,9 +8,10 @@ mod evidence;
 mod pipeline;
 mod rules;
 
-use zzop_core::{DepGraph, Finding, Lifecycle};
+use zzop_core::{DepGraph, Finding, Lifecycle, Severity};
 
 use crate::coupling::CouplingMap;
+use crate::roi::RecId;
 
 use super::*;
 

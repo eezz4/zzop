@@ -357,7 +357,7 @@ fn a_mount_matching_no_provide_produces_a_warning() {
             )
         });
     assert!(
-        warning.contains("stale mount, wrong dir, or the tree emits no http provides"),
+        warning.contains("a stale mount") && warning.contains("belongs on a different tree"),
         "expected the stale/wrong-dir/no-http-provides wording (0 provides matched this dir's path at all), got: {warning:?}"
     );
     assert!(
@@ -422,7 +422,7 @@ fn a_mount_shadowed_by_an_earlier_equal_dir_mount_gets_the_shadow_worded_warning
         "expected the shadowed-entry wording (claimed by a more specific mount), got: {warning:?}"
     );
     assert!(
-        !warning.contains("stale mount, wrong dir, or the tree emits no http provides"),
+        !warning.contains("a stale mount"),
         "the shadowed entry's dir DID match provides -- the stale/wrong-dir wording would be false here, got: {warning:?}"
     );
 

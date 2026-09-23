@@ -7,6 +7,7 @@
 //! Anchored at the consume site, not any candidate provider — the ambiguity is a property of the call site:
 //! the caller cannot know, from source alone, which candidate will actually answer.
 
+use super::landing::CALLER_BREAKAGE_LANDING;
 use zzop_core::io::AmbiguousConsume;
 use zzop_core::{disable_hint, Finding, Severity};
 
@@ -45,9 +46,11 @@ pub fn ambiguous_consume_findings(ambiguous_consumes: &[AmbiguousConsume]) -> Ve
                 "consume `{kind} {key}` (source `{}`) matches provides in {candidate_source_count} distinct \
                  sources — which one actually answers this call at runtime depends on deploy-time \
                  routing (load balancer / service mesh / gateway rule) that this static analysis cannot \
-                 observe. Either disambiguate the route (e.g. give each service a distinct key prefix) or \
-                 confirm which of the {candidate_count} candidate provider(s) is the intended one and \
-                 document that routing decision. {} if this is an intentional gateway fan-out where any \
+                 observe. Start by confirming which provider is meant: if the fan-out is deliberate and any \
+                 provider is equally valid, there is nothing here to repair. {CALLER_BREAKAGE_LANDING} IF \
+                 IT IS NOT DELIBERATE: disambiguate the route — give each service a distinct key prefix \
+                 — or leave the routes where they are, confirm which of the {candidate_count} candidate \
+                 provider(s) is the intended one, and document that routing decision. {} if this is an intentional gateway fan-out where any \
                  provider is equally valid (e.g. a stateless health/echo route deliberately duplicated across \
                  replicas behind a shared gateway).",
                 a.source,

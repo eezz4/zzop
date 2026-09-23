@@ -106,7 +106,11 @@ fn dbset_entity_name(ty: Node, src: &str) -> Option<String> {
 
 /// The simple (rightmost-segment) name of a type-argument node: `User`, `Models.User` -> `User`;
 /// `None` for a shape that names no single entity type (a nested generic, a tuple, ...).
-fn type_simple_name(node: Node, src: &str) -> Option<String> {
+///
+/// Shared with the sibling `entity_config` arm, which resolves its entity from a BASE-LIST type
+/// argument rather than a property type — the same question about the same node kinds, so the same
+/// answer rather than a second copy of it.
+pub(super) fn type_simple_name(node: Node, src: &str) -> Option<String> {
     match node.kind() {
         "identifier" => Some(node_text(node, src).to_string()),
         "qualified_name" => {

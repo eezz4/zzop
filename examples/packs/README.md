@@ -24,8 +24,10 @@ unaffected either way: they are compiled into the binary, not loaded from disk.)
 ⚠ `packsDir` is **not** a config-file key. It is the embedder request field
 ([`docs/modules/facade.md`](../../docs/modules/facade.md)), and until 2026-08-11 this README printed it
 inside a `zzop.config.jsonc` block — the only retrieval instruction in the repo, and it did not work.
-Measured: the config front end answers `unknown config key "packsDir" (ignored)` and loads 11 packs,
-where `packs.extraDirs` loads 12.
+Measured (2026-08-11, when the bundle was eleven packs): the config front end answers
+`unknown config key "packsDir" (ignored)` and loads the bundle unchanged, where `packs.extraDirs` loads
+the bundle plus one. The counts are deliberately not repeated — the bundle was merged to eight on
+2026-09-03 and the point of the measurement is the DIFFERENCE of one, which no merge moves.
 
 ## A copy taken from a binary knows which binary it came from
 
@@ -73,7 +75,8 @@ grep -l '"axis": "opinion"' rules/dsl/*/*.json examples/packs/*.json
 ```
 
 ⚠ **The ids changed; the suppress markers did not.** A rule id is `<pack>/<rule>`, and only three of
-`perf`'s four rules moved — `perf` still ships `api-in-loop` — so these three were RENAMED by the move
+`perf`'s four rules moved — `perf` kept `api-in-loop` and outlived the export — so these three were
+RENAMED by the move
 (`perf/jpa-eager-fetch` becomes `orm-eager/jpa-eager-fetch`; the table is in
 [VERSIONING.md](../../VERSIONING.md)). The marker is derived from the BARE rule id, so every
 `// zzop-jpa-eager-fetch-ok` already sitting in your code keeps suppressing. What breaks is a

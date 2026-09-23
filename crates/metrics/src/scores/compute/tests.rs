@@ -258,3 +258,79 @@ fn config_driven_fsd_routing_custom_slice_container_makes_a_cross_slice_import_c
     );
     assert_eq!(after.feature_sliced_design.score, 0.0); // 100 - (1/1)*100
 }
+
+/// The scored POPULATION reaches the ELEVEN file-keyed metrics and STOPS THERE — both halves of that
+/// sentence pinned on one graph carrying a test file beside a source file in the same slice.
+///
+/// The second half is the load-bearing one and it is asserted as a NON-effect, which is the shape this
+/// repo keeps having to add after the fact: a first implementation narrowed the four slice/module-keyed
+/// metrics too (by restricting their dep graph) and the 2026-09-11 user ruling reverted it. Without a
+/// test that says "cohesion must NOT move", re-adding that restriction is a green diff.
+///
+/// Assertions are BEFORE/AFTER pairs on the same inputs rather than absolute numbers, because the
+/// question is "did the population move", and a single post-state number cannot tell a working filter
+/// from a coincidence.
+#[test]
+fn the_population_filter_moves_the_file_keyed_denominators_and_leaves_the_slice_keyed_ones_alone() {
+    use crate::scores::config::PopulationFilter;
+
+    let nodes = [
+        node("features/auth/login.ts"),
+        node("features/auth/login.test.ts"),
+    ];
+    // The test file imports its own slice-mate. That import is a real dependency and stays one: it is
+    // still counted as INTERNAL cohesion after the filter is on.
+    let d = dep(&[
+        ("features/auth/login.ts", &[][..]),
+        (
+            "features/auth/login.test.ts",
+            &["features/auth/login.ts"][..],
+        ),
+    ]);
+
+    let on = ScoresConfig {
+        population: PopulationFilter::excluding_test_paths(None),
+        ..ScoresConfig::default()
+    };
+    let before = compute(&nodes, &d, &[], None, &ScoresConfig::default());
+    let after = compute(&nodes, &d, &[], None, &on);
+
+    // FILE-KEYED: `fileSizeCompliance`/`godFile` count live source files; the test file leaves both.
+    assert_eq!(before.file_size_compliance.total, 2);
+    assert_eq!(after.file_size_compliance.total, 1);
+    assert_eq!(before.god_file.total, 2);
+    assert_eq!(after.god_file.total, 1);
+
+    // SLICE/MODULE-KEYED: untouched. The slice keeps its file-count weight and its internal edge,
+    // because the population gate is a per-FILE subject gate and a slice rollup has no such subject —
+    // narrowing it would require dropping the node from the graph, which is the thing the doctrine on
+    // `ScoresInput::is_scored` forbids.
+    assert_eq!(before.cohesion.slices, after.cohesion.slices);
+    assert_eq!(after.cohesion.slices[0].file_count, 2);
+    assert_eq!(after.cohesion.slices[0].internal_edges, 1);
+    assert_eq!(before.cohesion.score, after.cohesion.score);
+    assert_eq!(before.sdp.score, after.sdp.score);
+    assert_eq!(before.main_sequence.score, after.main_sequence.score);
+    assert_eq!(before.modularity.score, after.modularity.score);
+}
+
+/// The DEFAULT is the pre-existing population, asserted on the same inputs the test above moves: a
+/// `ScoresConfig::default()` run must not be able to tell a test file from a source file.
+#[test]
+fn the_default_config_counts_test_files_exactly_as_it_always_did() {
+    let nodes = [
+        node("features/auth/login.ts"),
+        node("features/auth/login.test.ts"),
+    ];
+    let d = dep(&[
+        ("features/auth/login.ts", &[][..]),
+        (
+            "features/auth/login.test.ts",
+            &["features/auth/login.ts"][..],
+        ),
+    ]);
+    let s = compute(&nodes, &d, &[], None, &ScoresConfig::default());
+    assert_eq!(s.file_size_compliance.total, 2);
+    assert_eq!(s.god_file.total, 2);
+    assert_eq!(s.cohesion.slices[0].file_count, 2);
+}

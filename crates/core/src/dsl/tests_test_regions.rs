@@ -1,6 +1,6 @@
 //! The test-region gate (`eval`'s `TestRegions`) at the interpreter level: one gate applied after every
 //! per-file matcher's dispatch, and skipped for a rule that declares `scan_test_regions`. These tests
-//! exercise the shapes the end-to-end `crates/engine/tests/analyze_rust_test_spans.rs` cannot reach
+//! exercise the shapes the end-to-end `crates/engine/tests/integration/analyze_rust_test_spans.rs` cannot reach
 //! cheaply — a second matcher type, a second file in the same context, the zero-cost path, and the
 //! opt-out's per-RULE granularity.
 //!

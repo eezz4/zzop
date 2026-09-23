@@ -10,6 +10,14 @@
 # Sealed rule: no `| grep -q` (or -qxF/--quiet/--silent) pipeline in ANY of this repo's shell.
 # Safe equivalents, all used by the 2026-07-17 sweep:
 #   grep -q <pattern> <<< "$var"             # herestring — no writer process, nothing to SIGPIPE
+#                                            # ...but ONLY while "$var" stays under 64 KiB: bash
+#                                            # writes a herestring into a pipe before exec'ing the
+#                                            # reader, so 65,536+ bytes deadlock the script dead
+#                                            # silently (measured 2026-09-08, review ledger V109).
+#                                            # For content that scales with the repo, use
+#                                            # < <(printf '%s\n' "$var") — same SIGPIPE-free
+#                                            # property, no ceiling. check-shell-herestring-scale.sh
+#                                            # enforces that split.
 #   grep -q <pattern> <file>                 # direct file input
 #   <producer> | grep <pattern> >/dev/null   # grep consumes ALL input; producer never SIGPIPEs
 #
@@ -65,7 +73,15 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-self="scripts/$(basename "${BASH_SOURCE[0]}")"
+# 🔴 No self-exemption (removed 2026-09-13, review ledger V188). This guard used to skip its own
+# file, reasoning that it "documents the class in code-shaped prose". Measured: the file contains the
+# token 13 times and the guard is GREEN over itself without the skip — the needle matches a PIPELINE,
+# and every occurrence here is inside a pattern string or a comment. So the exemption protected
+# nothing and only stood ready to excuse a real one.
+#
+# If the needle is ever loosened enough to match this file's prose, this guard will say so loudly
+# instead of quietly not looking. That is the trade taken on purpose: a red that names the problem
+# beats a silence nobody can audit.
 
 # One `git ls-files` pair, one `grep -v`, one `awk` over the whole list — four process spawns total,
 # not two per file. That is not micro-optimisation: the pre-commit fleet is dominated by process
@@ -75,14 +91,11 @@ self="scripts/$(basename "${BASH_SOURCE[0]}")"
 # `--others --exclude-standard` never lists a git-ignored path, so `target/`/`node_modules/` can only
 # arrive here by being TRACKED; the filter below is the belt for that case (same reasoning as
 # scripts/lib/tracked-grep.sh's standard exclusions).
-files="$(
-  {
-    # BOTH workflow extensions: GitHub Actions loads `*.yml` and `*.yaml` alike (check-guards-wired.sh
-    # enumerates both), so a `.yaml`-spelled workflow must not fall out of this scan silently.
-    git ls-files -- '*.sh' '.githooks/*' '.github/workflows/*.yml' '.github/workflows/*.yaml'
-    git ls-files --others --exclude-standard -- '*.sh' '.githooks/*' '.github/workflows/*.yml' '.github/workflows/*.yaml'
-  } | sort -u | grep -vE '(^|/)(target|node_modules)/' || true
-)"
+# The population is `scripts/lib/shell-subjects.sh`'s, not this file's. It used to be spelled here,
+# and the two sibling shell guards each spelled their own — three lists, three different answers, and
+# the gap between them hid a live here-string in a workflow (see that file's header).
+. "$(dirname "$0")/lib/shell-subjects.sh"
+files="$(shell_subject_files)"
 
 # ## Empty-enumeration floor
 # Declared BEFORE awk runs, and that ordering is the point rather than a style choice: `awk 'prog'`
@@ -95,23 +108,27 @@ files_arr=()
 if [ -n "$files" ]; then
   while IFS= read -r f; do
     [ -f "$f" ] || continue          # index may list a file deleted in the working tree
-    [ "$f" = "$self" ] && continue   # this file documents the class in code-shaped prose
     files_arr+=("$f")
     scanned=$((scanned + 1))
-  done <<< "$files"
+  done < <(printf '%s\n' "$files")
 fi
 
-if [ "$scanned" -eq 0 ]; then
-  echo "check-shell-pipe-sigpipe: FAILED -- enumerated ZERO shell files. 'git ls-files -- \"*.sh\"" >&2
-  echo "  \".githooks/*\"' returned nothing, so this guard would have vouched for nothing. Either this" >&2
-  echo "  is not a git work tree, or the repo genuinely has no shell left; neither is a clean run." >&2
-  exit 1
-fi
+# NO EMPTY FLOOR HERE ANY MORE, and its absence is deliberate (2026-09-13, ledger V212).
+# `shell_subject_files` aborts on a per-pathspec zero before this file sees a list, so the floor that
+# stood here could not fire — and it went on printing a `git ls-files` command this guard no longer
+# runs. A floor that cannot fire is not caution, it is a second owner of the population's integrity,
+# stating it in terms that stopped being true. The floor lives with the list.
 
 fail=0
 hits="$(awk '
   /^[[:space:]]*#/ { next }
-  /\|[[:space:]]*grep([[:space:]]+(-[A-Za-z]+|--[a-z][a-z-]+))*[[:space:]]+(-[A-Za-z]*q[A-Za-z]*|--quiet|--silent)([[:space:]]|$)/ {
+  # Three widenings, all measured green before them (2026-09-13, ledger V209):
+  #   `command grep -q` / `\grep -q` — a wrapper or a quoting escape in front of the name;
+  #   `grep -e foo -q`                — the quiet flag AFTER an operand, which the old needle required
+  #                                      to come first;
+  #   `grep --quiet` spelled anywhere in the argument run.
+  # The subject is "a reader that exits early", and none of those three change that.
+  /\|[[:space:]]*(command[[:space:]]+|\\)?grep([[:space:]]+([^|;&]*))?[[:space:]](-[A-Za-z]*q[A-Za-z]*|--quiet|--silent)([[:space:]]|$)/ {
     print FILENAME ":" FNR ": " $0
   }
 ' "${files_arr[@]}")"
@@ -126,4 +143,4 @@ if [ "$fail" -ne 0 ]; then
   echo "  or '| grep ... >/dev/null' (grep then consumes all input). See this script's header." >&2
   exit 1
 fi
-echo "check-shell-pipe-sigpipe: OK (no '| grep -q' pipelines in $scanned files: every git-known *.sh, .githooks/*, and .github/workflows/*.{yml,yaml})"
+echo "check-shell-pipe-sigpipe: OK (no '| grep -q' pipelines in $scanned files -- the shared shell population, scripts/lib/shell-subjects.sh)"

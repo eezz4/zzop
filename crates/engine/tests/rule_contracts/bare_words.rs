@@ -7,7 +7,7 @@ use crate::load_all_packs;
 /// English words that read as ordinary prose (a JSDoc example, a log message, a string literal like
 /// `"logged in to do this"` or `"waiting for ${x}"`) but are also meaningful loop/SQL keywords when they
 /// appear as real syntax. A DSL pattern that matches one of these as a bare `\bword\b` with no adjacent
-/// syntax anchor fires on prose too — exactly the defect class two shipped rules had (`perf/api-in-loop`
+/// syntax anchor fires on prose too — exactly the defect class two shipped rules had (`reliability/api-in-loop`
 /// matched bare `\bdo\b`; `security/sql-string-concat` matched bare `UPDATE`), both fixed in the same commit
 /// that added this contract. Deliberately a small, curated list (not "every English word that's also a
 /// keyword") — these are the words shipped rules have actually tripped over in practice; extend this list
@@ -216,7 +216,7 @@ fn is_anchored(pattern: &str, start: usize, end: usize) -> bool {
 /// grouping beyond simple paren-depth counting, so a sufficiently contrived pattern (e.g. a real anchor
 /// sitting outside even the word's own enclosing group, further out than this contract's innermost-group
 /// check reaches) could still evade it. It exists to catch the concrete, real defect class two shipped
-/// rules had (`perf/api-in-loop` matched bare `\bdo\b` inside prose string literals like `"logged in to do
+/// rules had (`reliability/api-in-loop` matched bare `\bdo\b` inside prose string literals like `"logged in to do
 /// this"`; `security/sql-string-concat` matched bare `UPDATE` inside prose), not to be a sound regex analyzer —
 /// a human reviewing a new rule's pattern by eye remains the real backstop for a pattern this heuristic
 /// doesn't flag.

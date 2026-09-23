@@ -10,9 +10,17 @@ so it reads end to end without running anything.
 - a **source checkout** with a working Rust toolchain — the run builds a `cargo` example
   (`zzop-engine`'s `xlayer_dump`), so a released binary is not enough; and
 - the **two corpus trees**, at `corpus/oss/fe-vite` and `corpus/oss/be-express`. `corpus/oss/` is
-  gitignored and no lane in this repo fetches it — bring your own pair, the way
-  [CONTRIBUTING.md](../../CONTRIBUTING.md) describes. Any independently-authored frontend/backend pair
-  demonstrates the same thing; those two paths are simply what the script hardcodes.
+  gitignored and no lane in this repo fetches it — these are third-party checkouts, not ours to
+  redistribute. They are two commands:
+
+  ```bash
+  mkdir -p corpus/oss && cd corpus/oss
+  git clone --depth 1 https://github.com/romansndlr/react-vite-realworld-example-app fe-vite
+  git clone --depth 1 https://github.com/gothinkster/node-express-realworld-example-app be-express
+  ```
+
+  Any independently-authored frontend/backend pair demonstrates the same thing; those two paths are
+  simply what the script hardcodes.
 
 With both in place, the script replays the whole sequence (and restores the corpus on exit):
 
@@ -20,6 +28,22 @@ With both in place, the script replays the whole sequence (and restores the corp
 bash docs/demo/break-a-route.sh
 ```
 
+## Run it now, with nothing to set up
+
+```bash
+bash docs/demo/break-a-route-shipped.sh
+```
+
+That script needs only a `zzop` binary. It runs on `docs/demo/pair/`, a two-tree pair this
+repository ships, and it **asserts** the join state at every step rather than printing one — if the
+claim below ever stops being true, it exits non-zero. CI runs it on pushes to `main` and on pull
+requests, and `scripts/ci-local.sh` runs it on a development branch. It is smaller
+evidence than the walkthrough below on purpose: four routes and four calls, not two real applications.
+
+The rest of this page is the same change on **two independently-authored repositories**, which is
+the stronger evidence and needs a little setup.
+
+---
 ## The setup
 
 Two independently-authored [RealWorld](https://github.com/gothinkster/realworld) apps are vendored under `corpus/oss/`:

@@ -111,25 +111,13 @@ export default {
       en: `<code>egress</code>`,
     },
 
-    h211: {
-      ko: `<code>go</code>`,
-      en: `<code>go</code>`,
-    },
 
     h212: {
       ko: `<code>http</code>`,
       en: `<code>http</code>`,
     },
 
-    h213: {
-      ko: `<code>perf</code>`,
-      en: `<code>perf</code>`,
-    },
 
-    h214: {
-      ko: `<code>react</code>`,
-      en: `<code>react</code>`,
-    },
 
     h215: {
       ko: `<code>redis</code>`,
@@ -174,6 +162,24 @@ export default {
       surface carries what it produces. <code>zzop_engine::register_all_native</code> composes the five.`,
     },
 
+    // The shipped-off disclosure, added 2026-09-13 (ledger V206). The public rules table lists these
+    // three ids at `info` like every other row, and said NOTHING about their shipping off — so a reader
+    // of the one page most likely to be read as "what zzop checks" was told they run. The claim's owner
+    // is `docs/rules/catalog.md`; this is the site's copy of it, and `check-shipped-off-sync.sh` now
+    // holds both to the engine's own DEFAULT_OFF so they cannot drift apart.
+    pShippedOff: {
+      ko: `<strong>아래 셋은 꺼진 채로 출하된다</strong>: <code>unimported-export</code>,
+      <code>dead-candidates</code>, <code>unreachable</code>. 결함 주장이 아니라 미사용 코드 위생이고,
+      도그푸드 코퍼스 전체 발견의 61.7% 였다. <strong>켜려면 <code>rules</code> 에 심각도와 함께 이름을
+      적는다</strong> — <code>"dead-candidates": "info"</code> — 다른 룰의 밴드를 바꾸는 것과 같은 동작이라
+      옵트인을 위한 두 번째 어휘는 없다.`,
+      en: `<strong>Three of the ids below ship OFF</strong>: <code>unimported-export</code>,
+      <code>dead-candidates</code> and <code>unreachable</code>. They are unused-code hygiene rather than
+      defect claims, and they were 61.7% of every finding across the dogfood corpus. <strong>To turn one
+      on, name it in <code>rules</code> with a severity</strong> &mdash; <code>"dead-candidates":
+      "info"</code> &mdash; the same gesture that changes any other rule's band, so there is no second
+      vocabulary for opting in.`,
+    },
     p19: {
       ko: `<code>cross-layer/*</code> id 들은 다중 트리 예외다: 이들은 <code>zzop_engine::analyze_trees</code> 가 조인한 <code>CrossLayerResult</code> 위에서 돈다(여기 다른 모든 행은 트리 단위로 돈다). <code>analyzeTrees</code> 출력에서 <code>crossLayer</code> 옆의 <code>crossLayerFindings</code> 로 나간다. 이들 중 어느 것도 인라인 억제 마커를 존중하지 않는다 — 끄기 전용이다: config 의 <code>rules: { "&lt;id&gt;": "off" }</code>, 또는 임베더용 <code>disabledRules</code>.`,
       en: `The <code>cross-layer/*</code> ids are the multi-tree exception: they run over

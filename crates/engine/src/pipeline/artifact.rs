@@ -10,8 +10,9 @@ use crate::cache::CacheCounters;
 use crate::dispatch;
 use crate::EngineConfig;
 
+use super::degrade_cause::cached_degrade_cause;
 use super::findings::{eval_packs, schema_findings, schema_findings_eligible, SpanFacts};
-use super::fresh::{compute_fresh_artifact, is_oversized};
+use super::fresh::compute_fresh_artifact;
 use super::{DegradeCause, FileArtifact};
 
 /// Processes one file end to end: read -> cache lookup -> (size-cap / dispatch / parse) -> per-file DSL
@@ -94,6 +95,9 @@ fn unreadable_artifact(rel: &str) -> FileArtifact {
         test_spans: Vec::new(),
         call_sites: Vec::new(),
         string_literals: Vec::new(),
+        call_graph: Default::default(),
+        export_aliases: Vec::new(),
+        has_generated_banner: false,
     }
 }
 
@@ -134,7 +138,7 @@ fn process_file_cached(
                     c.record_hit();
                 }
                 // Full cache hit: no rule evaluation ran this call, so nothing to time.
-                let cause = cached_degrade_cause(ir.degraded, bytes, config);
+                let cause = cached_degrade_cause(ir.degraded, bytes, language, rel, config);
                 return artifact_from_ir(rel, ir, findings, Vec::new(), cause);
             }
             // IR hit, findings miss: reuse the parsed IR, re-run rules only.
@@ -171,7 +175,7 @@ fn process_file_cached(
             if let Some(c) = counters {
                 c.record_miss();
             }
-            let cause = cached_degrade_cause(ir.degraded, bytes, config);
+            let cause = cached_degrade_cause(ir.degraded, bytes, language, rel, config);
             return artifact_from_ir(rel, ir, findings, rule_timings, cause);
         }
     }
@@ -211,46 +215,15 @@ fn process_file_cached(
             test_spans: artifact.test_spans.clone(),
             call_sites: artifact.call_sites.clone(),
             string_literals: artifact.string_literals.clone(),
+            call_graph: artifact.call_graph.clone(),
+            export_aliases: artifact.export_aliases.clone(),
+            has_generated_banner: artifact.has_generated_banner,
         };
         let _ = cache.put_ir(key, &ir_slice);
         let _ = cache.put_findings(key, &artifact.findings);
     }
 
     artifact
-}
-
-/// The warm-cache half of the degrade-cause verdict: the cached slice remembers THAT a file degraded
-/// (`FileIrSlice::degraded`) but not why, so the reason is re-derived here rather than added to the
-/// cached payload.
-///
-/// **Re-deriving cannot disagree with the cold run's verdict, and that rests on a pinned invariant
-/// rather than on care.** The oversize test is the same call the cold gate makes
-/// ([`is_oversized`] — one predicate, not a copy), applied to the same `bytes`, because an IR hit means
-/// the content hash matched. Its other input, `size_cap`, is folded into `parser_fingerprint` and so
-/// into every `CacheKey` (`crate::cache`'s module doc says why; `cache::tests::
-/// parser_fingerprint_changes_with_size_cap` pins it) — a run under a different cap cannot hit this
-/// entry at all. So "degraded and not oversized" leaves exactly one possibility, the parser verdict.
-///
-/// `Unreadable` is structurally absent here: that path returns before any cache lookup, since a file
-/// with no bytes has no content to hash.
-///
-/// The alternative — a `degrade_cause` field on `FileIrSlice` — was not taken. It would put an
-/// engine-side enum in `zzop-cache` (a `zzop-core` leaf today) and move `CACHE_SCHEMA_VERSION`, i.e.
-/// cold-start every existing cache, to store a value that is a pure function of two things the caller
-/// already holds in hand.
-fn cached_degrade_cause(
-    degraded: bool,
-    bytes: &[u8],
-    config: &EngineConfig,
-) -> Option<DegradeCause> {
-    if !degraded {
-        return None;
-    }
-    Some(if is_oversized(bytes, config) {
-        DegradeCause::Oversized
-    } else {
-        DegradeCause::ParseFailure
-    })
 }
 
 /// Rebuilds a `FileArtifact` from a cached `FileIrSlice` + its (possibly just-recomputed) findings —
@@ -295,5 +268,8 @@ fn artifact_from_ir(
         test_spans: ir.test_spans,
         call_sites: ir.call_sites,
         string_literals: ir.string_literals,
+        call_graph: ir.call_graph,
+        export_aliases: ir.export_aliases,
+        has_generated_banner: ir.has_generated_banner,
     }
 }

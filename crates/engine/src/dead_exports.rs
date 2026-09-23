@@ -28,7 +28,6 @@
 
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::path::Path;
 
 use zzop_core::{Finding, ImportMap, SourceSymbol};
 use zzop_parser_typescript::{TsconfigPaths, WorkspacePkg};
@@ -66,6 +65,16 @@ pub(crate) struct DeadExportNames {
     pub(crate) used: Vec<String>,
     /// TypeScript-only; empty elsewhere, which simply yields no exemptions.
     pub(crate) signature: Vec<String>,
+    /// The rest of this rule's per-file inputs, added 2026-09-08 (review ledger V110). They arrive
+    /// here rather than as four more parameters because this struct is ALREADY "everything
+    /// `unimported-export` knows about one file", and the alternative was widening two call chains
+    /// for facts that belong to exactly one rule.
+    pub(crate) re_exports: Vec<zzop_core::ReExport>,
+    pub(crate) dynamic_imports: Vec<String>,
+    /// From-less `export { X as Y }` renames.
+    pub(crate) export_aliases: Vec<(String, String)>,
+    /// This file opens with a machine-generated banner.
+    pub(crate) is_generated: bool,
 }
 
 /// Runs the whole-tree dead-export computation and converts each result into a `Finding` at its symbol's
@@ -85,7 +94,6 @@ pub(crate) struct DeadExportNames {
 /// "no new dep-graph node" pin `dep_graph::merge_prescan_fan_in`'s doc explains for `dead-candidates`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn dead_export_findings(
-    root: &Path,
     ts_paths: &HashSet<String>,
     ts_import_pairs: &[(String, ImportMap)],
     all_symbols: &[SourceSymbol],
@@ -94,7 +102,6 @@ pub(crate) fn dead_export_findings(
     tsconfigs: &std::collections::BTreeMap<String, TsconfigPaths>,
     prescan_import_pairs: &[(String, ImportMap)],
     auto_import_names: &std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
-    generated_file_markers: &[&str],
 ) -> Vec<Finding> {
     if ts_paths.is_empty() {
         return Vec::new();
@@ -117,22 +124,12 @@ pub(crate) fn dead_export_findings(
         if !is_ts_source_ext(rel) {
             continue; // non-TS overlay participant (e.g. .svelte) — not re-parseable as TypeScript
         }
-        // Re-exports, dynamic imports and local `export { X as Y }` renames in one parse — all three
-        // are read off disk rather than from the cache for the same reason: `FileArtifact` does not
-        // carry them, and only this rule needs them.
-        let (facts, is_generated) = match std::fs::read(root.join(rel)) {
-            Ok(bytes) => {
-                let text = String::from_utf8_lossy(&bytes).into_owned();
-                let banner = crate::generated_banner::has_generated_banner;
-                (
-                    zzop_parser_typescript::parse_dead_export_facts(rel, &text),
-                    banner(rel, &text, generated_file_markers),
-                )
-            }
-            // Unreadable (deleted/permission race) — treat as no re-exports/dynamic-imports/
-            // aliases rather than failing the whole analysis.
-            Err(_) => (zzop_parser_typescript::DeadExportFacts::default(), false),
-        };
+        // All four of this rule's per-file facts now arrive on `DeadExportNames`. This loop used to
+        // read the file off disk and parse it — a SECOND full parse of the whole TypeScript tree, paid
+        // on every run, cache hit or not, which this module's header stated plainly and blamed on
+        // `FileArtifact` not carrying them. Two of them (`re_exports`, `dynamic_imports`) were in
+        // fact already carried and re-derived here anyway; the other two are now produced beside them,
+        // off the parse the per-file lane already paid for. Review ledger V110.
         let exports: Vec<DeadExportCandidate> = symbols_by_file
             .get(rel.as_str())
             .into_iter()
@@ -159,12 +156,12 @@ pub(crate) fn dead_export_findings(
                 .cloned()
                 .cloned()
                 .unwrap_or_default(),
-            re_exports: facts.re_exports,
-            dynamic_imports: facts.dynamic_imports,
+            re_exports: names.map(|n| n.re_exports.clone()).unwrap_or_default(),
+            dynamic_imports: names.map(|n| n.dynamic_imports.clone()).unwrap_or_default(),
             used_names,
             exported_signature_names,
-            export_aliases: facts.export_aliases,
-            is_generated,
+            export_aliases: names.map(|n| n.export_aliases.clone()).unwrap_or_default(),
+            is_generated: names.is_some_and(|n| n.is_generated),
             // Bare-identifier references a build-time auto-import table resolved, which no import
             // statement records — see `analyze::assemble::nuxt_auto_import`, which owns the anchor
             // (`nuxt.config.*`), the directory set and the per-app scope wall. Empty map on every tree

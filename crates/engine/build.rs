@@ -59,8 +59,8 @@ fn main() {
         ("FP_SQL", "parser/parser-sql"),
         ("FP_PRISMA", "parser/parser-prisma"),
         // Not a parser: the schema rules crate. Its Rust logic reaches CACHED findings (the
-        // `structural.rs` lane) with no pack content to hash, so it needs the same treatment — and it
-        // used to carry a hand-held `STRUCTURAL_RULES_VERSION` for exactly that reason.
+        // `structural.rs` lane) with no pack content to hash, so it needs the same treatment. The
+        // hand-stamped `STRUCTURAL_RULES_VERSION` it carried until 2026-09-06 sat INSIDE this closure.
         ("FP_SCHEMA_RULES", "rules/native/rules-schema"),
     ];
 

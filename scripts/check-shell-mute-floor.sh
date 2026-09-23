@@ -130,21 +130,60 @@ cd "$(dirname "$0")/.."
 
 # `|| true` here is this file's own instance of the class it seals: `grep -vE` exits 1 when it filters
 # nothing out, which is the normal case, and the zero-file abort below would never print without it.
-files="$(
-  {
-    git ls-files -- '*.sh' '.githooks/*'
-    git ls-files --others --exclude-standard -- '*.sh' '.githooks/*'
-  } | sort -u | grep -vE '(^|/)(target|node_modules)/' || true
-)"
+# The population is `scripts/lib/shell-subjects.sh`'s. This file used to enumerate its own and came
+# out 3 files short of its sibling — workflow `run:` blocks are shell too, and this guard's subject
+# (a derived enumeration that comes back empty and certifies silence) applies to them exactly as much.
+. "$(dirname "$0")/lib/shell-subjects.sh"
+files="$(shell_subject_files)"
 
 # Which files inherit errexit instead of declaring it. Derived from the SOURCING SITES for the reason
 # check-guards-wired.sh:161-171 gives: a lib that has not been committed yet is exactly the one whose
 # first run matters, and a lib nobody sources cannot inherit anything. Both POSIX spellings.
 # `|| true` on both stages, same class as everything else in this file.
+# ## Empty-enumeration floor, declared BEFORE awk runs
+# `awk 'prog'` with no file operands reads STDIN, so an empty list would hang or certify silence rather
+# than report an empty scan — check-shell-pipe-sigpipe.sh:87-92 records the same ordering for the same
+# reason. A derived enumeration that comes back empty must abort loudly.
+scanned=0
+files_arr=()
+if [ -n "$files" ]; then
+  while IFS= read -r f; do
+    [ -f "$f" ] || continue          # index may list a file deleted in the working tree
+    files_arr+=("$f")
+    scanned=$((scanned + 1))
+  done < <(printf '%s\n' "$files")
+fi
+
+# ORDER IS LOAD-BEARING: this reads `files_arr`, so it must come AFTER the loop that fills it.
+# Written above that loop first, `grep` got no file operands and READ STDIN — the guard hung with no
+# output, which is the exact hazard this file exists to seal (`awk` with no operands, one section
+# down). Caught by a 600-second timeout, not by any check.
+# 🔴 The sourcing sites come from the SHARED population, not a private glob (2026-09-13, ledger V208).
+# This line read `scripts/*.sh scripts/lib/*.sh .githooks/*` — a second, narrower idea of "the shell in
+# this repo" living inside the very guard whose fold was supposed to end exactly that. A lib whose only
+# sourcing site is `docs/demo/x.sh` was therefore not judged at all; planted, it stayed green, while the
+# same lib sourced from `scripts/x.sh` went red. One subject, one list.
+# 🔴 THE SPELLING IS PART OF THE POPULATION, and fixing the file list left this half wrong
+# (2026-09-13, ledger V208 — the drill that closed it). The needle required the literal
+# `./scripts/lib/<name>.sh`, and this repo sources a lib four ways:
+#   . "$(dirname "$0")/lib/shell-subjects.sh"          <- the dominant one; THIS FILE uses it
+#   . "$(dirname "${BASH_SOURCE[0]}")/lib/require-gnu.sh"
+#   . "$repo_root/scripts/lib/require-gnu.sh"
+#   . ./scripts/lib/tracked-grep.sh                    <- the only one the old needle matched
+# 📏 Measured: 4 of the 6 libs on disk were found; `require-gnu.sh` and `shell-subjects.sh` were not.
+# A lib the extraction misses is not in ISLIB, and a file not in ISLIB DROPS OUT OF THE SCAN — so two
+# libs were never checked for the muted floor this guard exists to seal.
+# 📏 The differential drill: the same violation planted in `tracked-grep.sh` (matched spelling) went
+# RED, and in `require-gnu.sh` (unmatched) stayed GREEN. ⚠ `shell-subjects.sh` ALSO went red and that
+# was a FALSE red — this guard sources it, so the plant EXECUTED instead of being detected. A drill
+# that goes red for the wrong reason is not a drill; `require-gnu.sh` is the clean witness.
+# So the path is matched loosely and the LIB NAME is what gets normalized: any source operator followed
+# by something ending in `/lib/<name>.sh` counts, and the name is re-anchored to `scripts/lib/` because
+# that is where every lib in this repo lives (one directory — `scripts/lib/*.sh` is the whole set).
 sourced="$(
-  grep -hoE '(^|[;&[:space:]])(\.|source)[[:space:]]+\./scripts/lib/[A-Za-z0-9_-]+\.sh' \
-    scripts/*.sh scripts/lib/*.sh .githooks/* 2>/dev/null |
-    grep -oE 'scripts/lib/[A-Za-z0-9_-]+\.sh' | sort -u || true
+  grep -hoE '(^|[;&[:space:]])(\.|source)[[:space:]]+[^[:space:]]*/lib/[A-Za-z0-9_-]+\.sh' \
+    "${files_arr[@]}" 2>/dev/null |
+    sed -E 's|.*/lib/([A-Za-z0-9_-]+\.sh).*|scripts/lib/\1|' | sort -u || true
 )"
 
 # Non-emptiness floor on THAT extraction, because a collapse there is silent in the worst direction:
@@ -160,26 +199,11 @@ if [ -z "$sourced" ]; then
   exit 1
 fi
 
-# ## Empty-enumeration floor, declared BEFORE awk runs
-# `awk 'prog'` with no file operands reads STDIN, so an empty list would hang or certify silence rather
-# than report an empty scan — check-shell-pipe-sigpipe.sh:87-92 records the same ordering for the same
-# reason. A derived enumeration that comes back empty must abort loudly.
-scanned=0
-files_arr=()
-if [ -n "$files" ]; then
-  while IFS= read -r f; do
-    [ -f "$f" ] || continue          # index may list a file deleted in the working tree
-    files_arr+=("$f")
-    scanned=$((scanned + 1))
-  done <<< "$files"
-fi
-
-if [ "$scanned" -eq 0 ]; then
-  echo "check-shell-mute-floor: FAILED -- enumerated ZERO shell files. 'git ls-files -- \"*.sh\"" >&2
-  echo "  \".githooks/*\"' returned nothing, so this guard would have vouched for nothing. Either this" >&2
-  echo "  is not a git work tree, or the repo genuinely has no shell left; neither is a clean run." >&2
-  exit 1
-fi
+# NO EMPTY FLOOR HERE ANY MORE, and its absence is deliberate (2026-09-13, ledger V212).
+# `shell_subject_files` aborts on a per-pathspec zero before this file sees a list, so the floor that
+# stood here could not fire — and it went on printing a `git ls-files` command this guard no longer
+# runs. A floor that cannot fire is not caution, it is a second owner of the population's integrity,
+# stating it in terms that stopped being true. The floor lives with the list.
 
 hits="$(awk -v SOURCED="$sourced" '
 BEGIN {
@@ -397,4 +421,4 @@ if [ -n "$hits" ]; then
   exit 1
 fi
 
-echo "check-shell-mute-floor: OK (no muted empty-set floor in $scanned files: every git-known *.sh and .githooks/*)"
+echo "check-shell-mute-floor: OK (no muted empty-set floor in $scanned files -- the shared shell population, scripts/lib/shell-subjects.sh)"

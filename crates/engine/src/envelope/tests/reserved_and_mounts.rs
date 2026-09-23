@@ -205,6 +205,48 @@ fn config_mount_matching_nothing_emits_the_same_had_no_effect_warning_as_the_nat
     );
 }
 
+/// The zero-effect mount tripwire must name the cause its MIRROR has always named. `clientBase`'s
+/// version ends "or the declaration belongs on a different tree"; this one did not until 2026-09-07
+/// (review ledger V95), and a pair of mirrored warnings where only one names the common cause reads as
+/// if the asymmetry meant something.
+#[test]
+fn a_zero_effect_mount_says_the_declaration_may_belong_on_another_tree() {
+    let env = envelope(vec![projection("routes.ts", 3)]);
+    let mut cfg = config();
+    cfg.mounts = vec![crate::MountRule {
+        dir: "nowhere".to_string(),
+        at: "/gw".to_string(),
+    }];
+    let out = analyze_envelope(&env, &cfg);
+    let w = out
+        .warnings
+        .iter()
+        .find(|w| w.contains("topology mount") && w.contains("had no effect"))
+        .unwrap_or_else(|| panic!("{:?}", out.warnings));
+    assert!(w.contains("belongs on a different tree"), "{w}");
+}
+
+/// An empty `dir` is the shape `mountedAt` takes — `zzop_facade::config::mounts` folds that key into a
+/// `mounts` entry before the engine sees it. So a user who typed `mountedAt` was being answered
+/// entirely in `mounts` vocabulary, about a `dir` they never wrote. The empty-dir arm now names it.
+#[test]
+fn the_empty_dir_arm_names_mounted_at_the_key_the_user_actually_types() {
+    let env = envelope(vec![projection("routes.jsp", 3)]);
+    let mut cfg = config();
+    cfg.mounts = vec![crate::MountRule {
+        dir: String::new(),
+        at: "/gw".to_string(),
+    }];
+    let out = analyze_envelope(&env, &cfg);
+    let w = out
+        .warnings
+        .iter()
+        .find(|w| w.contains("topology mount") && w.contains("had no effect"))
+        .unwrap_or_else(|| panic!("{:?}", out.warnings));
+    assert!(w.contains("mountedAt"), "{w}");
+    assert!(w.contains("belongs on a different tree"), "{w}");
+}
+
 #[test]
 fn config_mount_leaves_non_http_provide_kinds_untouched_in_envelope_mode() {
     let mut a = projection("router.jsp", 5);

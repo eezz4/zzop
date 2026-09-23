@@ -70,16 +70,30 @@ mod test_region_promise_tests;
 
 pub use analyze::{analyze_json, analyze_trees_json};
 pub use envelope::{analyze_envelope_json, validate_envelope_only_json};
-pub use explain::{explain, explain_with_config, native_analysis_ids};
+pub use explain::{bundled_verbatim_message, explain, explain_with_config, native_analysis_ids};
+
+/// The WHOLE of those two legends, run-free — what `zzop_summary`'s reply-legends contract document is
+/// rendered from. The reply keeps a pointer and these functions keep the text, so the two can never
+/// state different vocabularies: the same one-owner rule as the pair of exports above, applied to the
+/// half that left the wire rather than the half that travels between lanes.
+pub use output::{native_analyses_legend, packs_loaded_legend};
 /// The LANE-INVARIANT half of the `nativeAnalysesMeaning` legend — what `registered` counts and what
 /// `disabled` means. Re-exported for `zzop_summary`, whose cross-layer join reply carries the same
 /// roster under the same key with a DIFFERENT action attached: there `crossLayerFindings` is the
 /// channel the reader is looking at, so the per-tree lane's "run the join" sentence is nonsense and
 /// only these two travel. Exported rather than copied for the reason every legend in this workspace
 /// has one owner: two replies that disagree about their own denominator is worse than either alone.
-pub use output::{NATIVE_ANALYSES_DISABLED_MEANING, NATIVE_ANALYSES_REGISTERED_MEANING};
+pub use output::{
+    NATIVE_ANALYSES_DISABLED_MEANING, NATIVE_ANALYSES_REGISTERED_MEANING,
+    NATIVE_ANALYSES_SHIPPED_OFF_MEANING,
+};
 pub use query::query_io_json;
 pub use query_coverage::query_coverage_json;
+/// The capability table as a run-free markdown CONTRACT document — see
+/// [`query_coverage::recognizers::contract_text`] for the question it answers that no per-run channel
+/// could. Re-exported here because `zzop-summary`'s contract table reaches every rendered document
+/// through this crate, never below it.
+pub use query_coverage::recognizers::contract_text as framework_recognizer_contract_text;
 pub use query_file::{query_file_json, FILE_VERDICTS};
 pub use request::{
     AnalyzeRequest, AnalyzeTreesRequest, CommitSubjectPatternRequest, CommitTypePatternRequest,
@@ -87,16 +101,16 @@ pub use request::{
 };
 pub use rule_pack::validate_rule_pack_json;
 pub use version::{version, version_string};
-/// The ecosystem-fixed BUILD-surface path predicate, compiled — the sibling of `test_path_re` above, and
-/// re-exported for the same layering reason: the summary layer's three-tier deployment-role ordering
-/// needs both classifications, and neither may be re-spelled there (`zzop_core::paths::is_build_path`
-/// carries why this one is a Rust predicate rather than a shared DSL fragment).
 pub use zzop_core::build_path_re;
 /// The DSL shared test-paths fragment, compiled — re-exported for zzop-summary, whose layering
 /// (no shipped dependency below this crate) is deliberate, and whose first-screen ordering of
 /// test-path findings (2026-08-09 U78 ruling) must read the SAME pattern the packs expand as
 /// their test-path exclusions. One string, one owner, two consumers that cannot disagree.
 pub use zzop_core::dsl::test_path_re;
+/// The ecosystem-fixed BUILD-surface path predicate, compiled — the sibling of `test_path_re` above, and
+/// re-exported for the same layering reason: the summary layer's three-tier deployment-role ordering
+/// needs both classifications, and neither may be re-spelled there (`zzop_core::paths::is_build_path`
+/// carries why this one is a Rust predicate rather than a shared DSL fragment).
 /// Its companion, and re-exported for exactly the same reason: `DEP_GRAPH_RESOLVED_ONLY` says what the
 /// dep graph leaves OUT, and this says that the CYCLE verdict beside it was computed over a smaller
 /// edge set still (`zzop_core::noncycle`). A surface that publishes both an edge list and an `inCycle`
@@ -109,6 +123,15 @@ pub use zzop_core::CYCLE_GRAPH_EXCLUDES_ERASED_IMPORTS;
 /// shipped dependency of that crate. Re-exported, never restated — a second copy of this sentence is a
 /// second thing that can drift.
 pub use zzop_core::DEP_GRAPH_RESOLVED_ONLY;
+/// The companion `native_analysis_ids` needs and never carried: which of those ids no finding can be
+/// keyed by. Re-exported here for the same reason `SCORE_MEANINGS` is — `crates/summary` sits above
+/// this line and has no engine dependency, so a fact it cannot reach is a fact it will approximate.
+///
+/// It approximated it: `unmatchable_rule_filter` tested `native_analysis_ids` alone, which answers
+/// "is this id registered", and returned "the filter is fine" for the seven ids registered precisely
+/// because they gate something rather than report it. Publishing the pair together is what stops the
+/// next shaper from reaching for the half that is in scope instead of the half that is correct.
+pub use zzop_engine::ids_that_carry_no_finding;
 /// The silent-failure-class registry's two DERIVED views — its full text as a contract document, and
 /// its per-status tallies. Re-exported rather than wrapped, and re-exported HERE rather than reached
 /// for directly, because this is the analysis-MEANING layer (the same reason `explain` and `version`

@@ -72,8 +72,9 @@ repository pack is [`examples/packs/README.md`](examples/packs/README.md)'s to s
 restated here.
 
 ‡ The three `orm-eager` rows are the same case as `typescript` above with one difference worth stating:
-the pack did NOT move whole. `perf` still exists and still ships `api-in-loop`; only the three rules that
-declare `"axis": "opinion"` left it, into
+the pack did NOT move whole. `perf` outlived the export and went on shipping `api-in-loop` (until the
+2026-09-03 merge took that rule to `reliability` and the pack with it); only the three rules that
+declare `"axis": "opinion"` left it in 2026-08-12, into
 [`examples/packs/orm-eager.json`](examples/packs/orm-eager.json). That is why these are RENAMES and the
 `typescript` ones were not — a rule id is `<pack>/<rule>`, so a rule that leaves one pack for another is
 renamed by construction, while a whole pack takes its id with it.
@@ -98,7 +99,6 @@ the old full id: that gets the unknown-rule-id warning, and the fix is the new i
 | `http` | `read-model-path` | `get-route-no-cache-marker` |
 | `http` | `auth-gates` | `protected-path-no-auth-evidence` |
 | `http` | `route-exposure` | `dev-path-no-guard-hint` |
-| `react` | `setstate-after-await-unmounted` | `setstate-after-async-unguarded` |
 | `redis` | `keys-glob-scan` | `keys-command-in-code` |
 | `reliability` | `await-in-map` | `map-async-no-promise-all` |
 | `reliability` | `promise-all-writes` | `promise-all-and-writes` |
@@ -131,7 +131,25 @@ leaves `perf` for `orm-eager` has a different pack on each side, so both sides a
 | `reliability/promise-race-no-cancel` | `code-hygiene/promise-race-no-cancel` |
 | `egress/localhost-egress-committed` ¶¶ | `code-hygiene/localhost-url-literal-committed` |
 | `reliability/promise-race-resource-leak` | `code-hygiene/promise-race-no-cancel` |
+| `go/goroutine-in-loop` | `reliability/goroutine-in-loop` |
+| `perf/api-in-loop` | `reliability/api-in-loop` |
+| `react/setstate-after-async-unguarded` | `reliability/setstate-after-async-unguarded` |
+| `react/setstate-after-await-unmounted` | `reliability/setstate-after-async-unguarded` |
 
+The last four rows (2026-09-03) are the single-rule-pack merge: `go`, `perf` and `react` each shipped
+exactly ONE rule, so each pack name was a second spelling of a rule id that a user had to learn, keep
+in `packs.only`, and find a catalog section for. All three rules moved into `reliability` unchanged —
+11 bundled packs became 8 while the DSL rule count stayed at 118, which is the arithmetic that says
+nothing was dropped on the way. **`packs.only: ["go"]`, `["perf"]` or `["react"]` now names no loaded
+pack**, and a `packs.only` that resolves to nothing disables every DSL rule; the run warns, but the
+warning is the only signal, so those three words are worth grepping for in a config that predates this
+release.
+
+The FOURTH of those rows collapses two hops. `setstate-after-await-unmounted` was renamed inside the
+old `react` pack before that pack was merged, so a user still carrying the oldest spelling would
+otherwise have to walk the same-pack table to a `react/` id that no longer resolves and then walk this
+one — and the same-pack table above no longer carries that row for exactly that reason. The `··` rows
+were written to the same rule.
 The five `sql-preferences` rows (2026-08-12) are the same shape as the `orm-eager` ones: `sql` did not
 move, it shed rules that declare `"axis": "opinion"` and still ships eight, so each of the five is
 renamed by construction. The pack is
@@ -254,17 +272,30 @@ The surfaces:
 
 | Surface | What's covered |
 |---|---|
-| CLI JSON output — the `analyze` / `analyzeTrees` / `analyzeEnvelope` document shapes ([docs/modules/facade.md](docs/modules/facade.md)) | Field names and types. New fields are added (minor); existing fields are not removed or repurposed without a major bump. |
-| CLI flags & config keys | Removing or repurposing a flag/key is a major bump; adding one is minor. Unknown keys are ignored with a warning, never a hard error. |
+| CLI JSON output — the reply shapes of `zzop analyze`, `zzop cross` and `zzop analyze-envelope` (described in [docs/modules/facade.md](docs/modules/facade.md) under the names `analyze` / `analyzeTrees` / `analyzeEnvelope`; **those three are the facade's own function names, not a surface** — the exclusion list below removes the Rust crates, so a row that identified this promise by them named its scope in vocabulary it had already disclaimed) | Field names and types. New fields are added (minor); existing fields are not removed or repurposed without a major bump. ⚠ That document describes TWO shapes and only one of them is this surface: the **shaped summary** every CLI subcommand and MCP tool returns, not the raw facade output beside it. `ir`, `nodes` and `scores` are documented there and are never in a CLI reply — a consumer pinning those is pinning a shape this surface does not carry, and the exclusion list below does not mention them because they are not omitted from a promise, they were never in one. |
+| CLI flags & config keys | Removing or repurposing a flag/key is a major bump; adding one is minor. A key this release does not know is ignored with a warning, never a hard error — that covers both keys it never had and RETIRED keys, ones that stopped meaning anything. ⚠ **Two moved-key outcomes, and which one you get follows what the stale value would silently do.** A moved key is one whose value still means something, so dropping it with a line of text over it does not fail loudly later. **⑴ Refused, exit 1, naming both spellings** — when the stale value would mis-key the cross-tree join and then report confidently. That is the deployment-topology class, and its roster is `crates/config/src/mapper/topology.rs`; the refusal itself tells you the new path, so no list is kept here. **⑵ Reported at exit 0, naming both spellings, value not honoured** — when the stale value would move a SCORE rather than a finding or a join. Today that is `scores.excludeTestFilesFromPopulation` → `scores.excludeTestFilesFromFileMetrics` (`crates/facade/src/config/declared.rs`). It is reported rather than dropped for the reason that whole branch exists: serde discards an unknown field without a word, so a config carried across that rename would otherwise change its own `pain` with nothing said. ⚠ **This second outcome was undocumented here until 2026-09-23**, while this row stated ⑴ as the whole rule — read together with the branch that does ⑵, the two halves of one release said opposite things about the same key class (pinned by `the_old_flat_topology_keys_are_refused_and_name_their_new_home`). Through 0.x a moved key has no grace period at all; from 1.0 it owes one, and this row moves with that. |
 | Normalized AST envelope input ([`docs/NORMALIZED_AST.md`](docs/NORMALIZED_AST.md)) | The envelope shape external parser adapters emit. Its `version` field is a RELEASE number in these same units, and moves only when the shape moves — so an adapter emitting a given version keeps being accepted through every later release that did not change the shape. A shape change is never silent: a consumer rejects a version above its own, and a field whose absence would change the analysis carries an explicit floor. |
 | Rule ids | The `disabledRules` / `severityOverrides` ids you configure against. A rename is a major bump. |
+| CLI exit codes `0` / `1` / `2` | Whether the CALL was right: `0` answered, `1` zzop could not answer, `2` the invocation was refused. Narrowing what earns a refusal is recorded; changing what a code MEANS is a major bump. `--fail-on`'s `3` is deliberately NOT here — see the exclusions below. |
 
-### Inside those surfaces, three things are still moving
+### Inside those surfaces, six things are still moving
 
-Being in the table means a change to it is **recorded**, not that it will not happen. Three
+Being in the table means a change to it is **recorded**, not that it will not happen. Six
 properties inside it are known to be unsettled today. Each is named here rather than left for you to
 infer from a run, because a consumer that assumes the settled version of any of them is building on
-something this project has said out loud it is not holding:
+something this project has said out loud it is not holding.
+
+**They are not the same kind of unsettled, and `1.0.0` does not treat them alike.** Only the first
+names something the freeze has to *stop*: a rule id is a surface in the table above, so from
+`1.0.0` every rename is a MAJOR bump, which means the renaming has to be finished before the
+promise starts rather than after it. The other five are unsettled by decision and stay that way,
+and what `1.0.0` freezes is the *declaration* that they move — a severity band and a shipped-off
+default are field VALUES, not the field names and types the table covers; `SourceSymbol.id`'s
+non-uniqueness IS the contract, and a disambiguating spelling added later would be additive; and
+the three native id namespaces are explicitly not being normalized, so the mixed convention is the
+settled state rather than a stop on the way to one; and the keys inside `findings[].data` are unpromised
+because no machine could hold that promise, which makes not making it the settled state too. Read as a single bucket, this list says
+something it does not mean: that `1.0.0` cannot be declared while any of the six is moving.
 
 - **Rule ids are still being renamed, and one defect concept is often several ids.** The same
   concept is frequently spelled once per language rather than once, and folding those spellings into
@@ -277,6 +308,42 @@ something this project has said out loud it is not holding:
   Configure against [`docs/rules/catalog.md`](docs/rules/catalog.md),
   which is always the current set, and let a run's `configWarnings` / `warnings` tell you when an id
   you named no longer exists.
+- **A rule's SEVERITY is not a settled property, and one rule of judgment is currently moving many
+  of them at once.** The band is meant to say how strong the rule's own evidence is, and the rule
+  applied since 2026-08-25 is that a rule which SPELLS OUT a disqualifying condition it cannot detect
+  is describing a gate it did not build — so the band, not the prose, is where that fact belongs. On
+  2026-09-03 that rule was applied to the whole class rather than to the one rule it was written for:
+  **27 rules moved `warning` → `info`** because each already said in its own message that its two
+  matched halves are independent and nothing links them. **This changes what `--fail-on warning`
+  breaks on**, and for a security-heavy config it changes it a lot — 12 of the 27 are `security/`
+  rules, `taint-flow` and the command-injection and path-traversal families among them. Nothing was
+  removed and no finding count moved: the same findings report, under a band that now states the
+  evidence rather than the topic. If your gate depended on those rules failing a build, gate on
+  `--fail-on info`, or re-raise the ones you trust with `severityOverrides`. The band moves back up
+  per rule as the missing gate is actually built.
+  **A second judgment moved six more on 2026-09-06, and this one is about what a band is FOR.** A rule
+  that reports a shape the reader may legitimately intend — an import cycle, a wide model, an optional
+  foreign key, one external host called from two trees — is not making a claim that can be wrong, so it
+  does not belong in a band that asks for action: `circular`, `schema/god-model`, `schema/nullable-fk`,
+  `schema/model-churn`, `cross-layer/db-table-name-in-multiple-sources` and
+  `cross-layer/external-host-in-multiple-sources` moved `warning` → `info`. Each one's own message
+  already conceded it. Same consequence as the row above and the same remedies: no finding is removed,
+  no count moves, `--fail-on warning` stops breaking on these six. `schema/model-churn` also lost its
+  `critical` tier — its escalation line is one the rule's message calls unmeasurable.
+
+- **Whether a rule runs BY DEFAULT is not a settled property either, and three analyses now ship
+  off.** `unimported-export`, `dead-candidates` and `unreachable` are unused-code hygiene rather than
+  defect claims, and across the dogfood corpus they were **61.7% of every finding a run reported** —
+  a first run whose top half is hygiene buries the findings that claim a defect. Since 2026-09-03 the
+  ENGINE ships them off; before that the same opinion sat as three `"off"` lines in the starter
+  config, which reached only trees created after it landed. **A run that wants one must now name it**
+  — `"dead-candidates": "info"` in `rules`, the same gesture that changes any other rule's band, so
+  there is no opt-in vocabulary to learn. Nothing is removed from the build, and every reply lists
+  what it skipped in `nativeAnalyses.shippedOff` — kept separate from `nativeAnalyses.disabled`
+  precisely so a project default never reads as your decision. A library caller constructing an
+  `EngineConfig` directly is unaffected and still gets every registered analysis. Which ids are in
+  that set is not a promise: read `nativeAnalyses.shippedOff` off your own run rather than pinning
+  the three names.
 - **`SourceSymbol.id` is NOT UNIQUE — that is the declared contract, and it collides today.**
   Java/C# overloads, TypeScript overload signatures, and TS declaration merging each collapse
   several declarations onto one id. **Treat it as a label, not a key**: keying a map by it silently
@@ -289,14 +356,46 @@ something this project has said out loud it is not holding:
 - **Native analysis ids use three namespace conventions at once, and are not being normalized.** A
   native id is bare, `cross-layer/`-prefixed, or `schema/`-prefixed, and the prefix carries meaning
   rather than history: bare = judged inside a single tree, `cross-layer/` = exists only where a
-  join across trees does, `schema/` = emitted by the schema family gates. One analysis name occurs
-  in both a bare and a `cross-layer/` form as two genuinely different analyses for that reason. Do
+  join across trees does, `schema/` = emitted by the schema family gates. Some analysis names occur
+  in both a bare and a `cross-layer/` form, as two genuinely different analyses for that reason. Do
   not infer that a bare id will grow a prefix, do not strip one, and do not treat a bare/prefixed
-  pair as a duplicate.
+  pair as a duplicate. How many such pairs there are is not stated here, and neither are their names —
+  this sentence read "One analysis name occurs" while the command below printed two (external review
+  round 22, 2026-09-14), which is what a number in prose does. The command is the owner:
+
+  ```sh
+  zzop contract rule-catalog | grep -oE '^\| `[a-z0-9/-]+`' | tr -d '|` ' | sort -u > /tmp/ids
+  comm -12 <(grep '^cross-layer/' /tmp/ids | sed 's|^cross-layer/||' | sort) \
+           <(grep -v '/' /tmp/ids | sort)
+  ```
+
+- **The KEYS INSIDE `findings[].data` are not covered, though the field itself is.** The table's first row covers
+  field names and types, and `data` qualifies: it is always present and always a JSON object. What a rule writes
+  into it is another matter. `docs/rules/dsl-reference.md` documents each matcher's payload so a reply is readable,
+  and those descriptions track the code rather than binding it. This is unsettled BY DECISION and stays that way:
+  `Finding::data` is a free-form `serde_json::Value` at the engine boundary, its own doc refuses a per-rule table
+  of shapes on the grounds that a thirteenth rule leaves such a table silently short, and the guard that exists
+  (`crates/engine/tests/rule_contracts/finding_data_keys.rs`) asserts one direction only — that every key a shipped
+  consumer reads is spelled by some producer. Nothing watches a rule changing the shape it writes. Promising a shape
+  no machine can hold is the failure mode this section exists to prevent, so the promise is not made. Read `data`
+  defensively; a key you need that is absent means that rule does not carry it.
 
 ## Explicitly NOT part of the compatibility surface
 
 These change freely at any time, by design — do not build on them:
+
+- **The `--baseline` file's FORMAT.** zzop writes it, and its own `meaning` field tells you to commit
+  it — so it lands in your repository and looks like a contract. It is not one. Its keys are today's
+  shape: `byRule` is the ratchet the gate reads, and a file that parses as JSON without it is refused
+  with exit 1 rather than treated as empty. There is no schema version in it; `zzopVersion` records
+  which build wrote it and nothing promises the next build reads it. If an upgrade starts refusing
+  your committed baseline, delete it and re-run to re-record — that is one command and the recorded
+  counts are re-derived from the tree, not from the file.
+
+  Listed here on 2026-09-15 (external review round 23, ledger V251) because it was in NEITHER list.
+  The table above is what this project promises and this section is what it refuses to promise; a file
+  zzop instructs you to commit belongs in one of them, and silence is the one thing the 0.x license
+  does not include.
 
 - **`PARSER_FINGERPRINT` / `CACHE_SCHEMA_VERSION`** — internal cache keys. They change
   whenever extraction output or the cache payload changes; that churn is their whole job
@@ -315,6 +414,12 @@ These change freely at any time, by design — do not build on them:
   improves continuously, so which findings a run emits (and their exact text) shifts release
   to release. Gate CI by reading the severity/rule-id counts you care about from the JSON
   output, not on an exact total finding count.
+- **`--fail-on`'s exit code `3`** — it reports how many findings cleared a threshold, so it moves with
+  the finding set for exactly the reason that set is excluded above. A run that starts or stops exiting
+  `3` because a rule's band moved is the gate working, not a broken promise. The other three exit codes
+  ARE covered — they answer whether the CALL was right rather than what the code contains, and splitting
+  them is deliberate: one verdict over all four would have to be wrong about one half (2026-08-25).
+
 - **The Rust crates (`zzop-*`)** — internal workspace crates, not a published stable library
   API. The consumer surfaces are the `zzop` CLI binary and the `zzop-mcp` binary (MCP tools), the
   Claude Code plugin / Claude Desktop `.mcpb` bundle built from the latter, and the Normalized AST
@@ -347,6 +452,7 @@ schema field, or a rule row added here until a new binary ships.
 - `docs/contracts/example-envelope.json`
 - `docs/rules/catalog.md`
 - `crates/config/config-surface.json`
+- `crates/config/src/config-template.jsonc`
 - `examples/packs/typescript-lint.json`
 - `examples/packs/orm-eager.json`
 - `examples/packs/sql-preferences.json`
@@ -369,11 +475,14 @@ table through a build script (`crates/config/build.rs`) rather than an `include_
 `crates/config/src/lib.rs` (`CONFIG_SURFACE_JSON`) — the same bytes the unknown-key warner reads, so
 there is one embed and one truth. A grep for `include_str!` inside `contracts.rs` cannot see it, which
 is exactly how it stayed unlisted while being shipped; the guard now follows every `zzop_*::CONST` that
-`contracts.rs` serves back to the crate that defines it. TWO served resources still have no row here
-and never will, because there is no file to edit: `disclosure-classes` is RENDERED at build time from
-Rust, and `config-template` is a raw string literal in `crates/config/src/template.rs`. Both still need
-a release to reach a reader — a source file is not a document — and the guard aborts rather than skips
-if a served constant resolves to neither an `include_str!` nor a definition it could read.
+`contracts.rs` serves back to the crate that defines it. ONE served resource still has no row here and
+never will, because there is no file to edit: `disclosure-classes` is RENDERED at build time from Rust.
+It still needs a release to reach a reader — a source file is not a document — and the guard aborts
+rather than skips if a served constant resolves to neither an `include_str!` nor a definition it could
+read. `config-template` was the second such resource until this unreleased window, when the starter
+document moved out of a raw string literal in `crates/config/src/template.rs` into
+`crates/config/src/config-template.jsonc` and gained its row above; the carve-out was for a resource
+with no file, and it now has one.
 
 ## How versions are produced
 

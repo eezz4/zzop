@@ -27,7 +27,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use super::elaborations;
+use super::{elaborations, knobs_pointer, FILTER_KNOBS};
 
 fn src(rel: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join(rel)
@@ -342,4 +342,99 @@ fn every_tree_path_subcommand_spells_its_arity_floor_in_the_help_and_usage_lines
          one line later.",
         wrong.join("\n  ")
     );
+}
+
+/// The shared-gate flags: parsed OUTSIDE any `run_*` function, in their own `cli/*.rs` helper modules,
+/// which is exactly why [`every_flag_a_subcommand_parses_appears_in_its_help_line`] cannot see them.
+/// That test's population is the flag literals inside a `pub fn run_<sub>` chunk; these three live in
+/// `args.rs`, `baseline.rs` and `fail_on.rs` and were never subjects of anything.
+///
+/// `--config` is excluded and that is a claim, not a convenience: it is a PATH-MODE selector, spelled
+/// in each subcommand's own usage form (`analyze --config <zzop.config.jsonc>`) rather than described
+/// in the shared block, so requiring it here would demand a paragraph that would be wrong to write.
+const GATE_FLAG_SOURCES: [&str; 3] = ["cli/args.rs", "cli/baseline.rs", "cli/fail_on.rs"];
+
+/// Every long flag literal those helper modules compare argv against.
+fn shared_gate_flags() -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    for rel in GATE_FLAG_SOURCES {
+        let text = read(rel);
+        let mut rest = text.as_str();
+        while let Some(i) = rest.find("\"--") {
+            rest = &rest[i + 1..];
+            let Some(end) = rest.find('"') else { break };
+            let flag = &rest[..end];
+            if flag.chars().all(|c| c.is_ascii_lowercase() || c == '-') && flag != "--config" {
+                out.insert(flag.to_string());
+            }
+        }
+    }
+    out
+}
+
+/// TEST 5 — the pointer and the block it points at must agree, in BOTH directions.
+///
+/// # The failure this is written from
+/// 📏 2026-09-14 (ledger V238), measured on the shipped binary: the SHARED KNOBS block of `zzop --help`
+/// contained `fail-on` once and `baseline` ZERO times, while [`knobs_pointer`] told the reader on three
+/// separate lines that the block "says what each one does" — naming `--baseline` among them. The
+/// paragraph existed; it had been spliced into the single-subcommand lane alone, so `zzop analyze
+/// --help` documented the flag and `zzop --help` promised it and did not.
+///
+/// # Why both directions
+/// Forward alone (every named flag is documented) is satisfiable by naming fewer flags, which is the
+/// cheaper way to go green and leaves the reader worse off. Backward alone (every documented flag is
+/// named) is satisfiable by documenting fewer. Together they say: the pointer is a complete and honest
+/// index of the block, which is the only thing the pointer's sentence actually claims.
+#[test]
+fn the_knobs_pointer_names_exactly_what_the_shared_block_documents() {
+    let pointer = knobs_pointer("analyze");
+    let named: BTreeSet<String> = {
+        let mut out = BTreeSet::new();
+        let mut rest = pointer.as_str();
+        while let Some(i) = rest.find("--") {
+            rest = &rest[i..];
+            let end = rest
+                .find(|c: char| !(c.is_ascii_lowercase() || c == '-'))
+                .unwrap_or(rest.len());
+            let flag = &rest[..end];
+            if flag.len() > 2 {
+                out.insert(flag.to_string());
+            }
+            rest = &rest[end.max(1)..];
+        }
+        out
+    };
+    // FLOOR: a pointer that named nothing would make both directions below vacuous, and the named set
+    // is what the whole test is about.
+    assert!(
+        named.len() >= 5,
+        "the pointer names {} flags; it is supposed to be the complete index of the shared block, so a \
+         short list here means this parse stopped matching: {pointer}",
+        named.len()
+    );
+
+    let undocumented: Vec<&String> = named
+        .iter()
+        .filter(|f| !FILTER_KNOBS.contains(f.as_str()))
+        .collect();
+    assert!(
+        undocumented.is_empty(),
+        "the pointer tells a reader the SHARED KNOBS block says what each of these does, and the block \
+         never mentions them: {undocumented:?}. This is the exact shape of ledger V238 — a paragraph \
+         that exists in one help lane and is promised in the other."
+    );
+
+    for flag in shared_gate_flags() {
+        assert!(
+            named.contains(&flag),
+            "`{flag}` is parsed by one of {GATE_FLAG_SOURCES:?} — a knob shared by every filtered \
+             subcommand — and the pointer does not name it, so a reader of `zzop --help` who stops at \
+             a subcommand entry never learns it exists"
+        );
+        assert!(
+            FILTER_KNOBS.contains(flag.as_str()),
+            "`{flag}` is parsed but the SHARED KNOBS block does not describe it"
+        );
+    }
 }

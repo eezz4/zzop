@@ -1,6 +1,6 @@
 //! End-to-end coverage for `zzop_metrics::diagnostics` wired into `analyze::assemble` — the self-report
 //! half of the "silent degenerate data must self-report" principle. Uses the same hand-rolled `TempDir`
-//! pattern as `crates/engine/tests/pack_sql.rs`.
+//! pattern as `crates/engine/tests/integration/analyze_sql_db_table.rs`.
 //!
 //! - A tree whose files parse but carry zero internal dep edges and zero exported symbols must surface
 //!   both coverage-gap warnings on `AnalyzeOutput::warnings`.
@@ -388,11 +388,20 @@ fn an_all_typo_pack_allowlist_self_reports_even_when_another_override_is_also_se
 }
 
 /// The other direction, and the non-vacuity control for the test above: an allowlist naming a REAL
-/// loaded pack must stay silent, and a partial typo must report without claiming the run lost its
-/// whole DSL surface. Without this, the assertion above would pass just as well against a warning that
-/// fired on every `packs.only` config.
+/// loaded pack must raise no UNKNOWN-ID report, and a partial typo must report without claiming the
+/// run lost its whole DSL surface. Without this, the assertion above would pass just as well against a
+/// warning that fired on every `packs.only` config.
+///
+/// 🔴 The needle is "matching no loaded pack id", not the words "pack allowlist", and that narrowing is
+/// load-bearing (2026-09-14, review ledger V232). A valid allowlist is no longer SILENT: it now carries
+/// a different report saying the allowlist gates DSL packs only and the native analyses still ran — a
+/// statement about what the key DID, not about an unknown entry. The old needle could not tell the two
+/// apart, so it failed on a report it was never written to police. The control keeps its whole power:
+/// an unknown-id warning that fired unconditionally would still trip the assertion below, because that
+/// report is the only one carrying this phrase.
 #[test]
-fn a_pack_allowlist_naming_a_loaded_pack_is_silent_and_a_partial_typo_is_worded_milder() {
+fn a_pack_allowlist_naming_a_loaded_pack_raises_no_unknown_id_report_and_a_partial_typo_is_worded_milder(
+) {
     let dir = TempDir::new("zzop-engine-diag-only-packs-real");
     dir.write(
         "a.ts",
@@ -418,8 +427,17 @@ fn a_pack_allowlist_naming_a_loaded_pack_is_silent_and_a_partial_typo_is_worded_
     assert!(
         !out.config_warnings
             .iter()
-            .any(|w| w.contains("pack allowlist")),
+            .any(|w| w.contains("matching no loaded pack id")),
         "a valid allowlist entry must not be reported as unknown, got: {:?}",
+        out.config_warnings
+    );
+    // And the report it SHOULD carry, asserted here so this control gains a subject rather than losing
+    // one: a working allowlist tells the reader the native analyses were not gated by it.
+    assert!(
+        out.config_warnings
+            .iter()
+            .any(|w| w.contains("gates DSL PACKS ONLY")),
+        "a working allowlist must say the native analyses still ran, got: {:?}",
         out.config_warnings
     );
 

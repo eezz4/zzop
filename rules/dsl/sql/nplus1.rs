@@ -115,7 +115,7 @@ fn await_store_finduniq_inside_for_of_loop_is_flagged() {
     assert_eq!(hits(&out, "nplus1").len(), 1, "{:?}", out.findings);
 }
 
-/// Adapter shape (mirrors `perf/api-in-loop`'s REDDIT-shape negative): one `findMany`, then the result
+/// Adapter shape (mirrors `reliability/api-in-loop`'s REDDIT-shape negative): one `findMany`, then the result
 /// array is TRANSFORMED via `.map()` — the `await ... findMany(` line is not textually inside the map
 /// callback's own span, so the trigger never satisfies inside a loop span and the rule stays silent.
 #[test]

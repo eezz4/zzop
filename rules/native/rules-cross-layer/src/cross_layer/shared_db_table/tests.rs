@@ -61,7 +61,7 @@ fn same_table_consumed_by_two_edge_sources_is_flagged_in_each_of_them() {
     assert_eq!(sites, vec![("a.ts", 3), ("b.ts", 9)]);
     for f in &out {
         assert_eq!(f.rule_id, "cross-layer/db-table-name-in-multiple-sources");
-        assert_eq!(f.severity, Severity::Warning);
+        assert_eq!(f.severity, Severity::Info);
         assert!(f.message.contains("svc-a"), "{}", f.message);
         assert!(f.message.contains("svc-b"), "{}", f.message);
         assert!(f.message.contains("Verify"), "{}", f.message);

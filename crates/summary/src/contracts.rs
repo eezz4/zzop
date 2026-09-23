@@ -11,10 +11,12 @@
 //! keeps the established "reference, never re-own" discipline — the `config-surface` row points at
 //! `zzop_config::CONFIG_SURFACE_JSON` instead of embedding the same bytes a second time.
 //!
-//! One row is RENDERED rather than embedded: `disclosure-classes`, the silent-failure-class registry's
-//! full text, which lives in Rust (`zzop_engine::disclosure_contract_text`) and has no file to
-//! `include_str!`. Same discipline, one step further — the run reply's folded `disclosure` counts and
-//! this document are two views of one registry, so neither can drift into claiming the other's numbers.
+//! Two rows are RENDERED rather than embedded, both for the same reason and both halves of a fold:
+//! `disclosure-classes`, the silent-failure-class registry's full text (`zzop_engine::
+//! disclosure_contract_text`), and `reply-legends`, the four run-invariant reply legends
+//! (`crate::output::legends`). Neither has a file to `include_str!`, and in both cases the reply's
+//! folded half and the document are two views of ONE source, so neither can drift into claiming what
+//! the other says.
 
 use std::sync::OnceLock;
 
@@ -44,6 +46,23 @@ pub const CONFIG_TEMPLATE_FILENAME: &str = zzop_config::DEFAULT_CONFIG_FILENAME;
 /// string stays host-neutral; each host adds its own way out).
 pub const MISSING_CONFIG_MARKER: &str = zzop_config::MISSING_CONFIG_MARKER;
 
+/// The multi-tree refusal's stable phrase, for exactly the reason the line above rides here: the
+/// refusal is emitted by a crate every host shares, so it stays host-neutral — and then each host
+/// has to recognize it to append its own runnable way out. That was the 2026-08-09 ruling, and it
+/// was applied to the missing-config refusal only; this refusal shipped with the same
+/// SPELLING-FREE comment and no host wired to it, so BOTH of its prescriptions failed when a
+/// reader transcribed them (`zzop cross <dir>` exits 2; `zzop analyze <tree root>` exits 1 because the
+/// declared roots carry no config of their own). Emitted by `analyze::analyze_summary_with`; matched by
+/// `cli::print_or_exit` and `mcp::tools`.
+pub const MULTI_TREE_MARKER: &str = "run the CROSS-LAYER JOIN over this config";
+
+/// The same class's third member, re-exported for the same reason the two above are: the products
+/// depend on this crate, not on `zzop-config`, and a display layer that spells the phrase itself is a
+/// copy that drifts. Fires for PATHS mode — `cross <dirA> <dirB>` where one of those directories carries
+/// a config declaring its own tree set. Its remedy was already performable ("point these paths at trees
+/// whose configs declare one tree each"); what it lacked was any way to type the other one.
+pub const PATHS_MODE_CONFIG_MARKER: &str = zzop_config::trees::PATHS_MODE_CONFIG_MARKER;
+
 /// The URI space every contract document is addressed in. Owned here, next to the names it prefixes,
 /// because three surfaces now spell it: MCP `resources/list`/`resources/read` (`packages/mcp`), and —
 /// since the disclosure fold — every analyze-shaped reply, which prints the disclosure document's URI
@@ -57,6 +76,53 @@ pub const URI_PREFIX: &str = "zzop://contract/";
 /// pointer and the table that answers it must read one constant, or the reply can name a document the
 /// contract lane cannot serve.
 pub const DISCLOSURE_CONTRACT_NAME: &str = "disclosure-classes";
+
+/// The `<name>` of the reply-legends document — the FULL TEXT of the four RUN-INVARIANT legends an
+/// analyze reply used to ship on every call (8,474 bytes, byte-identical across four corpus trees) and
+/// now folds to a short note plus this pointer. Named here for [`DISCLOSURE_CONTRACT_NAME`]'s reason,
+/// which is the whole point of a pointer: the shaper that prints it and the table that answers it read
+/// ONE constant, so a reply cannot name a document this lane will not serve.
+pub const REPLY_LEGENDS_CONTRACT_NAME: &str = "reply-legends";
+
+/// The `<name>` of the framework-recognizer document — the CAPABILITY table (*"can this build read my
+/// stack"*) served with no tree to walk. Named here for the reason the two constants above are: any
+/// surface that points at it and the table that answers must read one constant.
+pub const FRAMEWORK_RECOGNIZERS_CONTRACT_NAME: &str = "framework-recognizers";
+
+/// The doc's bytes as a READER should receive them: a markdown contract is served with a one-line
+/// provenance banner naming the build that baked it. JSON and JSONC contracts are returned untouched —
+/// a banner is not valid in either, and both already carry their own version channel (the envelope
+/// schema's `version`, a rule pack's spliced `exported_from`).
+///
+/// ## Why this exists (2026-09-07, review ledger V74)
+///
+/// These documents are compiled into the binary, so a reader holds whatever was baked at that release
+/// and nothing in the bytes said which. Measured on v0.34.0..HEAD: `docs/rules/catalog.md` moved 153
+/// lines, `config-template.jsonc` was created (+287), `authoring-guide.md` moved 43. A v0.34.0 user
+/// running `zzop contract rule-catalog` holds 68-commits-stale bytes that read exactly like current
+/// ones. The repository's own `docs/` is ahead of them, which is the pair that actually disagrees —
+/// not "binary vs site", since the site ships on the same push as the release.
+///
+/// The device is not new: `examples/packs/*.json` have carried `exported_from: {zzop_version,
+/// contract}` since the pack contracts were minted, for this exact reason ("a copy saved from this
+/// binary is then undatable"). This is that stamp reaching the documents that had none.
+///
+/// It is prepended at SERVE time rather than baked, because the alternative is a version string
+/// hand-written into 15 committed files — the rot this repo has a guard against.
+pub fn served_content(doc: &ContractDoc) -> std::borrow::Cow<'static, str> {
+    if doc.mime != "text/markdown" {
+        return std::borrow::Cow::Borrowed(doc.content);
+    }
+    std::borrow::Cow::Owned(format!(
+        "<!-- served by zzop {version} as `{uri}{name}`. These bytes are compiled INTO that build: a \
+newer release may carry a different document, and this repository's own docs/ may already be ahead of \
+it. Re-read this resource from the binary you are actually running. -->\n{content}",
+        version = env!("CARGO_PKG_VERSION"),
+        uri = URI_PREFIX,
+        name = doc.name,
+        content = doc.content
+    ))
+}
 
 /// Looks up an embedded contract document by its `<name>` (the `zzop://contract/<name>` URI tail).
 /// The ONE lookup both surfaces share — the MCP `resources/read` handler (package `zzop-mcp`'s
@@ -83,9 +149,28 @@ fn disclosure_classes_text() -> &'static str {
     TEXT.get_or_init(zzop_facade::disclosure_contract_text)
 }
 
-/// Every contract resource this binary serves, in `resources/list` order — [`EMBEDDED_DOCS`] followed
-/// by the one RENDERED row. Built once at first use, then shared; deterministic (same binary, same
-/// list, same bytes) because its one non-const row renders from a pinned registry.
+/// The `reply-legends` document's text, rendered ONCE from the same list the reply's pointers are
+/// built from (`crate::output::legends`). The second RENDERED row, for the first one's reason: there is
+/// no file to embed, and a checked-in copy would be the second hand-maintained text the fold is not
+/// allowed to have — the reply's short notes and this document are two views of one list.
+fn reply_legends_text() -> &'static str {
+    static TEXT: OnceLock<String> = OnceLock::new();
+    TEXT.get_or_init(crate::output::legends::contract_text)
+}
+
+/// The `framework-recognizers` document's text, rendered ONCE from the compiled-in recognizer
+/// aggregator (`zzop_facade::framework_recognizer_contract_text`). The THIRD rendered row, for the two
+/// before it's reason: there is no file to embed, and a checked-in copy would be a second
+/// hand-maintained list of what this binary can read — the drift the aggregator exists to prevent.
+fn framework_recognizers_text() -> &'static str {
+    static TEXT: OnceLock<String> = OnceLock::new();
+    TEXT.get_or_init(zzop_facade::framework_recognizer_contract_text)
+}
+
+/// Every contract resource this binary serves, in `resources/list` order — [`EMBEDDED_DOCS`], the
+/// disclosure registry's RENDERED row, the exported packs, and the reply-legends RENDERED row. Built
+/// once at first use, then shared; deterministic (same binary, same list, same bytes) because both
+/// non-const rows render from pinned, run-free sources.
 fn docs() -> &'static [ContractDoc] {
     static DOCS: OnceLock<Vec<ContractDoc>> = OnceLock::new();
     DOCS.get_or_init(|| {
@@ -112,6 +197,24 @@ fn docs() -> &'static [ContractDoc] {
                     content,
                 }),
         );
+        // Appended AFTER the packs for the reason stated one comment up, applied to this row too: every
+        // resource that already had a position keeps it. A second rendered row that landed beside the
+        // first would have shifted every exported pack by one, which is a change to a published listing
+        // in exchange for reading order in a file nobody reads by ordinal.
+        docs.push(ContractDoc {
+            name: REPLY_LEGENDS_CONTRACT_NAME,
+            description: "The run-INVARIANT legends of an analyze-shaped reply, in full: what a `coverageGaps` row is and what its zero can and cannot mean, what `findings.byRule` counts (findings, not places) and why its entries are not comparable across rules, when a native analysis's absence from `findings` is NOT a measured zero, and what each `packsLoaded` row's numbers count — including the one that means NOT ANALYZED. These sentences are byte-identical on every run and for every repository, so a reply carries this run's measurement plus a short note and points here for the vocabulary. Rendered from the same list the reply builds those notes from, never a copy.",
+            mime: "text/markdown",
+            content: reply_legends_text(),
+        });
+        // Appended LAST, the same discipline the two rows above state: every resource that already had
+        // a `resources/list` position keeps it, so a published listing never shifts to buy reading order.
+        docs.push(ContractDoc {
+            name: FRAMEWORK_RECOGNIZERS_CONTRACT_NAME,
+            description: "Every framework recognizer compiled into THIS build, grouped by the parser crate that owns the adapter, with the extensions it runs on and the cross-layer channel it fills. A fact of the BUILD, true before any tree is walked: this is the one surface that answers \"will zzop read my stack\" WITHOUT running an analysis — the same table also rides in a `coverage` reply, but that needs a tree first, and every framework-silence warning is per-run and fires only on a tree already showing the symptom. A row means the recognizer runs on those extensions, never that every idiom is modelled; an absent framework means no recognizer for it exists in this build at all. Rendered from the compiled-in registry, never a copy.",
+            mime: "text/markdown",
+            content: framework_recognizers_text(),
+        });
         docs
     })
 }
@@ -225,7 +328,7 @@ static EMBEDDED_DOCS: &[ContractDoc] = &[
     },
     ContractDoc {
         name: "rule-catalog",
-        description: "Every rule id the engine ships today (11 DSL packs + all native analysis ids), with severity/matcher/detection prose per rule (a DSL rule's suppress marker is derived, `zzop-<rule id>-ok`) — the ONE place a rule id can be looked up without a source checkout. The EXPORTED packs are documented here too, under their own `Exported packs` heading, one row per rule: those ship in the repository but not in this binary and run only when a config points at them, so an id found in that section is a real id that did not LOAD — never a misspelling, and never absent from this document. The three FULL-ANALYSIS lanes — whole-repo analysis, the cross-repo join, and envelope analysis — take a `rule` findings filter to pair with it, and an id absent here never fires; the two LOOKUP lanes (one file, one endpoint) take no rule filter at all, so a rule id sent to those is not a narrower answer. Pair with the dsl-reference resource for matcher semantics.",
+        description: "Every rule id the engine ships today (8 DSL packs + all native analysis ids), with severity/matcher/detection prose per rule (a DSL rule's suppress marker is derived, `zzop-<rule id>-ok`) — the ONE place a rule id can be looked up without a source checkout. The EXPORTED packs are documented here too, under their own `Exported packs` heading, one row per rule: those ship in the repository but not in this binary and run only when a config points at them, so an id found in that section is a real id that did not LOAD — never a misspelling, and never absent from this document. The three FULL-ANALYSIS lanes — whole-repo analysis, the cross-repo join, and envelope analysis — take a `rule` findings filter to pair with it, and an id absent here never fires; the two LOOKUP lanes (one file, one endpoint) take no rule filter at all, so a rule id sent to those is not a narrower answer. Pair with the dsl-reference resource for matcher semantics.",
         mime: "text/markdown",
         content: include_str!("../../../docs/rules/catalog.md"),
     },

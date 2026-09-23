@@ -72,6 +72,9 @@ fn sample_ir(loc: u32) -> FileIrSlice {
         test_spans: Vec::new(),
         call_sites: Vec::new(),
         string_literals: Vec::new(),
+        call_graph: Default::default(),
+        export_aliases: Vec::new(),
+        has_generated_banner: false,
     }
 }
 

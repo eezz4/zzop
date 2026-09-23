@@ -29,7 +29,12 @@ cd "$(dirname "$0")/.."
 . ./scripts/lib/tracked-grep.sh
 
 violations=0
-SPAWN_PATTERN='Command::new\("git"\)'
+# Any process spawn, not just the literal `Command::new("git")` this guard shipped with until
+# 2026-09-06. An external review walked past that needle with `const GIT_BIN: &str = "git";
+# Command::new(GIT_BIN)` — one line, and the process census, which stands entirely on this guard, went
+# on vouching for a spawn it could not see. Widening also lets the guard state something stronger and
+# truer than it used to: this binary runs ONE external program, and its name is git.
+SPAWN_PATTERN='Command::new\('
 OWNER='crates/git/src/process.rs'
 
 # ## Subject-set floor
@@ -46,27 +51,48 @@ if [ "$rs_scanned" -eq 0 ]; then
 fi
 
 echo "git spawn isolation guard: checking non-test git spawn sites..."
-# Test code is identified by PATH, not by content: `tests/` directories, `tests.rs`, and `*_tests.rs`
-# are this repo's only three spellings for it (the same three the 300-line file cap exempts).
+# Test code is identified by PATH, not by content. The spellings are NOT counted here and NOT claimed
+# to match another guard's list -- the chain below is the roster, and a reader who needs it reads that.
+#
+# 🔴 This comment said "this repo's only three spellings for it (the same three the 400-line file cap
+# exempts)" until 2026-09-13 (review ledger V188). Both halves were false. The chain below excludes
+# SEVEN things, four of which are test spellings (`/tests/`, `/tests.rs`, `_tests.rs`,
+# `/test_support.rs`) and three of which are not tests at all (`/build.rs`, `rules/dsl/`, `cases/` --
+# the last two for the reason the paragraph above gives). And the file cap's exemption list is a
+# different set again: it also drops build and tooling directories that have nothing to do with test
+# identification.
+#
+# The cross-reference was the worse half. "The same three" invites a reader to change one list and
+# trust the other followed, and nothing was ever holding them equal.
+#
+# `rules/dsl/` and `cases/` join them for a different reason, and only since the needle stopped
+# requiring the "git" argument: both hold Rust that this repo ANALYZES rather than runs — fixtures a
+# rule is scored against, inline in string literals under `rules/dsl/` and as real files under
+# `cases/trees/`. A `Command::new("sh")` in either is the SUBJECT of an analysis (the `security`
+# pack's shell-routing rule is scored on exactly those lines), so counting it would make this guard
+# report spawns that do not exist. The distinction the two exclusions share is code-we-run vs
+# code-we-read, and it only had to be written down once the needle grew wide enough to see both.
 spawn_files=$(tracked_files_matching "$SPAWN_PATTERN" "${RS_GLOBS[@]}" \
   | grep -v '/tests/' \
   | grep -v '/tests\.rs$' \
   | grep -v '_tests\.rs$' \
   | grep -v '/test_support\.rs$' \
-  | grep -v '/build\.rs$' || true)
+  | grep -v '/build\.rs$' \
+  | grep -v '^rules/dsl/' \
+  | grep -v '^cases/' || true)
 
-unexpected=$(grep -v -x "$OWNER" <<< "$spawn_files" || true)
+unexpected=$(grep -v -x "$OWNER" < <(printf '%s\n' "$spawn_files") || true)
 if [ -n "$unexpected" ]; then
   echo "git spawn isolation guard: git spawned outside $OWNER:"
   while IFS= read -r f; do
     grep -nP "$SPAWN_PATTERN" "$f" | sed "s|^|  ${f#./}:|"
-  done <<< "$unexpected"
+  done < <(printf '%s\n' "$unexpected")
   violations=1
 fi
 
 # The owner must actually still be the owner. If the spawn moved out of process.rs entirely, the
 # check above would pass on an empty list — green while reading nothing, again.
-if ! grep -qx "$OWNER" <<< "$spawn_files"; then
+if ! grep -qx "$OWNER" < <(printf '%s\n' "$spawn_files"); then
   echo "git spawn isolation guard: FAILED -- $OWNER no longer contains a git spawn."
   echo "Either it moved (update this guard AND crates/git/src/lib.rs's module doc together) or the"
   echo "pattern stopped matching. Until then the process census in crates/engine/tests/"

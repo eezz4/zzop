@@ -59,7 +59,7 @@
 //! named: landings track constant FAMILIES, so a family that grows a member the pins do not follow is
 //! exactly the silent case, and it is red here from the first run.
 //!
-//! ONE KNOWN NON-CARRIER THAT SHOULD BE ONE, named so the registry is not read as complete.
+//! TWO KNOWN NON-CARRIERS THAT SHOULD BE ONE, named so the registry is not read as complete.
 //! `security/jwt-no-expiry` opens with "ADDING AN EXPIRY DOES NOT REACH THE TOKENS THIS FINDING IS
 //! ABOUT" — a landing by any reading — in its own spelling rather than through a constant, so this
 //! file classifies it as carrying none and nothing positions it. The circulation family is split
@@ -67,6 +67,16 @@
 //! verify-side exit, and this) and only one of the three is registered. Registering the bespoke
 //! spelling here would settle a question that has not been asked — whether the three collapse into
 //! one constant — and collapsing them is a MESSAGE change. The backlog owns it.
+//!
+//! `security/taint-flow` is the second, and it is a DIFFERENT shape of gap: it carries no landing
+//! prose at all, and it owes three. Its message hands the reader three remedies for three sinks —
+//! parameterize the SQL, take the shell out, use `textContent` — and each of the three already has a
+//! constant somewhere in this tree (`BOUND_PARAMETER_LANDING`, `SHELL_ROUTING_LANDING`,
+//! `SANITIZER_SUBTRACTION_LANDING`). Splicing one would make the message read as landed while two
+//! instructions still carry no cost, and the two SQL/shell constants are keyed to other languages'
+//! spellings, so it is a rule-sized decision rather than a splice. Named here because it is exactly
+//! the population this axis cannot see: a rule that owes a landing and carries none is
+//! indistinguishable from a rule whose remedy costs nothing.
 //!
 //! WHY A TEMPLATE PIN AND NOT 35 MORE FIXTURES. §27's claim is about what a reader meets in what
 //! order, and the order is a property of the template: delivery splices values in, it never reorders
@@ -102,17 +112,33 @@
 //! pin if its message carries a landing constant, and nothing at all if it does not. Adding neither on
 //! axis A is red, which is the whole point: the declaration cannot be forgotten because forgetting it
 //! is the failure.
+//!
+//! TWO SHAPE RULES THIS FILE ENFORCES ON ITSELF, both because the alternative fails QUIETLY. ONE
+//! FUNCTION, ONE AXIS: a `#[test]` may not both call a position-pin helper and compare two `find`
+//! offsets in place, because [`delivered_pins`] does not count the inline comparison in a
+//! helper-bearing block and the two together therefore read as a single verdict. ONE LINE, ONE
+//! LANDING: every landing is a bare single-line `const NAME: &str = "...";`, because
+//! [`landing_texts`] reads no other shape — and a landing outside the registry makes every rule
+//! splicing its sentence read as a non-carrier, which owes no pin and turns nothing red.
+//! [`every_landing_declaration_is_readable`] counts what the registry could not read rather than
+//! teaching it one more shape.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-/// Floors, not counts. Each is monotone — packs and rules only ever grow, and a pin is only ever
-/// removed by moving that rule into a table here — so none of them goes stale on ordinary growth,
-/// while all of them go red the moment a scan silently reads nothing.
-const MIN_PACKS: usize = 11;
+/// Floors, not counts. A pin is only ever removed by moving that rule into a table here, and rules
+/// only ever grow, so those floors do not go stale on ordinary growth while going red the moment a
+/// scan silently reads nothing.
+///
+/// PACKS ARE THE EXCEPTION, and it is worth knowing why before lowering this again. On 2026-09-03
+/// three packs that shipped ONE rule each (`go`, `perf`, `react`) were merged into `reliability`,
+/// so 11 -> 8. `MIN_RULES` did NOT move, and that is the whole check on such a merge: rules that
+/// change pack keep their id suffix, so a merge that lost one would show up here as 117. Lower this
+/// only alongside a rule count that stayed put; if BOTH fall, the scan broke, not the pack set.
+const MIN_PACKS: usize = 8;
 const MIN_RULES: usize = 118;
 const MIN_DISQUALIFIER_PINS: usize = 41;
-const MIN_LANDING_PINS: usize = 27;
+const MIN_LANDING_PINS: usize = 51;
 
 /// The three shared position-pin helpers that assert a DISQUALIFIER order. A `#[test]` naming any of
 /// them is asserting when this rule's own finding is wrong, and where the reader meets that.
@@ -136,7 +162,6 @@ const ORDER_CLAIMS: &[(&str, &str, &str)] = &[
     ("sql/truncate-in-app-code", "`#`-commented-out TRUNCATE is read as live code", "Move destructive schema/data operations into a migration script"),
     ("security/sql-interpolated-statement", "If that value is request-derived this is SQL injection", "Bind the value as a query PARAMETER"),
     ("security/template-unescaped-output", "if any interpolated value is user-influenced", "Use the escaped output form instead"),
-    ("browser/location-assign-dynamic", "if that value is influenced by the URL", "Validate the target against an allowlist"),
     ("security/command-interpolated-string", "the worst an argument-position value enables is argument/option injection against the called program", "Pass every argument as its own list element"),
     ("security/command-and-interpolation", "A formatted string passed as an ordinary `.arg(...)` is NOT", "Pass every argument as its own `.arg(value)`"),
     ("http/protected-path-no-auth-evidence", "If a guard exists but isn't recognized", "inject the `auth-guarded` attribute by either route above"),
@@ -161,12 +186,31 @@ const ORDER_CLAIMS: &[(&str, &str, &str)] = &[
     ("security/sql-string-concat", "if the concatenated part is request-derived", "Use a parameterized/bound query instead"),
     ("db/tx-and-empty-catch", "it doesn't prove the empty catch wraps the transaction's body", "Log the error and rethrow it"),
     ("security/path-traversal", "not proof the request-derived value actually flows into the joined path", "Reject `..` segments"),
-    ("react/setstate-after-async-unguarded", "an accepted false positive here", "Thread an `AbortController`"),
+    ("reliability/setstate-after-async-unguarded", "an accepted false positive here", "Thread an `AbortController`"),
     ("sql/destructive-migration", "Committed destructive migrations are usually deliberate", "Verify the object name against the PR/ticket"),
     ("security/annotation-sql-concat", "INJECTION IS NOT THE RISK HERE", "Prefer a single literal, with named parameters"),
     // §27's third form, and the section names this rule as its exemplar: the imperative itself is
     // conditioned, so the premise a reader must evaluate sits directly in front of the verb.
     ("security/hardcoded-secret", "IF this value is a real credential", "move it to an environment variable or a secrets manager"),
+    // --- 2026-09-05, the open adjudication batch `audit74` left behind. These ten declared
+    // NO_DISQUALIFIER with the bare reason "no limitation prose at all" -- a true DESCRIPTION that was
+    // never a JUDGMENT. Read one by one, every one of the ten turned out to have a real condition under which its own finding is
+    // wrong, and in every case the condition is the same shape: the rule matches a NAME or a SPAN and
+    // states a conclusion about a KIND. Two go further than a hedge -- `count-in-loop` names a remedy
+    // that moves the problem (a denormalized counter has to be written in the same transaction or it
+    // drifts), and `idempotency-key-regenerated-in-loop` names one that is HARMFUL on the loop it
+    // cannot tell apart (reusing a key across DISTINCT requests makes the server drop all but the
+    // first). The guard asked "did you declare?"; nobody had asked "is the absence right?".
+    ("db/unawaited-transaction", "the receiver is judged by NAME, not by type", "Await the call (or return it, or attach"),
+    ("reliability/json-parse-no-try", "a local `try` is not the only catcher", "Wrap the parse in try/catch"),
+    ("reliability/interval-no-clear", "the search is FILE-SCOPED", "Store the return value in a handle"),
+    ("security/error-leak-to-client", "this matches the SHAPE of sending an error-named value, never its contents", "Log server-side and send a generic message"),
+    ("sql/count-in-loop", "N is not read", "Use a single GROUP BY query"),
+    ("db/unbounded-user-limit", "the clamp does not have to be on this line", "Clamp it against a maximum"),
+    ("db/float-money-compare", "the money judgment is a NAME match", "Represent money as integer minor units"),
+    ("db/idempotency-key-regenerated-in-loop", "a loop is not always a retry", "Generate the key ONCE before the loop"),
+    ("egress/ws-no-auth", "the search is scoped to the SAME FUNCTION", "The WebSocket API can't set custom headers"),
+    ("security/weak-random", "the security judgment is the NAME on the line", "Use `java.security.SecureRandom` instead."),
 ];
 
 /// `(rule id, which excluded category its limitation prose falls into)` — this rule names no condition
@@ -234,25 +278,27 @@ const NO_DISQUALIFIER: &[(&str, &str)] = &[
         "redis/keys-command-in-code",
         "FN disclosure + suppression boilerplate",
     ),
-    ("go/goroutine-in-loop", "under-report disclosure"),
+    ("reliability/goroutine-in-loop", "under-report disclosure"),
     (
         "browser/markdown-and-html-sink-unsanitized",
-        "FN disclosure (cross-span, .vue)",
+        "FN disclosure (cross-span, .vue) + landing",
     ),
     (
         "db/client-new-in-loop",
         "veto description + sibling boundary",
     ),
     ("sql/nplus1", "FN disclosure (path scope)"),
-    ("browser/javascript-url", "FN disclosure (scope limit)"),
-    ("perf/api-in-loop", "FN disclosure (degraded parse)"),
     (
-        "db/idempotency-key-regenerated-in-loop",
-        "no limitation prose at all",
+        "browser/javascript-url",
+        "FN disclosure (scope limit) + landing (the scheme-allowlist cost; none of it disqualifies)",
     ),
+    ("reliability/api-in-loop", "FN disclosure (degraded parse)"),
     (
         "security/cors-reflected-origin-credentials",
-        "FN disclosure (multi-line object)",
+        "FN disclosure (multi-line object) + landing (was 'FN disclosure (multi-line object)' alone \
+         — the §37 origin-allowlist landing added ~740 characters about what enumerating the origins \
+         costs, and none of it disqualifies: a reflected origin with credentials is trust-anything \
+         whether or not the replacement list is hard to keep complete)",
     ),
     (
         "reliability/await-inside-promise-all-array",
@@ -276,15 +322,12 @@ const NO_DISQUALIFIER: &[(&str, &str)] = &[
         "db/client-new-in-handler",
         "accepted-miss (FN) parenthetical",
     ),
-    ("sql/count-in-loop", "no limitation prose at all"),
     (
         "security/api-key-in-url",
-        "suppression-marker spelling note",
-    ),
-    ("db/unawaited-transaction", "no limitation prose at all"),
-    (
-        "security/error-leak-to-client",
-        "no limitation prose at all",
+        "suppression-marker spelling note + landing (was 'suppression-marker spelling note' alone — \
+         the §37 credential-transport landing added ~650 characters about what moving the credential \
+         breaks and what it does not un-leak, and none of it disqualifies: the key is still in a URL \
+         and the URL is still logged)",
     ),
     (
         // Both this row and `weak-token-random` below read "no limitation prose at all" until the
@@ -301,19 +344,12 @@ const NO_DISQUALIFIER: &[(&str, &str)] = &[
         "landing only (was 'no limitation prose at all' — the CSPRNG landing added ~1,000 characters \
          about what the swap costs, and none of it disqualifies)",
     ),
-    ("db/unbounded-user-limit", "no limitation prose at all"),
     (
-        "reliability/json-parse-no-try",
-        "no limitation prose at all",
+        "browser/no-document-write",
+        "suppression boilerplate + landing (was 'suppression boilerplate' alone — the parser-timing \
+         landing added ~1,100 characters about what the DOM substitute costs, and none of it \
+         disqualifies)",
     ),
-    (
-        "reliability/interval-no-clear",
-        "no limitation prose at all",
-    ),
-    ("security/weak-random", "no limitation prose at all"),
-    ("browser/no-document-write", "suppression boilerplate"),
-    ("db/float-money-compare", "no limitation prose at all"),
-    ("egress/ws-no-auth", "no limitation prose at all"),
 ];
 
 /// `(rule id, disqualifying clause, imperative)` — OPEN §27-a violations: the clause sits BEHIND the
@@ -474,6 +510,62 @@ fn landing_texts() -> BTreeMap<String, String> {
     out
 }
 
+/// Every constant this tree DECLARES as a landing, by name, whatever shape its initializer takes.
+///
+/// Deliberately a WEAKER needle than [`landing_texts`]: it reads the name and the type and stops
+/// before the `=`, so it still sees a declaration whose literal `rustfmt` pushed onto the next line,
+/// or one spelled with a raw string, a `concat!`, or `&'static str`. That difference is the whole
+/// point — [`every_landing_declaration_is_readable`] subtracts the registry from this set, and what
+/// is left over is precisely what the registry FAILED TO READ.
+///
+/// The TYPE is the filter, not a roster of exempt names. Two constants in this file are named
+/// `*LANDING*` and are not landings (`MIN_LANDING_PINS: usize`, `LANDING_PIN_HELPERS: &[&str]`), and
+/// excluding them by type costs one `starts_with` and never goes stale, while a hand-written name
+/// list is a second place to edit for whoever adds the third one.
+fn declared_landing_names() -> BTreeMap<String, PathBuf> {
+    let mut files = Vec::new();
+    rs_files(&dsl_dir(), &mut files);
+    files.sort();
+    let mut out: BTreeMap<String, PathBuf> = BTreeMap::new();
+    for path in files {
+        let src = std::fs::read_to_string(&path).expect("rs file readable");
+        for line in src.lines() {
+            let mut trimmed = line.trim();
+            // Visibility is one of the shapes the registry's needle drops, so it is stripped here
+            // rather than required to be absent.
+            for vis in ["pub(crate) ", "pub(super) ", "pub(self) ", "pub "] {
+                if let Some(rest) = trimmed.strip_prefix(vis) {
+                    trimmed = rest;
+                    break;
+                }
+            }
+            let Some(rest) = trimmed.strip_prefix("const ") else {
+                continue;
+            };
+            let Some((name, ty)) = rest.split_once(':') else {
+                continue;
+            };
+            let name = name.trim();
+            if !name.contains("LANDING") {
+                continue;
+            }
+            if name.is_empty()
+                || !name
+                    .chars()
+                    .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+            {
+                continue;
+            }
+            let ty = ty.trim_start();
+            if !(ty.starts_with("&str") || ty.starts_with("&'static str")) {
+                continue;
+            }
+            out.insert(name.to_string(), path.clone());
+        }
+    }
+    out
+}
+
 /// True when this `fn` block compares two `find`-derived offsets IN PLACE, without a helper. This is
 /// what the 2026-08-30 census found that a helper-name grep could not: seven rules pin their own
 /// offsets inline, and a name search reports every one of them as unpinned.
@@ -580,6 +672,28 @@ fn delivered_pins(all: &BTreeMap<String, String>) -> (BTreeSet<String>, BTreeSet
                 }
             }
             if any_helper {
+                // ONE FUNCTION, ONE AXIS — enforced, because the alternative is unreadable rather
+                // than merely untidy. An inline comparison in a helper-bearing block is NOT counted
+                // below, and reading an inline comparison as an axis-A claim is only sound where
+                // there is no helper: a block that calls one can reach a landing constant too, so
+                // `at_x < at_y` inside it may be asserting either axis and the source no longer
+                // says which. Before this assertion that block was skipped in silence — measured by
+                // merging this tree's own landing pin for `db/write-in-loop-no-tx` into the `fn`
+                // that carries its inline §27-a comparison: the rule lost its axis-A verdict, and
+                // both assertions that noticed blamed the wrong thing (the pin floor reported that
+                // "the scan stopped seeing the pins", and the coverage assertion offered a
+                // `NO_DISQUALIFIER` row for a rule whose disqualifier is asserted five lines above).
+                let head = block.lines().next().unwrap_or("").trim();
+                assert!(
+                    !block_has_inline_order_comparison(block),
+                    "{}: `fn {head}` calls a shared position-pin helper AND compares two `find` \
+                     offsets in place, in one function. The inline comparison is not counted as a \
+                     verdict here and its subject cannot be read off the source, so whichever axis \
+                     it asserts is silently absent from the coverage sets below. Split it into two \
+                     `#[test]` functions, one per axis — or delete it if it is making the same \
+                     claim as the helper call.",
+                    path.display()
+                );
                 continue;
             }
             if !block_has_inline_order_comparison(block) {
@@ -832,5 +946,62 @@ fn landing_pins_name_a_registered_constant() {
          `assert_landing_precedes_imperative`. An inlined needle positions one message and leaves \
          every sibling that splices the same sentence invisible to the coverage check above.",
         orphans.len()
+    );
+}
+
+/// AXIS B'S INSTRUMENT, checked against the tree rather than trusted. Every landing constant this
+/// tree declares is one the registry can actually read.
+///
+/// [`landing_texts`] reads a landing only out of a bare single-line `const NAME: &str = "...";`. A
+/// declaration in any other shape is skipped with no diagnostic at all — it does not fail, it simply
+/// is not there. Measured 2026-09-01: one landing was short enough that `cargo fmt --all` broke the
+/// line after the `=`, the constant left the registry, and every rule splicing that sentence became a
+/// NON-CARRIER. That is the direction that goes quiet, because a non-carrier owes no landing pin and
+/// [`every_dsl_rule_carries_a_landing_verdict`] has nothing to say about it. That time the wrapped
+/// constant happened to be one a pin already named, so [`landing_pins_name_a_registered_constant`]
+/// went red sideways and blamed the pin for not naming a registered constant. A wrap on a landing
+/// whose carriers are not yet pinned is caught by nothing — measured before this test existed, by
+/// planting a wrapped constant in the tree and watching all three tests pass.
+///
+/// This does NOT widen the parser. A wider parser beats the shape that already bit us and loses to
+/// the next one; asking what the parser MISSED keeps being the right question as shapes are added.
+#[test]
+fn every_landing_declaration_is_readable() {
+    let declared = declared_landing_names();
+    let registry = landing_texts();
+
+    // The subtraction below only measures unreadability while this needle is the WIDER of the two.
+    // If the registry ever reads a declaration this scan cannot see, the difference stops being a
+    // measurement and becomes the disagreement of two broken scans.
+    let invisible: Vec<&String> = registry
+        .keys()
+        .filter(|name| !declared.contains_key(*name))
+        .collect();
+    assert!(
+        invisible.is_empty(),
+        "{} landing constant(s) were read by the registry but are invisible to the declaration \
+         scan: {invisible:?}. `declared_landing_names` is meant to be a SUPERSET of `landing_texts` \
+         — it stops before the `=` precisely so it can never be the narrower of the two. While this \
+         is false the assertion below is not a measurement of anything.",
+        invisible.len()
+    );
+
+    let unreadable: Vec<String> = declared
+        .iter()
+        .filter(|(name, _)| !registry.contains_key(*name))
+        .map(|(name, path)| format!("{name} at {}", path.display()))
+        .collect();
+    assert!(
+        unreadable.is_empty(),
+        "{} landing constant(s) are declared in this tree but the axis-B registry cannot read \
+         them: {unreadable:?}\n\
+         The registry needs a bare single-line `const NAME: &str = \"...\";`. A declaration that \
+         `rustfmt` wrapped after the `=`, or one written with a raw string, a `concat!`, \
+         `&'static str`, or a visibility modifier, is skipped SILENTLY — and a landing outside the \
+         registry makes every rule that splices its sentence read as carrying no landing at all, \
+         which owes no pin and turns nothing red. Put the declaration back on one line (with \
+         `#[rustfmt::skip]` if it is short enough for rustfmt to wrap it, the way \
+         `db/autocommit_replay_landing.rs` does), or rename it if it is not a landing.",
+        unreadable.len()
     );
 }

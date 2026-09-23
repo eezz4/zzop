@@ -17,11 +17,11 @@ export default {
         [
           "lede",
           {
-            ko: `기본으로 로드되는 것은 팩 <strong>11벌 · DSL 룰 118개</strong>와
+            ko: `기본으로 로드되는 것은 팩 <strong>8벌 · DSL 룰 118개</strong>와
       <strong>네이티브 분석 60개</strong>(단일 트리 33 + 저장소 간 27)다. 원문 사이트는 이걸 178행짜리 표로 싣는다 —
       찾을 것이 있을 때는 정확하지만, <em>무엇을 잡는 도구인지</em>는 알려주지 않는다.
       이 페이지는 표가 아니라 지도다.`,
-            en: `The default load is <strong>11 packs · 118 DSL rules</strong> plus
+            en: `The default load is <strong>8 packs · 118 DSL rules</strong> plus
       <strong>60 native analyses</strong> (33 single-tree + 27 cross-repo). The source site prints all 178 as one
       table — exact when you
       already know what you're looking for, and silent about <em>what kind of tool this is</em>.
@@ -52,8 +52,8 @@ export default {
             [
               "h2",
               {
-                ko: "팩 열하나. 셋이 전체의 4분의 3이다.",
-                en: "Eleven packs — three of them are three quarters of it.",
+                ko: "팩 여덟. 셋이 전체의 4분의 3이다.",
+                en: "Eight packs — three of them are three quarters of it.",
               },
             ],
           ],
@@ -82,7 +82,7 @@ export default {
               },
             },
             {
-              k: "<code>reliability</code> · 16",
+              k: "<code>reliability</code> · 19",
               v: {
                 ko: `기다릴 줄 모르는 호출과 정리되지 않는 자원 —
             <code>fetch-no-timeout</code> · <code>async-route-no-catch</code> · <code>sync-fs-in-handler</code> ·
@@ -138,12 +138,16 @@ export default {
               },
             },
             {
-              k: "<code>go</code> · <code>perf</code> · <code>react</code>",
+              k: "<code>reliability</code>, cont.",
               v: {
-                ko: `셋 다 룰이 <strong>하나뿐</strong>이다 — <code>goroutine-in-loop</code> ·
-            <code>api-in-loop</code> · <code>setstate-after-async-unguarded</code>. 팩은 분류이지 분량이 아니다.`,
-                en: `One rule each — <code>goroutine-in-loop</code> · <code>api-in-loop</code> ·
-            <code>setstate-after-async-unguarded</code>. A pack is a category, not a quota.`,
+                ko: `<code>goroutine-in-loop</code> · <code>api-in-loop</code> ·
+            <code>setstate-after-async-unguarded</code> — 셋은 룰이 하나뿐인 팩 셋(<code>go</code> · <code>perf</code> ·
+            <code>react</code>)으로 각각 출하되다가 2026-09-03 에 여기로 합쳐졌다. 룰이 하나뿐인 팩은 분류가 아니라
+            룰 이름의 두 번째 철자였다.`,
+                en: `<code>goroutine-in-loop</code> · <code>api-in-loop</code> ·
+            <code>setstate-after-async-unguarded</code> — each shipped as its own one-rule pack
+            (<code>go</code> · <code>perf</code> · <code>react</code>) until 2026-09-03. A pack holding one rule is
+            not a category; it is the rule's name spelled twice.`,
               },
             },
           ],

@@ -6,6 +6,7 @@ import * as beReliabilityFetchNoTimeout from "./api/be-reliability.fetch-no-time
 import * as crossLayerSensitiveResponseField from "./api/cross-layer.sensitive-response-field";
 import * as httpDevPathNoGuardHint from "./api/http.dev-path-no-guard-hint";
 import * as httpProtectedPathNoAuthEvidence from "./api/http.protected-path-no-auth-evidence";
+import * as httpProtectedPathNoAuthEvidenceDecorator from "./api/http.protected-path-no-auth-evidence-decorator";
 import * as sqlCountInLoop from "./api/sql.count-in-loop";
 import * as sqlNplus1 from "./api/sql.nplus1";
 import * as sqlRaceConditionToctou from "./api/sql.race-condition-toctou";
@@ -56,7 +57,7 @@ import * as beSecurityWeakPasswordHash from "./services/be-security.weak-passwor
 import * as beSecurityWeakTokenRandom from "./services/be-security.weak-token-random";
 import * as fullstackLocalhostEgressCommitted from "./services/fullstack.localhost-egress-committed";
 import * as fullstackWsNoAuth from "./services/fullstack.ws-no-auth";
-import * as perfApiInLoop from "./services/perf.api-in-loop";
+import * as reliabilityApiInLoop from "./services/reliability.api-in-loop";
 import * as securityTaintFlow from "./services/security.taint-flow";
 import * as sqlAppSideAggregationFilterLength from "./services/sql.app-side-aggregation-filter-length";
 import * as sqlAppSideAggregationReduce from "./services/sql.app-side-aggregation-reduce";
@@ -80,6 +81,7 @@ export const registry = {
   crossLayerSensitiveResponseField,
   httpDevPathNoGuardHint,
   httpProtectedPathNoAuthEvidence,
+  httpProtectedPathNoAuthEvidenceDecorator,
   sqlCountInLoop,
   sqlNplus1,
   sqlRaceConditionToctou,
@@ -130,7 +132,7 @@ export const registry = {
   beSecurityWeakTokenRandom,
   fullstackLocalhostEgressCommitted,
   fullstackWsNoAuth,
-  perfApiInLoop,
+  reliabilityApiInLoop,
   securityTaintFlow,
   sqlAppSideAggregationFilterLength,
   sqlAppSideAggregationReduce,

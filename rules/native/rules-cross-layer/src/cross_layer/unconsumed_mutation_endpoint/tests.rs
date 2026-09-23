@@ -100,6 +100,8 @@ fn a_provide_that_is_a_known_near_miss_target_is_not_a_confident_zero() {
         )],
         &[],
         &no_blind(),
+        &BTreeSet::new(),
+        &BTreeSet::new(),
         &near_miss_at("be", "Api.java", 12),
         &no_trpc(),
     );
@@ -123,6 +125,8 @@ fn a_provide_with_no_near_miss_keeps_warning() {
         )],
         &[],
         &no_blind(),
+        &BTreeSet::new(),
+        &BTreeSet::new(),
         &no_near_miss(),
         &no_trpc(),
     );
@@ -142,6 +146,8 @@ fn dead_write_endpoint_is_flagged_with_method_and_source() {
         )],
         &[],
         &no_blind(),
+        &BTreeSet::new(),
+        &BTreeSet::new(),
         &no_near_miss(),
         &no_trpc(),
     );
@@ -174,6 +180,8 @@ fn read_method_dead_endpoint_is_not_this_rules_turf() {
         )],
         &[],
         &no_blind(),
+        &BTreeSet::new(),
+        &BTreeSet::new(),
         &no_near_miss(),
         &no_trpc(),
     );
@@ -193,6 +201,8 @@ fn dead_provide_registered_in_a_test_fixture_file_is_skipped() {
         )],
         &[],
         &no_blind(),
+        &BTreeSet::new(),
+        &BTreeSet::new(),
         &no_near_miss(),
         &no_trpc(),
     );
@@ -212,6 +222,8 @@ fn non_http_dead_provide_is_ignored() {
         )],
         &[],
         &no_blind(),
+        &BTreeSet::new(),
+        &BTreeSet::new(),
         &no_near_miss(),
         &no_trpc(),
     );
@@ -228,6 +240,8 @@ fn determinism_multiple_findings_sorted_by_file_then_line() {
         ],
         &[],
         &no_blind(),
+        &BTreeSet::new(),
+        &BTreeSet::new(),
         &no_near_miss(),
         &no_trpc(),
     );
@@ -257,6 +271,8 @@ fn near_miss_cross_reference_note_fires_when_the_provide_is_a_near_miss_target()
         )],
         &[],
         &no_blind(),
+        &BTreeSet::new(),
+        &BTreeSet::new(),
         &targets,
         &no_trpc(),
     );
@@ -283,6 +299,8 @@ fn near_miss_cross_reference_note_is_absent_when_the_provide_is_not_a_near_miss_
         )],
         &[],
         &no_blind(),
+        &BTreeSet::new(),
+        &BTreeSet::new(),
         &no_near_miss(),
         &no_trpc(),
     );
@@ -311,6 +329,8 @@ fn trpc_mount_route_write_verb_is_suppressed_when_its_own_tree_has_a_trpc_edge()
         )],
         &[],
         &no_blind(),
+        &BTreeSet::new(),
+        &BTreeSet::new(),
         &no_near_miss(),
         &trpc_sources(&["web"]),
     );
@@ -330,6 +350,8 @@ fn trpc_mount_route_write_verb_is_still_reported_when_no_tree_has_a_trpc_edge() 
         )],
         &[],
         &no_blind(),
+        &BTreeSet::new(),
+        &BTreeSet::new(),
         &no_near_miss(),
         &no_trpc(),
     );
@@ -351,6 +373,8 @@ fn trpc_mount_route_write_verb_is_still_reported_when_only_a_different_tree_has_
         )],
         &[],
         &no_blind(),
+        &BTreeSet::new(),
+        &BTreeSet::new(),
         &no_near_miss(),
         &trpc_sources(&["api"]),
     );
@@ -376,6 +400,8 @@ fn message_states_the_unresolved_http_count_honestly() {
             unresolved_http("fe"),
         ],
         &no_blind(),
+        &BTreeSet::new(),
+        &BTreeSet::new(),
         &no_near_miss(),
         &no_trpc(),
     );
@@ -402,6 +428,8 @@ fn a_blind_source_downgrades_severity_to_info_and_names_the_source() {
             unresolved_http("fe"),
         ],
         &blind(&["fe"]),
+        &BTreeSet::new(),
+        &BTreeSet::new(),
         &no_near_miss(),
         &no_trpc(),
     );
@@ -435,6 +463,8 @@ fn no_blind_source_keeps_warning_and_todays_attack_surface_framing() {
         )],
         &[],
         &no_blind(),
+        &BTreeSet::new(),
+        &BTreeSet::new(),
         &no_near_miss(),
         &no_trpc(),
     );
@@ -475,6 +505,8 @@ fn the_downgrade_note_leads_the_message_instead_of_trailing_it() {
         )],
         &[],
         &blind(&["fe"]),
+        &BTreeSet::new(),
+        &BTreeSet::new(),
         &no_near_miss(),
         &no_trpc(),
     );
@@ -496,6 +528,8 @@ fn reported_provide_sites_reads_back_the_anchors_of_this_rules_own_findings() {
         ],
         &[],
         &no_blind(),
+        &BTreeSet::new(),
+        &BTreeSet::new(),
         &no_near_miss(),
         &no_trpc(),
     );
@@ -533,6 +567,8 @@ fn reported_provide_sites_distinguishes_routes_sharing_one_anchor() {
         ],
         &[],
         &no_blind(),
+        &BTreeSet::new(),
+        &BTreeSet::new(),
         &no_near_miss(),
         &no_trpc(),
     );
@@ -576,6 +612,8 @@ fn the_message_discloses_that_the_general_rule_stands_down_here() {
         )],
         &[],
         &no_blind(),
+        &BTreeSet::new(),
+        &BTreeSet::new(),
         &no_near_miss(),
         &no_trpc(),
     );
@@ -601,6 +639,8 @@ fn blind_source_list_is_capped_at_three_with_a_remainder_count() {
         )],
         &[],
         &blind(&["a", "b", "c", "d", "e"]),
+        &BTreeSet::new(),
+        &BTreeSet::new(),
         &no_near_miss(),
         &no_trpc(),
     );
@@ -611,4 +651,189 @@ fn blind_source_list_is_capped_at_three_with_a_remainder_count() {
     assert!(out[0].message.contains("`c`"));
     assert!(!out[0].message.contains("`d`"));
     assert!(out[0].message.contains("and 2 more"), "{}", out[0].message);
+}
+
+#[test]
+fn a_tree_that_contributed_nothing_downgrades_the_band_and_the_sentence_names_that_mechanism() {
+    // 🔴 Review ledger V63. The band used to move OPPOSITE to the evidence here. `blind_sources` is a
+    // RATIO over a floor (`MIN_TOTAL_CONSUMES`), so a caller tree with 5 consumes of which 3 were
+    // unresolved counted as blind and dropped this to info — while a caller tree that contributed
+    // NOTHING fell below the floor, counted as NOT blind, and left the band at warning. Measured on
+    // `corpus/oss/fe-svelte` + `be-gin`: 16 write endpoints at warning while the caller's `.svelte`
+    // files were never parsed by anything.
+    let silent: BTreeSet<String> = ["fe-svelte".to_string()].into_iter().collect();
+    let out = unconsumed_mutation_endpoint_findings(
+        &[unconsumed_provide(
+            "http",
+            "POST /api/articles",
+            "be",
+            "routers.go",
+            15,
+            Some("ArticleCreate"),
+        )],
+        &[],
+        &no_blind(),
+        &silent,
+        &BTreeSet::new(),
+        &no_near_miss(),
+        &no_trpc(),
+    );
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].severity, Severity::Info, "{:?}", out[0]);
+    // The sentence must name THIS mechanism. Saying "majority-unresolved consumes" about a tree with no
+    // consumes at all would be a false claim, and sending the reader looking for unresolved URLs that do
+    // not exist is worse than saying nothing.
+    assert!(
+        out[0].message.contains("contributed NO joinable io at all"),
+        "{}",
+        out[0].message
+    );
+    assert!(
+        !out[0].message.contains("majority-unresolved"),
+        "the silent branch must not borrow the ratio branch's sentence: {}",
+        out[0].message
+    );
+}
+
+#[test]
+fn the_ratio_branch_keeps_its_own_sentence_when_only_it_fires() {
+    // Guard for the above in the other direction: the two mechanisms are separate inputs and each names
+    // itself. A run where only the ratio predicate fired must not start claiming trees contributed
+    // nothing — they contributed call sites, just unresolvable ones.
+    let ratio: BTreeSet<String> = ["fe".to_string()].into_iter().collect();
+    let out = unconsumed_mutation_endpoint_findings(
+        &[unconsumed_provide(
+            "http",
+            "POST /api/articles",
+            "be",
+            "routers.go",
+            15,
+            Some("ArticleCreate"),
+        )],
+        &[],
+        &ratio,
+        &BTreeSet::new(),
+        &BTreeSet::new(),
+        &no_near_miss(),
+        &no_trpc(),
+    );
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].severity, Severity::Info, "{:?}", out[0]);
+    assert!(
+        out[0].message.contains("majority-unresolved"),
+        "{}",
+        out[0].message
+    );
+    assert!(
+        !out[0].message.contains("contributed NO joinable io"),
+        "{}",
+        out[0].message
+    );
+}
+
+#[test]
+fn zero_contribution_alone_does_not_move_the_band() {
+    // The half of the gate that keeps this from silencing real attack surface. A shared-lib or UI-only
+    // package in a monorepo join legitimately has no io; the ENGINE only puts a source in the silent set
+    // when it ALSO measured that most of that tree's own files went unread by any parser. With no such
+    // measurement the set is empty here, and a confident zero stays a warning.
+    let out = unconsumed_mutation_endpoint_findings(
+        &[unconsumed_provide(
+            "http",
+            "POST /api/articles",
+            "be",
+            "routers.go",
+            15,
+            Some("ArticleCreate"),
+        )],
+        &[],
+        &no_blind(),
+        &BTreeSet::new(),
+        &BTreeSet::new(),
+        &no_near_miss(),
+        &no_trpc(),
+    );
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].severity, Severity::Warning, "{:?}", out[0]);
+}
+
+#[test]
+fn an_untraced_client_witness_downgrades_the_band_and_the_sentence_names_that_mechanism() {
+    // 🔴 Review ledger V82, and the third instance of V63's shape. The band read two witnesses while a
+    // THIRD was being computed a few lines away and never reached it — so a reply could carry twelve
+    // `warning` write endpoints each saying "no blindness was WITNESSED", beside
+    // `untraced-client-import-no-visible-consume` saying the join is blind for exactly the tree that
+    // would have been their caller. Measured on `corpus/oss/pair-redux-fastapi.jsonc`, where
+    // `fe-redux` routes every call through `superagent`: 12 warning + 8 info became 20 info.
+    let untraced: BTreeSet<String> = ["fe-redux".to_string()].into_iter().collect();
+    let out = unconsumed_mutation_endpoint_findings(
+        &[unconsumed_provide(
+            "http",
+            "POST /api/articles",
+            "be",
+            "routers.py",
+            15,
+            Some("create_article"),
+        )],
+        &[],
+        &no_blind(),
+        &BTreeSet::new(),
+        &untraced,
+        &no_near_miss(),
+        &no_trpc(),
+    );
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].severity, Severity::Info, "{:?}", out[0]);
+    assert!(
+        out[0]
+            .message
+            .contains("client/SDK package this build cannot read"),
+        "{}",
+        out[0].message
+    );
+    // Each witness names itself. Borrowing another's sentence sends the reader after evidence that is
+    // not there — an unresolved URL to inspect, or a tree that contributed nothing.
+    assert!(
+        !out[0].message.contains("majority-unresolved"),
+        "{}",
+        out[0].message
+    );
+    assert!(
+        !out[0].message.contains("contributed NO joinable io"),
+        "{}",
+        out[0].message
+    );
+}
+
+#[test]
+fn the_warning_branch_admits_all_three_checks_stayed_silent() {
+    // The empty branch's sentence is the one that has to move whenever a witness is added, and it did
+    // not when the second arrived: it still said the check "only asks whether a source's http consumes
+    // are majority-unresolved" after there were two. A band that explains itself with a stale inventory
+    // of its own inputs is the class-extrapolation this branch exists to prevent.
+    let out = unconsumed_mutation_endpoint_findings(
+        &[unconsumed_provide(
+            "http",
+            "POST /api/articles",
+            "be",
+            "routers.py",
+            15,
+            Some("create_article"),
+        )],
+        &[],
+        &no_blind(),
+        &BTreeSet::new(),
+        &BTreeSet::new(),
+        &no_near_miss(),
+        &no_trpc(),
+    );
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].severity, Severity::Warning, "{:?}", out[0]);
+    assert!(
+        out[0]
+            .message
+            .contains("three consume-side blindness checks"),
+        "the silent branch must name how many checks it is speaking for: {}",
+        out[0].message
+    );
 }

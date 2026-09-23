@@ -24,6 +24,18 @@ pub(super) struct JavaGuards {
     /// per config file, collected across the tree. The caller applies them ONLY if exactly one exists —
     /// multiple means ambiguous scoping, unsafe to reason about, so they are left unapplied.
     pub(super) postures: Vec<(String, zzop_parser_java_21::SpringSecurityPosture)>,
+    /// WHY a file that looked like a Spring Security config produced NO posture — `(file, bail name)`,
+    /// one per file that got past "not a security config at all". Collected 2026-09-05, and the reason it
+    /// did not exist before is the whole point: this extractor has always NAMED its bails so that "this
+    /// config exists but we could not read it" could be reported, and the function below carried a comment
+    /// saying nothing consumed the reason yet. Nothing did — so a user whose config tripped a bail saw
+    /// every route reported as unguarded with no statement anywhere that a config had been found, read,
+    /// and abandoned at a named shape. Measured on macrozheng/mall: its chain ends
+    /// `.access(mgr == null ? authenticated() : mgr)`, which is `AnyRequestAccessNotProvable` by design
+    /// (the live arm could GRANT), and 114 of its 127 `mutating-route-no-auth` findings are the silent
+    /// consequence. The bail is CORRECT — clearing on an unprovable default is the false-clear direction
+    /// this extractor exists to refuse. Only the silence was wrong.
+    pub(super) posture_bails: Vec<(String, &'static str, String)>,
 }
 
 /// Reads every Java file once: appends its calls to `raw_calls` and its imports to `imports_by_file`,
@@ -38,6 +50,7 @@ pub(super) fn parse_calls_and_guards(
 ) -> JavaGuards {
     let mut decorator_guarded: HashSet<(String, u32)> = HashSet::new();
     let mut postures = Vec::new();
+    let mut posture_bails: Vec<(String, &'static str, String)> = Vec::new();
     for rel in java_rels {
         let Ok(bytes) = std::fs::read(root.join(rel)) else {
             continue;
@@ -52,13 +65,21 @@ pub(super) fn parse_calls_and_guards(
             // `Err` is a NAMED bail (`zzop_parser_java_21::SpringPostureBail`) rather than a silent
             // `None`, so a later pass can hook the shape it knows how to resolve. Nothing consumes the
             // reason yet — the extractor's contract here is unchanged: no posture, no exemption.
-            if let Ok(p) = zzop_parser_java_21::extract_spring_security_posture(rel, &text) {
-                postures.push((rel.clone(), p));
+            match zzop_parser_java_21::extract_spring_security_posture(rel, &text) {
+                Ok(p) => postures.push((rel.clone(), p)),
+                // `NotAConfig` is every ordinary Java file in the tree and carries no information, so it
+                // is dropped HERE rather than downstream: a channel that fires on every file is noise,
+                // and the disclosure this feeds exists to name the files that ARE configs.
+                Err(bail) if bail.name() != "not-a-config" => {
+                    posture_bails.push((rel.clone(), bail.name(), bail.detail()));
+                }
+                Err(_) => {}
             }
         }
     }
     JavaGuards {
         decorator_guarded,
         postures,
+        posture_bails,
     }
 }

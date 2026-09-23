@@ -17,7 +17,7 @@
 #   census axis == convention  =>  a config key exists for it, AND the starter template names that key.
 #
 # "Exists" is checked against the two files that already own those facts — crates/config/config-surface.json
-# (the machine-checked knob dictionary) and crates/config/src/template.rs (the starter document). No third
+# (the machine-checked knob dictionary) and crates/config/src/config-template.jsonc (the starter document). No third
 # list is introduced: a key this guard accepts is a key the config front end really takes.
 #
 # ## How a census line declares itself
@@ -66,7 +66,7 @@ export LC_ALL=C
 CENSUS=scripts/policy-census.txt
 BASELINE=scripts/convention-vocab-baseline.txt
 SURFACE=crates/config/config-surface.json
-TEMPLATE=crates/config/src/template.rs
+TEMPLATE=crates/config/src/config-template.jsonc
 
 for f in "$CENSUS" "$SURFACE" "$TEMPLATE"; do
   if [ ! -f "$f" ]; then
@@ -162,7 +162,7 @@ if [ "${1:-}" = "--update-baseline" ]; then
     echo "# file states the real remaining debt where a deleted one is indistinguishable from a lost one."
     echo "#"
     echo "# An entry is retired by giving the vocabulary a config key (crates/config/config-surface.json)"
-    echo "# and naming that key in the starter template (crates/config/src/template.rs), then adding"
+    echo "# and naming that key in the starter template (crates/config/src/config-template.jsonc), then adding"
     echo "# \`-> <configPath>\` after the axis on that constant's scripts/policy-census.txt line — at which"
     echo "# point this guard reports the baseline entry as STALE and it is deleted. Tracked as backlog item"
     echo "# D14 (\"convention vocabulary is declared, not guessed; built-ins ship as template defaults\")."

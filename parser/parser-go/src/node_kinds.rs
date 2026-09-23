@@ -19,6 +19,10 @@ pub(crate) const PINNED_NODE_KINDS: &[&str] = &[
     // Declarations (`lang::symbols`, `lang::imports`)
     "function_declaration",
     "method_declaration",
+    // A closure. It is a DECLARATION site here because it introduces a parameter scope, which is what
+    // `adapters::router_wrapper` reads it for: the callback group idiom hands a sub-router to one, and
+    // a parameter this file cannot resolve is the signal that a route's mount point lives elsewhere.
+    "func_literal",
     "type_declaration",
     "type_spec",
     "type_alias",

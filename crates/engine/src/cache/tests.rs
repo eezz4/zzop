@@ -1,5 +1,7 @@
+use super::ruleset::cache_relevant_disabled_rules;
 use super::*;
 use zzop_core::RuleConfig;
+use zzop_core::RulePackDef;
 
 fn pack(id: &str) -> RulePackDef {
     let json = format!(r#"{{"id": "{id}", "framework": "any", "rules": []}}"#);
@@ -26,13 +28,23 @@ fn ruleset_fingerprint_changes_when_pack_set_changes() {
     assert_ne!(fp_a, fp_ab);
 }
 
+/// 🔴 Rewritten 2026-09-06 (review ledger V31), and the rewrite is the point.
+///
+/// This test used to disable the id `"something"` — a name no loaded pack declares — and assert the
+/// fingerprint MOVED. That passed, but it was pinning the COST rather than the contract: the old key
+/// folded in every disabled id whether or not it could reach a cached entry, so disabling a whole-graph
+/// rule threw away every file (measured: 2,298 hits -> 2,298 misses). The invariant worth holding is not
+/// "any config change invalidates", it is "a change that could make a cached entry WRONG invalidates".
+///
+/// So the subject is now a rule the loaded pack actually declares — one that writes per-file findings —
+/// and its sibling below pins the other half.
 #[test]
-fn ruleset_fingerprint_changes_when_disabled_rules_changes() {
-    let a = pack("a");
+fn ruleset_fingerprint_changes_when_a_cached_rule_is_disabled() {
+    let a = pack_with_rule("a", "a/some-rule");
     let mut config = EngineConfig::default();
     let fp_before = ruleset_fingerprint(&[&a], &config);
     config.rule_config = RuleConfig {
-        disabled_rules: vec!["something".to_string()],
+        disabled_rules: vec!["a/some-rule".to_string()],
         ..RuleConfig::default()
     };
     let fp_after = ruleset_fingerprint(&[&a], &config);
@@ -290,4 +302,98 @@ fn cache_scope_does_not_let_source_id_and_rel_bleed_into_each_other() {
     let left = cache_scope(&left_config, "c");
     let right = cache_scope(&right_config, "bc");
     assert_ne!(left, right);
+}
+
+// --- cache_relevant_disabled_rules (V31: a whole-graph toggle must not cost a cold run) ---------
+
+/// A pack carrying one rule id, enough to exercise the derivation. Only `id` and `rules` are read.
+fn pack_with_rule(pack_id: &str, rule_id: &str) -> RulePackDef {
+    // Built from JSON like the `pack` helper above: neither `RulePackDef` nor `RuleDef` has a
+    // `Default`, and a struct literal would have to name every field the deserializer already fills.
+    // The matcher is the smallest real one -- only `rules[].id` is read by the code under test.
+    let json = format!(
+        r#"{{"id": "{pack_id}", "framework": "any", "rules": [{{
+            "id": "{rule_id}", "severity": "warning", "message": "m",
+            "matcher": {{"type": "line-scan", "file_pattern": "\\.ts$", "line_pattern": "x"}}
+        }}]}}"#
+    );
+    serde_json::from_str(&json).unwrap()
+}
+
+/// 🔴 The measurement this narrowing exists for (2026-09-06, review ledger V31).
+///
+/// `circular` is a whole-graph rule: it cannot write a per-file finding, so its state cannot make a
+/// cached entry wrong. Folding it into the key anyway turned 2,298 hits into 2,298 misses on
+/// `corpus/frameworks/nest` — a full cold run bought with nothing.
+#[test]
+fn a_whole_graph_rule_id_does_not_reach_the_per_file_key() {
+    let pack = pack_with_rule("http", "http/route-no-auth");
+    let packs = [&pack];
+    let kept = cache_relevant_disabled_rules(&packs, &["circular".to_string()]);
+    assert!(
+        kept.is_empty(),
+        "a rule no cached entry can carry must not move the per-file key: {kept:?}"
+    );
+}
+
+/// The direction that must never regress: a DSL pack rule DOES write cached findings, so disabling it
+/// has to invalidate. Under-invalidating here serves a finding the config switched off.
+#[test]
+fn a_loaded_pack_rule_id_still_reaches_the_per_file_key() {
+    let pack = pack_with_rule("http", "http/route-no-auth");
+    let packs = [&pack];
+    let kept = cache_relevant_disabled_rules(&packs, &["http/route-no-auth".to_string()]);
+    assert_eq!(kept, vec!["http/route-no-auth".to_string()]);
+}
+
+/// The schema family runs inside the fused per-file pass, so its ids are kept by prefix. The prefix
+/// also sweeps in the whole-tree `schema-usage` lane — over-invalidation, which is the free direction.
+#[test]
+fn schema_ids_are_kept_by_prefix_including_the_uncached_usage_lane() {
+    let pack = pack_with_rule("http", "http/route-no-auth");
+    let packs = [&pack];
+    let kept = cache_relevant_disabled_rules(
+        &packs,
+        &[
+            "schema-structural".to_string(),
+            "schema/god-model".to_string(),
+            "schema-usage".to_string(),
+        ],
+    );
+    assert_eq!(kept.len(), 3, "{kept:?}");
+}
+
+/// An id belonging to no loaded pack — a typo, or a rule from a pack this run did not load — cannot
+/// change a cached entry. Dropping it is what stops one project's config noise from invalidating
+/// another's cache.
+#[test]
+fn an_id_no_loaded_pack_declares_does_not_reach_the_per_file_key() {
+    let pack = pack_with_rule("http", "http/route-no-auth");
+    let packs = [&pack];
+    let kept = cache_relevant_disabled_rules(&packs, &["typo/not-a-rule".to_string()]);
+    assert!(kept.is_empty(), "{kept:?}");
+}
+
+/// End of the chain: the whole fingerprint, not just the helper. Two configs that differ only by a
+/// whole-graph disable must produce the SAME ruleset fingerprint — that equality is the cache hit.
+#[test]
+fn a_whole_graph_disable_leaves_the_ruleset_fingerprint_unchanged() {
+    let pack = pack_with_rule("http", "http/route-no-auth");
+    let packs = [&pack];
+    let plain = EngineConfig::default();
+    let mut disabled = EngineConfig::default();
+    disabled.rule_config.disabled_rules = vec!["circular".to_string()];
+    assert_eq!(
+        ruleset_fingerprint(&packs, &plain),
+        ruleset_fingerprint(&packs, &disabled),
+        "toggling a whole-graph rule must not move the per-file key"
+    );
+
+    let mut per_file = EngineConfig::default();
+    per_file.rule_config.disabled_rules = vec!["http/route-no-auth".to_string()];
+    assert_ne!(
+        ruleset_fingerprint(&packs, &plain),
+        ruleset_fingerprint(&packs, &per_file),
+        "toggling a rule that WRITES cached findings must move the key"
+    );
 }

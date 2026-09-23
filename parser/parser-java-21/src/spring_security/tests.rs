@@ -824,3 +824,48 @@ public class C {
 "#;
     assert_eq!(bail(src), "chain-scoper");
 }
+
+/// A COMMENT INSIDE THE CUSTOMIZER LAMBDA MUST NOT BAIL THE CONFIG. tree-sitter-java makes
+/// `line_comment` a NAMED node and `valid_named_children` filters only errors and missing nodes, so
+/// a comment reached `collect_groups`' catch-all and returned `LambdaBody("line_comment")`, abandoning
+/// a chain this pass otherwise reads. Measured on macrozheng/mall (2026-09-05): its customizer opens
+/// with a Chinese-language `//` comment, and that one line was the whole obstacle. The
+/// `enhanced_for_statement` arm in `clauses.rs` carries a comment naming mall's shape as the case it
+/// was written for, and it had never once been reached on mall.
+///
+/// The fixture is mall's real shape, and the assertion is deliberately NOT "a posture comes back":
+/// `requestMatchers(url)` under `for (String url : cfg.getUrls())` is a genuinely unreadable matcher
+/// — the permitAll list lives in a YAML property, outside the source — so the honest outcome is a
+/// bail that NAMES that, carrying the iterable which binds it. Pinning the bail VARIANT is what
+/// proves the comment stopped being the obstacle: before the fix this same fixture returned
+/// `LambdaBody`, and a test asserting only "still an Err" would have stayed green through it.
+#[test]
+fn a_comment_inside_the_customizer_lambda_does_not_bail_the_config() {
+    let src = r#"
+public class SecurityConfig {
+  SecurityFilterChain filterChain(HttpSecurity httpSecurity) throws Exception {
+    httpSecurity.authorizeHttpRequests(registry -> {
+      // paths that need no protection
+      for (String url : ignoreUrlsConfig.getUrls()) {
+        registry.requestMatchers(url).permitAll();
+      }
+      // allow CORS preflight
+      registry.requestMatchers(HttpMethod.OPTIONS).permitAll();
+    });
+    return httpSecurity.build();
+  }
+}
+"#;
+    match extract_spring_security_posture("SecurityConfig.java", src) {
+        Err(SpringPostureBail::NonLiteralMatcher { arg, bound_by }) => {
+            assert_eq!(arg, "url", "the bail must name the unreadable matcher argument");
+            // The iterable is the actionable half: it is how a reader learns the permitAll list is
+            // not in the source at all.
+            assert_eq!(bound_by.as_deref(), Some("ignoreUrlsConfig.getUrls()"));
+        }
+        other => panic!(
+            "expected the non-literal MATCHER bail (the real obstacle here); a LambdaBail means the \
+             comment arm regressed and the walker stops on a comment again: {other:?}"
+        ),
+    }
+}

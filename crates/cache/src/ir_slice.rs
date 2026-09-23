@@ -219,4 +219,27 @@ pub struct FileIrSlice {
     /// moved the moment this field was added.
     #[serde(default)]
     pub string_literals: Vec<BoundStringLiteral>,
+    /// This file's contribution to the whole-tree call graph (`zzop_core::callgraph::CallGraphFacts`).
+    ///
+    /// The reason it is CACHED and not recomputed is the whole point of the field: the call-graph pass
+    /// used to re-read and re-parse every dispatched source, which was 68% of a warm run on this
+    /// repository and a second full swc parse per `.ts` file (review ledger V108). Extraction now
+    /// happens once, in the per-file lane where the parse already happened, and lands here — so a warm
+    /// file pays neither the read nor the parse. TypeScript-only today, the same per-fact unevenness
+    /// this struct's header describes; other languages' call sites are still gathered by the pass.
+    #[serde(
+        default,
+        skip_serializing_if = "zzop_core::callgraph::CallGraphFacts::is_empty"
+    )]
+    pub call_graph: zzop_core::callgraph::CallGraphFacts,
+    /// From-less `export { X as Y }` renames, and whether this file opens with a machine-generated
+    /// banner. Both are `unimported-export`'s inputs, and both are here for the reason the field above
+    /// is: that rule ran a whole second read+parse of the TypeScript tree, on every run, cache hit or
+    /// not — its own module doc said so and named `FileArtifact` not carrying them as the cause
+    /// (review ledger V110). Two of its three facts were ALREADY carried (`re_exports`,
+    /// `dynamic_imports`); these are the two that were not.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub export_aliases: Vec<(String, String)>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub has_generated_banner: bool,
 }

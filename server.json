@@ -2,8 +2,8 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.eezz4/zzop",
   "title": "zzop",
-  "description": "Deterministic cross-repo contract analysis for AI agents: frontend calls vs backend endpoints.",
-  "version": "0.34.0",
+  "description": "Deterministic repository oracle for AI agents: inventory, dependency graph, per-file risk, and the frontend-call x backend-route join — one JSON answer, byte-identical for the same input.",
+  "version": "0.35.0",
   "websiteUrl": "https://eezz4.github.io/zzop/",
   "repository": {
     "url": "https://github.com/eezz4/zzop",
@@ -12,32 +12,32 @@
   "packages": [
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/eezz4/zzop/releases/download/v0.34.0/zzop-mcp-win32-x64-msvc.mcpb",
-      "version": "0.34.0",
+      "identifier": "https://github.com/eezz4/zzop/releases/download/v0.35.0/zzop-mcp-win32-x64-msvc.mcpb",
+      "version": "0.35.0",
       "transport": { "type": "stdio" }
     },
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/eezz4/zzop/releases/download/v0.34.0/zzop-mcp-darwin-x64.mcpb",
-      "version": "0.34.0",
+      "identifier": "https://github.com/eezz4/zzop/releases/download/v0.35.0/zzop-mcp-darwin-x64.mcpb",
+      "version": "0.35.0",
       "transport": { "type": "stdio" }
     },
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/eezz4/zzop/releases/download/v0.34.0/zzop-mcp-darwin-arm64.mcpb",
-      "version": "0.34.0",
+      "identifier": "https://github.com/eezz4/zzop/releases/download/v0.35.0/zzop-mcp-darwin-arm64.mcpb",
+      "version": "0.35.0",
       "transport": { "type": "stdio" }
     },
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/eezz4/zzop/releases/download/v0.34.0/zzop-mcp-linux-x64-gnu.mcpb",
-      "version": "0.34.0",
+      "identifier": "https://github.com/eezz4/zzop/releases/download/v0.35.0/zzop-mcp-linux-x64-gnu.mcpb",
+      "version": "0.35.0",
       "transport": { "type": "stdio" }
     },
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/eezz4/zzop/releases/download/v0.34.0/zzop-mcp-linux-arm64-gnu.mcpb",
-      "version": "0.34.0",
+      "identifier": "https://github.com/eezz4/zzop/releases/download/v0.35.0/zzop-mcp-linux-arm64-gnu.mcpb",
+      "version": "0.35.0",
       "transport": { "type": "stdio" }
     }
   ]

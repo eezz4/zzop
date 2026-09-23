@@ -92,6 +92,23 @@ fn scan(dir: &TempDir) -> AnalyzeOutput {
     analyze_tree(dir.path(), &config())
 }
 
+/// The same pack under a DECLARED `vocabulary.secretNames`, for the tests that exercise the
+/// declaration channel rather than the rule's default behaviour.
+///
+/// `None` is the honest spelling of "this config omitted the key" — not `Some(vec![])`, which a
+/// reader would have to know normalizes to the same thing. `EngineConfig::default()` carries
+/// `VocabularyConfig::built_in()`, so every OTHER test in this file already runs under the shipped
+/// declaration and none of them had to change.
+fn scan_with_secret_names(dir: &TempDir, names: Option<&[&str]>) -> AnalyzeOutput {
+    let mut cfg = config();
+    cfg.vocabulary.secret_names = names
+        .unwrap_or(&[])
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect();
+    analyze_tree(dir.path(), &cfg)
+}
+
 fn hits<'a>(out: &'a AnalyzeOutput, rule: &str) -> Vec<&'a zzop_core::Finding> {
     out.findings
         .iter()
@@ -118,16 +135,28 @@ mod message_order_pins;
 /// work, and being wired eight times is what keeps it from being dropped by a single edit.
 #[path = "../message_order_verdicts.rs"]
 mod message_order_verdicts;
+
+/// The §33/§37 landing shared with the `browser` pack — the sanitize/render-as-text remedy costs the
+/// same thing on both sides of the wire, and the two packs are separate test crates, so the one
+/// spelling lives beside the pins rather than inside either pack.
+#[path = "../sanitizer_subtraction_landing.rs"]
+mod sanitizer_subtraction_landing;
 use message_order_pins::{
     assert_disqualifier_clause_precedes_imperative,
     assert_disqualifier_summary_precedes_imperative, assert_landing_precedes_imperative,
 };
+use sanitizer_subtraction_landing::sanitizer_subtraction_landing;
 
 mod algorithm_cutover_landing;
 mod bound_parameter_landing;
 mod conn_string_credentials;
+mod cookie_script_read_landing;
 mod cors_csp;
+mod cors_origin_allowlist_landing;
+mod credential_transport_landing;
 mod crypto;
+mod csp_enforcement_rollout_landing;
+mod field_allowlist_landing;
 mod frontend_exposure;
 mod html_injection;
 mod http_exposure;
@@ -153,4 +182,5 @@ mod sql_injection;
 mod taint_and_eval;
 mod template_output;
 mod timing_compare;
+mod timing_safe_equal_length_landing;
 mod vendor_token_committed;

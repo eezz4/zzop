@@ -363,3 +363,54 @@ fn non_object_config_passes_through_untouched() {
     assert_eq!(out2, arr_config);
     assert!(warnings2.is_empty());
 }
+
+// --- what auto LEFT OUT (ledger V215) ----------------------------------------------------
+
+/// The defect this pins was worth more than every other finding of review round 20: on grafana,
+/// `trees: "auto"` — which the tool's own `configWarnings` tells the user to adopt — covered 3,056 of
+/// 23,043 tracked files and said NOTHING. `warnings` was the empty array and the string `pkg/` did not
+/// appear anywhere in the reply, so the Go backend simply was not there. The join then reported
+/// consumes as unprovided because their provider was in the part that had been dropped.
+///
+/// The shape is ordinary rather than exotic: a JS/TS workspace manifest beside a backend in another
+/// language is what most real monorepos look like.
+#[test]
+fn auto_names_the_top_level_directories_it_does_not_cover() {
+    let dir = TempDir::new("zzop-ws-uncovered");
+    dir.write("package.json", r#"{"workspaces": ["packages/*"]}"#);
+    dir.write("packages/ui/package.json", &pkg_json(Some("ui")));
+    // The backend the workspace manifest knows nothing about.
+    dir.write("pkg/api/api.go", "package api\n");
+    dir.write("cmd/server/main.go", "package main\n");
+
+    let (_out, warnings) = expand_auto_trees(auto_config(), dir.path()).unwrap();
+    let uncovered: Vec<&String> = warnings
+        .iter()
+        .filter(|w| w.contains("belong to no tree"))
+        .collect();
+    assert_eq!(
+        uncovered.len(),
+        1,
+        "auto must say what it left out, exactly once: {warnings:?}"
+    );
+    let w = uncovered[0];
+    assert!(w.contains("pkg"), "it must NAME them, not count them: {w}");
+    assert!(w.contains("cmd"), "{w}");
+}
+
+/// The mirror, and the reason the warning cannot simply always fire: a repo whose workspace manifest
+/// really does describe the whole repo must stay silent, or the sentence above becomes noise and the
+/// next reader learns to skip it.
+#[test]
+fn auto_stays_silent_when_the_workspace_is_the_whole_repo() {
+    let dir = TempDir::new("zzop-ws-fully-covered");
+    dir.write("package.json", r#"{"workspaces": ["packages/*"]}"#);
+    dir.write("packages/a/package.json", &pkg_json(Some("a")));
+    dir.write("packages/b/package.json", &pkg_json(Some("b")));
+
+    let (_out, warnings) = expand_auto_trees(auto_config(), dir.path()).unwrap();
+    assert!(
+        !warnings.iter().any(|w| w.contains("belong to no tree")),
+        "nothing is uncovered here: {warnings:?}"
+    );
+}

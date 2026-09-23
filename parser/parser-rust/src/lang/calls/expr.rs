@@ -48,14 +48,22 @@ fn walk_expr(cx: &Cx, expr: &Expr, out: &mut Vec<RawCall>) {
                 if let Some(last) = segs.next() {
                     let leaf = last.ident.to_string();
                     let qualifier = segs.next().map(|s| s.ident.to_string());
-                    // Parent module doc's callee-side rules: an inline-`mod` qualifier resolves to a
-                    // qualified NAME (a module is not a type, so `receiver_type` must be dropped);
-                    // anything else keeps the `Type::assoc` reading it has always had.
+                    // Parent module doc's callee-side rules, in three arms. An INLINE-`mod` qualifier
+                    // resolves to a qualified same-file NAME. A FILE-`mod` qualifier keeps the bare leaf
+                    // but drops the receiver — its items are in another file, so there is no same-file
+                    // name to qualify, and the one thing we know for certain is that a module is not a
+                    // type. Anything else keeps the `Type::assoc` reading it has always had.
                     let (callee_name, receiver_type) = match qualifier
                         .as_deref()
                         .and_then(|q| cx.level.path_callee(q, &leaf))
                     {
                         Some(qualified) => (qualified, None),
+                        None if qualifier
+                            .as_deref()
+                            .is_some_and(|q| cx.level.is_module_qualifier(q)) =>
+                        {
+                            (leaf, None)
+                        }
                         None if qualifier.is_some() => (leaf, qualifier),
                         None => (cx.level.callee(&leaf), None),
                     };

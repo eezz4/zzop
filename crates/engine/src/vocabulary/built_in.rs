@@ -19,6 +19,7 @@ impl VocabularyConfig {
         let router = zzop_parser_typescript::RouterMountVocab::built_in();
         let write = zzop_parser_typescript::WriteSiteVocab::built_in();
         let python = zzop_parser_python_3::PythonGuardVocab::built_in();
+        let csharp = zzop_parser_csharp::CSharpRouteVocab::built_in();
         VocabularyConfig {
             auth_guard_pattern: Some(zzop_rules_http::DEFAULT_AUTH_GUARD_PATTERN.to_string()),
             auth_guard_qualifier_tokens: owned(zzop_rules_http::QUALIFIER_GUARD_TOKENS),
@@ -41,6 +42,10 @@ impl VocabularyConfig {
             // the author writes anything. An entry here is a project's own EXTRA spelling — see the
             // field doc for why this key is the struct's one additive member.
             extra_test_path_patterns: Vec::new(),
+            // The rule's OWN seven, from the one place they are spelled outside the pack JSON. Shipped
+            // rather than left empty because this key REPLACES: an empty default written into a
+            // starter config would turn the corpus's top-firing rule off on the first run.
+            secret_names: owned(zzop_core::dsl::secret_names::BUILT_IN_NAMES),
             prisma_client_getter: Some(zzop_parser_typescript::PRISMA_CLIENT_GETTER.to_string()),
             retry_wrappers: owned(&zzop_parser_typescript::RETRY_WRAPPERS),
             middleware_guard_callees: owned(router.middleware_guard_callees),
@@ -81,7 +86,11 @@ impl VocabularyConfig {
             externally_fetched_paths: owned(zzop_rules_cross_layer::EXTERNALLY_FETCHED_PATHS),
             schema_usage_skip_fields: owned(zzop_rules_schema::SKIP_FIELD_NAMES),
             router_names: owned(crate::io::DEFAULT_ROUTER_NAMES),
+            csharp_root_route_builder_variable_names: owned(
+                csharp.root_route_builder_variable_names,
+            ),
             hierarchy_shared_dirs: owned(zzop_metrics::DEFAULT_HIERARCHY_SHARED_DIRS),
+            seam_noise_dirs: owned(zzop_metrics::DEFAULT_SEAM_NOISE_DIRS),
             feature_sliced_design: FeatureSlicedDesignVocab {
                 slice_containers: owned(zzop_metrics::DEFAULT_FSD_SLICE_CONTAINERS),
                 entry: owned(zzop_metrics::DEFAULT_FSD_ENTRY),

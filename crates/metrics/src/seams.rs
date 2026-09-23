@@ -7,7 +7,7 @@
 //! over the dep graph — language-agnostic. The folder granularity is the first path segment (the natural layer/module
 //! unit, same as cross-layer co-churn).
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -33,7 +33,7 @@ pub struct SeamCandidate {
     /// Files of this folder that are DEP-GRAPH KEYS — not files walked, and not the folder's contents on
     /// disk. `compute_seams`'s input is the dep graph, so a file the walk saw but no import edge names
     /// (a doc, a fixture, an asset, anything a parser produced no resolvable import for) is absent from
-    /// this count, and so is every file under a folder [`is_noise_folder`] rejects. The number is the
+    /// this count, and so is every file under a folder the declared [`DEFAULT_SEAM_NOISE_DIRS`] vocabulary names. The number is the
     /// eligibility basis for [`SEAMS_MIN_FILES`] and the denominator a reader is likely to sanity-check
     /// against `fileCount`, which it will not match.
     pub files: usize,
@@ -64,11 +64,14 @@ pub struct SeamCandidate {
 
 /// `coupling` is the co-change map — cross-folder co-change is added to each folder's boundary so a
 /// statically-clean but temporally-entangled folder is correctly demoted as an extraction candidate.
+/// `noise_dirs` is the project's declared never-extract vocabulary; an empty set filters nothing
+/// (see [`DEFAULT_SEAM_NOISE_DIRS`] for why that is deliberate rather than a missing default).
 pub fn compute_seams(
     dep: &DepGraph,
     coupling: &CouplingMap,
     min_files: usize,
     limit: usize,
+    noise_dirs: &BTreeSet<String>,
 ) -> Vec<SeamCandidate> {
     // Every analyzed file is a dep key; a target outside this set is external.
     let in_repo: HashSet<&str> = dep.keys().map(|s| s.as_str()).collect();
@@ -79,7 +82,7 @@ pub fn compute_seams(
     )]
     for file in &in_repo {
         let folder = folder_of(file);
-        if is_noise_folder(folder) {
+        if noise_dirs.contains(folder) {
             continue; // test/build/config dirs are never extraction targets
         }
         *file_count.entry(folder).or_insert(0) += 1;
@@ -94,7 +97,7 @@ pub fn compute_seams(
     )]
     for (importer, imports) in dep {
         let from = folder_of(importer);
-        if is_noise_folder(from) {
+        if noise_dirs.contains(from) {
             continue; // edges out of a test/build dir don't shape a real seam
         }
         for imported in imports {
@@ -105,7 +108,7 @@ pub fn compute_seams(
                 continue;
             }
             let to = folder_of(imported);
-            if is_noise_folder(to) {
+            if noise_dirs.contains(to) {
                 continue;
             }
             if from == to {
@@ -123,12 +126,12 @@ pub fn compute_seams(
     let mut temporal: BTreeMap<&str, u32> = BTreeMap::new();
     for (file, partners) in coupling {
         let from = folder_of(file);
-        if is_noise_folder(from) || !file_count.contains_key(from) {
+        if noise_dirs.contains(from) || !file_count.contains_key(from) {
             continue;
         }
         for p in partners {
             let to = folder_of(&p.path);
-            if to == from || is_noise_folder(to) || !file_count.contains_key(to) {
+            if to == from || noise_dirs.contains(to) || !file_count.contains_key(to) {
                 continue;
             }
             *temporal.entry(from).or_insert(0) += p.count;
@@ -172,32 +175,36 @@ pub fn compute_seams(
     out
 }
 
-/// Top-level folders that are never strangler extraction targets — surfacing them as "best seams" is noise (they are
-/// naturally self-contained but you do not extract a test/build dir).
-fn is_noise_folder(folder: &str) -> bool {
-    static NOISE: &[&str] = &[
-        "tests",
-        "test",
-        "e2e",
-        "__tests__",
-        "__test__",
-        "spec",
-        "playwright",
-        "cypress",
-        "fixtures",
-        "mocks",
-        "__mocks__",
-        "stories",
-        "docs",
-        "doc",
-        "examples",
-        "example",
-        "node_modules",
-        "dist",
-        "build",
-    ];
-    NOISE.contains(&folder)
-}
+/// Top-level folders a project declares as never-extraction-targets — surfacing them as "best seams"
+/// is noise (they are naturally self-contained, but you do not extract a test or build dir).
+///
+/// zzop's own suggested value, and the value `vocabulary.seamNoiseDirs` REPLACES. Like every other
+/// convention vocabulary since 2026-07-27 there is NO FALLBACK: an absent or empty declaration filters
+/// nothing. This is a loud key to leave out — `tests/`, `node_modules/` and `dist/` then rank as the
+/// best extraction candidates — and that loudness is the point, the same reason
+/// `vocabulary.workspaceSkipDirs` chose it. A default applied silently would instead make the filter
+/// look like a property of the tree.
+pub const DEFAULT_SEAM_NOISE_DIRS: &[&str] = &[
+    "tests",
+    "test",
+    "e2e",
+    "__tests__",
+    "__test__",
+    "spec",
+    "playwright",
+    "cypress",
+    "fixtures",
+    "mocks",
+    "__mocks__",
+    "stories",
+    "docs",
+    "doc",
+    "examples",
+    "example",
+    "node_modules",
+    "dist",
+    "build",
+];
 
 /// First path segment — the natural module/layer unit. "(root)" when the file sits at the analyzed root.
 fn folder_of(path: &str) -> &str {

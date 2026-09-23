@@ -10,8 +10,15 @@
 //! the path is served, the method is unknown, and inject-to-confirm is the remedy — so no verb-level
 //! cross-layer check runs on a made-up method and no invented verb ever reaches a finding.
 //!
-//! Tone and inject-pointer phrasing mirror `cross-layer/unresolved-consume-ratio`: a self-report of a known
-//! blind spot with a Mode B overlay (Normalized AST adapter) as the resolution, never an error.
+//! Tone and inject-pointer phrasing mirror `cross-layer/unresolved-consume-ratio`: a self-report of a
+//! known blind spot with a paste-ready remedy, never an error.
+//!
+//! **The remedy this rule leads with is the tree's own `routes` field**, not a Mode B overlay. The
+//! finding hands the reader a one-line stub (`routes: [{ "key": "<VERB> /path" }]`) because the PATH is
+//! already known and only the VERB is missing — a whole Normalized AST adapter is the answer for MANY
+//! routes, offered second. ⚠ This header named only the overlay until 2026-09-07 (review ledger V92 ⑹),
+//! so the module's own summary prescribed the expensive half of what its message actually says — the
+//! same inversion V84 found one rule over.
 
 use std::collections::BTreeSet;
 

@@ -128,7 +128,14 @@ fn population_of(scores: &Scores, metric: HealthMetric) -> u32 {
 }
 
 /// Rolls up `scores` into a single composite pain index plus the ranked, non-zero contributors behind it.
-pub fn compute_health_index(scores: &Scores) -> HealthIndex {
+///
+/// `test_files_excluded` is not a knob this function reads — it is the caller STATING which population
+/// produced `scores`, so [`HealthIndex::test_files_excluded`] can travel with the number it qualifies.
+/// It is a required parameter rather than a defaulted field for the reason every other input on this
+/// crate's boundary is (`ScoresInput`'s doc calls it "no ambient defaulting"): a caller that forgot it
+/// would publish a wide-population claim over a narrowed number, which is the one failure the field
+/// exists to prevent. Pass `false` when the scores were computed over every file.
+pub fn compute_health_index(scores: &Scores, test_files_excluded: bool) -> HealthIndex {
     let gap_of = |metric: HealthMetric| -> f64 {
         match metric {
             HealthMetric::Circular => {
@@ -235,6 +242,7 @@ pub fn compute_health_index(scores: &Scores) -> HealthIndex {
         measured_weight,
         total_weight,
         contributors,
+        test_files_excluded,
     }
 }
 

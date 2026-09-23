@@ -24,10 +24,29 @@ pub(in crate::graph) struct Folded {
     pub(in crate::graph) in_cycle: BTreeSet<String>,
     /// Boxes that are a single file with fewer segments than the depth — see [`Fold::is_unfoldable`].
     pub(in crate::graph) unfoldable: usize,
+    /// Per box: how many files folded into it, and how much of that the run measured. Counted here
+    /// rather than by a caller re-walking `in_scope`, because the box id is built by this pass and a
+    /// second builder of the same id is a second answer waiting to drift.
+    pub(in crate::graph) census: BTreeMap<String, BoxCensus>,
     /// File-level edges BETWEEN in-scope files, before the collapse. The denominator the census reports
     /// the fold's loss against; deliberately not the whole-tree edge count, which is the CAP's
     /// denominator and a different number.
     pub(in crate::graph) file_edges: usize,
+}
+
+/// What one box is made of. `files` is a count of in-scope files; `loc` is the sum over the ones this
+/// run MEASURED, and `loc_files` says how many that was.
+///
+/// The pair is inseparable, and that is the point. `folded`'s node deliberately drops `loc` to `None`
+/// because a box has no single value, and summing is the one axis its own note calls defensible — but a
+/// bare sum would read as "this box is N lines" even when half its files were never measured
+/// (`ir.dep` names import targets outside the scanned set, and those have no LOC). `loc_files < files`
+/// is that statement, and `loc_files == 0` means the sum is not a number anyone should print.
+#[derive(Default)]
+pub(in crate::graph) struct BoxCensus {
+    pub(in crate::graph) files: usize,
+    pub(in crate::graph) loc_files: usize,
+    pub(in crate::graph) loc: u32,
 }
 
 /// Collapses the in-scope file graph to `fold`'s depth.
@@ -47,6 +66,7 @@ pub(in crate::graph) fn collapse(
     let mut nodes: BTreeMap<String, DepNode> = BTreeMap::new();
     let mut in_cycle: BTreeSet<String> = BTreeSet::new();
     let mut unfoldable_boxes: BTreeMap<String, bool> = BTreeMap::new();
+    let mut census: BTreeMap<String, BoxCensus> = BTreeMap::new();
 
     for (id, n) in in_scope {
         let folded_rel = fold.rel(&n.rel);
@@ -72,6 +92,12 @@ pub(in crate::graph) fn collapse(
         // group, and the caveat would be false about it.
         let entry = unfoldable_boxes.entry(box_id.clone()).or_insert(true);
         *entry &= fold.is_unfoldable(&n.rel);
+        let c = census.entry(box_id.clone()).or_default();
+        c.files += 1;
+        if let Some(loc) = n.loc {
+            c.loc_files += 1;
+            c.loc += loc;
+        }
         if cycle_files.contains(*id) {
             in_cycle.insert(box_id);
         }
@@ -92,6 +118,7 @@ pub(in crate::graph) fn collapse(
 
     Folded {
         nodes,
+        census,
         edges,
         in_cycle,
         unfoldable: unfoldable_boxes.values().filter(|only| **only).count(),

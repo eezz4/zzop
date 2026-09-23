@@ -1,8 +1,7 @@
 //! `scan_non_idempotent_write` — see the parent `http_scan` module doc for the shared BFS design.
 
-use std::collections::HashMap;
-
-use zzop_core::callgraph::{bfs_reachable, SymbolGraph};
+use super::landing::UNIQUE_ENFORCEMENT_LANDING;
+use zzop_core::callgraph::{bfs_reachable_in, Adjacency, SymbolGraph};
 use zzop_core::{
     disable_hint, ApiEndpoint, Finding, NonIdempotentKind, Severity, SourceSymbol, WriteSite,
 };
@@ -17,9 +16,9 @@ pub struct ScanNonIdempotentWriteInput<'a> {
     pub api_endpoints: &'a [ApiEndpoint],
     pub symbols: &'a [SourceSymbol],
     pub symbol_graph: &'a SymbolGraph,
-    /// rel path -> full source text, for the `idempotent-ok` whitelist lookback only (see
-    /// [`ScanUnsafeReadEndpointInput::files`]'s doc).
-    pub files: &'a HashMap<String, String>,
+    /// Reads ONE file's full text by rel path, on demand, for the `idempotent-ok` whitelist
+    /// lookback only (see [`ScanUnsafeReadEndpointInput::read_file`]'s doc).
+    pub read_file: &'a dyn Fn(&str) -> Option<String>,
 }
 
 /// Which finding kinds apply to a method: `create` only matters for PUT/DELETE (idempotency-promising); POST/PATCH are flagged only for accumulation.
@@ -62,6 +61,9 @@ pub fn scan_non_idempotent_write(input: &ScanNonIdempotentWriteInput) -> Vec<Fin
             .unwrap_or_default()
     };
 
+    // ONE adjacency index for the whole loop — same measurement as its sibling `unsafe_read`, and
+    // `Adjacency`'s own doc for why building it per call was quadratic (review ledger V112).
+    let adjacency = Adjacency::build(input.symbol_graph);
     let mut out = Vec::new();
     for e in writes {
         let method = e.method.to_uppercase();
@@ -69,10 +71,10 @@ pub fn scan_non_idempotent_write(input: &ScanNonIdempotentWriteInput) -> Vec<Fin
         let Some(handler_symbol) = resolve_handler(&e.handler, &name_index) else {
             continue;
         };
-        if is_whitelisted(&handler_symbol, input.symbols, input.files) {
+        if is_whitelisted(&handler_symbol, input.symbols, input.read_file) {
             continue;
         }
-        let Some((id, depth)) = bfs_reachable(input.symbol_graph, &handler_symbol, |id| {
+        let Some((id, depth)) = bfs_reachable_in(&adjacency, &handler_symbol, |id| {
             sites_at(id)
                 .iter()
                 .any(|s| allowed.contains(&s.kind.expect("filtered to Some above")))
@@ -91,7 +93,7 @@ pub fn scan_non_idempotent_write(input: &ScanNonIdempotentWriteInput) -> Vec<Fin
             hint_for(&method, &e.path, &site, depth),
             &handler_symbol,
             input.symbols,
-            input.files,
+            input.read_file,
         );
         out.push(Finding {
             rule_id: "non-idempotent-write".to_string(),
@@ -111,7 +113,14 @@ pub fn scan_non_idempotent_write(input: &ScanNonIdempotentWriteInput) -> Vec<Fin
                 "sink": site.sink,
                 "kind": site.kind.expect("filtered to Some above").as_str(),
                 "depth": depth,
-                "hint": hint,
+                // 🔴 NO `hint` KEY HERE, and its absence is the repair. This rule used to emit
+                // `"hint": hint` beside `message: hint.clone()` — the SAME string twice in one finding.
+                // Harmless while both were inline; expensive once the prose fold landed, because the fold
+                // shrinks `message` to a pointer and `data.hint` kept shipping the full text per finding,
+                // cancelling the saving exactly. 📏 Measured 2026-09-13 (ledger V231) on
+                // `analyze corpus/frameworks/fastapi --limit 1000`: `data.hint` was 624,774 of the reply's
+                // 1,167,742 bytes (60%), and 117 of 117 hints were byte-identical to their own finding's
+                // message. The text is not lost — it is in `message`, which is the field that carries it.
             })),
         });
     }
@@ -140,9 +149,11 @@ fn hint_for(method: &str, path: &str, site: &WriteSite, depth: u32) -> String {
         format!("a retried {method} must converge or carry an idempotency key")
     };
     format!(
-        "{method} {path} reaches {} {where_} ({}) — {why}; {contract}. Add an idempotency key or a \
-         dedup/uniqueness check before the write, or mark it with `// idempotent-ok: <reason>` on the \
-         {} if a retry is genuinely safe here. {} if this applies more broadly. {}",
+        "{method} {path} reaches {} {where_} ({}) — {why}; {contract}. If a retry is genuinely safe \
+         here, this is a false positive: mark it with `// idempotent-ok: <reason>` on the {} and \
+         nothing else has to change. {UNIQUE_ENFORCEMENT_LANDING} IF A RETRY IS NOT SAFE: add an \
+         idempotency key, or a dedup check the DATABASE enforces, before the write. {} if this applies \
+         more broadly. {}",
         site.sink,
         kind.as_str(),
         super::marker_window_phrase(),

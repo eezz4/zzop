@@ -4,9 +4,11 @@ use std::collections::BTreeMap;
 
 mod git;
 mod parsers;
+mod scores;
 
 pub use git::{CommitSubjectPatternRequest, CommitTypePatternRequest, GitOptionsRequest};
 pub use parsers::ParsersRequest;
+pub use scores::ScoresRequest;
 
 use serde::Deserialize;
 
@@ -139,6 +141,17 @@ pub struct AnalyzeRequest {
     /// `vocabulary` to avoid — same "user-declared table" feel, different subject matter.
     #[serde(default)]
     pub parsers: ParsersRequest,
+    /// Structural-score policy — the config's `scores` object. One key today,
+    /// `scores.excludeTestFilesFromFileMetrics`, which decides whether test files count toward the
+    /// population every structural score averages over. Lands on
+    /// `zzop_engine::EngineConfig::scores_exclude_test_files`.
+    ///
+    /// A third roof beside `vocabulary` and `parsers`, for the reason the one above gives: this is
+    /// neither a name the project picked nor a path-to-parser mapping, it is a POLICY about which
+    /// files a score may judge. Default (absent object, or the key unset) keeps the population every
+    /// score has always counted.
+    #[serde(default)]
+    pub scores: ScoresRequest,
     /// Rule TIMING instrumentation — the wire exposure of `zzop_engine::EngineConfig::profile_rules`
     /// (the ESLint `TIMING=1` / oxlint rule-timing equivalent). `false` (the default) leaves
     /// `AnalyzeOutput::rule_timings` at `None` with zero added cost; `true` times each DSL rule and each

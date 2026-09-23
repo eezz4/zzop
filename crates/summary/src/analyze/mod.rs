@@ -3,6 +3,7 @@
 //! A) — the two share one post-facade shaper (`shape_analyze_output`) so the same cap/disclosure/
 //! config-warning contract holds for both entry points.
 
+use crate::contracts::MULTI_TREE_MARKER;
 use crate::output::{FindingFilters, RunKnobs};
 
 mod adjacent_config;
@@ -15,6 +16,14 @@ mod shape;
 mod tests;
 
 use shape::shape_analyze_output;
+
+/// The FULL `coverageGaps.meaning` text, for the one consumer outside this module tree: the
+/// reply-legends contract document, which serves it now that the reply carries a short note plus a
+/// pointer instead. Reached through a function rather than copied for the reason that sentence itself
+/// interpolates its own share floor — a second spelling of a legend is a second thing to keep true.
+pub(crate) fn coverage_gaps_meaning() -> String {
+    coverage_gaps::full_meaning()
+}
 
 /// Turns rule-timing instrumentation on in an already-mapped request `Value`, for either request shape
 /// the config loader produces: a single `AnalyzeRequest` object (`Method::Analyze`) or the
@@ -131,8 +140,13 @@ pub fn analyze_summary_with(
                 // to say) is advice a `zzop` CLI user cannot take. Each product's own usage text owns
                 // its own words — the same remedy `zzop_config::load_config_file`'s missing-config
                 // error already carries, pinned in `crates/config/src/lib_tests.rs`.
+                //
+                // That second sentence was a PROMISE, and until 2026-09-23 no host kept it for THIS
+                // refusal: both prescriptions failed when transcribed. The phrase is now
+                // `contracts::MULTI_TREE_MARKER` so each host can recognize it and append its own
+                // runnable line, which is what the missing-config refusal has had since 2026-08-09.
                 return Err(format!(
-                    "the config at {} defines {tree_count} trees — run the CROSS-LAYER JOIN over this config instead, or point this single-tree analysis at one tree root directly",
+                    "the config at {} defines {tree_count} trees — {MULTI_TREE_MARKER} instead, or point this single-tree analysis at a config that declares exactly ONE tree",
                     loaded
                         .config_path
                         .as_deref()

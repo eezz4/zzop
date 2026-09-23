@@ -187,6 +187,6 @@ fn is_gin_receiver_type(ty: Node, imports: &ImportMap, src: &str) -> bool {
     let type_name = node_text(type_name_node, src);
     imports
         .get(package)
-        .is_some_and(|b| b.specifier == "github.com/gin-gonic/gin")
+        .is_some_and(|b| b.specifier == super::GIN_SPECIFIER)
         && GIN_RECEIVER_TYPES.contains(&type_name)
 }

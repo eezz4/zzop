@@ -1,7 +1,7 @@
 use super::*;
 
 /// Policy-value pin (same-crate substitute for the cross-crate T2 pin pattern
-/// `crates/engine/tests/policy_value_pins.rs` uses): `VERB_METHODS` (this module) and
+/// `crates/engine/tests/integration/policy_value_pins.rs` uses): `VERB_METHODS` (this module) and
 /// `adapters::axum::VERB_METHODS` encode the identical five-verb HTTP vocabulary for two independent
 /// reasons (called methods here, axum routing-fn names there) that happen to agree one-for-one today —
 /// if one changes, this pin forces the other to be re-justified rather than silently drifting apart.

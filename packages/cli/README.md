@@ -35,13 +35,23 @@ no Node runtime dependency beyond that).
 
 ## Supported platforms
 
-| npm sub-package               | OS      | CPU   | libc  |
-| ------------------------------ | ------- | ----- | ----- |
-| `@zzop/cli-win32-x64-msvc`     | Windows | x64   | MSVC  |
-| `@zzop/cli-darwin-x64`         | macOS   | x64   | —     |
-| `@zzop/cli-darwin-arm64`       | macOS   | arm64 | —     |
-| `@zzop/cli-linux-x64-gnu`      | Linux   | x64   | glibc |
-| `@zzop/cli-linux-arm64-gnu`    | Linux   | arm64 | glibc |
+| npm sub-package               | OS      | CPU   | libc  | Smoke-tested in CI |
+| ------------------------------ | ------- | ----- | ----- | ------------------ |
+| `@zzop/cli-win32-x64-msvc`     | Windows | x64   | MSVC  | yes                |
+| `@zzop/cli-darwin-x64`         | macOS   | x64   | —     | **no** (cross-built) |
+| `@zzop/cli-darwin-arm64`       | macOS   | arm64 | —     | yes                |
+| `@zzop/cli-linux-x64-gnu`      | Linux   | x64   | glibc | yes                |
+| `@zzop/cli-linux-arm64-gnu`    | Linux   | arm64 | glibc | **no** (cross-built) |
+
+**"Supported" here means built and published, which is not the same as run.** Two of the five are
+cross-compiled on another architecture's runner, so nothing executes them before release — a binary
+that builds but cannot start would ship. That is a deliberate trade (the alternative is emulation or
+runners that do not exist for these pairs), and the release workflow says so at the step that skips
+them. The other three run `zzop version` on the exact bytes the npm package carries, which proves the
+binary loads and links against that runner's C runtime — not that any analysis is correct there.
+
+If one of the two never-executed builds fails to start for you, that is the channel this gap is
+covered by: open an issue naming your platform. The gap is disclosed rather than closed.
 
 musl-based Linux (e.g. Alpine) and WASM are out of scope. On an unsupported platform, build from source
 (see above) and run `target/release/zzop` directly, or place it where `bin/zzop.js`'s dev-fallback path

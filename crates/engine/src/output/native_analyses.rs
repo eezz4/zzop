@@ -17,12 +17,18 @@
 //! adjacent channel said so: `configWarnings` `[]`, `coverageGaps.extensions` `[]`, `degraded` `[]`,
 //! `coverage.joinContributionZero` `false`.
 //!
-//! # The three causes are kept apart because the remedies are opposite
+//! # The causes are kept apart because the remedies are opposite
+//! Counted rather than named, this heading would be the field's own staleness bug: it said "three"
+//! until `shipped_off` made it four on 2026-09-03. The list below is the count.
 //! * [`NativeAnalyses::reported_in_cross_layer_findings`] — structural. These analyses judge the
 //!   cross-tree JOIN and report into its own `crossLayerFindings` channel, which no per-tree output
 //!   has. Remedy: run the cross-layer join.
 //! * [`NativeAnalyses::disabled`] — the run's own config switched them off by id. Remedy: turn them
 //!   back on.
+//! * [`NativeAnalyses::shipped_off`] — THIS BUILD ships them off and this config did not turn them on.
+//!   Same non-evaluation as `disabled` and a different remedy for the same reason it is a different
+//!   list: the reader did not make this choice, so "turn it back on" is the wrong sentence to hand
+//!   them. Remedy: name the id in `rules` with a severity, which is the opt-in the surface already has.
 //! * everything else — EXCEPT the two registration classes [`NativeAnalyses::registered`] names, which
 //!   key no `findings.byRule` entry under their own id at all — it ran, and its absence from
 //!   `findings.byRule` is a real zero. Remedy: none.
@@ -30,10 +36,11 @@
 //! Folded into one number they would say nothing, which is the state this field replaces.
 //!
 //! # Derived, never listed
-//! Both lists come out of the registrations themselves — [`crate::register_all_native`] for the
-//! population and `zzop_rules_cross_layer`'s own `register_native_analyses` for the cross-layer
-//! subset — so a native analysis added, moved between crates or renamed is carried without an edit
-//! here, and no count in this file can go stale. The floor that keeps a broken derivation from
+//! Every list comes out of the registrations themselves — [`crate::register_all_native`] for the
+//! population, `zzop_rules_cross_layer`'s own `register_native_analyses` for the cross-layer subset,
+//! and [`crate::shipped_off_native_ids`] (composed from the owning rules crates' own `DEFAULT_OFF`) for
+//! the shipped-off one — so a native analysis added, moved between crates or renamed is carried without
+//! an edit here, and no count in this file can go stale. The floor that keeps a broken derivation from
 //! reading as "everything was evaluated" is `rule_contracts::native_analyses`, which requires the
 //! cross-layer subset to be a non-empty PROPER subset of the registry.
 
@@ -43,18 +50,22 @@ use zzop_core::{is_enabled, RuleConfig};
 /// could not have contributed a `findings.byRule` key — split by CAUSE, because the reader's next
 /// action differs per cause (see the module doc).
 ///
-/// A registered id that appears in neither list ran — EXCEPT for the two registration classes
+/// A registered id that appears in NONE of the three lists ran — EXCEPT for the two registration classes
 /// [`NativeAnalyses::registered`] names, which key no `findings` entry under their own id by
 /// construction: an id that gates a score computation emits no finding at all, and an umbrella
 /// registration reports under the finer `schema/<label>` ids, so look for those rather than for the
-/// umbrella id. For every OTHER id in neither list, absence from `findings` is a measured zero. That is
+/// umbrella id. For every OTHER id in none of the three, absence from `findings` is a measured zero. That is
 /// the only claim this type makes about it — like `PackLoaded::zero_admission_rules`, it says nothing
 /// about whether the analysis then had anything to judge.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NativeAnalyses {
     /// Every native analysis id `register_all_native` composes into this build, counted. The
-    /// DENOMINATOR the two lists below are read against — without it "27 not evaluated" is a
+    /// DENOMINATOR the lists below are read against — without it "27 not evaluated" is a
     /// magnitude with no scale, the failure `score-population-empty` names one layer over.
+    ///
+    /// Not "the two lists": that spelling shipped here and in the wire legend until a THIRD list
+    /// (`shipped_off`) landed beside them and neither sentence followed (2026-09-12, ledger V168).
+    /// The count is owned by whoever adds the next list, which is nobody — so it is not stated.
     ///
     /// Counts REGISTRATIONS, which is the id space the config gates and `RuleOverridesApplied` speaks
     /// — not the set of ids a finding can carry. The two differ in both directions and deliberately:
@@ -106,6 +117,18 @@ pub struct NativeAnalyses {
     /// multi-tree reply carries it too, and correctly so — the findings are in that reply's top-level
     /// `crossLayerFindings`, not in the row's own `findings`.
     pub reported_in_cross_layer_findings: Vec<String>,
+    /// Registered ids this BUILD ships off, which this config did not turn on. Sorted.
+    ///
+    /// A third cause, and it needs its own list because the other two already mean something else.
+    /// `disabled` says the CALLER switched it off; an id in neither list is one this reply claims
+    /// RAN. A project-shipped default is neither of those, and folding it into `disabled` would tell
+    /// every reader they did something they did not do — while leaving it out of both would make the
+    /// legend's own residual clause ("an analysis in NEITHER list ran") false.
+    ///
+    /// Disjoint from `disabled` by construction: both are partitions of the same gate answer, split
+    /// on whether the id appears in the caller's `disabled_rules`. Their union is exactly the set
+    /// `is_enabled` refused.
+    pub shipped_off: Vec<String>,
 }
 
 impl NativeAnalyses {
@@ -119,13 +142,17 @@ impl NativeAnalyses {
         let mut cross = zzop_core::RuleRegistry::new();
         zzop_rules_cross_layer::register_native_analyses(&mut cross);
 
-        let mut disabled: Vec<String> = all
+        // ONE gate answer, split by CAUSE. Deriving both halves from `is_enabled` keeps the property
+        // the `disabled` field's own doc claims -- this cannot disagree with the gate about what ran --
+        // while the partition adds the only thing the gate does not know: whose choice it was.
+        let (mut disabled, mut shipped_off): (Vec<String>, Vec<String>) = all
             .ids()
             .iter()
             .filter(|id| !is_enabled(rule_config, id))
             .cloned()
-            .collect();
+            .partition(|id| rule_config.disabled_rules.iter().any(|d| d == id));
         disabled.sort();
+        shipped_off.sort();
 
         let mut reported_in_cross_layer_findings: Vec<String> = cross
             .ids()
@@ -150,6 +177,7 @@ impl NativeAnalyses {
             registered: all.ids().len(),
             disabled,
             reported_in_cross_layer_findings,
+            shipped_off,
         }
     }
 }
