@@ -65,6 +65,7 @@ GUARDS=(
   check-version-relative-prose
   check-vendor-token-literals
   check-server-json-hashes
+  check-mcp-registry-limits
   check-release-version-propagation
   check-embedded-contract-docs
   check-license-shipping

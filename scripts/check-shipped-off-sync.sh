@@ -6,8 +6,8 @@
 # `zzop_rules_graph::DEFAULT_OFF` decides which native analyses a run does not evaluate unless the
 # config names them. That decision is invisible in a reply's `findings` (a shipped-off analysis produces
 # no key, exactly like one that ran clean), so what a reader has instead is prose: the starter template,
-# the rule catalog, VERSIONING, the changelog, the getting-started page and the site's usage page each
-# spell the three ids out. Six copies of one list is six chances to be wrong the day a fourth id lands
+# the rule catalog, VERSIONING, the getting-started page and the site's usage page each spell the three
+# ids out. Every copy of one list is another chance to be wrong the day a fourth id lands
 # — and each of them is a sentence a user CONFIGURES against, so a stale one does not read as stale, it
 # reads as "this id runs by default" and sends them to debug a rule that never ran.
 #
@@ -65,7 +65,7 @@ fi
 
 count="$(printf '%s\n' "$default_off" | wc -l | tr -d ' ')"
 if [ "$count" -lt 1 ]; then
-  err "DEFAULT_OFF parsed to an empty set — refusing to certify six documents against nothing"
+  err "DEFAULT_OFF parsed to an empty set — refusing to certify every claiming document against nothing"
   exit 1
 fi
 
@@ -94,7 +94,7 @@ if [ -z "$native_ids" ]; then
 fi
 
 # Every shipped-off id must be a real catalogued analysis. A typo in the const would otherwise make
-# this whole guard check six documents against a name nothing ships.
+# this whole guard check every claiming document against a name nothing ships.
 #
 # `set -e` HAZARD, and the reason it is worth a comment: a `grep` that legitimately finds nothing is the
 # NORMAL case in every loop below, and under `set -e` a non-zero last command in a pipeline or a command
@@ -219,7 +219,13 @@ check_doc "crates/config/src/config-template.jsonc" "THREE ANALYSES SHIP OFF"
 check_doc "docs/rules/catalog.md"                   "ids below ship OFF"
 check_doc "docs/getting-started.md"                 "analyses ship OFF, and this is where you turn one on"
 check_doc "VERSIONING.md"                           "Whether a rule runs BY DEFAULT is not a settled property"
-check_doc "CHANGELOG.md"                            "analyses now ship OFF, and turning one on takes no new vocabulary"
+# CHANGELOG.md is deliberately NOT a row here (2026-09-23, review ledger V293). Its copy of this claim
+# lived in `## Unreleased`, and cutting a release ROLLS THAT SECTION AWAY -- the file says so in its own
+# words, and v0.33.0's tagged copy proves it: an 11-line Unreleased holding only the two standing
+# paragraphs. So the pin was durable and its surface was not, and the first release to fold after the pin
+# was added is the release that discovered it: the fold deleted the marker and this guard failed the
+# commit that performed the documented ceremony. A changelog entry describes a release; it is not a
+# standing statement of what ships off today, which is what every other row below is.
 # The WIRE copy, added 2026-09-13 (review ledger V178). This constant ships inside every analyze-shaped
 # reply and names the same three ids as the documents above -- and it was the one copy no guard read.
 # TWO guards each watched part of this claim: the legend file has a test forbidding hand COUNTS in one

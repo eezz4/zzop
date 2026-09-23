@@ -108,6 +108,32 @@ env_count="$(printf '%s\n' "$envelope_files" | grep -c . || true)"
   back into subject A and gets forced onto the RELEASE version, which is the exact defect this
   classification removes. Fix the extraction rather than trusting a green run."
 
+# --- Subject A1: classify the VENDORED JSON SCHEMAS by content ------------------------------------
+# A vendored schema's version strings and asset URLs are the UPSTREAM's examples, not this repo's
+# release surface. `docs/contracts/mcp-server.schema.json` (the MCP registry's server.schema.json,
+# read by check-mcp-registry-limits.sh) carries a sample semver in a `version` field and a sample
+# release-asset download URL -- both spelled out only in the schema, deliberately NOT quoted here:
+# subject B greps every tracked file, so a literal example URL in this comment makes the guard report
+# ITSELF (measured 2026-09-23, one run after this classifier was added). Forcing either onto
+# Cargo.toml's version would
+# corrupt the copy this repo vendored precisely so it stays byte-identical to what the registry
+# serves (2026-09-23, review ledger V292).
+#
+# Classified by CONTENT for the same reason A0 is: the file declares `"$schema"` pointing at
+# json-schema.org, which is how a JSON Schema says it is one. A path list would have to be edited
+# every time another contract is vendored, and the edit that is forgotten is the one that matters.
+# Both schemes are matched -- draft-07 self-identifies over http://, later drafts over https://.
+schema_files="$(git ls-files -z -- '*.json' \
+  | xargs -0 -r grep -l '"\$schema"[[:space:]]*:[[:space:]]*"https\?://json-schema\.org/' -- 2> /dev/null \
+  || true)"
+
+schema_count="$(printf '%s\n' "$schema_files" | grep -c . || true)"
+[ "$schema_count" -gt 0 ] || abort \
+  "classified 0 vendored JSON Schemas -- the '\"\$schema\": \"http(s)://json-schema.org/...' self-identification
+  was reshaped or every vendored schema left the tree. With no schema set, an upstream's EXAMPLE version
+  falls back into subject A and gets forced onto this repo's release calendar, which would rewrite a copy
+  whose whole value is being byte-identical to what the registry serves. Fix the extraction rather than
+  trusting a green run."
 # --- Subject A ------------------------------------------------------------------------------------
 # `git ls-files` output, filtered rather than pathspec-excluded, so the exclusion reads next to its
 # reason. `grep -H` forces the filename prefix even when xargs hands grep a single path.
@@ -123,6 +149,8 @@ json_lines="$(git ls-files -z -- '*.json' \
   | grep -v 'package-lock\.json:' \
   | awk -F: 'NR == FNR { if (NF) envelope[$0] = 1; next } !($1 in envelope)' \
       <(printf '%s\n' "$envelope_files") - \
+  | awk -F: 'NR == FNR { if (NF) schema[$0] = 1; next } !($1 in schema)' \
+      <(printf '%s\n' "$schema_files") - \
   || true)"
 
 a_count="$(printf '%s\n' "$json_lines" | grep -c . || true)"
@@ -147,6 +175,8 @@ done < <(printf '%s\n' "$json_lines")
 # --- Subject B ------------------------------------------------------------------------------------
 url_lines="$(git grep -n 'releases/download/v[0-9][0-9.]*' -- . 2>/dev/null \
   | grep -v '^\.github/' \
+  | awk -F: 'NR == FNR { if (NF) schema[$0] = 1; next } !($1 in schema)' \
+      <(printf '%s\n' "$schema_files") - \
   || true)"
 
 b_count="$(printf '%s\n' "$url_lines" | grep -c . || true)"
@@ -186,4 +216,4 @@ if [ "$violations" -ne 0 ]; then
   exit 1
 fi
 
-echo "$SELF: clean (workspace $VERSION; $a_count committed JSON version string(s), $b_count asset URL line(s) checked; $env_count envelope(s) held out to the contract axis)."
+echo "$SELF: clean (workspace $VERSION; $a_count committed JSON version string(s), $b_count asset URL line(s) checked; $env_count envelope(s) held out to the contract axis, $schema_count vendored schema(s) held out to upstream)."

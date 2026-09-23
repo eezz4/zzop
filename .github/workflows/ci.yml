@@ -221,6 +221,12 @@ jobs:
         # stamping loop in prebuild.yml. That job runs the same script's --stamped mode as a publish
         # blocker after stamping.
         run: bash scripts/check-server-json-hashes.sh
+      - name: MCP registry field-limit guard
+        # server.json's own field lengths against the registry schema it declares (vendored at
+        # docs/contracts/mcp-server.schema.json). The registry answers a violation with a 422 in
+        # prebuild's LAST job, after the tag, the release assets and six npm packages are already
+        # published -- v0.35.0's 187-char description did exactly that (review ledger V292).
+        run: bash scripts/check-mcp-registry-limits.sh
       - name: release-version propagation guard
         # Every committed version on the release surface (plugin.json, server.json's version fields and
         # its packages[] download URLs) must equal Cargo.toml's [workspace.package] version. prebuild's

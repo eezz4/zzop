@@ -1,6 +1,6 @@
 {
   "name": "zzop",
-  "version": "0.35.0",
+  "version": "0.36.0",
   "description": "Deterministic repository oracle for AI agents: point it at a repo and get one JSON answer — inventory, dependency graph, per-file risk, and the frontend-call x backend-route join — byte-identical for the same input, with its blind spots named rather than guessed past. TypeScript/JavaScript, Python, Java, C#, Rust, Go, Prisma, SQL natively; anything else via a documented adapter envelope. First install only: the binary is fetched during session startup, after this session's tool list was settled — restart Claude Code once and the zzop tools appear.",
   "author": {
     "name": "eezz4",
