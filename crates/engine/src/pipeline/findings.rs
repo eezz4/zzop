@@ -286,7 +286,15 @@ fn schema_issue_to_finding(
         rule_id: zzop_rules_schema::schema_issue_rule_id(&issue.rule),
         severity: issue.severity,
         file: rel.to_string(),
-        line: zzop_parser_prisma::model_decl_line(text, &issue.model),
+        // 🔴 A field-level issue anchors at the FIELD, not at the model (2026-09-24, review ledger
+        // V312). The model line opens fine and shows `model User {`, which is not the evidence for
+        // `stale-updated-at`; an auditor reading that citation has to go find the row themselves.
+        // `field_decl_line` falls back to the model line, so a field it cannot place is coarse rather
+        // than wrong.
+        line: match issue.field.as_deref() {
+            Some(f) => zzop_parser_prisma::field_decl_line(text, &issue.model, f),
+            None => zzop_parser_prisma::model_decl_line(text, &issue.model),
+        },
         message: zzop_rules_schema::schema_issue_message(issue),
         evidence_paths: Vec::new(),
         data: serde_json::to_value(issue).ok(),

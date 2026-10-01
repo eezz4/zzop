@@ -16,7 +16,7 @@
 #     mandatory and is read by the next person, not by the machine. Liveness-checked: if the deictic is
 #     gone, the exemption reds — an exemption cannot outlive what it excuses.
 
-VETTED 0.36.0
+VETTED 0.37.0
 
 # All three were FALSE on 2026-08-11, one release after v0.30.0 shipped, with the whole guard fleet
 # green. They now name their boundary explicitly; this registry is what makes the next bump re-read them.
@@ -33,9 +33,58 @@ VETTED 0.36.0
 # present-tense claim ("ls-remote tops out at v0.30.0") had gone false when v0.31.0 landed and was
 # rewritten as a past-tense anchor ("at both hops the remote tag list topped out at ..."). The rewrite
 # rewrapped that sentence, which is why VERSIONING.md's count moved 5 -> 4 in the same act.
+#
+# VERSIONING.md went 4 -> 5 on 2026-09-24 (review ledger V304). The document had been telling readers
+# to take a pinned tag's assets from GitHub Releases, which 404s for 37 of the 39 tags: 24 predate the
+# release workflow and the 2026-09-23 repository recreation took the other 13. The new line narrows the
+# promise to `v0.35.0 onward` and is therefore itself a boundary claim, which is why the count moved.
+#
+# It is an ETERNAL claim in the same sense the other four are: it names the first tag that carries
+# assets, and a later release does not make it false. What WOULD make it false is back-filling the
+# older tags, and the paragraph under it records that we refuse to — a download that succeeds with the
+# wrong bytes is worse than one that fails. `scripts/measure/release-surfaces.mjs` carries the same
+# number as `PROMISED_FROM`; if the promise ever widens, both move together.
+# CHANGELOG.md joined 2026-09-30, cutting v0.37.0. Its `## Unreleased` section states what this
+# window did to each compatibility surface, and one of those sentences names a tag coordinate read off
+# the remote ("178 ids, none retired since v0.36.0"). That is a boundary claim by this guard's own
+# definition, and it was invisible here until it was written — `working-agreements.md` §6.5-5 even
+# said CHANGELOG.md was outside this needle, which was true of the old body and stopped being true.
+#
+# 🔵 It is registered rather than reworded because the re-read this registry demands ALREADY EXISTS as
+# a runbook step: §6.5-5 folds `## Unreleased` at every release, which is exactly "re-read these
+# sentences when the version moves". Registering turns that step from a line someone follows into a
+# line the machine holds — and the failure this whole guard was built from is a sentence whose author
+# KNEW it needed rewriting at the next release while no machine held it.
+#
+# ⚠ Expect this entry to red on every bump. That is the design: the bump is when the fold happens.
 claim README.md 1
-claim VERSIONING.md 4
+claim VERSIONING.md 7
 claim docs/ARCHITECTURE.md 1
+claim CHANGELOG.md 1
+
+# ── Re-read at 0.37.0 (2026-09-30). Ten lines read; TWO were false and are rewritten. ────────────
+#
+# This is the first bump where the re-read this registry demands actually caught something, so what it
+# caught is worth stating rather than leaving in a diff.
+#
+#  * README.md and VERSIONING.md CONTRADICTED EACH OTHER, and nothing could see it because each was
+#    true on its own axis. README said the `SHA256SUMS` asset exists "from v0.30.0 onward" and told a
+#    reader on an older pin to "check that the file is there". VERSIONING said every
+#    `releases/download/` URL below v0.35.0 returns 404. So for a pin between v0.30.0 and v0.34.0
+#    README sent the reader to check a file inside a release that does not exist. Both halves of
+#    README's sentence predate the 2026-09-23 history rewrite and neither survived it. README now
+#    points at VERSIONING as the one owner of which tags carry assets.
+#  * VERSIONING's "37 of the 39 tags carry no release assets" is arithmetic over a tag list that THIS
+#    release grows by one — it would have been false the moment CI cut v0.37.0, i.e. minutes after
+#    being vetted. Replaced with the recount command and the half that does not move (v0.35.0 is where
+#    assets begin). 📏 39 measured today: `git ls-remote --tags origin | grep -v '^{}' | wc -l`.
+#
+# VERSIONING.md went 5 -> 7 because the rewrite states the durable boundary twice (heading and body)
+# rather than once beside a count. The other eight lines were read and are true at 0.37.0:
+# the cache-key boundary (VERSIONING x2 + docs/ARCHITECTURE x1) is unmoved — 📏 the only diff in
+# `crates/cache/` this window is a doc comment, and no PARSER_FINGERPRINT changed; the
+# read-coordinates-off-the-remote pair is advice, not a boundary; and CHANGELOG's line was measured
+# by this release's own audit (`check-rule-id-renames-recorded`: 178 ids, none retired).
 
 # "the hook installs the current release" describes the auto-update hook's BEHAVIOUR — it fetches
 # whatever the newest published tag is — so there is no version for it to name. This is the shape the

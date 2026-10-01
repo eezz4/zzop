@@ -889,9 +889,11 @@ fn analyze_json_keeps_the_nonexistent_root_warning_behavior() {
         .any(|w| w.contains("does not exist or is not a directory")));
 }
 
-/// `gitWindow` — the operative `recentDays`/`since` git-window knobs (`zzop_engine::AnalyzeOutput::
-/// git_window`'s doc): neither knob was echoed anywhere before this field existed, so a consumer
-/// diffing two runs' `scores`/`health` numbers could not tell which window produced which output.
+/// `gitWindow` — the operative `recentDays`/`since` git-window knobs plus `commits`, the count the
+/// walk traversed (`zzop_engine::AnalyzeOutput::git_window`'s doc): neither knob was echoed anywhere
+/// before this field existed, so a consumer diffing two runs' `scores`/`health` numbers could not
+/// tell which window produced which output — and until 2026-09-24 neither was the COST, so two
+/// replies carrying identical knobs could describe runs 548s and 13s apart (review ledger V294).
 
 #[test]
 fn analyze_json_git_window_echoes_the_resolved_default_recent_days() {
@@ -908,8 +910,60 @@ fn analyze_json_git_window_echoes_the_resolved_default_recent_days() {
     let value: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
     assert_eq!(
         value["gitWindow"],
-        serde_json::json!({"recentDays": 30, "since": null}),
+        serde_json::json!({"recentDays": 30, "since": null, "commits": 4}),
         "an unset recentDays must echo the resolved default (30), got: {value}"
+    );
+}
+
+/// `gitWindow.commits` is the COST beside the two knobs (review ledger V294) — the commits this
+/// tree's walk actually traversed. It is pinned against git ITSELF rather than against a literal,
+/// because a literal is what lets a wiring mistake keep passing: writing `files.len()` or the
+/// diagnostics' `total_changes` into this field would still be "a plausible number" and the
+/// whole-shape pin above would simply be updated to match it.
+///
+/// ⚠ The two populations coincide HERE and are not the same law in general. `commits` counts
+/// commits in the analyzed window that touched SELECTED files for this tree (no-merges, the source
+/// extension filter, and `rebase_onto` for a subtree all narrow it); `git rev-list --count HEAD`
+/// counts every commit. They are equal for this fixture because all four of its commits are
+/// non-merge and every one touches a `.ts` file at the tree root. A fixture that grew a merge or a
+/// README-only commit would break this test correctly, and the fix there is to narrow the expected
+/// count, never to delete the cross-check.
+#[test]
+fn git_window_commits_counts_the_walk_and_agrees_with_git_itself() {
+    if !git_available() {
+        skip_notice!("git not on PATH");
+        return;
+    }
+    let dir = cycle_and_git_fixture();
+    let out = std::process::Command::new("git")
+        .args(["rev-list", "--count", "HEAD"])
+        .current_dir(dir.path())
+        .output()
+        .expect("git rev-list should spawn");
+    assert!(out.status.success(), "git rev-list failed in the fixture");
+    let from_git: u64 = String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .parse()
+        .expect("rev-list --count prints a number");
+
+    // Floor: a one-commit fixture would make the equality below true for the wrong reason (every
+    // wrong wiring that happens to yield a small number passes), and it would also be the exact
+    // shallow-clone shape this field exists to make visible. Fail loudly instead of passing emptily.
+    assert!(
+        from_git > 1,
+        "the fixture must carry real history for this test to mean anything, got {from_git} commit(s)"
+    );
+
+    let config = format!(
+        r#"{{"root": {:?}, "sourceId": "t", "git": {{}}}}"#,
+        dir.path().display()
+    );
+    let value: serde_json::Value =
+        serde_json::from_str(&analyze_json(&config).expect("analyze_json should succeed"))
+            .expect("valid JSON");
+    assert_eq!(
+        value["gitWindow"]["commits"], from_git,
+        "gitWindow.commits must be the walk's own count, not a stand-in: git says {from_git}, reply says {value}"
     );
 }
 

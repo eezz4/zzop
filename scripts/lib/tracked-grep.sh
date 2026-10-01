@@ -224,7 +224,8 @@ assert_workspace_members_scanned() {
   # zero-census comment (right reason, no message, whole diagnosis paid for by the next reader).
   members="$(workspace_member_dirs || true)"
   # Counted with the shell. `printf | grep -c` forks twice for a number this loop already has to
-  # walk for, and on this machine a fork is the unit of cost -- see the scanned-set comment below.
+  # walk for, and on the MSYS2 box this was written for a fork was the unit of cost -- see the
+  # scanned-set comment below, and check-guards-wired.sh's V296 note for what a fork costs here today.
   local _m
   while IFS= read -r _m; do [ -n "$_m" ] && member_count=$((member_count + 1)); done < <(printf '%s\n' "$members")
   # The seal's OWN subject set. Without this, a Cargo.toml reshape that makes the awk match nothing
@@ -244,7 +245,8 @@ assert_workspace_members_scanned() {
   # stays right; what was wrong is that it cost a PROCESS. Six guards call this function and the
   # workspace declares ~25 members, so every one of them paid ~25 forks here, and under MSYS2 --
   # which emulates fork by copying the process -- a fork from bash costs the better part of a
-  # second on this machine. Traced 2026-08-18 with `PS4='+ $EPOCHREALTIME|' bash -x`:
+  # second on THAT machine (4.9ms here today -- review ledger V296). Traced 2026-08-18 with
+  # `PS4='+ $EPOCHREALTIME|' bash -x`:
   # check-swc-isolation spent 22.6s of its 44.8s in 33 grep spawns, and 0.9s in the 1,304 shell
   # builtins around them. The cost was set by the LENGTH OF THE MEMBER LIST, not by the tree.
   #

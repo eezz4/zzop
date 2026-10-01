@@ -187,7 +187,14 @@ const silent = roster.filter((r) => !anchored.has(r.file) && !declaredSilent.has
 //
 // What IS enforced is the ratchet: coverage may grow freely and may not shrink. A rule that loses its
 // last anchor fails here, naming itself, instead of quietly joining the silent 38.
-const ANCHORED_FLOOR = 80; // of 118 shipped DSL rules, measured 2026-09-15. Recount: this script.
+// Of 118 shipped DSL rules. RE-MEASURED 2026-09-24 (was 80, set 2026-09-15): twelve rules that had
+// shipped with no evidence got fixtures, and one co-fire came with them.
+//
+// It ratchets in BOTH directions as of the same day (review ledger V334). It used to fail only when
+// coverage SHRANK, so growth was silent and the floor never rose — which is how a second guard came
+// to be built for the tightening half alone, reporting the same 25 unanchored rules this line does.
+// That guard is deleted; its one idea is the second branch below.
+const ANCHORED_FLOOR = 93;
 
 const packRules = [];
 for (const file of execFileSync("git", ["ls-files", "rules/dsl/*.json"], { encoding: "utf8" }).trim().split("\n")) {
@@ -222,6 +229,13 @@ if (anchoredRules < ANCHORED_FLOOR) {
   console.error(`fixture-anchor-coverage: RULE COVERAGE SHRANK -- ${anchoredRules} shipped rules are anchored, below the recorded floor of ${ANCHORED_FLOOR}.`);
   console.error(`  A rule lost its last anchor in cases/EXPECTED.jsonc, so the detection gate no longer defends it and`);
   console.error(`  will keep printing 100%. Restore the anchor, or lower ANCHORED_FLOOR in the same commit and say why.`);
+  process.exit(1);
+}
+if (anchoredRules > ANCHORED_FLOOR) {
+  console.error(`fixture-anchor-coverage: coverage GREW -- ${anchoredRules} shipped rules are anchored, ABOVE the floor of ${ANCHORED_FLOOR}.`);
+  console.error(`  Raise it in this commit: ANCHORED_FLOOR = ${anchoredRules}`);
+  console.error(`  A floor that is not raised when it can be is a number nobody is pushing on, and it lets the next`);
+  console.error(`  regression fall back to the old value unnoticed. Growth is welcome; leaving it unrecorded is not.`);
   process.exit(1);
 }
 

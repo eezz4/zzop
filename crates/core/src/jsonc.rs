@@ -1,4 +1,20 @@
-//! JSONC stripping — the byte-for-byte port of the removed JS CLI's `jsonc.js` (2026-07-20), specifically its `stripJsonComments`:
+//! JSONC stripping — THE one implementation, and it lives in `core` so there can only be one.
+//!
+//! # Why it moved here (2026-09-26, review ledger V411)
+//! There were two. This one, string-aware in both passes with eleven tests; and a second in
+//! `zzop-engine`'s tsconfig lane — comment-stripping by hand plus a STRING-BLIND regex
+//! `,(\s*[}\]])` for trailing commas. They disagreed, and this file already held the test that
+//! proves it: `a_comma_inside_a_string_is_never_blanked` pins `{"a": "x, }"}` as unchanged, and
+//! the regex turned it into `{"a": "x }"}`. Two smaller divergences went the same way — a lone-CR
+//! line comment terminated here and not there, and the other dropped block-comment newlines so
+//! `serde_json` error lines shifted.
+//!
+//! Nothing could see it: no file in the repository fed one input to both. `zzop-config` depends on
+//! `zzop-engine`, so the shared home could not be either of them — it had to be `core`, which both
+//! already depend on. The reach of the disagreement was narrow (a string must carry `,` then
+//! whitespace then `}`/`]`), so the argument for this move is duplication, not a live corruption.
+//!
+//! Ported byte-for-byte from the removed JS CLI's `jsonc.js` (2026-07-20), specifically its `stripJsonComments`:
 //! two string-aware passes (comments, then trailing commas) that preserve newline COUNT so
 //! `serde_json` error positions stay meaningful. Quirks that MUST survive the port (see the JS
 //! source): `//`/`/*` inside double-quoted strings are copied through untouched; block comments
@@ -235,15 +251,19 @@ mod tests {
   "roots": ["."], // trailing
   /* a block
      comment */
+  // A PLACEHOLDER id, not a real one: `crates/core` is the kernel and must carry zero rule
+  // vocabulary, which `rule_contracts::kernel_vocabulary` enforces by scanning for quoted analysis
+  // ids. This fixture only needs the SHAPE of a config, so the id's identity is free — and the guard
+  // caught it the moment this file moved here (2026-09-26, review ledger V411).
   "rules": {
-    "circular": "warn", // inline
+    "some-rule-id": "warn", // inline
   },
   "exclude": ["legacy/",],
 }"#;
         let out = strip_json_comments(input);
         let parsed: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
         assert_eq!(parsed["roots"][0], ".");
-        assert_eq!(parsed["rules"]["circular"], "warn");
+        assert_eq!(parsed["rules"]["some-rule-id"], "warn");
         assert_eq!(parsed["exclude"][0], "legacy/");
     }
 }

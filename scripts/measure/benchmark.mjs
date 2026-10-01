@@ -618,12 +618,47 @@ function readBaseline() {
   return rows;
 }
 
+// Comment lines in the existing floor that this template does not itself produce. They are the
+// HAND-WRITTEN reasons the growth message above demands ("lower the row BY HAND, with the reason"),
+// and until 2026-09-24 `--update-baseline` deleted them: this function rendered a fixed header plus
+// rows, so anything a human had added in between was simply not part of the output. MEASURED that
+// day — recording review ledger V327's growth removed a 19-line block explaining the previous one,
+// whose own first sentence was "written by hand rather than left to the diff, because
+// --update-baseline records the NUMBER and cannot record WHY". The tool ate the answer to its own
+// complaint, silently, in a file whose entire purpose is to remember what a regenerating file cannot.
+//
+// The comparison walks the two sequences IN ORDER rather than testing membership in a set, and that
+// is not a refinement -- the set version was written first and measured losing two lines. The header
+// is full of bare `#` separators, so every bare `#` a human wrote was "already in the template" and
+// vanished, silently welding their paragraphs together. An ordered walk consumes each template line
+// at most once, so a separator the template has not yet spent is carried like any other line.
+//
+// The residual, stated rather than discovered: a hand-written block inserted INSIDE the template (as
+// opposed to after it, which is where the growth notes live and where the failure message points)
+// can resynchronise the pointer early and lose lines. Detecting that needs a real diff, and the cost
+// of being wrong here is a lost paragraph rather than a lost detection.
+function carriedComments(templateText) {
+  if (!fs.existsSync(BASELINE)) return "";
+  const template = templateText.split("\n");
+  const kept = [];
+  let t = 0;
+  for (const line of fs.readFileSync(BASELINE, "utf8").split(/\r?\n/)) {
+    if (!line.startsWith("#")) continue;
+    if (t < template.length && line === template[t]) {
+      t += 1;
+      continue;
+    }
+    kept.push(line);
+  }
+  return kept.length ? kept.join("\n") + "\n" : "";
+}
+
 function renderBaseline(counts) {
   const rows = [...counts.keys()].sort().map((id) => {
     const c = counts.get(id);
     return `${id} ${c.expectations} ${c.benign} ${c.gap}`;
   });
-  return (
+  const header = (
     "# Detection-benchmark COVERAGE FLOOR — how much cases/EXPECTED.jsonc is required to claim, per tree.\n" +
     "# This is not debt and not an exemption list: it is the previous value of a file that regenerates\n" +
     "# itself, which is the one thing that file cannot hold about itself.\n" +
@@ -653,10 +688,9 @@ function renderBaseline(counts) {
     "# Maintained by: node scripts/measure/benchmark.mjs --expected cases/EXPECTED.jsonc --update-baseline\n" +
     "# That mode GROWS ONLY. Lowering a number, or removing a row, is a hand edit — on purpose, so that\n" +
     "# giving up a detection is an act with an author and a reason in the diff, never a side effect of\n" +
-    "# regenerating the answer key against a degraded engine.\n" +
-    rows.join("\n") +
-    "\n"
+    "# regenerating the answer key against a degraded engine.\n"
   );
+  return header + carriedComments(header) + rows.join("\n") + "\n";
 }
 
 /** Rows where the ground truth now claims LESS than the floor, and rows the floor does not record yet. */

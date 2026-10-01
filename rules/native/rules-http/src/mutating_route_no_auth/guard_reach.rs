@@ -40,7 +40,7 @@ impl<'a> GuardReach<'a> {
     }
 
     /// True when the handler reaches auth evidence of either kind. The unresolved-name check rides the
-    /// SAME traversal rather than a second one: `bfs_reachable` applies its predicate to every reachable
+    /// SAME traversal rather than a second one: `bfs_reachable_in` applies its predicate to every reachable
     /// node including the start, which is exactly the set whose dropped calls could be the guard.
     pub(super) fn reaches(&self, handler_symbol: &str) -> bool {
         if let Some(hit) = self.memo.borrow().get(handler_symbol) {

@@ -136,7 +136,7 @@ fn census(reply: &serde_json::Value) -> Option<(u64, BTreeMap<String, u64>)> {
 /// says what it is. An absent file is deliberately not an error — requiring a separate `--write-baseline`
 /// verb would make the common path two commands and the second one forgettable.
 pub fn gate_against_baseline(text: &str, path: &str) -> ! {
-    println!("{text}");
+    super::emit(text);
     let reply: serde_json::Value = match serde_json::from_str(text) {
         Ok(v) => v,
         Err(e) => {

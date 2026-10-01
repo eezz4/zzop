@@ -1164,8 +1164,9 @@ fn injected_pathscope_auth_guarded_exempts_every_route_under_the_prefix() {
 }
 
 /// The message may not claim an UNBOUNDED search. `anywhere in its call graph` is literal for the JS/TS
-/// extensions and — since 2026-09-07, review ledger V30 — for `.java` too; for a Python
-/// module-attribute receiver the walk still stops one hop out, so in THAT case a finding means "no
+/// extensions and — since 2026-09-07, review ledger V30 — for `.java` too, and — since 2026-09-08,
+/// review ledger V100 — for a Python MODULE-attribute receiver. What still stops one hop out is a
+/// DOTTED receiver (`import app.helpers; app.helpers.ensure()`), so in THAT case a finding means "no
 /// guard within one hop".
 ///
 /// 🔴 The Java half of this bound moved, and why it had to is worth keeping here: the bound was never a
@@ -1185,11 +1186,19 @@ fn the_message_never_claims_an_unbounded_walk_without_naming_the_hop_bound() {
         msg.contains("anywhere in its call graph"),
         "the phrase this test qualifies must still be there, or the pin is checking nothing: {msg}"
     );
-    // Every token here must be UNIQUE to the bound that REMAINS — the Python module-attribute one.
+    // Every token here must be UNIQUE to the bound that REMAINS — the Python DOTTED-receiver one.
     // `resolves to ITSELF` was in this list until 2026-09-07 and had to leave with the Java bound it
     // described: a token that survives its own subject pins the SENTENCE, not the claim.
+    //
+    // 🔴 `module-attribute` was in this list until 2026-09-24 and it is the exact failure the line above
+    // warns about, committed by the warning's own author. `python_bridge` closed that bound on
+    // 2026-09-08 (ledger V100) and this pin went on asserting it for sixteen days — so the test did not
+    // merely go stale, it HELD A FALSE SENTENCE IN PLACE, because the message could not be corrected
+    // without turning this red. Measured 2026-09-24 on two fixtures identical but for the receiver:
+    // `from app import helpers` + `helpers.ensure()` clears the guarded route (1 finding, the
+    // genuinely unguarded one); `import app.helpers` + `app.helpers.ensure()` still fires on both (2).
     for token in [
-        "module-attribute",
+        "DOTTED receiver",
         "stops one hop out",
         "within one hop",
         "no guard anywhere",

@@ -17,6 +17,18 @@
 //! An adapter-supplied `response` with `dto_ref: None` and NON-empty `fields` is already resolved
 //! (Mode B overlays may fill fields directly, like `ProvideBodyShape`) and passes through untouched.
 //!
+//! 2b. **Resolved-to-nothing disclosure** (2026-09-25, review ledger V388) — the silence between
+//!    the two above, and the one that shipped for over a month. A `dto_ref` that RESOLVES against
+//!    the merge but whose fragment carries NO readable field (`fields` empty, `complete: false`)
+//!    used to have those empty fields copied onto the provide, producing a `response` object that
+//!    downstream cannot tell apart from an adapter-resolved one — while the entry-time capture-less
+//!    read had already excluded it from §3's count. MEASURED on immich before the fix: 303 provides,
+//!    156 carrying a present `response`, ALL 156 with zero fields and NONE with fields, and the
+//!    three disclosures accounting for exactly the other 147. The tree's public story said 147 of
+//!    303 routes were blind; the truth was 303 of 303. The boundary is `complete`: empty +
+//!    INCOMPLETE is "found, read nothing"; empty + complete is a genuinely field-less DTO and
+//!    still passes through.
+//!
 //! 3. **Capture-less disclosure** (2026-08-03) — the third silence, one aggregated warning per tree
 //!    over the `http` provides that arrive here with `response: None` AT ENTRY (before the sentinel
 //!    strip and the unresolved-ref drops turn other provides into `None` too — the entry read is what
@@ -65,6 +77,9 @@ pub(crate) fn resolve_provide_response_refs(
     }
 
     let mut unresolved: BTreeMap<(String, String), u32> = BTreeMap::new();
+    // Refs that RESOLVE and carry nothing — see the `Some(frag) if ...` arm below. Keyed the same
+    // way as `unresolved` so one DTO named from twenty handlers is one warning, not twenty.
+    let mut resolved_empty: BTreeMap<(String, String), u32> = BTreeMap::new();
     // file -> distinct undeclared HANDLERS (`(line, symbol)` — one method is one entry no matter
     // how many provides it emits: an array-path decorator emits one sentinel per path from a
     // single annotatable method, and the disclosure counts what the developer can annotate).
@@ -96,6 +111,19 @@ pub(crate) fn resolve_provide_response_refs(
             continue;
         }
         match merge.get(&dto_ref) {
+            Some(frag) if frag.fields.is_empty() && !frag.complete => {
+                // RESOLVED TO NOTHING. The name was found and the shape it names carries no readable
+                // field, with `complete: false` saying the list may be partial — so this is the
+                // never-guess blind case, not a field-less response. Strip it for the same reason the
+                // sentinel arm strips its own (module doc: a zero-information shape must not reach
+                // rules, the join, or JSON output) and disclose it under its OWN reason: "declared no
+                // return type" and "declared a type that reads as nothing" ask the developer for
+                // different edits, and only the first one had a warning until 2026-09-25.
+                provide.response = None;
+                *resolved_empty
+                    .entry((provide.file.clone(), dto_ref))
+                    .or_insert(0) += 1;
+            }
             Some(frag) => {
                 if let Some(shape) = provide.response.as_mut() {
                     shape.fields = frag.fields.clone();
@@ -119,6 +147,35 @@ pub(crate) fn resolve_provide_response_refs(
              shape — its {count} {provide_word} keep no response contract; the type may live in an \
              unanalyzed file, or be a type alias/mapped type this declaration-based extraction does not \
              read"
+        ));
+    }
+
+    if !resolved_empty.is_empty() {
+        // ONE warning per tree, not one per DTO. Keyed per (file, ref) like its `unresolved`
+        // sibling, this printed 95 copies of the same paragraph on immich and grew the analyze reply
+        // 103,632 -> 181,959 B (+75.6%). The sibling gets away with per-ref because an unresolvable
+        // name is rare; "resolves but reads as nothing" is the COMMON case in a codebase that builds
+        // its DTOs with a factory, so it folds like the other two whole-tree disclosures.
+        let total: u32 = resolved_empty.values().sum();
+        let distinct = resolved_empty.len();
+        let examples: Vec<String> = resolved_empty
+            .keys()
+            .take(3)
+            .map(|(file, dto_ref)| format!("`{dto_ref}` ({file})"))
+            .collect();
+        let provide_word = if total == 1 { "provide" } else { "provides" };
+        let distinct_word = if distinct == 1 { "type" } else { "types" };
+        warnings.push(format!(
+            "{total} {provide_word} name {distinct} declared response {distinct_word} that RESOLVE but \
+             read as no fields (e.g. {}) — the declaration was found; what it declares could not be \
+             read (members coming from an `extends` clause, a factory call such as \
+             `extends createZodDto(...)`, constructor parameter properties, an index signature, or a \
+             computed key). Declared-response analysis (`cross-layer/sensitive-response-field`, \
+             response-contract checks) is OFF for those routes: zero response findings there is \
+             no-evidence, never \"no sensitive response field\". Spell the fields on the DTO, or supply \
+             them through a Mode B adapter overlay's `response`. A field-less DTO that genuinely has \
+             no members is NOT this case — it resolves complete and passes through",
+            examples.join(", ")
         ));
     }
 

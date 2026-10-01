@@ -246,6 +246,37 @@ clone (plain git, no husky or npm dependency):
 git config core.hooksPath .githooks
 ```
 
+### Enabling that also enables a SECOND hook, and it will refuse commits
+
+`core.hooksPath` installs everything in `.githooks/`, which is two hooks, not one. Besides
+`pre-commit` there is **`commit-msg`**, and it rejects a commit outright when the message is missing
+a line it requires. Both lines are written below because a rule you meet only as a rejection is a
+rule you cannot follow in advance.
+
+**1. `Subtraction considered:` — required when the commit ADDS a tracked file.** Measured on the
+unreleased delta, that is about 40% of commits. The hook checks that the line is PRESENT, never what
+it says, and the reason is written into the hook itself: a required line becomes a ritual the moment
+it is graded. Two lines is enough —
+
+```
+Subtraction considered: <what removing would have looked like>
+  -> <what that would have cost>
+Chose to add, because <reason>.
+```
+
+**"Nothing to remove" is a valid answer.** Recording that the question was ASKED is the whole point —
+this project's founding doctrine is that perfection is reached when there is nothing left to take
+away, so the obligation is to ask before adding, not to always subtract. Fixing a defect honestly
+often adds lines and that is not a violation.
+
+**2. `Population delta:` — required when you change WHICH FILES OR LINES A RULE MATCHES** (any
+changed line under `rules/dsl/` or in `shared_fragments.json` that is not one of four metadata keys).
+Widening a veto or narrowing a `file_pattern` can only ever REMOVE findings, and a removed finding
+leaves no trace in the diff, in CI, or in the detection gate. Produce the number with
+`node scripts/measure/rule-population.mjs <pack>/<rule>`, then state it. ⚠ That script reimplements
+the matcher in JavaScript and names its divergences from the engine in its own header, so quote the
+figure as a population reading, not as engine truth.
+
 The hook's `GUARDS` array mirrors the CI `guards` job's step order element-for-element (bound by
 `scripts/check-guards-wired.sh`), so a green pre-commit means that job is satisfied — but `guards` is
 one of CI's five jobs, not its guard *half*. The other four (`test`, `cli-shim-test`,
@@ -334,6 +365,71 @@ Two honest limitations:
   `untracked` list); `.gitignore` carries the full why — a live vendor-token literal is exactly what
   push protection and our own commit-time guard reject — and the two ways out.
 
+### The ad hoc harnesses in `crates/engine/examples/`
+
+`scripts/measure/` holds the harnesses with a process around them. Beside it sit five `cargo run
+--example` targets that answer narrower questions while you are working on a rule or a join. They are
+listed here because they were not listed anywhere tracked, and an external review reasonably read one
+of them as dead code on that basis — a capability nothing can lead you to is close to not having it.
+
+| Example | Answers |
+|---|---|
+| `corpus_rule_counts <root> [rule-id]` | per-rule finding counts over ONE root, with samples |
+| `cross_layer_rule_counts <root> [<root> ...]` | the multi-tree counterpart: per `cross-layer/*` rule id, counts plus up to 5 `file:line` samples and the join's bucket sizes. Takes bare roots — each folder name becomes its `source_id`, so no config file is needed. `ZZOP_DUMP_BUCKETS=1` prints every non-edge bucket entry, which is the only way to see WHICH call sites landed where; no shipped subcommand exposes that |
+| `xlayer_dump` | the cross-layer join's raw intermediate state |
+| `bench` | timing over a generated tree (`scripts/measure/gen-scale-tree.mjs`) |
+| `fastapi_overlay_adapter` | a worked external-adapter envelope, also cited from `docs/ARCHITECTURE.md` |
+
+They are development instruments, not product surface: nothing in the shipped binaries calls them, and
+they are deliberately outside the release lanes. Deleting one is fine when its question is answerable
+another way — three others were deleted in 2026-09 for having no question left. Check what the answer
+costs elsewhere first; `ZZOP_DUMP_BUCKETS` above is the example of a question with no other answer.
+
+### The hand-run measurements in `scripts/measure/`
+
+Most of that directory is wired: `detection-gate.sh`, `snapshot.mjs`, `diff.mjs` and `benchmark.mjs`
+are called by CI, by a guard, or by a documented procedure above. The rest are not called by
+anything in this repository, and that is deliberate rather than rot — they answer a question you ask
+on purpose, once, and then quote the number with the command beside it. **The count is not written
+here, only the command that produces it** — the table below is the list, and a number beside a list
+is a second owner that goes stale first.
+
+📏 Recount which ones: for each file in `scripts/measure/`, search the tracked tree for its name,
+excluding the file itself, `scripts/check-guards-wired.sh` (which lists them only to exempt them
+from the every-guard-has-a-caller rule), **this file** (the table below names all of them, so leaving
+it in makes every one look referenced), and the generated `site/`+`site-src/` dependency-graph
+data, which enumerates every file and so makes anything look referenced.
+
+⚠ **That exclusion of this file was missing until 2026-09-30, and without it the recipe returns
+zero** — every entry is "referenced", by this table. It is the same self-counting failure as a word
+scan that matches the line explaining the scan; here it made the recipe unable to reproduce the
+number the paragraph above it used to state, which is why the number is gone and the command stayed.
+
+⚠ And the recipe flags one file the table below does NOT list: `gen-scale-tree.mjs`, which the recipe
+cannot see a caller for because its only caller is named in the `bench` row of the examples table
+above — i.e. it HAS a documented procedure, which is the first sentence's own exemption. Read the
+recipe's output as "no caller in code", then check the examples table before calling one orphaned.
+
+| Hand-run | Answers |
+|---|---|
+| `vocab-key-census.mjs` | how many `vocabulary.*` config keys exist and how many analysis lanes read each — the instrument behind the 1.0 decision on whether to respell them |
+| `mcp-meaning-delegation.mjs` | which MCP tool descriptions hand vocabulary back to the reply's `*Meaning` fields instead of keeping a second copy |
+| `line-census.mjs` | how much of the tree ships versus tests and fixtures |
+| `subtraction-trend.sh` | whether the codebase is getting smaller, over a range of commits |
+| `reply-run-invariance.mjs` | whether two runs over the same input produce byte-identical replies |
+| `join-instrument.mjs` | the cross-repo join's regression check, and the strongest of these: it rebuilds the pair configs under `corpus/oss/`, runs `cross` over each, and ASSERTS the edge count it expects — including the two pairs expected to join at zero. It is the only measurement here that fails on its own rather than printing a number for a human to judge. It checks counts, not correctness: that the join still produces 19 edges, never that those 19 are the right ones |
+| `config-warnings-gate.mjs` | which config warnings a given tree raises |
+
+⚠ **They are listed here because being uncalled is exactly what makes a measurement easy to lose.**
+An external review read two of them as deletable on the grounds that nothing invokes them, which was
+a fair reading of the evidence available: their consumers are notes that are not in this repository,
+so from inside the tree they have no reader at all. That is the same argument the examples section
+above makes, and it applies with more force here — an example is discoverable by `cargo run
+--example` with no arguments, and a loose script is discoverable by nothing.
+
+**Deleting one is still fine when its question is dead.** What is not fine is deleting one because
+no caller was found, without asking what the answer costs elsewhere: the first entry above is the
+only instrument behind an open 1.0 gate.
 ## Conventions
 
 - **English-only.** All source, comments, and docs are English (enforced by the english-source

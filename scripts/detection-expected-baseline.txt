@@ -45,7 +45,34 @@
 # The selection was not ad hoc: a census of the shipped id space (118 bundled DSL + 60 native = 178,
 # the machine-checked total in docs/rules/catalog.md) against the ids EXPECTED.jsonc names found 61
 # with no row at all. These five are that set's `critical` members plus the one already known.
-api 112 0 0
+#
+# GROWTH RECORDED 2026-09-24, review ledger V327 — by hand, same reason as the block above. Total
+# 296 -> 305 expectations, controls unchanged.
+#   api  112 -> 121   nine of the twelve rules that shipped with NO evidence at all: absent from the
+#                     answer key, silent in all 27 fixture trees, and silent in 25 corpus trees over
+#                     28 runs — so neither an FN nor an FP was reachable and any change to them was
+#                     green by construction. db/{idempotency-key-regenerated-in-loop,
+#                     manual-tx-no-rollback, non-atomic-counter-update, tx-and-empty-catch,
+#                     unawaited-transaction}, redis/lock-no-ttl, security/{jwt-verify-bypass,
+#                     cors-reflected-origin-credentials}, sql/raw-sql-check-then-write.
+#   web    7 ->  11   the other three plus one correct co-fire: browser/{postmessage-wildcard,
+#                     javascript-url, markdown-and-html-sink-unsanitized}, and browser/unsafe-html-sink
+#                     at the `el.innerHTML = html` line the markdown fixture needs in order to have a
+#                     sink at all.
+# Every anchor was MEASURED from the engine's own output, never predicted from reading the matcher,
+# and each fixture's `good` half is scored by silence — see the block EXPECTED.jsonc carries.
+#
+# MEASURED while recording this: `--update-baseline` DELETED the 2026-08-29 block above when it wrote
+# these two numbers — 19 lines gone, including the sentence saying the prose is written by hand
+# because the flag "records the NUMBER and cannot record WHY". Restored from git and FIXED at the
+# source (review ledger V329): renderBaseline now carries forward comment lines it did not itself
+# produce. Re-running the flag on this file now moves the two numbers and nothing else, which is how
+# that fix was proven rather than asserted.
+#
+# The coverage preflight moved 38 -> 25 anchored-nowhere DSL rules, so this closed THIRTEEN and not
+# twelve — browser/unsafe-html-sink had no anchor either. That preflight prints the census on every
+# run and owns the number.
+api 121 0 0
 bearticles 0 0 0
 beinvoices 0 0 0
 callgraph 5 0 0
@@ -66,7 +93,7 @@ sqllang 23 4 0
 testconv 4 3 0
 trpc 1 0 0
 unresolved 2 0 0
-web 7 0 0
+web 11 0 0
 worker 1 0 0
 xbe 8 0 0
 xbe2 4 0 0

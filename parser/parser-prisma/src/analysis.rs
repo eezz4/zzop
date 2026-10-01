@@ -145,6 +145,71 @@ fn accessor_casing(model_name: &str) -> String {
 /// `pub`: `zzop_engine`'s per-file Prisma pass (`schema_issue_to_finding`) reuses this to place a
 /// `SchemaIssue`-derived `Finding` at the issue's model's declaration line, rather than duplicating the
 /// same lexical lookup.
+/// The 1-based line of `<field> ...` inside `model <model> {`, or the MODEL's own line when the field
+/// cannot be placed. The field-level twin of [`model_decl_line`], and the reason it exists is that the
+/// model line is not evidence for a field-level finding (2026-09-24, review ledger V312): an
+/// uncontaminated auditor reading `schema/stale-updated-at` at `schema.prisma:15` found `model User {`
+/// there and the offending `updatedAt` nine lines below. The citation opened; it just showed nothing.
+///
+/// Scanning is textual and brace-counted rather than parsed, the same trade [`model_decl_line`] takes:
+/// this runs on the RAW text so a finding can point at what the author wrote, and the projected
+/// `SchemaField` carries no offset to translate.
+///
+/// Failure is toward the MODEL line, never toward line 1 and never toward a line in another model — a
+/// citation that is merely coarse stays useful, while one that points into an unrelated block is worse
+/// than the coarse one. The field is matched as a whole word at the start of its line, so `updatedAt`
+/// does not match `updatedAtUtc` and a mention inside an attribute argument cannot win.
+pub fn field_decl_line(text: &str, model: &str, field: &str) -> u32 {
+    let model_line = model_decl_line(text, model);
+    // 🔴 `model_decl_line` returns 1 both for "declared on line 1" and for "not found at all", and the
+    // two must not be confused here: scanning from a fallback 1 walks into whatever model DOES start the
+    // file and can return a same-named field from it — the exact "points into an unrelated block"
+    // outcome this function's doc forbids. My own test caught it doing that. So the line is CONFIRMED to
+    // declare this model before anything is scanned; otherwise the fallback is returned untouched.
+    let declares_this_model = text
+        .lines()
+        .nth(model_line.saturating_sub(1) as usize)
+        .map(str::trim_start)
+        .and_then(|l| l.strip_prefix("model "))
+        .map(str::trim_start)
+        .is_some_and(|rest| {
+            rest.starts_with(model) && rest[model.len()..].trim_start().starts_with('{')
+        });
+    if !declares_this_model {
+        return model_line;
+    }
+    let mut depth = 0i32;
+    let mut inside = false;
+    for (i, line) in text.lines().enumerate() {
+        let n = (i + 1) as u32;
+        if n < model_line {
+            continue;
+        }
+        if n == model_line {
+            inside = true;
+            depth = 0;
+        }
+        if !inside {
+            continue;
+        }
+        if n > model_line {
+            let t = line.trim_start();
+            if let Some(rest) = t.strip_prefix(field) {
+                let next = rest.chars().next();
+                if next.is_none_or(|ch| ch.is_whitespace()) {
+                    return n;
+                }
+            }
+        }
+        depth += line.matches('{').count() as i32;
+        depth -= line.matches('}').count() as i32;
+        if n > model_line && depth <= 0 {
+            break; // left the model block without finding the field
+        }
+    }
+    model_line
+}
+
 pub fn model_decl_line(text: &str, name: &str) -> u32 {
     for (i, line) in text.lines().enumerate() {
         let t = line.trim_start();

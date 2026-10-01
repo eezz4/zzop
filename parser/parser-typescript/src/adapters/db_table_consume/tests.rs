@@ -172,3 +172,18 @@ fn bare_receiver_widens_query_call_sites_too() {
     assert_eq!(out[0].model, "Item");
     assert_eq!(out[0].method, "findMany");
 }
+
+/// `as const` in the receiver chain (2026-09-25, review round 31 — see `unwrap_expr`'s own comment).
+///
+/// This crate holds EIGHT copies of `unwrap_expr` and this adapter's was the only one missing the
+/// `Expr::TsConstAssertion` arm, so the one receiver shape TypeScript users write to freeze a literal
+/// was the one shape the db-table adapter could not see through. Its sibling copies — `egress.rs`,
+/// `hono_client/scan.rs`, `router_mounts/chain.rs`, `trpc_consume.rs`, `trpc_router/extract.rs`,
+/// `wrapper_calls/calls.rs`, `asset_refs.rs` — all carried it. The invalidation probe is to delete
+/// that arm again: this test goes red and every other test in this file stays green, which is what
+/// makes it worth its lines.
+#[test]
+fn an_as_const_receiver_is_unwrapped_like_every_other_adapter_in_this_crate() {
+    let src = "function f() {\n  (getPrisma() as const).order.findMany();\n}\n";
+    assert_eq!(keys("a.ts", src), vec!["table:order"]);
+}

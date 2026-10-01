@@ -184,7 +184,7 @@ fn key_carries_route_identity_rejects_only_all_placeholder_paths() {
 }
 
 #[test]
-fn db_table_channel_casing_lower_firsts_only_the_first_character() {
+fn db_table_channel_casing_lower_firsts_a_mixed_case_name_and_lowercases_an_all_caps_one() {
     // PascalCase model name -> Prisma client accessor casing (the shape this transform exists for).
     assert_eq!(db_table_channel_casing("Article"), "article");
     assert_eq!(db_table_channel_casing("UserProfile"), "userProfile");
@@ -194,4 +194,19 @@ fn db_table_channel_casing_lower_firsts_only_the_first_character() {
     // Single character and empty string are edge cases both call sites can hit after quote-stripping.
     assert_eq!(db_table_channel_casing("A"), "a");
     assert_eq!(db_table_channel_casing(""), "");
+
+    // ALL-CAPS is lowercased WHOLE, not lower-firsted (2026-09-25, review ledger V409). Lower-firsting
+    // an identifier SQL spells in capitals produced keys nothing could ever provide: MEASURED on
+    // corpus/audit/nocodb, 13 of 55 distinct `db-table` keys and 47 of 206 consumes were wreckage of
+    // this shape. The boundary is "carries no lowercase letter", so every case above is untouched.
+    assert_eq!(db_table_channel_casing("COLUMNS"), "columns");
+    assert_eq!(
+        db_table_channel_casing("REFERENTIAL_CONSTRAINTS"),
+        "referential_constraints"
+    );
+    assert_eq!(db_table_channel_casing("LATERAL"), "lateral");
+    // The discriminator, both ways: one lowercase letter anywhere keeps the lower-first rule, which is
+    // what protects `UserProfile` -> `userProfile` from becoming `userprofile`.
+    assert_eq!(db_table_channel_casing("USERProfile"), "uSERProfile");
+    assert_eq!(db_table_channel_casing("ID"), "id");
 }

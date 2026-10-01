@@ -53,7 +53,19 @@ if [ ! -x "$BIN" ]; then
   if command -v zzop > /dev/null; then
     BIN="$(command -v zzop)"
   else
-    echo "!! no zzop binary. Build one with 'cargo build --release -p zzop-cli-bin', or install @zzop/cli." >&2
+    # A refusal carries a RUNNABLE remedy, not a description of one -- the rule this repository
+    # adopted for its rule messages in v0.35.0, applied here because this is the first gate a
+    # stranger meets: they cloned, pasted the README line, and this is the whole of their first
+    # impression. Two lines, both copy-pasteable, cheapest first.
+    {
+      echo "!! no zzop binary found (looked in target/release/ and on PATH)."
+      echo
+      echo "   No Rust toolchain needed -- install the CLI and re-run:"
+      echo "     npm i -g @zzop/cli && bash docs/demo/break-a-route-shipped.sh"
+      echo
+      echo "   Or build it from this checkout (slower, needs cargo):"
+      echo "     cargo build --release -p zzop-cli-bin && bash docs/demo/break-a-route-shipped.sh"
+    } >&2
     exit 1
   fi
 fi

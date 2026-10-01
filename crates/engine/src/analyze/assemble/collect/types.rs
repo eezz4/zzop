@@ -61,7 +61,7 @@ pub(in crate::analyze::assemble) struct Collected {
     /// consumes it walks exactly the dep-graph participants (`ts_paths`).
     ///
     /// It is COLLECTED rather than gathered by that pass because the pass gathering it meant reading
-    /// and re-parsing every source a second time — 68% of a warm run on this repository, and a
+    /// and re-parsing every source a second time, inside a pass measured at 68% of a warm run on this repository (a boundary number for the PASS, not for the re-parse — review ledger V401), and a
     /// second full swc parse per file, for facts the per-file lane could produce off a parse it had
     /// already paid for (review ledger V108).
     pub(in crate::analyze::assemble) ts_call_graph_pairs:

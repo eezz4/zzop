@@ -3384,3 +3384,44 @@ fn a_json_file_that_is_not_a_baseline_is_refused_rather_than_read_as_zeroes() {
     );
     assert!(stderr(&out).contains("byRule"), "{}", stderr(&out));
 }
+
+/// A closed downstream is not this process failing (2026-09-25, review ledger V407).
+///
+/// MEASURED before the fix: `zzop contract rule-catalog | head -1` exited 101 with 246 bytes of Rust
+/// panic text, and `zzop analyze --config <a real tree> | head -1` did the same — while the same
+/// analyze on THIS repo exited 0 and silent, because a 30 KB reply never reaches the failing write.
+/// So the defect was every reply over the 64 KiB pipe buffer, and `| head` is the first honest use of
+/// a 212 KB document.
+///
+/// The test drops the child's stdout handle immediately, which is what `head` does after its line.
+#[test]
+fn a_reader_that_stops_reading_is_not_an_error() {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_zzop"))
+        .args(["contract", "rule-catalog"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn zzop");
+
+    // Read one small chunk, then close the pipe — `head`'s behaviour, minus the line counting.
+    {
+        let mut out = child.stdout.take().expect("stdout piped");
+        let mut buf = [0u8; 64];
+        let _ = out.read(&mut buf);
+    }
+
+    let done = child.wait_with_output().expect("wait");
+    let stderr = String::from_utf8_lossy(&done.stderr);
+    assert!(
+        done.status.success(),
+        "a closed pipe must exit 0, got {:?} with stderr: {stderr}",
+        done.status.code()
+    );
+    assert!(
+        !stderr.contains("panicked"),
+        "a closed pipe must not panic; stderr was: {stderr}"
+    );
+}

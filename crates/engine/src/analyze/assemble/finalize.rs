@@ -108,7 +108,9 @@ pub(super) fn run(input: FinalizeInputs<'_>, warnings: &mut Vec<String>) -> Fina
         ts_dynamic_import_pairs,
     });
 
-    let git_window = metrics::git_window(config, git_active);
+    // Same `commits` the diagnostics counted above (`run_diagnostics` takes `&commits` and reports
+    // `commits.len()` in its thin-history warning) -- one population, read twice, never re-derived.
+    let git_window = metrics::git_window(config, git_active, commits.len());
 
     Finalized {
         metrics: metrics_result,

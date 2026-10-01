@@ -95,6 +95,17 @@ fn skip_warning(report: &zzop_parser_csharp::CSharpProjectProvidesReport) -> Opt
             report.skipped_unresolved_method_path
         ));
     }
+    if report.skipped_convention_routed > 0 {
+        parts.push(format!(
+            "{} action(s) on controllers with no class-level `[Route]` whose own `[HttpGet]`/\
+             `[HttpPost]` carried no path either — ASP.NET routes those by CONVENTION, from \
+             `MapControllerRoute`'s `{{controller}}/{{action}}` template in Program.cs, which this \
+             pass does not read. Their real paths are unknown here, so they are skipped rather \
+             than keyed at `/`, which would put every action of one class on a single wrong path \
+             and report them as duplicates of each other",
+            report.skipped_convention_routed
+        ));
+    }
 
     // The ambiguous-class-name census is a SEPARATE sentence, because it is not route work. The
     // counter increments for every duplicate simple class name in the corpus, controller or not — two

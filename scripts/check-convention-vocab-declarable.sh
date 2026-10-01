@@ -78,7 +78,8 @@ done
 # `path:CONST` of every census line whose axis column is exactly `convention`, and the config path each
 # one claims — read in ONE pass and held in memory rather than re-derived per key.
 #
-# This used to be two awk functions called once per key from the loop below, which on this machine was
+# This used to be two awk functions called once per key from the loop below, which on the MSYS2 box
+# this was written for was
 # the whole cost of this guard: MSYS2 emulates fork by copying the process, so a subprocess spawned
 # from bash costs ~563ms here regardless of what it does (measured 2026-08-18; native `git.exe` spawns
 # in 30ms, so it is the shell boundary and not the machine). Per key that was a `$(...)` subshell plus

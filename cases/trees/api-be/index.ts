@@ -20,6 +20,15 @@ import * as beDbUnawaitedWrite from "./services/be-db.unawaited-write";
 import * as beDbUnboundedUserLimit from "./services/be-db.unbounded-user-limit";
 import * as beDbUpdateDeleteNoWhere from "./services/be-db.update-delete-no-where";
 import * as beRedisFlushallInCode from "./services/be-redis.flushall-in-code";
+import * as beDbIdempotencyKeyRegeneratedInLoop from "./services/be-db.idempotency-key-regenerated-in-loop";
+import * as beDbManualTxNoRollback from "./services/be-db.manual-tx-no-rollback";
+import * as beDbNonAtomicCounterUpdate from "./services/be-db.non-atomic-counter-update";
+import * as beDbTxAndEmptyCatch from "./services/be-db.tx-and-empty-catch";
+import * as beDbUnawaitedTransaction from "./services/be-db.unawaited-transaction";
+import * as beRedisLockNoTtl from "./services/be-redis.lock-no-ttl";
+import * as beSecurityCorsReflectedOriginCredentials from "./services/be-security.cors-reflected-origin-credentials";
+import * as beSecurityJwtVerifyBypass from "./services/be-security.jwt-verify-bypass";
+import * as sqlRawSqlCheckThenWrite from "./services/sql.raw-sql-check-then-write";
 import * as beReliabilityAsyncRouteNoCatch from "./services/be-reliability.async-route-no-catch";
 import * as beReliabilityAwaitInMap from "./services/be-reliability.await-in-map";
 import * as beReliabilityBodyLimitMissing from "./services/be-reliability.body-limit-missing";
@@ -150,4 +159,13 @@ export const registry = {
   srcApiSqlNplus1Nested,
   srcDomainsOrdersRoutesSqlNplus1Domain,
   srcQueries,
+  beDbIdempotencyKeyRegeneratedInLoop,
+  beDbManualTxNoRollback,
+  beDbNonAtomicCounterUpdate,
+  beDbTxAndEmptyCatch,
+  beDbUnawaitedTransaction,
+  beRedisLockNoTtl,
+  beSecurityCorsReflectedOriginCredentials,
+  beSecurityJwtVerifyBypass,
+  sqlRawSqlCheckThenWrite,
 };

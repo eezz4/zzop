@@ -32,11 +32,16 @@ the demo page shows the run's own format):
   "PUT /api/users/me"  @ be-express  src/app/routes/auth/auth.controller.ts:61   ← the route nobody calls
 ```
 
-**You can run that in seconds**, on a pair this repository ships and with nothing to fetch:
+**You can run that in seconds**, on a pair this repository ships and with nothing to fetch — the
+demo pair is committed here, so clone this repository to get it:
 
 ```bash
-bash docs/demo/break-a-route-shipped.sh    # needs only a zzop binary
+git clone https://github.com/eezz4/zzop && cd zzop
+bash docs/demo/break-a-route-shipped.sh    # needs a zzop binary and node, nothing else
 ```
+
+The script finds a binary in `target/release/`, or any `zzop` on your `PATH`, and tells you how to
+get one if it finds neither. It analyzes a temporary copy and never edits `docs/demo/pair/`.
 
 It asserts the join state at each step instead of printing it, so it fails rather than narrating a
 claim that has stopped being true. CI runs it on pushes to `main` and on pull requests; on a
@@ -85,8 +90,12 @@ Neither binary needs Node.js, npm, or a compiler. Get them one of four ways:
 - **Download the binaries.** Grab the `zzop-cli-<platform>[.exe]` (CLI) and/or `zzop-mcp-<platform>[.exe]`
   (MCP server) assets for your platform from [GitHub Releases](https://github.com/eezz4/zzop/releases)
   and run them directly, or put them on `PATH`. Each release also carries a `SHA256SUMS` asset covering
-  every one of those assets — **from v0.30.0 onward**; releases up to and including v0.29.1 do not have
-  one, so on an older pin check that the file is there before relying on it. Verify with
+  every one of those assets. ⚠ **On an older pin there may be no release to download at all** — see
+  [VERSIONING.md](VERSIONING.md) under *Breaking in the current `0.x`*, which is the one owner of which
+  tags carry assets, and build from source for the ones that do not. (This sentence said the asset
+  exists *"from v0.30.0 onward"* and told you to check on an older pin. Both halves were written
+  before the 2026-09-23 history rewrite and neither survived it: for a tag between v0.30.0 and
+  v0.34.0 there is nothing to check, because the release itself is gone.) Verify with
   `sha256sum -c SHA256SUMS --ignore-missing`, or `shasum -a 256 -c SHA256SUMS --ignore-missing` on a
   macOS box that has no `sha256sum`. Its scope is narrow and worth stating: it catches a corrupted
   download, and it is a hook for anyone who obtained the digest through another channel. It does
@@ -98,7 +107,15 @@ Neither binary needs Node.js, npm, or a compiler. Get them one of four ways:
   cross-compiled targets (macOS x64, Linux arm64) cannot execute on the runner that built them and
   are not smoke-tested at all. So on macOS and Windows what is proven is that the binary loads and
   links; the analysis behaviour is proven on Linux and assumed to carry. The engine has no
-  platform-specific code path, which is why that assumption is a reasonable one and not a promise.
+  platform-specific code path save one, which is why that assumption is a reasonable one and not a
+  promise. The exception is worth naming because it is the case the assumption covers least well:
+  `crates/summary/src/siblings.rs` folds directory names case-insensitively on Windows, because a
+  case-insensitive filesystem would otherwise report a root you analyzed as its own unanalyzed
+  sibling. The Windows arm of that fold is executed by nothing, anywhere: the suite runs on Linux,
+  where the arm is not taken, and a developer mac cannot test the other arm either, because APFS is
+  case-insensitive by default and the test skips itself with that reason. The source says so at the
+  skip. Recount: `git grep -nE 'cfg!?\(\s*(not\()?\s*(windows|unix|target_os|target_family)' --
+  'crates/**/*.rs' 'parser/**/*.rs' 'rules/**/*.rs' 'packages/**/*.rs'`.
 - **Claude Code plugin.** `/plugin marketplace add eezz4/zzop`, then `/plugin install zzop@zzop` —
   see [Use in Claude Code](#use-in-claude-code-mcp-plugin) below. (Windows: the install hook needs a
   POSIX shell — Git for Windows is the supported path; details in
@@ -194,7 +211,20 @@ zzop graph . --domain dep --fold 2           # the SAME import graph with each p
                                              # drawn as one box — the module map you were trying to see
                                              # IS the picture, and every edge says how many file edges
                                              # it collapsed. --fold 1 for the top-level view
+zzop map . --fold 2                          # the same folding as DATA, not a picture: one row per
+                                             # module with its files, lines and the imports between
+                                             # modules. `--fold` is the only knob (NOT --depth, which
+                                             # is git's), and `moduleEdges` counts edges BETWEEN
+                                             # modules while `fileImports` counts every file-level one
 ```
+
+**A large repository takes minutes, and every command above writes nothing until it is finished.**
+There is no progress output: the reply is one document, assembled and then written, so a run you
+interrupt gives you zero bytes rather than a partial answer — and while it works it looks
+indistinguishable from a hang. Measured on this project's own corpus: a 3,800-file tree is seconds,
+`zzop facts` over a 24,000-file monorepo is ~50s and 10.8 MB, and an ASP.NET-sized tree (17,000
+files, 1.26M resolved import edges) is ~8 minutes for `analyze`. Redirect to a file and wait; if you
+need a bound, wrap the call in your own `timeout` and treat a kill as no answer, never as a clean one.
 
 The manifest is deliberately uncapped and carries no file or line, so a pure refactor diffs empty while
 a route leaving the join cannot hide above a summary's caps. `diff` refuses two manifests from different
@@ -264,7 +294,7 @@ and got a legitimately different answer. That is what the paragraph above this o
 tree could actually be measured on, and `pain: null` means no metric had a population at all — absence of
 data, never a clean bill.
 
-**And `pain` is not a defect score.** It contains no rule findings whatever: the run below reports 92
+**And `pain` is not a defect score.** It contains no rule findings whatever: the run below reports 101
 findings, 7 of them critical, while its `defect` pain is `0`. `painByAxis` splits the number so that is
 visible instead of implied — `defect` (import cycles, the only entry), `opinion` (barrel discipline, FSD
 layering, SDP/Main Sequence, Newman modularity, LOC ceilings — a project that deliberately does the
@@ -274,16 +304,16 @@ code is arranged.
 
 ```json
 {
-  "fileCount": 89,
+  "fileCount": 98,
   "findings": {
-    "total": 92,
-    "bySeverity":  { "critical": 7, "warning": 54, "info": 31 },
+    "total": 101,
+    "bySeverity":  { "critical": 7, "warning": 59, "info": 35 },
     "byRule":      { "security/weak-crypto": 6, "db/unawaited-write": 1 },
     "shown":       [ /* 50 here — the listed slice, capped by --limit; each entry has ruleId, severity, file, line, message */ ]
   },
-  "architecture": { "pain": 7.7, "painMeasuredWeight": 13.8, "painTotalWeight": 18.6,
+  "architecture": { "pain": 7.5, "painMeasuredWeight": 13.8, "painTotalWeight": 18.6,
                     "painByAxis": [ { "axis": "defect",  "pain": 0.0, "totalWeight": 3.0 },
-                                    { "axis": "opinion", "pain": 7.7, "totalWeight": 15.0 },
+                                    { "axis": "opinion", "pain": 7.4, "totalWeight": 15.0 },
                                     { "axis": "history", "pain": 0.0, "totalWeight": 0.6 } ],
                     "topRecommendation": null, "criticalTop": [],
                     /* + painMeaning / topRecommendationMeaning / criticalTopMeaning: the sentences

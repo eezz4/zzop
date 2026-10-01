@@ -8,7 +8,8 @@
 # does not fail at all.
 #
 # 🔴 IT IS A WINDOW, NOT A CLIFF, and this header said cliff until 2026-09-08 (review ledger V117).
-# Bisected on this machine (bash 5.3.9(1)-release, x86_64-pc-cygwin, Git for Windows): a here-string
+# Bisected on the machine this repo used until 2026-09-10 (bash 5.3.9(1)-release, x86_64-pc-cygwin,
+# Git for Windows): a here-string
 # whose operand is 65,536..65,663 bytes long DEADLOCKS; 65,535 and below pass, and so does 65,664 and
 # ABOVE -- past there bash gives up on the pipe and uses a temp file. The window is 128 values wide.
 #
@@ -25,9 +26,20 @@
 # ⇒ neither `git bisect` nor "what did we change" finds either one. The only safe state is not
 # having the window at all, which is why this is a guard and not a size check.
 #
-#     while IFS= read -r p; do ...; done <<< "$scanned"    # $scanned = git ls-files output
+# 🔴 NOT REPRODUCIBLE ON THE CURRENT MACHINE, and that is a fact about the GUARD, not about the
+# hazard (2026-09-24, review ledger V296). Measured here on bash 5.3.15(1)-release,
+# aarch64-apple-darwin25: a here-string of 65,536 / 131,072 / 1,048,576 / 8,388,608 bytes all return
+# immediately. Recount with
+#   for n in 65536 131072 1048576 8388608; do
+#     env bash -c "s=\$(head -c $n /dev/zero | tr '\\0' 'x'); timeout 5 grep -c x <<< \"\$s\""
+#   done
+# So this guard cannot be shown RED where it is now developed. That matters because this repo's rule
+# is that a canary proves red AND green, and here only green is demonstrable. The guard stays: the
+# hazard is real on Cygwin/MSYS2, a contributor can be on one, and a text guard costs nothing to keep.
+# What must not happen is someone reading a green run here as evidence that the window closed.
+##     while IFS= read -r p; do ...; done <<< "$scanned"    # $scanned = git ls-files output
 #
-# Measured on this machine (bash 5.3.9(1)-release, x86_64-pc-cygwin, Git for Windows), 2026-09-08:
+# Measured on that same Cygwin machine, 2026-09-08:
 # `git ls-files -- '*.rs'` had just crossed the ceiling at 65,603 bytes. The same string truncated to
 # 64,000 ran in milliseconds; the full 65,603 hung until killed. `< <(printf '%s\n' "$scanned")` --
 # process substitution, which gives the reader a live writer instead of a pre-filled buffer -- passed

@@ -42,7 +42,19 @@ pub(super) const MESSAGE_BY_RULE_ID: &str = "ruleId";
 /// either here would be the per-finding repetition this whole lane exists to remove. It still says
 /// something true about itself and names where its own explanation is, which is the rule
 /// `docs/modules/facade.md` states for a pointer message.
-pub(super) const BY_ID_MESSAGE: &str = "[by-id] resolve by ruleId; see messageByIdMeaning";
+///
+/// # Why it lost `resolve by ruleId` on 2026-09-25
+/// Those three words restate [`MESSAGE_BY`]'s VALUE, and that field exists precisely so a consumer
+/// never reads the resolver out of the sentence. Repeating it per finding paid bytes to say a second
+/// time what the contract says must not be read here anyway. 49 bytes -> 30, once per pointer finding.
+/// MEASURED on corpus/audit/immich, both arms of the same binary pair
+/// (`zzop analyze --config corpus/audit/immich/zzop.config.jsonc | wc -c`):
+/// default window 104,278 -> 103,632 bytes (34 pointers x 19 = 646); `--limit 1000` 163,729 ->
+/// 160,974 (145 x 19 = 2,755). Nothing that a reader or a consumer can act on
+/// left: the marker still marks, and the legend is still named. Deleting the sentence ENTIRELY is a
+/// different question and is not this edit -- that one changes the shape of `message` and belongs to
+/// whoever owns the compatibility surface.
+pub(super) const BY_ID_MESSAGE: &str = "[by-id] see messageByIdMeaning";
 
 /// The legend for the pointer a finding carries when its rule declared that text VERBATIM and the
 /// facade left it to `zzop explain` (`zzop_facade::BY_ID_MESSAGE`, `output-philosophy.md` §3.5).

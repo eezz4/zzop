@@ -2,8 +2,8 @@
 //! `tests_fragments` module doc). Every pack is hand-built — `RulePackDef::expand_fragments` in isolation.
 
 use super::super::def::{
-    IoDirection, IoScan, LabeledPattern, LineScan, Matcher, MethodScan, RuleDef, RulePackDef,
-    SymbolScan,
+    CallScan, IoDirection, IoScan, LabeledPattern, LineScan, LiteralScan, Matcher, MethodScan,
+    RuleDef, RulePackDef, SymbolScan,
 };
 use super::super::fragments::{fragment_ref_name, FragmentError};
 use crate::Severity;
@@ -193,6 +193,19 @@ fn expand_fragments_covers_every_pattern_bearing_field_on_every_matcher_kind() {
         "patterns-pattern",
         "absent-pattern",
         "trigger-call-exclude-pattern",
+        // 🔴 2026-09-24 (review ledger V309): these three were MISSING, and the two LineScan ones had
+        // been missing since their fields shipped. This list is hand-written, so a new pattern field is
+        // forced into `pattern_fields.rs` by an exhaustive destructure and forced into NOTHING here.
+        "prev-line-exclude-pattern",
+        "enclosing-call-exclude-pattern",
+        "call-window-exclude-pattern",
+        "next-line-exclude-pattern",
+        // 🔴 CallScan and LiteralScan had NO fixture rule at all — two whole matcher kinds outside the
+        // population, not just fields missing from one (review ledger V315).
+        "callee-pattern",
+        "algorithm-pattern",
+        "line-exclude-pattern",
+        "name-exclude-pattern",
         "name-pattern",
         "key-pattern",
         "symbol-pattern",
@@ -220,6 +233,10 @@ fn expand_fragments_covers_every_pattern_bearing_field_on_every_matcher_kind() {
                 label: "l".to_string(),
             }]),
             exclude_pattern: Some("${exclude-pattern}".to_string()),
+            prev_line_exclude_pattern: Some("${prev-line-exclude-pattern}".to_string()),
+            next_line_exclude_pattern: Some("${next-line-exclude-pattern}".to_string()),
+            enclosing_call_exclude_pattern: Some("${enclosing-call-exclude-pattern}".to_string()),
+            call_window_exclude_pattern: Some("${call-window-exclude-pattern}".to_string()),
             file_exclude_pattern: Some("${file-exclude-pattern}".to_string()),
             // Every PATTERN-bearing field is spelled out above on purpose (that is what this fixture
             // proves). The attribute gates are plain attribute-key strings, never fragment-expanded, so
@@ -253,6 +270,7 @@ fn expand_fragments_covers_every_pattern_bearing_field_on_every_matcher_kind() {
                 label: "a".to_string(),
             }],
             trigger_call_exclude_pattern: Some("${trigger-call-exclude-pattern}".to_string()),
+            enclosing_call_exclude_pattern: Some("${enclosing-call-exclude-pattern}".to_string()),
             require_call_kind: None,
             file_exclude_pattern: Some("${file-exclude-pattern}".to_string()),
             snippet_max: 160,
@@ -270,6 +288,39 @@ fn expand_fragments_covers_every_pattern_bearing_field_on_every_matcher_kind() {
             name_pattern: Some("${name-pattern}".to_string()),
             exported: None,
             negate: false,
+        }),
+    };
+    // 🔴 Neither of these two kinds had a fixture rule before 2026-09-24 (review ledger V315), so a
+    // fragment reference in any of their pattern fields was never proven to expand. They are built the
+    // same way as their siblings above: every pattern-bearing field carries a fragment placeholder.
+    let call_scan_rule = RuleDef {
+        axis: crate::RuleAxis::Defect,
+        id: "cs".to_string(),
+        severity: Severity::Info,
+        message: "m".to_string(),
+        scan_test_regions: false,
+        matcher: Matcher::CallScan(CallScan {
+            file_pattern: "${file-pattern}".to_string(),
+            file_exclude_pattern: Some("${file-exclude-pattern}".to_string()),
+            callee_pattern: Some("${callee-pattern}".to_string()),
+            algorithm_pattern: Some("${algorithm-pattern}".to_string()),
+            line_pattern: Some("${line-pattern}".to_string()),
+            line_exclude_pattern: Some("${line-exclude-pattern}".to_string()),
+            ..CallScan::default()
+        }),
+    };
+    let literal_scan_rule = RuleDef {
+        axis: crate::RuleAxis::Defect,
+        id: "ls2".to_string(),
+        severity: Severity::Info,
+        message: "m".to_string(),
+        scan_test_regions: false,
+        matcher: Matcher::LiteralScan(LiteralScan {
+            file_pattern: "${file-pattern}".to_string(),
+            file_exclude_pattern: Some("${file-exclude-pattern}".to_string()),
+            name_pattern: Some("${name-pattern}".to_string()),
+            name_exclude_pattern: Some("${name-exclude-pattern}".to_string()),
+            ..LiteralScan::default()
         }),
     };
     let io_scan_rule = RuleDef {
@@ -299,6 +350,11 @@ fn expand_fragments_covers_every_pattern_bearing_field_on_every_matcher_kind() {
             method_scan_rule,
             symbol_scan_rule,
             io_scan_rule,
+            // 🔴 Appended, never inserted: the assertions below index `pack.rules[N]` positionally, so a
+            // rule added in the middle silently re-points every check after it (that is how this test
+            // first went red on 2026-09-24 — review ledger V315).
+            call_scan_rule,
+            literal_scan_rule,
         ],
     );
     pack.expand_fragments().expect("every field must resolve");
@@ -345,6 +401,10 @@ fn expand_fragments_covers_every_pattern_bearing_field_on_every_matcher_kind() {
         ms.trigger_call_exclude_pattern.as_deref(),
         Some("(?i)trigger-call-exclude-pattern-resolved")
     );
+    assert_eq!(
+        ms.enclosing_call_exclude_pattern.as_deref(),
+        Some("(?i)enclosing-call-exclude-pattern-resolved")
+    );
 
     let Matcher::SymbolScan(ss) = &pack.rules[2].matcher else {
         unreachable!()
@@ -369,5 +429,95 @@ fn expand_fragments_covers_every_pattern_bearing_field_on_every_matcher_kind() {
     assert_eq!(
         io.anchor_exclude_pattern.as_deref(),
         Some("(?i)anchor-exclude-pattern-resolved")
+    );
+}
+
+/// 🔴 **The population of the test above is a HAND-WRITTEN list, and nothing kept it complete.**
+///
+/// `def::pattern_fields::for_each_pattern_field` holds the same population as an EXHAUSTIVE
+/// destructure, so adding a pattern field to a matcher breaks the build until someone names it there —
+/// that module's own comment says it is spelled that way for exactly this reason. The fixture above
+/// holds the population a second time, by hand, and forces nothing. Measured 2026-09-24 (review ledger
+/// V315): line-scan's `prev_line_exclude_pattern` and `enclosing_call_exclude_pattern` had never been
+/// exercised here, from the day each field shipped, and a third field inherited the hole silently.
+///
+/// So this test compares the two lists. It reads both source files as text — the same idiom
+/// `check-guards-wired.sh` uses for its own pair — and requires every field the destructure visits to
+/// appear in the fixture as a fragment placeholder.
+///
+/// ## What the extraction takes, and the floor under it
+///
+/// From `pattern_fields.rs`: every string literal that ends in `_pattern`, carries a `[].` element
+/// path, or is one of the three `require_file*` names. That rule excludes the module's other literals
+/// and is stated here rather than discovered: if it ever extracts nothing the FLOOR below fails, because
+/// an empty subject is a broken test and never a clean one (this repo's A2).
+///
+/// ## The exemptions, each with its reason rather than a bare list
+///
+/// A field is exempt only when a fragment CANNOT ride in it, never because covering it is awkward.
+#[test]
+fn every_pattern_field_the_destructure_visits_is_exercised_by_the_fragment_fixture() {
+    let owner = include_str!("../def/pattern_fields.rs");
+    let fixture = include_str!("expansion_tests.rs");
+
+    // Literals of the shape the module passes as a visit LABEL.
+    let mut names: Vec<String> = Vec::new();
+    let bytes = owner.as_bytes();
+    let mut i = 0usize;
+    while let Some(open) = owner[i..].find('"') {
+        let s = i + open + 1;
+        let Some(close) = owner[s..].find('"') else {
+            break;
+        };
+        let lit = &owner[s..s + close];
+        let looks_like_a_field = lit
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c == '_' || c == '[' || c == ']' || c == '.')
+            && (lit.ends_with("_pattern")
+                || lit.contains("[].")
+                || matches!(
+                    lit,
+                    "require_file" | "require_file_all" | "require_file_absent"
+                ));
+        if looks_like_a_field && !names.iter().any(|n| n == lit) {
+            names.push(lit.to_string());
+        }
+        i = s + close + 1;
+    }
+    let _ = bytes;
+
+    // FLOOR: an empty or tiny subject is a broken extractor, not a clean repo.
+    assert!(
+        names.len() >= 15,
+        "extracted only {} field names from pattern_fields.rs — the extraction is broken, not the \
+         population: {names:?}",
+        names.len()
+    );
+
+    // A fragment cannot ride in these, so the fixture cannot exercise them. Reasons, not a bare list.
+    let exempt: &[(&str, &str)] = &[
+        // `require_file_all` / `require_file_absent` are Vec<String>; the fixture does carry them, but
+        // under their own names — kept here only if a future shape makes them unreachable.
+    ];
+
+    let mut missing: Vec<String> = Vec::new();
+    for n in &names {
+        if exempt.iter().any(|(e, _)| e == n) {
+            continue;
+        }
+        // The fixture spells a fragment reference in kebab case inside a dollar-brace placeholder.
+        let kebab = n.replace("[].", "-").replace('_', "-");
+        let needle = format!("{}{}{}", '$', '{', kebab);
+        if !fixture.contains(&needle) {
+            missing.push(n.clone());
+        }
+    }
+
+    assert!(
+        missing.is_empty(),
+        "these pattern fields are visited by for_each_pattern_field but never exercised by the \
+         fragment fixture, so nothing proves a fragment expands in them: {missing:?}\n\
+         Add each to the fixture as a fragment placeholder and to the fragment map, or exempt it \
+         above WITH its reason."
     );
 }

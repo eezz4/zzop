@@ -55,13 +55,23 @@ use crate::analyze::record_native_timing;
 /// ran, gated exactly like `scores`/`health`/`critical`/`seams` below, so no consumer ever sees a
 /// window quoted for numbers that stayed empty. Lives here rather than at the `super::assemble` call
 /// site because that gate is this phase's own contract.
-pub(super) fn git_window(config: &EngineConfig, git_active: bool) -> Option<crate::GitWindow> {
+///
+/// `commits` is the COST beside those knobs (ledger V294): the number of commits this tree's walk
+/// actually traversed. It arrives as a parameter rather than being re-derived here because the caller
+/// already holds the one `Vec<CommitFileSet>` the diagnostics count from -- re-deriving it from a
+/// second source is how a field and the warning beside it start disagreeing.
+pub(super) fn git_window(
+    config: &EngineConfig,
+    git_active: bool,
+    commits: usize,
+) -> Option<crate::GitWindow> {
     git_active
         .then_some(config.git.as_ref())
         .flatten()
         .map(|g| crate::GitWindow {
             recent_days: g.recent_days,
             since: g.since.clone(),
+            commits,
         })
 }
 

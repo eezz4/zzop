@@ -189,6 +189,13 @@ jobs:
         # A different needle from the seal above, on the same hazard family: that one bans `| grep -q`,
         # this one bans an empty-set floor its own assignment can never reach. Neither says anything
         # about the other's shape.
+      - name: every subcommand is reachable from a page a user reads
+        run: bash scripts/check-subcommand-reachable.sh
+        # A fourth surface-parity needle, and the only one whose subject is the COMMAND rather than a
+        # flag hanging off it. Three guards compared flags across --help, config-surface.json and the
+        # source and all three were green while `zzop map` appeared on zero user-reachable pages: a
+        # flag is always checked against the command it belongs to, so nobody checked the command.
+
       - name: unreachable empty-set floor seal
         run: bash scripts/check-shell-mute-floor.sh
         # Third needle on the same family, and the only one whose subject is SIZE: a here-string over
@@ -299,11 +306,29 @@ jobs:
     # Linux only, and that is a recorded choice rather than an oversight (2026-09-07, review ledger
     # V72). `prebuild.yml` builds five targets and smoke-tests three of them by running `version`;
     # nothing but this job ever runs the suite, so macOS and Windows are proven to LOAD and not to
-    # ANALYZE. The engine carries no platform-specific code path -- the split that would justify a
-    # matrix here -- and macOS runner minutes bill at ten times Linux, so the trade is stated in
-    # README's download section for the reader who has to weigh it, instead of being paid blindly.
-    # If a platform-conditional path ever lands in the engine, this comment is the thing that is now
-    # wrong: add the matrix in the same change.
+    # ANALYZE. macOS runner minutes bill at ten times Linux, so the trade is stated in README's
+    # download section for the reader who has to weigh it, instead of being paid blindly.
+    #
+    # 🔴 THIS COMMENT SAID "the engine carries no platform-specific code path" UNTIL 2026-09-26, and
+    # by then one had landed. It also carried its own invalidation rule -- "if a platform-conditional
+    # path ever lands in the engine, this comment is the thing that is now wrong: add the matrix in
+    # the same change" -- and that rule did not fire, because nothing mechanical reads a comment.
+    # The path is `crates/summary/src/siblings.rs::sibling_scope_warning`, which folds directory
+    # names case-insensitively under `cfg!(windows)` and byte-exactly elsewhere. It is CORRECT and
+    # it stays: on Windows the caller's casing can differ from the on-disk casing, so a byte-exact
+    # compare would disclose an analyzed root as its own "unanalyzed sibling"; on a case-sensitive
+    # filesystem `FE` and `fe` are genuinely different trees. It reaches production through
+    # `crates/summary/src/cross.rs`, so it is in every shipped binary.
+    #
+    # WHAT THAT MEANS FOR THIS JOB, stated instead of left implicit: the `to_lowercase()` arm is
+    # NEVER EXECUTED ANYWHERE -- not here (ubuntu), not in `prebuild.yml` (which runs `version`, not
+    # the suite). The sibling test below pins the case-SENSITIVE arm, which is the half this runner
+    # can see. Whether to buy the matrix for the other half is a cost judgment and is filed as one;
+    # it is not resolved by this comment.
+    #
+    # ⚠ And the needle that was supposed to catch this cannot: `grep -e "cfg(windows)"` does not
+    # match `cfg!(windows)` -- the bang breaks the substring. Any future audit of "does the engine
+    # branch on platform?" must search `cfg!(` as well.
     runs-on: ubuntu-latest
     # Hang ceiling, not a budget. GitHub's default is 360 minutes, so before 2026-09-06 ANY hang in
     # this workspace burned six runner-hours and reported "cancelled" — which is what a parser that
@@ -317,7 +342,52 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace
+      # The plain `cargo test --workspace` ran here until 2026-09-27 (review ledger V435). The
+      # --nocapture run below is a SUPERSET of it, so the job was spending the warm suite twice --
+      # this repo measures that at 304s. Dropping it moves failure output into a log, so the step
+      # below tails that log on failure rather than swallowing it.
+
+      # A SKIPPED TEST AND A PASSING TEST ARE THE SAME PIXEL HERE (review ledger V419).
+      # `skip_notice!` is an `eprintln!` (crates/test-support/src/lib.rs:30) and libtest swallows a
+      # PASSING test's stderr unless --nocapture. So every skip above this line was invisible -- and
+      # the pin proving `zzop analyze` makes no network call is one of the tests that CAN skip:
+      # crates/git/src/tests.rs needs a filtered clone over `file://`, and a git that cannot make one
+      # turns that pin green without running it. README.md:67 promises no network call to the public,
+      # and that promise was already false in FOURTEEN shipped tags (v0.25.0..v0.36.0, eleven minor
+      # versions) before 27b3fb3 closed it -- this comment said four until 2026-09-27; recount with
+      # `for t in $(git tag --sort=v:refname); do git grep -q 'network request of any kind' $t -- README.md; done`.
+      #
+      # Two steps, because the two questions differ:
+      #   1. PRINT every skip in the workspace -- visibility, never a failure. Skipping is often
+      #      CORRECT: measured 2026-09-27 on macOS, the case-variant sibling probe skips because APFS
+      #      folds case, and that skip is the right behaviour.
+      #   2. ASSERT zero skips in zzop-git only -- every skip in that crate means the runner's git
+      #      lacks a capability the pin needs, which is exactly the silent-disarm condition.
+      #      Measured 2026-09-27 locally: 50 passed, 0 skipped, --nocapture costs 64 lines.
+      - name: skipping-is-not-passing
+        run: |
+          set -o pipefail
+          cargo test --workspace -- --nocapture > /tmp/zzop-tests.log 2>&1 \
+            || { tail -n 200 /tmp/zzop-tests.log; exit 1; }
+          if grep -E '^skipping ' /tmp/zzop-tests.log; then
+            echo '^ those ran as NOTHING. Legitimate skips are expected -- read them, do not ignore them.'
+          else
+            echo 'no test skipped anywhere in the workspace.'
+          fi
+          # Population floor: a run that executed no test is a broken instrument, not a clean tree.
+          ran=$(grep -cE '^test .+ ok$' /tmp/zzop-tests.log || true)
+          if [ "$ran" -eq 0 ]; then
+            echo 'FLOOR: zero tests reported ok -- this log is not a test run.'
+            exit 1
+          fi
+          echo "floor ok: $ran test(s) reported ok"
+          cargo test -p zzop-git -- --nocapture > /tmp/zzop-git.log 2>&1 \
+            || { tail -n 200 /tmp/zzop-git.log; exit 1; }
+          if grep -E '^skipping ' /tmp/zzop-git.log; then
+            echo 'FAILED: a zzop-git pin skipped, so it proved nothing this run.'
+            exit 1
+          fi
+          echo 'zzop-git: no pin skipped.'
 
   cli-shim-test:
     # Proves the @zzop/cli npm shim actually works against a real native `zzop` binary. Mirrors

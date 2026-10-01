@@ -17,9 +17,48 @@ than a description.
 
 If you depend on zzop, **pin an exact version** and re-test before upgrading. Both binaries are versioned
 by the same release tag, so pin by tag: take the assets for the tag you want from [GitHub
-Releases](https://github.com/eezz4/zzop/releases) rather than tracking a "latest" link (the install lanes
-themselves are listed once in the [README's Quick start](README.md#quick-start)). The
-Claude Code plugin pins the same way, via its own `version` field in
+Releases](https://github.com/eezz4/zzop/releases) rather than tracking a "latest" link.
+
+⚠ **Releases exist for v0.35.0 onward only, and the instruction above is false for older tags.**
+**Most tags carry no release assets**, and the count is not written here because every release adds a
+tag and would falsify it — recount with `git ls-remote --tags origin | grep -v '\^{}' | wc -l` against
+the releases page. Two causes, both one-way: the repository was recreated on 2026-09-23 to remove a
+committed identity from its public history, and most of the older tags predate the release workflow
+and never had assets even before that. Every `releases/download/` URL below v0.35.0 returns 404
+today. ⚠ **The boundary in the heading is the durable half of this** — v0.35.0 onward is where assets
+begin, and that does not move when a tag is added.
+
+**For an older version, build from source at that tag** (`git checkout v0.27.0 && cargo build
+--release`). For the **CLI** there is a second route: npm is unaffected and serves every published
+version independently of GitHub Releases (`npm i @zzop/cli@0.27.0`).
+
+⚠ **That second route does not exist for the MCP server**, and this document said it did until
+2026-09-24. MEASURED: `npm view @zzop/mcp` is a 404. The published packages are `@zzop/cli` and its
+five platform binaries, and every one of them ships the `zzop` CLI — `zzop-mcp` and the `.mcpb`
+bundles are released on GitHub only. So for an MCP server older than v0.35.0 the honest answer is one
+route, not two: build it from source at that tag.
+
+**Those tags will not be back-filled with current binaries, deliberately.** A download that succeeds
+with the wrong bytes is worse than one that fails: pinning `v0.27.0` is usually how somebody holds a
+config that a later release stopped accepting, and handing them a current binary makes it refuse that
+config with `exit 1` — the exact break they pinned away from — while the URL still says `v0.27.0`.
+A 404 says *this does not exist*, which is true. The other says *this is v0.27.0*, which is not.
+
+⚠ **That argument only defeats the WRONG-bytes version of back-filling, and an external review pointed
+out (2026-09-24) that it was the only version stated here.** The right-bytes version exists for one
+lane and is refused for a different reason, so the two are separated now rather than covered by one
+sentence:
+
+- **CLI.** The original bytes of every old version are on npm — 35 published versions of `@zzop/cli`,
+  and the platform binaries with them (`npm view @zzop/cli-darwin-arm64@0.27.0 dist.unpackedSize` →
+  24,724,401). Re-uploading those to a GitHub release would be correct and is still not done, because
+  it adds a second copy of something that is not missing: npm already serves that exact version, this
+  document says so above, and a second route has to be kept true forever after.
+- **MCP server.** There is nothing to restore from. `zzop-mcp` and the `.mcpb` bundles are released on
+  GitHub only, and no npm package carries them. For those tags the choice really is the 404.
+
+The install lanes themselves are listed once, in the [README's Quick start](README.md#quick-start) —
+this section is about pinning, not about installing. The Claude Code plugin pins the same way, via its own `version` field in
 [`.claude-plugin/plugin.json`](.claude-plugin/plugin.json) — bump/reinstall a specific plugin version
 instead of always taking the marketplace's newest.
 
@@ -276,6 +315,7 @@ The surfaces:
 | CLI flags & config keys | Removing or repurposing a flag/key is a major bump; adding one is minor. A key this release does not know is ignored with a warning, never a hard error — that covers both keys it never had and RETIRED keys, ones that stopped meaning anything. ⚠ **Two moved-key outcomes, and which one you get follows what the stale value would silently do.** A moved key is one whose value still means something, so dropping it with a line of text over it does not fail loudly later. **⑴ Refused, exit 1, naming both spellings** — when the stale value would mis-key the cross-tree join and then report confidently. That is the deployment-topology class, and its roster is `crates/config/src/mapper/topology.rs`; the refusal itself tells you the new path, so no list is kept here. **⑵ Reported at exit 0, naming both spellings, value not honoured** — when the stale value would move a SCORE rather than a finding or a join. Today that is `scores.excludeTestFilesFromPopulation` → `scores.excludeTestFilesFromFileMetrics` (`crates/facade/src/config/declared.rs`). It is reported rather than dropped for the reason that whole branch exists: serde discards an unknown field without a word, so a config carried across that rename would otherwise change its own `pain` with nothing said. ⚠ **This second outcome was undocumented here until 2026-09-23**, while this row stated ⑴ as the whole rule — read together with the branch that does ⑵, the two halves of one release said opposite things about the same key class (pinned by `the_old_flat_topology_keys_are_refused_and_name_their_new_home`). Through 0.x a moved key has no grace period at all; from 1.0 it owes one, and this row moves with that. |
 | Normalized AST envelope input ([`docs/NORMALIZED_AST.md`](docs/NORMALIZED_AST.md)) | The envelope shape external parser adapters emit. Its `version` field is a RELEASE number in these same units, and moves only when the shape moves — so an adapter emitting a given version keeps being accepted through every later release that did not change the shape. A shape change is never silent: a consumer rejects a version above its own, and a field whose absence would change the analysis carries an explicit floor. |
 | Rule ids | The `disabledRules` / `severityOverrides` ids you configure against. A rename is a major bump. |
+| Runtime behaviour — no network call, any lane | **No code path in either shipped binary reaches the network.** Not "by default" and not "during analysis": there is no flag that turns it on and no subcommand exempt from it. ⚠ **The subject is the PROPERTY, not a list of subcommands** — this row named `zzop analyze` and `zzop cross` until 2026-09-27, which was narrower than both the public promise and the mechanism. README says "Neither one" of the two binaries; the enforcement is a single `git` spawn point (`crates/git/src/process.rs`, machine-checked as the only one), so it already covers `zzop-mcp`, `file`, `facts`, `graph` and `map`. A row listing two subcommands left every other lane outside the freeze for no reason anyone had decided. Turning that off — adding an opt-in, or letting any code path fetch — is a MAJOR bump. ⚠ **This row exists because the promise was already public and already broken.** [README](README.md) has said "Neither one makes a network request of any kind" since 2026-07-28, and `git log --numstat` (added 2026-07-16) silently lazy-fetched from a partial clone until it was stopped in 2026-09-26. **Fourteen tags shipped that sentence while it was false** -- every release from `v0.25.0` (2026-07-28, the tag that introduced it) through `v0.36.0`, which is eleven minor versions. Recount, rather than trusting this number: `for t in $(git tag --sort=v:refname); do git grep -q 'network request of any kind' $t -- README.md && echo $t; done` -- and `git grep -c GIT_ALLOW_PROTOCOL v0.36.0 -- crates/` returns nothing, which is what puts all fourteen before the fix. This clause said FOUR until 2026-09-27, when an external review counted it. A sentence whose whole job is to state honestly how long a promise was false, understating it by 3.5x, is worse than no sentence: one `git tag --contains` from a reader collapses the paragraph written to restore their trust. The promise was in prose, the enforcement was nowhere, and nothing connected them — so the sentence could not fail. Now the mechanism is one env var on the single `git` spawn point (`crates/git/src/process.rs`, machine-checked as the only one by `scripts/check-git-spawn-isolation.sh`), the pin asserts the OBJECT STORE rather than an exit code, and CI fails if that pin skips. ⚠ **Scope is exactly this property.** One neighbour is deliberately NOT in this row because nobody has decided it: that `git` stays the only subprocess. It is true today (`Command::new` outside tests resolves to that one spawn point) and it is not promised. 🔴 **A second neighbour was listed here and was simply false** (corrected 2026-09-27): this row claimed "nothing is written outside `cacheDir`". `packages/cli-bin/src/cli/baseline.rs:177` writes to a path the user names, **inside the analyze lane**, and `zzop init` writes a config into the tree (`cli/run/init.rs:42,111`). Writing it down as "true today" cost nothing to say and would have cost a release to believe -- the next person to widen this table would have had a false precondition sitting in it, already phrased as a measurement. |
 | CLI exit codes `0` / `1` / `2` | Whether the CALL was right: `0` answered, `1` zzop could not answer, `2` the invocation was refused. Narrowing what earns a refusal is recorded; changing what a code MEANS is a major bump. `--fail-on`'s `3` is deliberately NOT here — see the exclusions below. |
 
 ### Inside those surfaces, six things are still moving

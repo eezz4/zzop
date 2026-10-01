@@ -48,10 +48,42 @@ pub fn read_or_exit(path: &str) -> String {
 /// EVERY lane's error lands here (`main::print_result` delegates), which is what makes the hint below
 /// reliable — it used to live in one of two hand-kept copies of this match, and the analyze lane,
 /// routed through the other, printed nothing.
+/// Write one whole reply to stdout, treating a closed pipe as the normal end of the conversation.
+///
+/// # Why this exists (2026-09-25, review ledger V407)
+/// `println!` panics when stdout is gone, and Rust's default panic exit is 101 with a backtrace note
+/// on stderr. MEASURED that day: `zzop contract rule-catalog | head -1` exited 101 with 246 bytes of
+/// panic text, and so did `zzop analyze --config <a real tree> | head -1` (253 bytes) — while the same
+/// analyze on this repo exited 0 and silent, because its 30,748-byte reply fits inside the 64 KiB pipe
+/// buffer and never reaches the failing write. The defect was never about one subcommand; it was about
+/// every reply bigger than the buffer, and `| head` is the FIRST thing anyone does to a 212 KB document.
+///
+/// A reader that stopped reading is not this process failing. Exit 0, say nothing — the Unix contract
+/// every other tool in a pipeline keeps.
+///
+/// # Scope, stated rather than left to be discovered
+/// Routed from the four sites that emit a whole reply (`print_or_exit`, the run lane's report, the
+/// baseline lane, and `contract`). `--help`, `version` and the per-line loops are deliberately NOT
+/// routed: their output is bounded and small enough that it cannot reach the failing write, so routing
+/// them would add a flush per line to buy nothing. If any of them ever grows, this helper is one call away.
+pub fn emit(text: &str) {
+    use std::io::Write;
+    let stdout = std::io::stdout();
+    let mut lock = stdout.lock();
+    match writeln!(lock, "{text}").and_then(|()| lock.flush()) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => std::process::exit(0),
+        Err(e) => {
+            eprintln!("zzop: could not write the reply to stdout: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
 pub fn print_or_exit(result: Result<String, String>) -> ! {
     match result {
         Ok(text) => {
-            println!("{text}");
+            emit(&text);
             std::process::exit(0);
         }
         Err(e) => {

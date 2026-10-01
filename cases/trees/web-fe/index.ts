@@ -11,6 +11,9 @@ import * as mixedContent from './rules/fullstack.mixed-content-egress';
 import * as getWithBody from './rules/fullstack.get-with-body';
 import * as localstorageJwt from './rules/be-security.localstorage-jwt';
 import * as secretEnvInFe from './rules/be-security.secret-env-in-fe';
+import * as postmessageWildcard from './rules/browser.postmessage-wildcard';
+import * as javascriptUrl from './rules/browser.javascript-url';
+import * as markdownAndHtmlSinkUnsanitized from './rules/browser.markdown-and-html-sink-unsanitized';
 
 export const registry = {
   asCast,
@@ -23,4 +26,7 @@ export const registry = {
   getWithBody,
   localstorageJwt,
   secretEnvInFe,
+  postmessageWildcard,
+  javascriptUrl,
+  markdownAndHtmlSinkUnsanitized,
 };

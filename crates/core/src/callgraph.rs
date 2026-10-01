@@ -1,9 +1,18 @@
 //! Call-graph substrate — `RawCall` (parser-projected intra-file call sites) -> `SymbolEdge`/`SymbolGraph`
 //! (cross-file-resolved caller-symbol -> callee-symbol edges) -> BFS reachability over that graph.
-//! Downstream direction only — the only direction the call-graph rules in `rules/native/rules-graph` need.
+//! Downstream direction only — the only direction any call-graph consumer has needed.
 //!
-//! Backs the `rules/native/rules-graph` HTTP-handler-reachability rules (`scanUnsafeReadEndpoint` /
-//! `scanNonIdempotentWrite`, both BFS-over-`symbolEdges` from an HTTP handler symbol to a store-write call).
+//! Backs the HTTP-handler-reachability rules (`scanUnsafeReadEndpoint` / `scanNonIdempotentWrite`, both
+//! BFS-over-`symbolEdges` from an HTTP handler symbol to a store-write call), and those live in
+//! **`rules/native/rules-http`**.
+//!
+//! 🔴 These two lines named `rules/native/rules-graph` from this module's FIRST commit until
+//! 2026-09-25 (review ledger V405), and that crate has never held either rule — it holds `circular`,
+//! `dead_candidates`, `dead_exports`, `unreachable` and `cache_lane_file_read`. MEASURED that day, by
+//! files touching this substrate: rules-http 9, rules-graph 2, rules-cross-layer 0, rules-schema 0.
+//! Both crates are real consumers; the SENTENCE was wrong about which one owns the rules it names, and
+//! nothing in this repository reads a pointer like that — see the ledger row for why a mechanical guard
+//! for this class is not cheap.
 //!
 //! The two halves split along the substrate's own seam and are re-exported flat, so this module's public
 //! surface is unchanged by the split: [`resolve`] turns raw calls into edges (and reports what it could
@@ -49,7 +58,15 @@ pub struct RawCall {
 /// lane's consecutive extractors and can never be warm for a pass that runs later on another thread.
 /// Measured on this repository: two parses per `.ts` file, and the pass was 68% of a warm run (review
 /// ledger V103/V108). Moving the extraction to where the parse already happened makes it one, and puts
-/// the result behind the per-file cache — which is where the 68% actually lived.
+/// the result behind the per-file cache.
+///
+/// 🔴 This sentence used to end "— which is where the 68% actually lived", and that was a boundary
+/// number worn as a part's (2026-09-26, review ledger V401). The 68% was measured by switching the
+/// WHOLE PASS off (V103); it says nothing about which term inside the pass is expensive. The repo's
+/// own later split answered that and answered it the other way: `rust_guard` was 4.4-5.8s of the
+/// ~7.5s pass, so the TypeScript double-parse this paragraph is about was never the bulk of it
+/// (V111, and `pipeline/fresh/call_graph.rs` states it in the same words). The edit was still
+/// right; the number quoted for it was the wrong number.
 ///
 /// The three guard fields are NestJS-specific and TypeScript-only, the same unevenness `function_spans`
 /// (TypeScript) and `test_spans` (Rust) already carry: a fact belongs to the languages that can produce

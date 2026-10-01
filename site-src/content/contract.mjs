@@ -151,7 +151,7 @@ export default {
               },
               `  <span class="hit">"packsLoaded"</span>: [`,
               {
-                code: `    { "id": "security", "rules": 49, "ruleIds": [ … ], "source": "inline", "filesInScope": 912 }`,
+                code: `    { "id": "security", "rules": 51, "ruleIds": [ … ], "source": "inline", "filesInScope": 912 }`,
                 comment: {
                   ko: "// ruleIds = rules 개수 뒤의 목록",
                   en: "// ruleIds = the list behind the count",
@@ -182,8 +182,14 @@ export default {
               `    "degraded": 0, <span class="hit">"joinContributionZero"</span>: false`,
               `  },`,
               `  <span class="hit">"configWarnings"</span>: [ ],`,
-              `  <span class="hit">"disclosure"</span>: { "classes": 18, "asserted": 6, "partial": 10, "notYetDetected": 2 },`,
-              `  <span class="hit">"gitWindow"</span>: { "recentDays": 30, "since": null }`,
+              `  <span class="hit">"disclosure"</span>: { "classes": 18, "asserted": 5, "partial": 12, "notYetDetected": 1 },`,
+              {
+                code: `  <span class="hit">"gitWindow"</span>: { "recentDays": 30, "since": null, "commits": 4207 }`,
+                comment: {
+                  ko: "// 앞 둘은 요청, commits 는 비용",
+                  en: "// the first two are the request; commits is the cost",
+                },
+              },
               `}`,
               // ⚠ 스키마 공백 G2: 원본은 ko 스팬과 en 스팬 **사이**에 언어 무관 스팬이 하나 끼어 있다
               //   (필드 이름 줄). panel 라인은 [code][ko][en] 순서만 낼 수 있어 그 자리가 없다.
@@ -315,10 +321,10 @@ export default {
           "note",
           {
             ko: `<code>disclosure</code> 는 이번 실행이 아니라 <strong>zzop 자신</strong>에 대한 자리다 — 아직 못 잡는 침묵의 종류를 센다.
-      지금 <strong>18종</strong>이고 그중 <strong>12종</strong>은 부분 탐지이거나 아예 탐지 못 한다. 매 실행 같은 글이라
+      지금 <strong>18종</strong>이고 그중 <strong>13종</strong>은 부분 탐지이거나 아예 탐지 못 한다. 매 실행 같은 글이라
       전문은 응답에서 빼고 <code>zzop contract disclosure-classes</code> 로 옮겼다 — 숫자는 남는다.`,
             en: `<code>disclosure</code> is not about this run but about <strong>zzop itself</strong>: it counts the classes of
-      silence zzop does not yet catch. <strong>18</strong> today, <strong>12</strong> of them only partially detected
+      silence zzop does not yet catch. <strong>18</strong> today, <strong>13</strong> of them only partially detected
       or not at all. The text is identical every run, so it ships once via
       <code>zzop contract disclosure-classes</code> — the counts stay in the reply.`,
           },

@@ -22,6 +22,7 @@ mod api_in_loop;
 mod config_flags;
 mod fetch_and_process;
 mod goroutine_in_loop;
+mod prescription_cost_landing;
 mod request_deadline_landing;
 mod routes_and_handlers;
 mod rust_reqwest;

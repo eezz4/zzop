@@ -25,7 +25,10 @@
 //   - In a file that is not wholly a test file, a `#[cfg(test)]` block is removed by BRACE MATCHING, not
 //     by a line heuristic, and those lines are counted as test.
 //   - Blank lines and comment-only lines are reported separately, so "lines" can mean either and the
-//     reader picks. The headline uses ALL lines, matching what `wc -l` would say.
+//     reader picks. The headline uses ALL lines, matching what `wc -l` would say — and since
+//     2026-09-25 that is true rather than claimed: `splitLines()` below drops the phantom element
+//     `split(/\r?\n/)` leaves after a file's final newline, which had been inflating every count
+//     here by exactly one per file.
 //
 // ## What it deliberately does not claim
 //
@@ -130,9 +133,25 @@ while (queue.length) {
   }
 }
 
+// --- the one place this file turns bytes into lines -------------------------------------------
+//
+// 🔴 2026-09-25 (review ledger V408): every count here was one-too-many PER FILE. `split(/\r?\n/)`
+// on a file that ends in a newline — which all 1,409 of them do — yields a trailing EMPTY element
+// that is not a line. MEASURED: split 317,293 vs newline-count 315,884, difference 1,409 = exactly
+// the file count. The header of this file claims the headline matches `wc -l`; it did not, and the
+// error was invisible because it scaled with the population instead of standing out as a wrong-looking
+// number. This script exists BECAUSE that count had been stated wrong three times.
+//
+// Every consumer goes through here so the phantom cannot come back one call site at a time.
+function splitLines(src) {
+  const lines = src.split(/\r?\n/);
+  if (lines.length && lines[lines.length - 1] === "") lines.pop();
+  return lines;
+}
+
 // --- split the remaining files on brace-matched `#[cfg(test)]` blocks ------------------------
 function splitCfgTest(src) {
-  const lines = src.split(/\r?\n/);
+  const lines = splitLines(src);
   const isTest = new Array(lines.length).fill(false);
   for (let i = 0; i < lines.length; i++) {
     if (!/^\s*#\[cfg\(test\)\]/.test(lines[i])) continue;
@@ -175,7 +194,7 @@ const isCode = (l) => {
 
 for (const [f, src] of source) {
   if (testFiles.has(f)) {
-    const lines = src.split(/\r?\n/);
+    const lines = splitLines(src);
     tally.test.all += lines.length;
     tally.test.code += lines.filter(isCode).length;
     tally.files.test++;
@@ -216,7 +235,7 @@ const alt = {
   "any file that mentions #[test] or #[cfg(test)]": (f) =>
     source.get(f).includes("#[test]") || source.get(f).includes("#[cfg(test)]"),
 };
-const lineCount = (f) => source.get(f).split(/\r?\n/).length;
+const lineCount = (f) => splitLines(source.get(f)).length;
 console.log("");
 console.log("  the same repository under other classifiers (the total never moves):");
 for (const [name, fn] of Object.entries(alt)) {

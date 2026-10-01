@@ -28,8 +28,8 @@
 //!
 //! | verdict         | meaning                                                                     |
 //! |-----------------|-----------------------------------------------------------------------------|
-//! | `analyzed`      | a structural projection exists (symbols and/or dep-graph membership)         |
-//! | `lexical-only`  | walked and line-scanned, but no structural projection — no parser for it     |
+//! | `analyzed`      | a structural projection exists — a symbol, a dep-graph entry, OR an io fact  |
+//! | `lexical-only`  | walked and line-scanned; NONE of those three channels carries this file      |
 //! | `degraded`      | no structural projection was built; the reply does not say which of the four |
 //! | `not-found`     | this run never walked that path                                              |
 //!
@@ -60,8 +60,9 @@ pub const FILE_VERDICTS: &[&str] = &["analyzed", "lexical-only", "degraded", "no
 fn verdict_meaning(verdict: &str) -> &'static str {
     match verdict {
         "analyzed" => {
-            "zzop built a structural projection for this file (symbols and/or dependency-graph \
-             membership), so every rule that needs structure had the evidence it needs. That is a \
+            "zzop built a structural projection for this file — a symbol, a dependency-graph entry, \
+             or an io provide/consume; a frontend need not fill all three (the SQL frontend projects \
+             io only) — so every rule that needs structure had the evidence it needs. That is a \
              statement about the PROJECTION and not about how much of the rule set targets this path: a \
              DSL rule runs only on files its `file_pattern` matches, and per-language reach is uneven \
              (a tree's principal filetype reached by few of the loaded rules, or none, is named in this \
@@ -70,9 +71,10 @@ fn verdict_meaning(verdict: &str) -> &'static str {
         }
         "lexical-only" => {
             "zzop walked this file and ran text-based (line-scan) rules over it, but built no \
-             structural projection — no parser in this build claims its extension. An empty findings \
-             list here does NOT mean clean: everything that needs symbols, imports or io facts was \
-             never evaluated. Bring an adapter overlay, or declare a parser for the extension under \
+             structural projection — NONE of the three channels (symbol, dependency-graph entry, io \
+             provide/consume) carries it, which usually means no parser in this build claims its \
+             extension. An empty findings list here does NOT mean clean: everything that needs \
+             symbols, imports or io facts was never evaluated. Bring an adapter overlay, or declare a parser for the extension under \
              `parsers.globOverrides`."
         }
         "degraded" => {
@@ -236,7 +238,26 @@ fn verdict_for(tree: &Value, rel: &str) -> &'static str {
         .pointer("/output/ir/dep")
         .and_then(Value::as_object)
         .is_some_and(|d| d.contains_key(rel));
-    if has_symbols || in_dep {
+    // THE THIRD CHANNEL, and it is the one that made this function lie (2026-09-25, review ledger
+    // V406). A frontend need not fill all three: the SQL frontend projects io only (no symbols, no
+    // imports), so reading the first two alone called a parsed `.sql` file `lexical-only` — "no
+    // parser in this build claims its extension" — in the same reply that carried two `db-table`
+    // provides extracted from it. `dispatch.rs` maps "sql" to a language; nothing was unclaimed.
+    //
+    // The coverage lane already fixed exactly this in v0.34.0 and wrote the reason into its own
+    // legend (`query_coverage/dispatch_meaning.rs`, the `structural` sentence: "All THREE channels
+    // count"). This surface never got the sweep, so the two lanes disagreed about the same file for
+    // a release and a half. The two verdict vocabularies are twins by design — `structural` there is
+    // `analyzed` here, per this module's own doc — so they have to read the same channels.
+    let in_io = ["provides", "consumes"].iter().any(|field| {
+        tree.pointer(&format!("/output/ir/io/{field}"))
+            .and_then(Value::as_array)
+            .is_some_and(|a| {
+                a.iter()
+                    .any(|f| f.get("file").and_then(Value::as_str) == Some(rel))
+            })
+    });
+    if has_symbols || in_dep || in_io {
         "analyzed"
     } else {
         "lexical-only"

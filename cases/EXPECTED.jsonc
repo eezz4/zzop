@@ -159,7 +159,19 @@
   "api/api/sql.count-in-loop.ts:8": ["sql/count-in-loop","sql/nplus1"],
   "api/api/sql.nplus1.ts:8": ["sql/nplus1"],
   "api/api/sql.race-condition-toctou.ts:13": ["db/find-then-create-no-unique", "sql/race-condition-toctou"],
-  "api/prisma/schema.prisma:14": ["schema/unreferenced-field-name","schema/fk-no-index","schema/float-money","schema/missing-timestamps","schema/nullable-fk","schema/temporal-as-string"],
+  // 2026-09-24 RE-ADJUDICATED, `model Order` (lines 14-20). FIVE of this key's six rules moved off the
+  // model header and onto their own fields, and nothing about the fixture changed: review ledger V312
+  // gave field-level schema issues a `field_decl_line` anchor. The old key said line 14 for all six,
+  // which opened on `model Order {` and showed a reader nothing — an uncontaminated auditor followed
+  // exactly that citation on cal.com and had to go find the row. Each line below is read off the
+  // fixture: `price Float` 16, `userId Int?` 17, `dueDate String` 19.
+  //
+  // `missing-timestamps` STAYS on 14, and that is not an oversight: it is a model-level issue with no
+  // field of its own (`SchemaIssue.field` is None), so the model header IS its evidence.
+  "api/prisma/schema.prisma:14": ["schema/missing-timestamps"],
+  "api/prisma/schema.prisma:16": ["schema/float-money"],
+  "api/prisma/schema.prisma:17": ["schema/fk-no-index","schema/nullable-fk"],
+  "api/prisma/schema.prisma:19": ["schema/temporal-as-string","schema/unreferenced-field-name"],
   // 2026-08-29 RE-ADJUDICATED, `model User` (lines 22-25). Both rules on this key changed what they
   // claim, in opposite directions, and neither change was an accident — so this key is re-read from the
   // fixture rather than restored. `schema.prisma` itself has not been touched since `2a15d35`.
@@ -832,6 +844,101 @@
   "web/rules/dead.orphan.tsx:4": ["unimported-export"],
   "web/rules/fullstack.get-with-body.ts:5": ["egress/get-and-body"],
   "web/rules/fullstack.mixed-content-egress.ts:2": ["egress/http-url-literal"],
+
+  // ---- TWELVE RULES THAT SHIPPED WITH NO EVIDENCE (added 2026-09-24, review ledger V327) --------
+  // Each of the twelve satisfied three things at once: absent from this key, silent across all 27
+  // fixture trees, and silent across 25 corpus trees in 28 runs. A rule in that state cannot fail this
+  // gate in EITHER direction -- no label means no false negative, and no firing means no false
+  // positive -- so a change to it is green by construction. That is the same blind spot
+  // `scripts/measure/fixture-anchor-coverage.mjs` ratchets (review ledger V317, V334); this block is the
+  // twelve worst cases of it paid off rather than counted.
+  //
+  // The verdict the reviewer reached was NOT `delete them`. Deleting was refused because nothing here
+  // showed the rules were wrong -- only that nothing in the repository had ever watched them. Each
+  // fixture below was written to the rule's own matcher and then MEASURED; every anchor is a line the
+  // engine actually reported, never one predicted from reading the regex.
+  //
+  // Every module is registered in its tree's barrel (`trees/api-be/index.ts`, `trees/web-fe/index.ts`)
+  // for the reason the nested `sql/nplus1` note above records: without that, each picks up
+  // `dead-candidates` + `unimported-export` and this block would be 52 rows of noise around 13 of
+  // signal.
+  //
+  // The `good` half of each file is the load-bearing part and is scored by SILENCE: it is the nearest
+  // shape that must NOT fire. A widened matcher that starts reporting one of them turns up here as a
+  // false positive, which is the direction this corpus was blind to for these twelve.
+  //
+  // ⚠ THAT CLAIM WAS ONLY TRUE OF FIVE OF THEM when this block was written (review ledger V335,
+  // external review round 29). Five good halves did exercise a veto — ROLLBACK, an atomic
+  // `increment:`, `await`, an `EX` expiry, `DOMPurify`. Four others shared no token with their
+  // matcher at all, so no widening could have reported them and the sentence above was empty for
+  // those four. "Does not fire" and "is a control" are not the same property, and only the second one
+  // is worth a fixture. They were rewritten to the nearest NON-defect instead:
+  //   javascript-url   `/docs/javascript-guide` — carries the word out of scheme position, so a
+  //                    widening from `javascript:` to `javascript` reports it
+  //   jwt-verify-bypass  `ignoreExpiration: false` — the same key, the other value
+  //   idempotency…loop   the same `crypto.randomUUID()` key, minted OUTSIDE the loop — the rule's
+  //                      one distinguishing condition is `trigger_in_loop`, so that is what to test
+  //   raw-sql-check…     keeps the `SELECT`, so `ON CONFLICT` alone holds the rule back; without it
+  //                      the half was silent for two reasons and could not say which one broke
+  // The three remaining (`postmessage-wildcard`, `cors-reflected-origin-credentials`,
+  // `tx-and-empty-catch`) each catch one class of widening and not every class; that is stated rather
+  // than fixed, because a control per widening is a fixture per regex arm.
+  //
+  // 🟢 THAT SENTENCE WAS CHALLENGED AND HELD (2026-09-25, external review round 30). The reviewer read
+  // `tx-and-empty-catch` as "closer to zero classes than one", on the reasoning that its empty-catch arm
+  // is a single regex and a catch holding `logger.error` is therefore out of every widening's reach.
+  // MEASURED instead of argued: widen that arm the one way it would plausibly be widened -- drop the
+  // empty-body requirement, `catch\s*(?:\([^)]*\))?\s*\{\s*\}` -> `...\{` -- and rerun the pack.
+  // `transactions::catch_that_rethrows_inside_a_transaction_callback_is_not_flagged` goes RED (169
+  // passed, 1 failed). The good half's `catch (e) { logger.error(e); throw e; }` is exactly what that
+  // widening reports, so this control does exercise its class.
+  //
+  // 🔴 THE RESIDUE SENTENCE THAT FOLLOWED WAS WRONG, and it was mine (2026-09-26, review ledger
+  // V395). It read: "What the control still cannot see is a widening of the OTHER arm
+  // (`$transaction` / `@Transactional` / `beginTransaction`), because both halves of the fixture
+  // carry `$transaction`." Both halves DO carry it -- and that says nothing about the residue,
+  // because the tx arm has a control and it is not in this file. `rules/dsl/db/transactions.rs`'s
+  // `empty_catch_with_no_transaction_anywhere_in_the_function_is_not_flagged` writes an empty catch
+  // with NO transaction marker anywhere, so the tx arm is the ONLY thing holding it silent.
+  // MEASURED both ways by widening that arm in `rules/dsl/db/db.json` and rerunning the one test:
+  //     + `\bawait\b`        -> RED   (the fixture's `await riskyOp()` is reported)
+  //     + `\btransaction\b`  -> GREEN (the fixture carries neither spelling of the word)
+  // So the real residue is ONE widening, not the arm: a loosening of `$transaction` to a bare
+  // `transaction` passes both controls. Widenings that reach any token the control's fixture does
+  // carry are covered. The lesson generalises past this rule -- a control's reach is the set of
+  // TOKENS ITS FIXTURE CARRIES, and "which arm" is the wrong unit to state it in.
+  //
+  // ONE co-fire is deliberate and correct: `browser.markdown-and-html-sink-unsanitized.ts:13` is
+  // `el.innerHTML = html`, which IS an unsafe HTML sink, so `browser/unsafe-html-sink` reports it and
+  // is labelled. Its `good` twin at :17 passes the same value through `DOMPurify.sanitize` and both
+  // rules correctly stay silent there -- the pair is what proves the sanitizer vocabulary is read.
+  //
+  // ⚠ ONE RESIDUAL WAS MEASURED AND LEFT OPEN, in `be-redis.lock-no-ttl.ts`: a TYPE DECLARATION
+  // spelling `setnx(key: string, value: string): Promise<number>;` fires `redis/lock-no-ttl`. The
+  // matcher is a line regex and a method signature is neither a comment nor a call. The fixture uses
+  // `declare const redis: any` to stay a single-rule fixture, and the file's own header records the
+  // shape -- a veto for declaration lines can only ever REMOVE findings, so it needs evidence from
+  // real code rather than from a fixture written to provoke it.
+  //
+  // MEASURED after the fact, because the count is not the one that was predicted: the coverage
+  // preflight moved 38 -> 25 anchored-nowhere DSL rules, i.e. THIRTEEN closed, not twelve.
+  // `browser/unsafe-html-sink` was unanchored too, and the markdown fixture needed an HTML sink in
+  // order to have anything to sanitize, so it came along. The remaining 25 are the same defect and
+  // are not fixed here; the preflight prints that census on every run and stays its owner.
+  "api/services/be-db.idempotency-key-regenerated-in-loop.ts:13": ["db/idempotency-key-regenerated-in-loop"],
+  "api/services/be-db.manual-tx-no-rollback.ts:11": ["db/manual-tx-no-rollback"],
+  "api/services/be-db.non-atomic-counter-update.ts:16": ["db/non-atomic-counter-update"],
+  "api/services/be-db.tx-and-empty-catch.ts:12": ["db/tx-and-empty-catch"],
+  "api/services/be-db.unawaited-transaction.ts:10": ["db/unawaited-transaction"],
+  "api/services/be-redis.lock-no-ttl.ts:20": ["redis/lock-no-ttl"],
+  "api/services/be-security.cors-reflected-origin-credentials.ts:10": ["security/cors-reflected-origin-credentials"],
+  "api/services/be-security.jwt-verify-bypass.ts:12": ["security/jwt-verify-bypass"],
+  "api/services/sql.raw-sql-check-then-write.ts:17": ["sql/raw-sql-check-then-write"],
+  "web/rules/browser.javascript-url.ts:11": ["browser/javascript-url"],
+  "web/rules/browser.markdown-and-html-sink-unsanitized.ts:12": ["browser/markdown-and-html-sink-unsanitized"],
+  "web/rules/browser.markdown-and-html-sink-unsanitized.ts:13": ["browser/unsafe-html-sink"],
+  "web/rules/browser.postmessage-wildcard.ts:9": ["browser/postmessage-wildcard"],
+  // ---- end of the twelve ------------------------------------------------------------------------
   // The consumed->CRITICAL half of cross-layer/sensitive-response-field: xfe/consumesSession.ts
   // fetches GET /session/report, so the declared sessionToken response field escalates. Anchored at
   // the PROVIDE side (the DTO is what gets fixed), so no unconsumed-endpoint co-fire here.

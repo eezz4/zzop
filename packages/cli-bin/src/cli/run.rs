@@ -260,7 +260,7 @@ pub fn run_file_validate(args: &[String], usage_tail: &str, validate: fn(&str) -
     reject_flag_like_args([path.as_str()], &usage);
     let text = read_or_exit(path);
     let report = validate(&text);
-    println!("{report}");
+    super::emit(&report);
     // The report is `{"valid":bool,…}` — deserialize just to read `valid` for the exit code; a
     // never-fails report that somehow doesn't parse is treated as invalid (exit 1), never a false pass.
     let valid = serde_json::from_str::<serde_json::Value>(&report)

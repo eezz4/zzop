@@ -177,6 +177,24 @@ exist. The path resolution here is wrong, or the file moved without its include_
   baked=$(printf '%s\n%s\n' "$baked" "$resolved" | sort -u)
 done
 
+# --- the derived set, for the other guard that needs it (2026-09-27, review ledger V431/V428) -----
+# `$baked` is now the complete file-backed served set from ALL THREE baking sites: this file's own
+# include_str! calls, the generated examples/packs lane, and the `zzop_*::CONST` lane followed into
+# the crate that owns each constant.
+#
+# check-english-source needs exactly this population — a private pointer inside any of these files
+# reaches a reader who has only a binary. It used to carry a hand-written pathspec that knew one of
+# the three, reported "clean" while config-surface.json served a ledger pointer, and a separate
+# scripts/lib/served-docs.sh built to fix that knew two of the three and missed examples/packs.
+#
+# Rather than a third extraction, that guard now ASKS THIS ONE. `--list` prints the derived set and
+# exits, after every floor above has already run, so a caller cannot get a silently narrowed list:
+# to reach this line the include_str! lane, the packs lane and every constant must all have resolved.
+if [ "${1:-}" = "--list" ]; then
+  printf '%s\n' "$baked"
+  exit 0
+fi
+
 # --- what VERSIONING.md claims ------------------------------------------------------------------
 grep -q "$MARKER" "$LISTING" || abort "$LISTING carries no $MARKER block — the list this guard checks
 against is gone. Restore it, or delete this guard along with the section it protects."

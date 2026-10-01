@@ -191,6 +191,64 @@ fn with_zero_commits_in_a_bounded_window_names_the_narrow_since_window() {
 }
 
 #[test]
+/// Every warning that tells a reader to widen the git window must also say what widening costs.
+///
+/// The module has a thin-history arm and NO huge-history arm, so the only guidance it gives about the
+/// git window points in the expensive direction. Measured 2026-09-24 (review ledger V294): the walk is
+/// one `git log --numstat` over every selected commit, and on a 16,485-commit repository that single
+/// command took 548s against 13s for the whole rest of the analysis. The advice is still right — churn
+/// signals are worthless on one commit — but a reader who follows it blind pays that without warning.
+///
+/// This asserts the PRICE rides along, not its wording: the sentence may be rewritten, and the test
+/// fails only if a warning recommends widening while saying nothing about cost.
+fn every_advice_to_widen_the_git_window_carries_its_price() {
+    let recommends_widening =
+        |w: &str| w.contains("omit `since` entirely") || w.contains("omitting `since` entirely");
+    let names_a_price = |w: &str| w.contains("not free") && w.contains("git log --numstat");
+
+    // Both arms that can recommend it: a bounded window holding nothing, and a degenerate history.
+    let bounded = build_diagnostics(DiagnosticsInput {
+        git: Some(GitDiagnosticsInput {
+            commits: 0,
+            total_changes: 0,
+            tagged_changes: 0,
+            fix_changes: 0,
+            since: Some("1.year".to_string()),
+        }),
+        ..healthy()
+    });
+    let thin = build_diagnostics(DiagnosticsInput {
+        git: Some(GitDiagnosticsInput {
+            commits: 1,
+            total_changes: 4,
+            tagged_changes: 1,
+            fix_changes: 1,
+            since: None,
+        }),
+        ..healthy()
+    });
+
+    let mut checked = 0;
+    for d in [&bounded, &thin] {
+        for w in &d.warnings {
+            if recommends_widening(w) {
+                checked += 1;
+                assert!(
+                    names_a_price(w),
+                    "a warning recommends widening the git window without naming its cost: {w}"
+                );
+            }
+        }
+    }
+    // A floor, for the reason every extraction in this repo carries one: if the phrasing moves and
+    // nothing matches, the loop above passes vacuously and this test stops guarding anything.
+    assert!(
+        checked >= 2,
+        "expected both widening recommendations to be reachable, matched {checked}"
+    );
+}
+
+#[test]
 fn with_zero_commits_over_full_history_submodule_untracked() {
     let d = build_diagnostics(DiagnosticsInput {
         git: Some(GitDiagnosticsInput {

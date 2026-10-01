@@ -85,6 +85,34 @@ fn spawn_git(repo: &Path, args: &[String]) -> Result<Output, GitError> {
     }
     record_spawn(repo);
     Command::new("git")
+        // NO NETWORK, ENFORCED RATHER THAN ASSUMED (2026-09-26, 1.0 gate P4).
+        //
+        // `git log --numstat` on a BLOBLESS PARTIAL CLONE (`--filter=blob:none`, the ordinary shape
+        // of a CI checkout) silently lazy-fetches every blob it needs from the promisor remote.
+        // Measured on one corpus tree: `analyze` sat for 900s with zero bytes on either stream while
+        // a grandchild ran `git remote-https` against a third-party host. A static analyzer reaching
+        // the network unannounced breaks the determinism this project lists as a doctrine floor and
+        // promises on its own front page ("answers the same way every time").
+        //
+        // Git offers no way to decline. FIVE mechanisms were measured and all five fetched anyway:
+        // no knob, `GIT_NO_LAZY_FETCH=1`, `-c remote.origin.promisor=false`, both together, and
+        // `-c extensions.partialClone=`. So the fetch is not refused here — it is made IMPOSSIBLE,
+        // and the difference is the whole trick: a transport that cannot be used fails in 0s instead
+        // of hanging, and a tree whose blobs are already local never notices.
+        //
+        // Measured both ways on a controlled blobless clone:
+        //   blobs missing -> rc 128 in 0s, "transport 'file' not allowed", objects NOT fetched
+        //   blobs present -> rc 0 in 0s, full numstat output, objects NOT fetched
+        //
+        // The failure is graceful downstream: `collect_git`'s `Err` arm pushes a warning and the
+        // reply's `architecture` object is ABSENT rather than null, which its warning text already
+        // explains as NOT MEASURED. So the worst case turns a silent 20-minute network call into an
+        // instant, labelled degradation.
+        //
+        // Placed at this single choke point deliberately: `check-git-spawn-isolation.sh` machine-
+        // checks that this module holds exactly one `Command`, so "zzop never reaches the network
+        // through git" is structural here rather than a convention a future call site can forget.
+        .env("GIT_ALLOW_PROTOCOL", "none")
         .arg("-c")
         .arg("core.quotepath=false")
         // A user-level `diff.relative=true` makes `--numstat` emit cwd-relative paths AND silently
@@ -92,6 +120,21 @@ fn spawn_git(repo: &Path, args: &[String]) -> Result<Output, GitError> {
         // run's trees keyed by repo root, so one cwd-sensitive collection would poison trees 2..N.
         .arg("-c")
         .arg("diff.relative=false")
+        // THE PIN ABOVE CHOOSES GIT'S TRANSPORT. IT DOES NOT SEE THE PROGRAMS GIT STARTS.
+        //
+        // With `log.showSignature=true` in the analyzed repo's config OR the invoking user's
+        // global config, `git log` verifies every signed commit by forking `gpg.program` --
+        // measured (2026-09-27, review ledger V442) as one spawn per signed commit with
+        // GIT_ALLOW_PROTOCOL=none set the entire time, argv `--keyid-format=long --status-fd=1
+        // --verify`, exit 0. GIT_ALLOW_PROTOCOL constrains git's own transports; a child process
+        // is outside it, and gpg's `auto-key-retrieve` is a keyserver call. So the same sentence
+        // the block above enforces -- this binary does not reach the network -- was reachable
+        // around it, through configuration belonging to the tree being analyzed.
+        //
+        // Signature verification is also work nothing here consumes: the collector reads
+        // `--numstat`, never a signature. Measured 1 -> 0 spawns on both config paths.
+        .arg("-c")
+        .arg("log.showSignature=false")
         .args(args)
         .current_dir(repo)
         .output()

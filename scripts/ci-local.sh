@@ -41,6 +41,10 @@ fail() { printf '\n\033[1;31mci-local: FAILED at %s\033[0m\n' "$1" >&2; exit 1; 
 # --- job: guards ---------------------------------------------------------------------------------
 # Not re-run here (see the header). Stated rather than silently skipped, so a reader of this output
 # knows what it does and does not cover.
+# The guards are pre-commit's job, but everything BELOW here is shell too, and the same missing
+# userland makes it lie in the same way (review ledger V340). Asked once, here, before any of it.
+bash scripts/lib/require-gnu-toolchain.sh || fail "shell toolchain"
+
 step "guards — skipped (pre-commit owns them; run: for f in scripts/check-*.sh; do bash \$f; done)"
 
 # EXCEPT this one step of the guards job: it is a `run:` block, not a `scripts/check-*.sh`, so
@@ -61,8 +65,35 @@ step "test: cargo clippy --workspace --all-targets -- -D warnings"
 # tool that happens to share a name.
 $CARGO clippy --workspace --all-targets -- -D warnings || fail "cargo clippy (-D warnings)"
 
-step "test: cargo test --workspace"
-$CARGO test --workspace || fail "cargo test --workspace"
+# The plain `cargo test --workspace` used to run HERE as well, and the --nocapture run below is a
+# superset of it. Running both spent the warm suite twice (review ledger V435). The cost of dropping
+# the plain one is that failures now live in a log file, so the step below tails it on failure.
+
+# A SKIPPED TEST AND A PASSING TEST ARE THE SAME PIXEL WITHOUT THIS (review ledger V419).
+# `skip_notice!` is an `eprintln!` and libtest swallows a PASSING test's stderr unless --nocapture,
+# so every skip above this line is invisible -- including the pin that proves `zzop analyze` makes
+# no network call, which skips when git cannot make a filtered clone over `file://`.
+step "test: skipping-is-not-passing"
+# `tmp` is created further down (line ~105), so this step makes its own.
+skiplog="$(mktemp -d)"
+$CARGO test --workspace -- --nocapture > "$skiplog/nocap.log" 2>&1 \
+  || { tail -n 200 "$skiplog/nocap.log"; fail "cargo test --workspace --nocapture (last 200 lines above)"; }
+if grep -E '^skipping ' "$skiplog/nocap.log"; then
+  printf '^ those ran as NOTHING. Legitimate skips are expected -- read them, do not ignore them.\n'
+else
+  printf 'no test skipped anywhere in the workspace.\n'
+fi
+# Population floor: a run that executed no test is a broken instrument, not a clean tree.
+ran=$(grep -cE '^test .+ ok$' "$skiplog/nocap.log" || true)
+[ "$ran" -eq 0 ] && fail "FLOOR: zero tests reported ok -- that log is not a test run"
+printf 'floor ok: %s test(s) reported ok\n' "$ran"
+# zzop-git is asserted, not just printed: every skip there means the runner git lacks a capability
+# the network-isolation pin needs, which is exactly the silent-disarm condition.
+$CARGO test -p zzop-git -- --nocapture > "$skiplog/git-nocap.log" 2>&1 || fail "cargo test -p zzop-git --nocapture"
+if grep -E '^skipping ' "$skiplog/git-nocap.log"; then
+  fail "a zzop-git pin skipped, so it proved nothing this run"
+fi
+printf 'zzop-git: no pin skipped.\n'
 
 if [ "$FAST" = "1" ]; then
   printf '\n\033[1;33mci-local: --fast — skipped the release build, the site-regeneration diff and the site render check.\033[0m\n'
@@ -159,8 +190,37 @@ node scripts/site-render-check/check.mjs site || fail "site render check"
 # It reports STALENESS, never "green" — a stamp records that a run happened at a sha, not a claim about
 # the working tree now. .zzop/ is already gitignored, so the stamp is local by construction and cannot
 # travel to another checkout to be read as a claim about that tree.
+#
+# ## The third field, and why the first two were not enough (2026-09-24, review ledger V308)
+#
+# This line used to write HEAD alone, and HEAD is not what was tested. This script is MEANT to run on
+# a dirty tree (it says so thirteen lines above the site step), so on the run that added this comment
+# it passed over HEAD + fifteen uncommitted files and then stamped the bare HEAD. That is wrong twice,
+# in opposite directions: the stamped commit's own content had never been tested (false green), and
+# committing those fifteen files made the reader announce "not HEAD, 1 commit behind" about the exact
+# content that had just passed (false alarm). The second is the expensive one -- this suite takes
+# minutes, and the site step's own comment already records what that costs: a guard that cannot be made
+# green by doing what it asks teaches people to skip it.
+#
+# So the stamp carries a CONTENT digest beside the commit. The reader recomputes it: same digest means
+# the bytes that passed are the bytes you have, whether or not the branch pointer moved since.
+#
+# 🔴 What the digest does NOT see, stated here rather than discovered later: the CONTENT of untracked
+# files (their PATHS are in it via --porcelain -uall, so one appearing or vanishing changes it, but
+# editing one does not), and anything gitignored -- which includes .zzop/ itself, deliberately, or the
+# stamp would change its own subject.
+# 🔴 The digest's subject is the TREE, not (commit + patch). The first version of this line hashed
+# `HEAD + git diff HEAD` and that reproduced the very bug it was written for: committing the work
+# empties the diff and moves HEAD, so the digest changed while the bytes did not, and the reader went
+# red on content it had just watched pass. `git stash create` names the working tree as a tree object
+# without touching the tree, the index, or any ref -- and on a clean tree it prints nothing, which is
+# why the fallback is HEAD's own tree. Those two agree across a commit by construction: the tree you
+# stamped while dirty IS the tree the commit records.
 mkdir -p .zzop
-printf '%s %s\n' "$(git rev-parse HEAD)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > .zzop/last-verified
+_zzop_tree="$(git stash create 2> /dev/null || true)"
+if [ -n "$_zzop_tree" ]; then _zzop_tree="$(git rev-parse "$_zzop_tree^{tree}")"; else _zzop_tree="$(git rev-parse 'HEAD^{tree}')"; fi
+_zzop_digest="$( { printf '%s\n' "$_zzop_tree"; git status --porcelain -uall | grep '^??' | sort || true; } | shasum -a 256 | cut -d' ' -f1 )"
+printf '%s %s %s\n' "$(git rev-parse HEAD)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_zzop_digest" > .zzop/last-verified
 
 printf '\n\033[1;32mci-local: every mirrored CI job passed.\033[0m\n'
 printf 'Not covered here: the guards job (pre-commit owns it).\n'

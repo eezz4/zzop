@@ -102,12 +102,23 @@ pub(super) fn unwrap_expr(e: &Expr) -> &Expr {
         Expr::TsAs(a) => unwrap_expr(&a.expr),
         Expr::TsNonNull(n) => unwrap_expr(&n.expr),
         Expr::TsSatisfies(s) => unwrap_expr(&s.expr),
+        // `... as const`. MEASURED 2026-09-25 (review round 31): this crate holds EIGHT copies of
+        // this function and this was the only one missing this arm, so `db.table("users" as const)`
+        // was unwrapped by every adapter here except the one whose subject is db tables. The header
+        // above says "mirroring the other adapters in this crate" — it was not, and nothing checked.
+        Expr::TsConstAssertion(c) => unwrap_expr(&c.expr),
         other => other,
     }
 }
 
-/// First-char-uppercase (`item` -> `Item`) — mirrors `zzop_rules_schema::usage::capitalize` byte-for-byte;
-/// duplicated locally to avoid a parser-typescript -> rules-schema dependency edge for one function.
+/// First-char-uppercase (`item` -> `Item`).
+///
+/// This doc said it "mirrors `zzop_rules_schema::usage::capitalize` byte-for-byte; duplicated locally
+/// to avoid a parser-typescript -> rules-schema dependency edge for one function" until 2026-09-25.
+/// MEASURED then: `rules-schema` contains the string `capitalize` zero times, `git log -S'fn capitalize'`
+/// puts its last one in v0.3.0 (2026-07-07), and the only `fn capitalize` in this repository is the one
+/// below. So the duplicate outlived its original by two and a half months while still charging rent for
+/// an edge it no longer avoids — this is not a copy, it is the last one standing.
 pub(super) fn capitalize(s: &str) -> String {
     let mut chars = s.chars();
     match chars.next() {

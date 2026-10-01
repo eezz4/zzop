@@ -191,6 +191,26 @@ pub struct MethodScan {
     /// of evidence must never become evidence of a waiver.
     #[serde(default)]
     pub trigger_call_exclude_pattern: Option<String>,
+    /// UPWARD veto over the ENCLOSING EXPRESSION of the trigger line — the same window
+    /// `LineScan::enclosing_call_exclude_pattern` reads, brought to this matcher kind: the joined text of
+    /// the still-unclosed `(`/`[`/`{` OPENER LINES above the trigger. Multi-line by construction
+    /// (compiled with a `(?m)` prefix). Only lines carrying an opener that is STILL OPEN enter it, so a veto
+    /// keyword cannot hide in text that merely sits nearby — which is why `absent` beside it stays the WIDE,
+    /// body-scoped one and this is the narrow structural one.
+    ///
+    /// Why this kind needed it (2026-09-24, review ledger V309): `reliability/api-in-loop` fires inside
+    /// `await Promise.all(links.map(async …))` — and wrapping the calls in `Promise.all` is that rule's
+    /// OWN prescription. A rule that fires on the shape it recommends is not reporting a defect, it is
+    /// reporting its own remedy back at the reader. `trigger_in_loop` counts an array-iteration callback
+    /// body as a loop (correctly — it is one), so the concurrency that makes the loop harmless is
+    /// visible ONLY in the enclosing expression, never on the trigger line or inside its parentheses.
+    ///
+    /// A rule setting this must write the enclosing call's own consumption into the pattern
+    /// (`\\b(?:await|return|yield)\\b[^\\n]*…`), for the reason its line-scan twin states: an UNawaited
+    /// `Promise.all([...])` leaves the calls genuinely unconsumed, so vetoing on the callee alone would
+    /// hide a real bug. Every residual of the walk leaves the site FIRING.
+    #[serde(default)]
+    pub enclosing_call_exclude_pattern: Option<String>,
     /// Structural PRESENCE gate over the projected call-site channel: when set, the symbol span must
     /// additionally contain at least one `SourceFile::call_sites` entry of exactly this `kind` (the
     /// site's own line within `body_start..=body_end`). It is the CO-OCCURRENCE axis a lexical

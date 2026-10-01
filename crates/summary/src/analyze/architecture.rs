@@ -93,8 +93,8 @@ pub(super) fn architecture_summary(output_view: &serde_json::Value) -> Option<se
                 "topItem": top_item,
             })
         });
-    let critical_top: Vec<&str> = output_view["critical"]
-        .as_array()
+    let critical_all = output_view["critical"].as_array();
+    let critical_top: Vec<&str> = critical_all
         .map(|files| {
             files
                 .iter()
@@ -103,6 +103,28 @@ pub(super) fn architecture_summary(output_view: &serde_json::Value) -> Option<se
                 .collect()
         })
         .unwrap_or_default();
+    // How many ranked files this list does NOT show — the convention every other capped list in this
+    // reply already follows (`zzop_metrics::scores::detail_cap`, and `criticalTruncated` for the
+    // producer's own 20-row cap), and the one this list did not until 2026-09-26 (review ledger V410).
+    // The legend published the CAP ("Up to 3") and never the REMAINDER, so three paths and three
+    // hundred read identically. The parity contract was leaning on the gap: `criticalTruncated`'s row
+    // says the shaped reply may omit that scalar because "criticalTopMeaning already publishes THAT
+    // reduction" — true of the cap, false of the number.
+    //
+    // TWO CAPS COMPOSE and one number has to carry both: the producer cuts `critical` at
+    // `CRITICALITY_LIMIT` (20) and reports the drop in `criticalTruncated`; this shaper then takes 3
+    // of the survivors. Counting only `len - 3` would publish 17 for a tree with 300 ranked files —
+    // a disclosure that is wrong in the direction of reassurance, which is the failure this field is
+    // for. `.get()`-defensive on the producer's scalar for the same reason every other field here is:
+    // an output written before `criticalTruncated` existed dropped nothing it could tell us about,
+    // and 0 is that output's true value rather than a guess.
+    //
+    // ALWAYS SERIALIZED, 0 included — same reason `criticalTruncated` is: a count that appears only
+    // when it is non-zero makes "complete list" and "this build has no disclosure" the same bytes.
+    let shown = u64::try_from(critical_top.len()).unwrap_or(u64::MAX);
+    let ranked = u64::try_from(critical_all.map(Vec::len).unwrap_or(0)).unwrap_or(u64::MAX);
+    let critical_top_not_shown =
+        ranked.saturating_sub(shown) + output_view["criticalTruncated"].as_u64().unwrap_or(0);
     let mut architecture = serde_json::Map::new();
     architecture.insert("pain".to_string(), pain);
     if let Some(measured_weight) = measured_weight {
@@ -162,6 +184,10 @@ pub(super) fn architecture_summary(output_view: &serde_json::Value) -> Option<se
         )),
     );
     architecture.insert("criticalTop".to_string(), critical_top.into());
+    architecture.insert(
+        "criticalTopNotShown".to_string(),
+        serde_json::json!(critical_top_not_shown),
+    );
     // The POPULATION rides with the list, and this legend is FOLDED — its text plus the full
     // record of why each clause is load-bearing live with the constant, in
     // `crate::output::architecture_legends::CRITICAL_TOP_MEANING`. Not restated here: a rationale
@@ -255,5 +281,77 @@ mod tests {
             .as_str()
             .expect("string")
             .contains("This holds in EVERY run"));
+    }
+
+    /// `criticalTopNotShown` — the remainder this list did not publish until 2026-09-26 (review
+    /// ledger V410). Three properties, because the field can be wrong three separate ways:
+    ///
+    ///   1. PRESENT AT ZERO. A count that materialises only when it is non-zero makes "complete
+    ///      list" and "this build has no disclosure" the same bytes — the exact defect
+    ///      `criticalTruncated` was given its own always-serialize rule for.
+    ///   2. IT COUNTS THE 3-CAP'S DROP.
+    ///   3. IT ADDS THE PRODUCER'S 20-ROW CUT. This is the one an obvious implementation gets
+    ///      wrong: `len - 3` over an array the producer already truncated publishes 17 for a tree
+    ///      with 300 ranked files, and it is wrong in the direction of reassurance.
+    #[test]
+    fn critical_top_not_shown_composes_both_caps_and_is_present_at_zero() {
+        let at = |critical: serde_json::Value, truncated: serde_json::Value| {
+            let mut v = view(Some(false));
+            v["critical"] = critical;
+            if !truncated.is_null() {
+                v["criticalTruncated"] = truncated;
+            }
+            architecture_summary(&v).expect("architecture")["criticalTopNotShown"].clone()
+        };
+        let row = |p: &str| serde_json::json!({ "path": p });
+
+        // 1. Two ranked files, both shown, nothing dropped anywhere — the field is still there.
+        assert_eq!(
+            at(
+                serde_json::json!([row("a.ts"), row("b.ts")]),
+                serde_json::json!(0)
+            ),
+            serde_json::json!(0),
+            "a complete list must SAY it is complete, not go silent"
+        );
+
+        // 2. Five ranked, three shown, producer dropped nothing.
+        let five = serde_json::json!([
+            row("a.ts"),
+            row("b.ts"),
+            row("c.ts"),
+            row("d.ts"),
+            row("e.ts")
+        ]);
+        assert_eq!(at(five.clone(), serde_json::json!(0)), serde_json::json!(2));
+
+        // 3. Same five survivors, but the producer cut 280 at its own cap. The honest answer is
+        //    282, and `len - 3` would say 2.
+        assert_eq!(at(five, serde_json::json!(280)), serde_json::json!(282));
+
+        // An output from before `criticalTruncated` existed dropped nothing it could tell us
+        // about, so its absence is 0 rather than a panic or a missing key.
+        assert_eq!(
+            at(serde_json::json!([row("a.ts")]), serde_json::Value::Null),
+            serde_json::json!(0)
+        );
+    }
+
+    /// The legend has to NAME the field, or the number ships without its meaning — which is the
+    /// shape every other legend in this reply exists to prevent.
+    #[test]
+    fn the_critical_top_legend_names_the_remainder_field() {
+        // Read through the FOLDED-LEGEND REGISTRY, not the constant: the registry is the one list
+        // the reply's pointer and the `reply-legends` contract document are both built from, so a
+        // pin here cannot pass while the text a reader actually receives says something else.
+        let text = crate::output::legends::folded()
+            .into_iter()
+            .find(|l| l.key == "architecture.criticalTopMeaning")
+            .map(|l| (l.full)())
+            .expect("the criticalTop legend is registered")
+            .into_iter()
+            .map(|(_, body)| body)
+            .collect::<String>();
+        assert!(text.contains("criticalTopNotShown"), "{text}");
     }
 }

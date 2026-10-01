@@ -429,7 +429,9 @@ rust_consts() {
 # class that already took this repo's guard fleet down once: `git ls-files -- '*.rs'` crossing bash's
 # 65,536-byte here-string pipe buffer, where six guards hung with no error, no exit code and no
 # output (review ledger V109). Headroom is wide on the platforms that run this today (ARG_MAX is
-# 1,048,576 on this machine and larger on the CI runner), but a limit you are under is not a limit
+# 1,048,576 -- re-verified 2026-09-24 with `getconf ARG_MAX` and UNCHANGED across the 2026-09-10
+# machine move, which is worth writing down where every other measured number in these scripts moved
+# (review ledger V296) -- and larger on the CI runner), but a limit you are under is not a limit
 # you are safe from, and this one moves on its own every time a `.rs` file is added.
 #
 # Chunking is safe here specifically because the awk program is PER-FILE: `FNR == 1` resets every

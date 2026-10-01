@@ -21,7 +21,11 @@
 #
 # ## Cost and trigger, measured
 #
-# MEASURED on this machine (2026-09-09): 92s warm for `-p zzop-rule-packs` (most of it linking the
+# MEASURED 2026-09-09 on the machine this repo then used: 92s warm for `-p zzop-rule-packs`.
+# Re-measured 2026-09-24 on the one it uses now: 52.5s warm, twice in a row.
+# ⚠ The FIRST re-measurement read 164s and that number was wrong -- a relink had crept into it, and
+# only a SECOND consecutive run is warm. Recount with two back-to-back runs, never one.
+# (Most of it linking the
 # test binaries, not running them; pack_sql alone runs in 5.2s). `rules/dsl/` was staged in 15 of the
 # 102 unpushed commits, so this is ~15% of commits, not every one.
 #

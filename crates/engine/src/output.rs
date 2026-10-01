@@ -182,6 +182,30 @@ pub struct GitWindow {
     pub recent_days: u32,
     /// `GitOptions::since`, verbatim (`None` = full history).
     pub since: Option<String>,
+    /// Commits the walk actually traversed for this tree -- the SAME population
+    /// `zzop_metrics::diagnostics` already names in prose ("only N commit(s) in the analyzed
+    /// window"), fed from the same `Vec<CommitFileSet>` at the same call site, so the number a
+    /// consumer reads and the number a warning quotes cannot drift apart.
+    ///
+    /// ## Why it rides here rather than staying in prose (2026-09-24, review ledger V294)
+    ///
+    /// The two knobs above say what was REQUESTED. This says what it COST. `zzop_git`'s collection
+    /// is one `git log --no-merges --reverse --numstat` over every selected commit, and the walk is
+    /// bounded in COUNT (one per repo, pinned by `git_spawn_census.rs`) but not in RANGE: measured on
+    /// a 16,485-commit repository that single command took 548s against 13s for all of the analysis.
+    /// So the difference between a `--depth 1` clone and a real history is the difference between a
+    /// 13-second run and a ten-minute one, and until now no field in the reply carried it. A consumer
+    /// diffing two runs needs the SIZE of the history behind the numbers, not only the window that
+    /// selected it -- `recentDays: 30` over a fresh clone and over a decade-old monorepo are the same
+    /// two knobs describing incomparable runs.
+    ///
+    /// ## It reports; it does not judge
+    ///
+    /// No threshold lives here and none is intended. A "this history is large" warning was considered
+    /// in the same review and declined (ledger V294 (3)) because it needs a hand-picked number, which
+    /// this repo forbids in perf tests for the reason that applies here too: nobody can defend where
+    /// the line goes. A count the caller can compare against its own expectations needs no line.
+    pub commits: usize,
 }
 
 /// `AnalyzeOutput::rule_overrides_applied`'s payload. Every list is sorted + deduped and bounded by the

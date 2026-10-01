@@ -768,8 +768,12 @@ CREATE TABLE zzop_canary_table (id INT);
             r#"// ZZOP_LINE_MARKER
 using System.Net.Http;
 
+// The route path is deliberate, not decoration: a bare `[HttpGet]` on a class with no `[Route]`
+// is CONVENTION-routed in ASP.NET, the parser stopped keying those on 2026-09-28 rather than
+// fabricating `/`, and this canary had been proving the io_provides channel exists BY that
+// phantom. Third fixture in this repository found leaning on it.
 public class ZzopCanaryController {
-    [HttpGet]
+    [HttpGet("canary")]
     public string Get() { return ""; }
 }
 

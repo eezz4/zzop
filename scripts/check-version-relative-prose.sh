@@ -135,7 +135,9 @@ declare -A ACTUAL=()
 #
 # Why the shape changed (2026-08-18): this loop, the deictic loop, and the stability loop each
 # spawned a grep PER PAGE — 161 spawns for 74 files. Under MSYS2, which emulates fork by copying
-# the process, a spawn from bash costs the better part of a second on this machine; a trace
+# the process, a spawn from bash cost the better part of a second on THAT machine (4.9ms on the one
+# this repo uses since 2026-09-10 -- review ledger V296, which is why this shape is kept for being
+# correct rather than for still paying for itself); a trace
 # (`PS4='+ $EPOCHREALTIME|' bash -x`) put 65.1s of this guard's 89.6s inside those greps and 0.5s
 # in the 58 `case` statements around them. Same regex, same files, same counts — the scan simply
 # stopped paying a process per file. Filenames are assumed colon-free, which every tracked path in

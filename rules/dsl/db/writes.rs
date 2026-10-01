@@ -244,6 +244,26 @@ fn no_where_ok_marker_directly_above_the_bulk_write_line_suppresses_the_finding(
 }
 
 // --- unawaited-write ---
+//
+// PROVENANCE OF THIS RULE'S KNOWN FALSE POSITIVE, moved here on 2026-09-24 (review ledger V350/V362).
+// The shipped message used to carry it: "Measured on nocodb `3a5cbd5`
+// (`packages/nocodb/src/db/sql-data-mapper/lib/BaseModel.ts:536`), where the helper really is
+// `async _run(query) { return await query; }`, so the write really is awaited and the finding really
+// is false."
+//
+// Two things were wrong with that living in user-facing text, and an uncontaminated first-screen
+// audit found both on one row. FIRST: the rule still fires at that exact file and line on that exact
+// repository, so a nocodb reader gets a finding whose own message names their file and declares
+// itself false — the auditor spent about six hundred words arriving at "the tool already knew, wrote
+// it down, and shipped it anyway," and called that worse than a plain false positive because a false
+// positive is a limitation and this is a decision. SECOND: it leaks the answer key. The §7 dry audit
+// exists to measure what an uncontaminated reader concludes, and three rows across two trees arrived
+// pre-graded, so those verdicts were not independent observations. That channel grows as corpus
+// measurements accumulate in messages.
+//
+// The message keeps the SHAPE (a helper that awaits its argument, one call deeper than the line can
+// see), which is what a reader needs to judge their own code. The repository, the sha and the line
+// number are maintainer evidence and live here, where the rest of this rule's measurements already do.
 
 #[test]
 fn fire_and_forget_create_call_is_flagged() {

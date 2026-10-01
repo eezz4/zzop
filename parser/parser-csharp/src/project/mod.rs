@@ -67,6 +67,12 @@ pub struct CSharpProjectProvidesReport {
     /// reference that did not resolve against the corpus — the method-path analog of
     /// `skipped_unresolved_prefix`. Skipped, never keyed at the empty base.
     pub skipped_unresolved_method_path: u32,
+    /// Actions dropped because NEITHER the class nor the method supplied a path segment — an ASP.NET
+    /// CONVENTION-routed action, whose real path comes from `MapControllerRoute`'s
+    /// `{controller}/{action}` template in Program.cs, which this pass does not read. Counted per
+    /// dropped action. Disclosed rather than silent for the reason `skip_warning` states: silence
+    /// here reads as "this controller has no routes".
+    pub skipped_convention_routed: u32,
 }
 
 /// One `class_declaration`'s structural facts, collected once per file (`collect::walk_class`) — every class
@@ -168,6 +174,7 @@ mod walk_entrypoint {
         let mut seen: HashSet<(String, String, u32, Option<String>)> = HashSet::new();
         let mut skipped_unresolved_prefix = 0u32;
         let mut skipped_unresolved_method_path = 0u32;
+        let mut skipped_convention_routed = 0u32;
 
         // Deterministic iteration: controller names sorted, independent of `HashMap` order.
         let mut controller_names: Vec<&String> = classes
@@ -186,11 +193,13 @@ mod walk_entrypoint {
                 &mut seen,
                 &mut skipped_unresolved_prefix,
                 &mut skipped_unresolved_method_path,
+                &mut skipped_convention_routed,
             );
         }
 
         CSharpProjectProvidesReport {
             provides,
+            skipped_convention_routed,
             skipped_unresolved_prefix,
             skipped_ambiguous_class_name,
             skipped_unresolved_method_path,
@@ -209,6 +218,7 @@ mod walk_entrypoint {
         seen: &mut HashSet<(String, String, u32, Option<String>)>,
         skipped_unresolved_prefix: &mut u32,
         skipped_unresolved_method_path: &mut u32,
+        skipped_convention_routed: &mut u32,
     ) {
         let prefix = match &row.prefix {
             ClassPrefix::Literal(p) => p.clone(),
@@ -231,6 +241,24 @@ mod walk_entrypoint {
                     }
                 },
             };
+            // NEITHER HALF SUPPLIES A SEGMENT -> this is not a route this pass can key.
+            // An ASP.NET action with no class-level `[Route]` and a bare `[HttpGet]` is reached
+            // through CONVENTION routing (`MapControllerRoute`'s `{controller}/{action}` template in
+            // Program.cs), which nothing here reads. Composing the two empties yields `/`, the same
+            // phantom this module already refuses for an unresolvable class prefix just above and
+            // for an unresolvable method path just below -- and worse than a miss, because every
+            // action of such a class collapses onto one key and then reports as duplicate-route
+            // against its own siblings.
+            //
+            // 📏 corpus/audit/eShop, 2026-09-28: five Quickstart controllers produced 12 of that
+            // tree's 17 findings this way, all keyed `GET /` or `POST /`.
+            //
+            // The per-file pass applies the identical condition, which is how the two stay in
+            // agreement by construction rather than by comment (see that module's doc).
+            if prefix.is_empty() && method_path.is_empty() {
+                *skipped_convention_routed += 1;
+                continue;
+            }
             let full_path = format!("{prefix}/{method_path}");
             let key = http_interface_key(&method.verb, &full_path);
             // Anchor on the METHOD's own file (not `row.file`): a merged partial controller's methods span

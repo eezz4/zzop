@@ -134,7 +134,17 @@ count=0
 #
 # This was `invoked_in <file> <base>`, an awk run per guard: ~40 guards, ~40 forks, and under
 # MSYS2 (fork emulated by copying the process) a fork from bash costs the better part of a second
-# on this machine. Traced 2026-08-18: this script spent most of its 120s in those spawns.
+# on that machine. Traced 2026-08-18: this script spent most of its 120s in those spawns.
+#
+# 🔴 THAT MACHINE IS GONE (2026-09-24, review ledger V296). The reasoning above is sound and it
+# names its cause -- MSYS2 emulating fork by copying the process -- but "on this machine" stopped
+# being true on 2026-09-10. Measured today on the Apple M2 Pro this repo now builds on: a fork
+# from bash costs 4.9ms, not ~563ms, which is 115x cheaper; recount with
+#   st=$(date +%s%N); for i in $(seq 1 200); do /bin/echo x >/dev/null; done; en=$(date +%s%N)
+# The CI runner is Ubuntu, a third machine, and pays the same order. So the premise that bought
+# this shape no longer holds where the code runs; the shape is kept because it is correct and
+# tested, not because it is still paying for itself. Removing it is a judgement, not a fix.
+# 📏 And this script itself: 120s then, 8.9s today (`time bash scripts/check-guards-wired.sh`).
 #
 # The REGEX below is unchanged except that the guard name is now a capture rather than a
 # parameter -- the accepted spellings, the comment skip, and the two rejected spellings the header
@@ -262,7 +272,8 @@ fi
 
 while IFS= read -r -d '' f; do
   # Builtins, not `basename`: this loop runs once per guard and each `$(...)` forks a subshell on
-  # top of the tool it calls. Measured 2026-08-18 on this machine, a fork from bash costs ~563ms
+  # top of the tool it calls. Measured 2026-08-18 on the MSYS2 box this repo then used, a fork from
+  # bash cost ~563ms -- 4.9ms here today, see the header's V296 note
   # (MSYS2 emulates fork by copying the process; native `git.exe` spawns in 30ms), so the two forks
   # this line used to cost were the single largest line in this file. Same result: `${f##*/}` drops
   # the directory, `${base%.sh}` drops the suffix — verified identical on multi-dot names too.
@@ -499,7 +510,12 @@ HAND_RUN_TOOLS=(
   "scripts/measure/line-census.mjs|a census, not a gate: it reports how many lines of this workspace ship vs. test, AND how much that split moves under four other classifiers. There is deliberately no pass/fail -- the whole finding (review ledger V91) is that the number is a function of the definition, so any threshold CI could enforce would be picking one definition and re-creating the problem. Run it by hand when a document wants to quote the figure, and quote the SCRIPT rather than the number"
   "scripts/measure/wire-key-census.mjs|a RELEASE-time census, not a gate: it prints today key paths for a human to compare against the previous release print. It has no committed baseline to diff against because two node classes (keys built from data, and the analyze-vs-cross lane split) would churn it on every unrelated change, so there is no pass/fail for CI to read -- see its header and the release checklist step that owns it"
   "scripts/measure/vocab-key-census.mjs|a census, not a gate: it reports which LANES read each vocabulary key, and its own header says the lane split is path-based and therefore cannot tell plumbing from consumption. A pass/fail would have to assert that no key is read from two lanes, which is false today for seventeen of them and correct for most -- the finding it exists for (a key whose NAME promises more than its readers deliver) needs a human to read the list. Run it by hand when naming or removing a vocabulary key"
+  "scripts/measure/mcp-meaning-delegation.mjs|a census, not a gate: it reports which tool descriptions NAME the reply field that owns a piece of vocabulary, and it deliberately cannot tell a pointer from a re-definition — a description may name painMeaning and still define pain, which only a reader settles. Gating on it would turn a reading into a threshold and reward naming the field without dropping the copy. Run it before editing any tool description, and beside tools-list-anatomy.mjs when the session fixed cost moves"
   "scripts/measure/tools-list-anatomy.mjs|a census, not a gate: it prints what the MCP session fixed cost is made of, and its whole point is that three of those figures have no single value -- overlap depends on the tokenization rule (three stated rules give three answers), the reply legend count depends on the key pattern AND on whether git ran, and the config refusal interpolates the missing path twice so its size is a slope of 2 bytes per path character rather than a constant. A pass/fail would have to pick one of those and re-create the defect it exists to expose. Run it by hand before quoting any tools/list number"
+  "scripts/measure/release-surfaces.mjs|it reads four live registries over the network, so it cannot be a pre-commit guard without failing offline commits, and it cannot be a release-workflow gate either because the surfaces legitimately disagree DURING a release (tag before release, release before npm, npm before the MCP registry) -- a gate there would be red on every healthy release; a human runs it AFTER a release reports success"
+  "scripts/measure/join-instrument.mjs|its subject is corpus/oss/, which is gitignored, so CI structurally has nothing to run it against; it is the cross-repo JOIN instrument a human rebuilds and reads at review time, and it writes pair configs into that corpus rather than asserting anything about this tree"
+  "scripts/measure/reply-run-invariance.mjs|a READING, not a gate: it needs two or more trees over the network-free but gitignored corpus, so CI has nothing to point it at, and its output is a share that has no right value -- a legend sentence repeated on every call may be the one that stops a number being misread, which is the open trade in review ledger V302 rather than a threshold. Run it by hand before claiming how much of a reply is boilerplate, and quote the SENTENCE unit it uses: the same pair of trees reads 0.0% or 83.0% on the same key depending on whether whole strings or sentences are compared"
+  "scripts/measure/rule-population.mjs|a SIZING instrument, not a gate: it answers what ONE line-scan rule's file population actually reaches and what its file-level veto buys, over a corpus that is gitignored, so CI structurally has nothing to point it at. It also re-implements the matcher in JavaScript and names three divergences from the engine in its own header, which is exactly why it must never be the thing that decides whether a rule is RIGHT -- the detection gate owns that. Run it by hand before widening or narrowing a file_pattern or a file_exclude_pattern; review ledger V323 is the round where not having it inverted a prescription"
   "scripts/measure/subtraction-trend.sh|a TREND, not a gate: it prints the added/removed line ratio and the net-decrease commit count for a git range, and review-ledger row V125 records the points and the judgement made from them. Wiring it in would turn a reading into a threshold, which is the proxy-metric failure the design cheatsheet names twice -- and the row already refuses a numeric target by name (a line goal makes people delete docs). Run it when a release arc closes and add the point to the row."
 )
 
@@ -603,5 +619,42 @@ for entry in "${HAND_RUN_TOOLS[@]}"; do
 done
 
 [ "$missing" -eq 0 ] || exit 1
+
+# ── A step with TWO `run:` keys runs only the LAST one ────────────────────────────────────────────
+#
+# This whole file asks "does the text `bash scripts/<name>.sh` appear in ci.yml", which is a text
+# question standing in for a YAML one. MEASURED 2026-09-24 (review ledger V347): commit 3314b00 added
+# a second `run:` under an existing step instead of a new step. YAML keeps the last duplicate key, so
+# `check-policy-census.sh` STOPPED RUNNING IN CI that day -- and this guard reported both of them
+# wired the entire time, because both spellings were present as text.
+#
+# A full YAML parse is a dependency this fleet does not have and does not want. This is the one shape
+# that makes the text answer differ from the runtime answer, and it is a four-line scan: inside a
+# workflow, count `run:` keys between one `- name:` and the next.
+dupe_steps=0
+while IFS= read -r wf; do
+  awk -v file="$wf" '
+    /^[[:space:]]*-[[:space:]]+name:/ {
+      if (runs > 1) { printf "%s:%d: step with %d `run:` keys -- YAML keeps only the last\n", file, startline, runs }
+      startline = NR; runs = 0; next
+    }
+    /^[[:space:]]*run:/ { runs++ }
+    END { if (runs > 1) { printf "%s:%d: step with %d `run:` keys -- YAML keeps only the last\n", file, startline, runs } }
+  ' "$wf"
+done < <(printf '%s\n' "${workflow_files[@]}") > /tmp/.zzop-dupe-run.$$ 2>/dev/null || true
+if [ -s /tmp/.zzop-dupe-run.$$ ]; then
+  # Single quotes: a backtick inside a double-quoted bash string is COMMAND SUBSTITUTION, and this
+  # line printed `run:: command not found` plus an empty word in its own error message the first time
+  # it fired. The repo's own note on shell-written edits names this class; it reaches error strings too.
+  echo 'check-guards-wired: FAILED -- a workflow step declares `run:` more than once.' >&2
+  cat /tmp/.zzop-dupe-run.$$ >&2
+  echo "" >&2
+  echo "  YAML keeps the LAST duplicate key, so every earlier command in that step is silently not run" >&2
+  echo "  while still being present as text -- which is exactly what the rest of this guard reads." >&2
+  echo "  Give each command its own '- name:' step." >&2
+  rm -f /tmp/.zzop-dupe-run.$$
+  exit 1
+fi
+rm -f /tmp/.zzop-dupe-run.$$
 
 echo "check-guards-wired: clean ($count guards checked; ${#workflow_files[@]} workflows, ${wf_refs:-0} workflow_run reference(s) resolved; core.hooksPath ${actual_hooks_path:-unset}; ${#DEFENSES[@]} executable defense(s), ${#HAND_RUN_TOOLS[@]} hand-run)."

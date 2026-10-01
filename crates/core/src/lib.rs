@@ -17,6 +17,7 @@ pub mod fragments;
 pub mod graph;
 pub mod io;
 pub mod ir;
+pub mod jsonc;
 pub mod node;
 pub mod noncycle;
 pub mod normalized;

@@ -142,11 +142,12 @@ pub(super) fn missing_auth_hint(
          the JS/TS extensions a call is resolved across files, so the phrase is literal, and since \
          2026-09-07 it is literal for `.java` too — a Java import specifier is a dotted package/class \
          name that resolves to ITSELF, which used to stop the walk one hop out, and the whole-corpus \
-         type index is now bridged onto the graph so the walk continues. It is NOT literal for a \
-         Python module-attribute receiver (`from pkg import mod; mod.f()`): that receiver is read as \
-         a class, so the walk stops one hop out and a guard reached as handler -> helper in another \
-         file -> guard is NOT found. In that one case a finding means \"no guard within one hop\", never \
-         \"no guard anywhere\".{unresolved_clause} {} if your auth happens at the middleware layer or \
+         type index is now bridged onto the graph so the walk continues. Since 2026-09-08 it is \
+         literal for a Python MODULE-attribute receiver (`from pkg import mod; mod.f()`) too, bridged \
+         the same way. The one shape still NOT joined is a DOTTED receiver (`import app.helpers; \
+         app.helpers.ensure()`): that receiver is read as a class, so the walk stops one hop out and a \
+         guard reached as handler -> helper in another file -> guard is NOT found. In that one case a \
+         finding means \"no guard within one hop\", never \"no guard anywhere\".{unresolved_clause} {} if your auth happens at the middleware layer or \
          beyond that hop bound (this rule has no inline suppression marker).",
         disable_hint("mutating-route-no-auth")
     )

@@ -13,7 +13,7 @@
 //!
 //! Only a string-literal argument is recognized — `app.setGlobalPrefix(cfg.prefix)` (or any other
 //! non-literal expression) emits nothing, per this repo's "never guess" IO convention (see
-//! `egress.rs`'s `resolve_url`): a wrong prefix would mis-key every route in the tree, which is worse
+//! `egress/url_resolve.rs`'s `resolve_url_variants`): a wrong prefix would mis-key every route in the tree, which is worse
 //! than emitting none.
 
 use swc_core::common::SourceMap;

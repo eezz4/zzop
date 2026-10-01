@@ -6,7 +6,7 @@
 //!
 //! ## Guard vocabulary
 //! [`DEFAULT_AUTH_GUARD_PATTERN`] is matched against (name-segment shape below — see "Match granularity")
-//! every symbol id `bfs_reachable` visits — a name-vocabulary check, not a body inspector. `access` is
+//! every symbol id `bfs_reachable_in` visits — a name-vocabulary check, not a body inspector. `access` is
 //! guarded to `(has|can|check|require)access` only (bare `access` clears `accessLog`/`dataAccess`). Two
 //! classes are EXCLUDED — clearing on a non-authorization name silently suppresses a real missing-auth
 //! finding (recall loss outweighs FP savings for a security rule): a blanket `require[A-Z]\w*` (clears
@@ -20,14 +20,14 @@
 //! (`http_scan::resolve_handler_scoped`, "do not guess"): a repo-wide-unique name resolves directly; a name
 //! ambiguous repo-wide resolves ONLY to a UNIQUE candidate in the route's OWN file — sound for a decorator-
 //! routed method (it lives in its controller file), with a narrow imported-member-handler residual noted at
-//! that fn. Any other ambiguity, or an unknown handler, is skipped; a `bfs_reachable` depth-0 self-match
+//! that fn. Any other ambiguity, or an unknown handler, is skipped; a `bfs_reachable_in` depth-0 self-match
 //! clears a self-describing handler name on its own.
 //!
 //! ## Call-graph language coverage (the OTHER half of the decidable subset)
 //! `symbol_graph` is built from re-parsed TypeScript/JavaScript, Java, Python AND Rust source
 //! (`run_callgraph_rules`, which loops `ts_paths`/`java_rels` plus the Python- and Rust-dispatched
 //! members of `ts_paths` — see that function's own module doc). No OTHER language parser in this
-//! workspace produces the `RawCall` sites `bfs_reachable` walks, so for a handler outside
+//! workspace produces the `RawCall` sites `bfs_reachable_in` walks, so for a handler outside
 //! [`CALL_GRAPH_COVERED_EXTENSIONS`], `symbol_graph` restricted to that ecosystem is provably EMPTY — the
 //! BFS can never find a guard there. [`is_call_graph_covered`] makes this explicit and load-bearing: a
 //! mutating provide outside the covered set is exempt from the BFS entirely, same "do not guess" spirit

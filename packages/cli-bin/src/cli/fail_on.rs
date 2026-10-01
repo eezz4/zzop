@@ -144,7 +144,7 @@ fn refuse_unmatched_rule_filter(reply: &str, rule: &str) {
 /// such object cannot be gated, and that is a refusal rather than a pass: silently exiting 0 there is
 /// the "green build proves nothing" failure this flag exists to end.
 pub fn gate_or_exit(text: &str, threshold: Option<&str>, rule: Option<&str>) -> ! {
-    println!("{text}");
+    super::emit(text);
     if threshold.is_none() && rule.is_none() {
         std::process::exit(0);
     }

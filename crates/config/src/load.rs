@@ -7,8 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::{
-    io_error_label, jsonc, mapper, workspaces, ConfigError, LoadedRequest, Method,
-    DEFAULT_CONFIG_FILENAME,
+    io_error_label, mapper, workspaces, ConfigError, LoadedRequest, Method, DEFAULT_CONFIG_FILENAME,
 };
 
 /// Loads the config for a single analyzed root: reads `<root>/zzop.config.jsonc`, or REFUSES.
@@ -149,7 +148,7 @@ fn load_config_file_with(path: &Path, advice: TreeAdvice) -> Result<LoadedReques
         ))
     })?;
 
-    let stripped = jsonc::strip_json_comments(&raw);
+    let stripped = zzop_core::jsonc::strip_json_comments(&raw);
     let parsed: serde_json::Value = serde_json::from_str(&stripped)
         .map_err(|err| ConfigError(format!("Invalid JSONC in {}: {err}", candidate.display())))?;
 

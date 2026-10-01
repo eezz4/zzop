@@ -131,6 +131,23 @@ fn walk_class(rel: &str, node: Node, src: &str, out: &mut Vec<IoProvide>) {
         let Some((verb, path)) = route.literal_route() else {
             continue;
         };
+        // CONVENTION-ROUTED CONTROLLER: no class `[Route]` and a bare `[HttpGet]` carrying no path.
+        // Neither half supplies a segment, so the composed key would be `/` -- and ASP.NET does not
+        // route it there: with no attribute route the action is reached through convention routing
+        // (`MapControllerRoute`'s `{controller}/{action}` template), which lives in Program.cs and is
+        // not read here. Keying it `/` is the same phantom this module already refuses twice above --
+        // once for a non-literal class prefix, once for a non-literal method path -- and it is worse
+        // than a miss, because every action of such a class collapses onto one key and then reports
+        // as duplicate-route against its own siblings.
+        //
+        // 📏 Measured on corpus/audit/eShop (2026-09-28): 5 Quickstart controllers produced 12 of the
+        // tree's 17 total findings this way, all keyed `GET /` or `POST /`.
+        //
+        // A class with no `[Route]` whose methods DO carry paths (`[HttpGet("items")]`) is untouched:
+        // that is ordinary attribute routing and the method supplies the whole path.
+        if prefix.is_empty() && path.is_empty() {
+            continue;
+        }
         let full_path = format!("{prefix}/{path}");
         out.push(IoProvide {
             route_version: None,

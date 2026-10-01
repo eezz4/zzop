@@ -151,7 +151,8 @@
   // judgment at all, so this block is what turns these questions on, and deleting a key turns one off.
   //
   // 📏 That sentence is exact, and measuring it is what proves the values here are AUTHORED rather than
-  // injected (2026-09-14, review ledger W1). `authGuardPattern`'s value below is byte-identical to the
+  // injected (measured 2026-09-14: an external review asked whether these values were real or
+  // decorative, and the numbers below are the answer). `authGuardPattern`'s value below is byte-identical to the
   // pattern the engine carries internally, and declaring it still CHANGES the run: on
   // `corpus/frameworks/fastapi`, `mutating-route-no-auth` reports 132 with no `vocabulary` block, 123
   // with this one key restored, and 117 with the whole block. If an undeclared key fell back to the

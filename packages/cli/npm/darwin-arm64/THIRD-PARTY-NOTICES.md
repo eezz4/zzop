@@ -21,7 +21,7 @@
      real body or an explicit "NO LOCAL LICENSE TEXT FOUND" marker, the textless list being a
      subset of the table) so the common hand edits fail by name, not merely as moved bytes.
 
-     fingerprint inventory-inputs = c7bc064f4f356da4bcee9a11d6ef09f9243fb0fc3e4acb7d0bae08debe6ba1bf
+     fingerprint inventory-inputs = 1bf3eac5fc0b31be4e945ed61a662ef815849e2585b325a9ffe99218b57b4a54
      fingerprint generated-body = b3c9a22fccfc41d9b8668b823c24a4d68b7126b238fba6dbd6802d4ff122693b
 -->
 

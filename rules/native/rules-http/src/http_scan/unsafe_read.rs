@@ -60,7 +60,7 @@ pub fn scan_unsafe_read_endpoint(input: &ScanUnsafeReadEndpointInput) -> Vec<Fin
             .cloned()
     };
 
-    // ONE adjacency index for the whole loop. Building it inside `bfs_reachable` — which is where it
+    // ONE adjacency index for the whole loop. Building it inside `bfs_reachable_in` — which is where it
     // used to live — made this rule and its sibling **91% of a 22.9s run on a 3,000-route tree while
     // reporting nothing**, because the index is O(edges) and the loop is O(routes). See `Adjacency`
     // (review ledger V112).

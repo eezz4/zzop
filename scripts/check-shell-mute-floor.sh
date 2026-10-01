@@ -95,9 +95,21 @@
 # ## File scope: DERIVED, same axis as check-shell-pipe-sigpipe.sh
 # Every git-known `*.sh` plus everything under `.githooks/` (hooks carry no extension), tracked AND
 # untracked-but-not-ignored — a new script must be caught before its first `git add`.
-# `.github/workflows/*.yml` is deliberately OUT, unlike in that sibling: a `run:` block is a fresh
-# shell whose errexit comes from the runner's `shell:` setting rather than from any `set` line this
-# needle could read, so premise 2 would be assumed rather than parsed. Named as a residual, not closed.
+# 🔴 That paragraph used to end "`.github/workflows/*.yml` is deliberately OUT ... named as a
+# residual, not closed" — and it was WRONG TWICE over (2026-09-24, review ledger V341). Workflows have
+# been in the population since V201 moved the file list into `scripts/lib/shell-subjects.sh`, so the
+# header contradicted the code it describes. And the residual it named was real but assumed the wrong
+# default: a `run:` block with no `shell:` runs under `bash -e {0}`, so errexit there is ON, and this
+# scan started every workflow buffer at errexit OFF — the one setting that makes the whole class
+# invisible exactly where the runner supplies it from outside the text.
+#
+# That is closed now. A workflow buffer starts at errexit ON and RESETS to ON at every `run:`, because
+# each block is its own shell; `set +e` inside a block turns it off for that block only. `pipefail` is
+# NOT on by default (only `shell: bash` adds it), so PF starts off there.
+#
+# It cost something before it was closed: review ledger V330. A workflow step did `node …; rc=$?` under
+# `set -uo pipefail`, which reads as "errexit off" in a .sh and is not in a `run:` block — the step died
+# at the node call and never reached `rc`, in the only mode it was written for.
 #
 # ## errexit is PARSED, never sniffed
 # `set -uo pipefail` (check-version-relative-prose.sh, the fleet's only one) does NOT enable errexit,
@@ -299,12 +311,24 @@ function scan(   i, j, k, c, ERR, PF, on, line, w, n, t, nx, body, seg, rest, en
   # A sourced lib declares nothing of its own and runs under whatever flags the caller had; every
   # sourcing site in this tree is `set -euo pipefail`. Everything else starts where bash really
   # starts: errexit OFF until a `set` line turns it on.
-  ERR = (bufname in ISLIB) ? 1 : 0
+  # A sourced lib inherits whatever flags the caller had (every sourcing site here is set -euo
+  # pipefail). A WORKFLOW inherits the runner default, bash -e {0}: errexit on, pipefail off.
+  # Everything else starts where bash really starts.
+  # (No apostrophe in this awk program -- the whole thing is a single-quoted shell string, as this
+  # file says twice already. Writing one here is what broke it on the first try.)
+  ERR = (bufname in ISLIB) ? 1 : ((bufname ~ /^\.github\/workflows\//) ? 1 : 0)
   PF  = (bufname in ISLIB) ? 1 : 0
+  ISWF = (bufname ~ /^\.github\/workflows\//) ? 1 : 0
 
   for (i = 1; i <= nf; i++) {
     line = L[i]
     if (line ~ /^[[:space:]]*#/) continue
+
+    # Each run: is a FRESH shell, so a set +e in one step must not excuse the next. Without this the
+    # whole file reads as errexit-off after the first block that turns it off, which is the
+    # over-permissive half of the same mistake the header describes.
+    if (ISWF && line ~ /^[[:space:]]*(-[[:space:]]+)?run:/) { ERR = 1; PF = 0 }
+    if (ISWF && line ~ /^[[:space:]]*shell:[[:space:]]*bash/) { ERR = 1; PF = 1 }
 
     if (line ~ /^[[:space:]]*set[[:space:]]+[-+]/) {
       n = split(line, w, /[[:space:]]+/)
@@ -422,3 +446,45 @@ if [ -n "$hits" ]; then
 fi
 
 echo "check-shell-mute-floor: OK (no muted empty-set floor in $scanned files -- the shared shell population, scripts/lib/shell-subjects.sh)"
+
+# ── SECOND CLASS, workflow-only: reading `$?` in a shell the runner put `-e` on ────────────────────
+#
+# Two classes in one file, deliberately, and the reason is the parser above: both need the SAME
+# question answered — is errexit in force here — and the model for a `run:` block was only just
+# written. A second file would either duplicate that model or drift from it, which is the trap
+# review ledger V334 records one guard over.
+#
+# THE DEFECT (V330, mine, 2026-09-24): a step did `node …; rc=$?` under `set -uo pipefail`. In a `.sh`
+# that reads as errexit-off and the idiom is safe; in a `run:` block GitHub supplies `bash -e {0}` and
+# the shell exits AT the node call, so `rc` is never read and every branch below it is dead — on
+# exactly the path the step exists for, since that call exits non-zero when the defect is present.
+#
+# Narrow on purpose: only `.github/workflows/`, only a bare `<var>=$?` (the `cmd && rc=0 || rc=$?`
+# idiom `prebuild.yml` uses is safe by construction), and the fix is one line the block can declare.
+# In `.sh` files the repo already wraps every such read in `set +e` … `set -e`; measured 2026-09-24,
+# 26 sites, 26 wrapped. This seals the one surface where the flag comes from outside the text.
+dollar_q_fail=0
+while IFS= read -r wf; do
+  [ -n "$wf" ] || continue
+  awk -v file="$wf" '
+    /^[[:space:]]*(-[[:space:]]+)?run:/ { inrun = 1; plusE = 0; start = NR; next }
+    /^[[:space:]]*(-[[:space:]]+)?(name|uses|with|env|if|id|shell|working-directory|continue-on-error|timeout-minutes):/ { inrun = 0 }
+    inrun && /^[[:space:]]*set[[:space:]]+\+[a-z]*e/ { plusE = 1 }
+    inrun && /^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=\$\?[[:space:]]*$/ {
+      if (!plusE) printf "%s:%d: reads $? in a run: block that never says `set +e` (step starts line %d)\n", file, NR, start
+    }
+  ' "$wf"
+done < <(printf '%s\n' "$files" | grep -E '^\.github/workflows/') > /tmp/.zzop-dollarq.$$ 2>/dev/null || true
+
+if [ -s /tmp/.zzop-dollarq.$$ ]; then
+  echo 'check-shell-mute-floor: FAILED -- a workflow step reads `$?` under the runner errexit.' >&2
+  cat /tmp/.zzop-dollarq.$$ >&2
+  echo "" >&2
+  echo "  GitHub runs an unspecified run: as 'bash -e {0}', and 'set -uo pipefail' does NOT turn that" >&2
+  echo "  off. The shell exits at the command whose status you meant to read, so the read and every" >&2
+  echo "  branch below it are dead on the non-zero path -- which is usually the only interesting one." >&2
+  echo "  Add 'set +e' at the top of that block, or use: out=\$(cmd) && rc=0 || rc=\$?" >&2
+  dollar_q_fail=1
+fi
+rm -f /tmp/.zzop-dollarq.$$
+[ "$dollar_q_fail" -eq 0 ] || exit 1

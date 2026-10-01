@@ -117,6 +117,29 @@ pub fn key_carries_route_identity(key: &str) -> bool {
 /// worth the isolation violation, but leaving it un-shared (prose-only agreement) is worse: this makes
 /// drift a compile-time impossibility instead of a convention.
 pub fn db_table_channel_casing(name: &str) -> String {
+    // AN ALL-CAPS IDENTIFIER IS LOWERCASED WHOLE, not lower-firsted (2026-09-25, review ledger V409).
+    //
+    // Lower-firsting is right for the PascalCase model names this was written for (`model Article` ->
+    // `table:article`) and wrong for the spelling SQL actually uses. MEASURED on corpus/audit/nocodb
+    // before this: 206 `db-table` consumes over 55 distinct keys, of which **13 keys / 47 consumes
+    // (23%)** were casing wreckage — `cOLUMNS`, `sTATISTICS`, `rEFERENTIAL_CONSTRAINTS`, `lATERAL`,
+    // `tABLES`, `kEY_COLUMN_USAGE`, `dUAL`, `aLL_OBJECTS` and five more. Each is a key nothing can
+    // ever provide, so it rides to the reader as an unprovided consume naming a table that does not
+    // exist under that spelling.
+    //
+    // NOT fixed here, and it is a different question: another 11 keys / 64 consumes are PostgreSQL
+    // catalog tables (`pg_namespace`, `pg_class`, …). Those names are real and the code does query
+    // them; whether a system catalog belongs on this channel is a scoping decision with a veto's
+    // burden of proof, not a transform bug.
+    //
+    // The test is "carries no lowercase letter", not "is uppercase": it leaves `Article` and
+    // `user_profile` exactly as they were, so every key this function already produced is unchanged
+    // except the ones that were unreachable. An unquoted identifier is case-insensitive in SQL and
+    // canonically lowercase in PostgreSQL, so `COLUMNS` -> `columns` is the spelling a provider side
+    // would emit anyway.
+    if !name.is_empty() && !name.chars().any(char::is_lowercase) {
+        return name.to_lowercase();
+    }
     let mut chars = name.chars();
     match chars.next() {
         Some(c) => c.to_lowercase().collect::<String>() + chars.as_str(),

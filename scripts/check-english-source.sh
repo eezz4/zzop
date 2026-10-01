@@ -242,3 +242,80 @@ if [ -n "$claude_ref_files" ]; then
   exit 1
 fi
 echo "Internal-path guard: clean ($source_scanned files scanned)."
+
+# Private-ledger guard: the scan above spells a PATH, and the pointer that reached users did not use
+# one. A shipped rule message said "an uncontaminated auditor found it by hand (review ledger V313)"
+# -- baked into the binary, delivered in a reply, and naming a document that does not exist outside
+# this working tree. Measured on 2026-09-25: eleven such pointers, one in a rule message and ten in
+# published docs, all invisible to the `.claude/` scan because none of them wrote the path.
+#
+# WHAT THIS GUARD CANNOT SEE, stated rather than left to be discovered: the same phrase appears about
+# 214 more times in COMMENTS -- .rs files, workflow YAML, hooks -- and those are deliberately out of the
+# population. A comment is read by someone who has the repository checked out; a rule message and a
+# published doc are read by someone who has neither. The line is drawn at reader-facing bytes, not at
+# "anywhere the phrase occurs" --
+# a scan over all of them would be 214 edits of no value to any reader and would make this guard a
+# thing people turn off. If a rule message or a doc ever needs to cite an internal decision, cite the
+# REASON inline. A commit hash is NOT a substitute here and was measured to be one dead end replacing
+# another: `git blame` puts eight of those ten doc pointers on a 681-file release squash.
+# 🔴 THE SERVED SET HAS TWO SOURCES AND THIS LIST ONLY KNEW ONE (2026-09-27, review ledger V422).
+# `zzop contract` serves 18 documents. Nine are baked by `include_str!` in
+# crates/summary/src/contracts.rs -- all under docs/, which the first entry below already covered.
+# The other baking site is a DIFFERENT crate: crates/config/src/lib.rs:95 and template.rs:48 embed
+# config-surface.json and config-template.jsonc. Neither was in this pathspec, so a private ledger
+# pointer sat inside config-surface.json and this guard reported "clean (reader-facing surfaces
+# carry no ledger pointers)" -- a header claiming a class wider than its needle could see.
+# Measured that day: `zzop contract config-surface | grep -c 'review ledger'` -> 1.
+# These two are named rather than derived because deriving them needs the SERVED registry, which
+# lives in two crates; unifying that is its own row. Until then this comment is the derivation.
+# The PUBLISHED half stays a pathspec: docs/ and site-src/ are reader-facing by being published,
+# which is a different property from being embedded, and it is broader than the served set.
+PRIVATE_LEDGER_PATHSPEC=('docs/*' 'rules/dsl/*.json' 'rules/dsl/*/*.json' 'site-src/*' 'README.md')
+# The SERVED half is DERIVED, and it is derived by the guard that already owned that derivation
+# (2026-09-27, ledger V431/V432/V433). `zzop contract` bakes from THREE sites: contracts.rs's own
+# include_str! calls, a generated lane for examples/packs (crates/config/build.rs writes include_str!
+# into $OUT_DIR), and `zzop_*::CONST` rows followed into the crate that owns the constant.
+#
+# This guard first carried a hand-written pathspec that knew ONE of the three and printed "clean"
+# while config-surface.json served a ledger pointer. The fix for that was a new scripts/lib file with
+# its own extraction, which knew TWO and missed examples/packs -- committing, in the file written to
+# prevent it, the exact failure it named: a population missing a source while the others keep it
+# non-empty. Its floor also could not speak under this script's own `set -euo pipefail`, and could
+# not see the population SHRINK. That file is deleted; a third extraction was the wrong answer twice.
+#
+# check-embedded-contract-docs --list prints its derived set after every one of its floors has run,
+# so an answer reaching this line has already survived: zero include_str! aborts, zero packs aborts,
+# an unresolvable constant aborts, and a resolved path that is not a file aborts.
+served_list=$(bash "$(dirname "$0")/check-embedded-contract-docs.sh" --list) || {
+  echo "Private-ledger guard: could not derive the served-document set --"
+  echo "  check-embedded-contract-docs.sh --list failed, so this scan does not know which files a"
+  echo "  binary-only reader sees. Refusing to report clean on a population I could not build."
+  exit 1
+}
+[ -n "$served_list" ] || {
+  echo "Private-ledger guard: the served-document set came back EMPTY."
+  echo "  That is a broken derivation, not a repo that serves nothing."
+  exit 1
+}
+while IFS= read -r served; do
+  [ -n "$served" ] && PRIVATE_LEDGER_PATHSPEC+=("$served")
+done <<< "$served_list"
+
+# No exemption array. The population is small and every member of it is reader-facing by definition,
+# so there is no file here whose job is to spell the phrase -- and an empty array is the slot the
+# FOREIGN_LETTER_EXEMPTIONS header warns about, so there is none to sit down in.
+ledger_ref_matches=$(tracked_and_untracked_files_matching '[Rr]eview [Ll]edger' "${PRIVATE_LEDGER_PATHSPEC[@]}")
+
+if [ -n "$ledger_ref_matches" ]; then
+  echo "English-only source guard: private review-ledger pointers found on reader-facing surfaces:"
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    grep -nP '[Rr]eview [Ll]edger' "$f" | sed "s|^|  ${f#./}:|"
+  done < <(printf '%s\n' "$ledger_ref_matches")
+  echo
+  echo "A rule message or a published doc must not point at the private review ledger -- that document"
+  echo "is not published, so the pointer is dead for every reader outside this working tree. State the"
+  echo "REASON inline instead. (.rs comments are deliberately not in this scan: see the header above.)"
+  exit 1
+fi
+echo "Private-ledger guard: clean (reader-facing surfaces carry no ledger pointers)."

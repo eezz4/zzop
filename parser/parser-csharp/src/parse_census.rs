@@ -26,7 +26,7 @@
 //! sibling. It is the part of this finding a machine can hold, it costs one relaxed atomic add, and it
 //! is what makes the next attempt at the quadratic term legible.
 //!
-//! ## The memo that is NOT here, and why
+//! ## The memo that WAS not here, and why it is back (2026-09-25, review ledger V402)
 //!
 //! The obvious fix was TypeScript's: a one-entry thread-local memo, since a file's extractors run
 //! consecutively. It was built, it worked, and it cut the count **14 → 3** (the residual three being
@@ -52,6 +52,36 @@
 //! COUNT dominates rather than one deep file — many medium C# files, where fourteen full trees per file
 //! is fourteen allocations rather than one — or a machine where peak RSS is measurable, since that is
 //! the axis a memo would actually be defended on. Neither was available here.
+//!
+//! ## 🟢 That condition arrived, and the memo is back (2026-09-25, review ledger V402)
+//!
+//! The population the paragraph above asked for is `corpus/frameworks/aspnetcore`: **10,740 `.cs`
+//! files, 141,358 parses, 13.16 per file** — parse COUNT dominating, not one deep file.
+//!
+//! 📏 ALTERNATING A/B in one window, cold cache each run, two pairs — the shape this file's own
+//! warning demands, because the reading it had to retract came from non-alternating samples:
+//!
+//! | arm | wall | peak RSS |
+//! |---|---|---|
+//! | off | 492.72s | 14,692 MB |
+//! | on  | **471.03s** | 14,717 MB |
+//! | off | 487.39s | 15,018 MB |
+//! | on  | **475.54s** | 15,117 MB |
+//!
+//! Means 490.06s -> 473.29s, **−16.8s (−3.4%)**, and every ON run beat every OFF run — no overlap.
+//! Output bytes identical between arms. Parse time (summed across workers) 201.04s -> 43.96s.
+//!
+//! 🔴 **The memory axis — the one this file says a memo would actually be defended on — shows
+//! NOTHING.** Peak RSS is 14,855 MB off against 14,917 MB on: the memo is 62 MB WORSE on the mean,
+//! inside an off-arm spread of 326 MB. It holds one source string and one tree per worker, so a
+//! small cost there is what one would expect. **This revival is defended on wall clock alone**, and
+//! anyone reading it as a memory win is reading it wrong.
+//!
+//! ⚠ And the honest note on how this came back: it was rebuilt by someone who had NOT found this
+//! file, measured single before/after runs (the artifact shape this file warns about), and was sent
+//! back by `analyze_parse_census`'s pin going red. THE PIN IS WHY THAT WAS CHEAP — a number held by a
+//! test is how a re-derivation announces itself, and the search that missed this file had used the
+//! defect's vocabulary ("parses per file") rather than the remedy's ("parse_census").
 
 use std::sync::atomic::{AtomicU64, Ordering};
 

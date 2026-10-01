@@ -2,8 +2,13 @@
 //!
 //! Why this file exists at all. `collect_git` runs per TREE, and in a monorepo every tree resolves to
 //! the same `.git`; `zzop_git` does no path or branch scoping, so those calls all spawn the same
-//! `git log --numstat` and get byte-identical output back. Measured 2026-08-07 on a 22-tree monorepo,
-//! that repetition was **90.9%** of the warm wall clock — and CI has no perf job, so nobody could say
+//! `git log --numstat` and get byte-identical output back. On a 22-tree monorepo (2026-08-07) that
+//! repetition was **90.9%** of the warm wall clock — DERIVED, not A/B'd: one collection was timed at
+//! ~1.66s and multiplied by the 22 trees (the sibling `git_collect/cache.rs` shows that arithmetic).
+//! This file said "Measured" until 2026-09-26 while `performance.md` called the same figure a
+//! PREDICTION, and the doc's label was the honest one (review ledger V401). The prediction was then
+//! borne out by a real A/B on a different corpus — 17 trees, 60.0s -> 5.1s, **91.5%** — which is the
+//! number to quote when an A/B is what someone needs — and CI has no perf job, so nobody could say
 //! when the regression arrived. `zzop_engine::analyze_trees` now shares one memo across the run; this
 //! is the gate that keeps it shared.
 //!

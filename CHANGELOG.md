@@ -36,16 +36,41 @@ Work on `main` past the top row below, so an id or a file named here may not be 
 be installable while the table below still ends at its predecessor, and an installed `zzop version`
 reading higher than the top row is the documented state rather than a gap in this file.
 
-Nothing on the compatibility surface moved since `v0.35.0`. That release reached npm, the GitHub
-release and the plugin manifests but was rejected by the MCP registry with a `422` on its
-`description` field, which exceeded a length the registry's schema declares and nothing local read.
-`server.json`'s description is shorter and a guard now reads that schema instead of trusting it —
-neither is a change to anything `VERSIONING.md` covers, so no row is owed here.
+Nothing on the compatibility surface broke since `v0.36.0`. That was **measured rather than
+assumed**, and each surface below carries what it was measured with — so a reader who doubts the
+sentence can re-run the check rather than take it.
+
+- **CLI JSON output.** `node scripts/measure/wire-key-census.mjs` was run against a `v0.36.0`
+  binary (built from `git archive v0.36.0`) and against this tree **with the same script**, so a
+  change in the instrument could not read as a change in the surface: **505 key paths then, 508 now —
+  3 added, 0 removed.** The three are `architecture.criticalTopNotShown`,
+  `findings.shown[].data.params.type` and `gitWindow.commits`. All additive; the second is a key
+  inside `findings[].data`, which the section below declares unpromised.
+- **Rule ids.** `bash scripts/check-rule-id-renames-recorded.sh`, which diffs the catalog against the
+  newest tag read off the REMOTE: **178 ids, none retired since `v0.36.0`.**
+- **CLI flags & config keys.** Nothing removed, nothing repurposed. Two entries were ADDED to
+  `crates/config/config-surface.json`'s `mcpToolTokens` — `target` and `sourceId` — and that
+  is a repair to the PUBLISHED vocabulary, not a change to what zzop accepts: both are
+  `tools/call` argument names the file's own contract claimed to enumerate and did not, and
+  `target` is `check_file`'s only required argument.
+- **CLI exit codes `0`/`1`/`2`.** Unchanged in meaning. What changed: a write to a closed stdout
+  (`zzop contract <doc> | head`) now exits `0` instead of panicking, and any other write failure
+  exits `1` with one line on stderr. That **narrows what earns a failure** without moving what a code
+  means, which is the recorded-not-breaking side of the line the section below draws.
+- **Normalized AST envelope.** `docs/NORMALIZED_AST.md` is untouched in this window
+  (`git diff v0.36.0..HEAD -- docs/NORMALIZED_AST.md` is empty), so neither the shape nor its
+  `version` moved.
+
+The window's own work was corrections rather than new surface: ASP.NET convention-routed actions
+stopped being keyed at `/` and now say so in the reply, the DSL attribute gate stopped filtering packs
+with the narrower predicate, the shipped demo's first refusal carries a runnable remedy, and
+`git log` no longer forks `gpg.program` once per signed commit.
 
 ## Released
 
 | Version | Date | Commit | What the release said it was |
 |---|---|---|---|
+| `v0.36.0` | 2026-09-23 | `6649e8a` | the MCP registry gets the release it refused, and the limit it refused on is now read locally |
 | `v0.35.0` | 2026-09-23 | `a1ac023` | fix(guards): the rule-id rename guard reads its baseline, and reads the whole id |
 | `v0.34.0` | 2026-08-31 | `4c504978` | the reply stops repeating itself, and the rules start saying what your fix costs |
 | `v0.33.0` | 2026-08-15 | `73951a2` | fix(site): x-showcase row filter so site-render-check passes |

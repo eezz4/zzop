@@ -123,7 +123,11 @@ pub(crate) const TOP_RECOMMENDATION_MEANING: &str =
 /// would conclude the run narrowed nothing, and the next edit to either half could make the
 /// sentence false without anyone noticing it had been load-bearing.
 pub(crate) const CRITICAL_TOP_MEANING: &str =
-    "Up to 3 paths from the SIZE-WEIGHTED critical list (blast_radius * ln(loc+2)). The \
+    "Up to 3 paths from the SIZE-WEIGHTED critical list (blast_radius * ln(loc+2)); \
+     `criticalTopNotShown` beside it counts every ranked file these three leave out, so the \
+     length of this list never stands in for the size of the ranking. That count composes TWO \
+     caps — the producer's own 20-row cut of `critical` and this list's 3 — and is always \
+     present, 0 included. The \
      population is EVERY analyzed file: test files are NOT excluded, so a test module can \
      and does appear here even though nothing depends on it at runtime. Read a slot as \
      \"this file has the widest structural reach in the tree as analyzed\", then check \

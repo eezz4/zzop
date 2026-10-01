@@ -222,7 +222,7 @@ pub fn build_diagnostics(i: DiagnosticsInput) -> AnalysisDiagnostics {
             if git.commits == 0 {
                 let msg = match &git.since {
                     Some(since) => format!(
-                        "0 commits in the analyzed window — the history is likely entirely older than the configured `git.since: \"{}\"` window. Widen or remove `since` in zzop.config.jsonc (omitting `since` entirely analyzes full history). Churn, FIX, lifecycle, coupling, bug-prone are all empty until the window includes real history.",
+                        "0 commits in the analyzed window — the history is likely entirely older than the configured `git.since: \"{}\"` window. Widen or remove `since` in zzop.config.jsonc (omitting `since` entirely analyzes full history). Widening is not free: the walk is one `git log --numstat` over every selected commit, and on a repository with tens of thousands of commits it dominates the run — measured on a 16,485-commit repo, 548s for that single command against 13s for all of the analysis. Widen deliberately. Churn, FIX, lifecycle, coupling, bug-prone are all empty until the window includes real history.",
                         since
                     ),
                     None => "0 commits touch these files even over the full history (`git.since` was already omitted) — widening the window further will NOT help. Most likely a git submodule (the parent repo records only the submodule's SHA, not its file history — point a `roots` entry / `trees[].root` at the submodule checkout so it is analyzed as its own tree), or brand-new/untracked files. Churn, FIX, lifecycle, coupling, bug-prone stay empty.".to_string(),
@@ -239,8 +239,16 @@ pub fn build_diagnostics(i: DiagnosticsInput) -> AnalysisDiagnostics {
             // squashed repo) gives every file the same changeCount, so churn carries no information. Risk/lifecycle
             // rank by size alone and the hotspot signal collapses to pure LOC -- warn so the consumer fetches full
             // history before trusting them.
+            //
+            // 🔴 And say what the advice costs, because there is no mirror branch (2026-09-24, review ledger V294).
+            // This arm fires on a thin history and points at full history; nothing fires on a HUGE one, so the only
+            // guidance this module gives about the git window pushes in the expensive direction, silently. Measured:
+            // `git log --no-merges --reverse --numstat` over a 16,485-commit repo took 548s on its own, against 13s
+            // for the whole rest of that analysis -- the walk was 97% of the run. The dogfood corpus cannot see this
+            // at all because every tree in it is a `--depth 1` clone, which is the same reason this arm fires on
+            // every corpus run and nobody read it as a statement about our own timings.
             warnings.push(format!(
-                "only {} commit(s) in the analyzed window across {} files — this is a genuinely thin history, not necessarily a tool problem. Causes: a shallow clone (`git clone --depth=1` → fix with `git fetch --unshallow`), a freshly squashed or young repo (nothing to fix — the repo simply has few commits), or a `git.since` window (in zzop.config.jsonc) narrower than the history — widen it, or omit `since` entirely for full history. With so little history, churn-based signals (hotspot, lifecycle, bug-prone, silent-criticality) rank by size alone.",
+                "only {} commit(s) in the analyzed window across {} files — this is a genuinely thin history, not necessarily a tool problem. Causes: a shallow clone (`git clone --depth=1` → fix with `git fetch --unshallow`), a freshly squashed or young repo (nothing to fix — the repo simply has few commits), or a `git.since` window (in zzop.config.jsonc) narrower than the history — widen it, or omit `since` entirely for full history. Widening is not free: the walk is one `git log --numstat` over every selected commit, and on a repository with tens of thousands of commits it dominates the run — measured on a 16,485-commit repo, 548s for that single command against 13s for all of the analysis. Widen deliberately. With so little history, churn-based signals (hotspot, lifecycle, bug-prone, silent-criticality) rank by size alone.",
                 git.commits, i.files
             ));
         }

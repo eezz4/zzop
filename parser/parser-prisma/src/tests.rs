@@ -296,3 +296,40 @@ fn attribute_arguments_keep_a_nested_call_whole() {
         "fields: [ownerId], references: [id]"
     );
 }
+
+/// A field-level finding must anchor at the FIELD. Before 2026-09-24 (review ledger V312) every schema
+/// issue anchored at the model header, so an auditor following a `stale-updated-at` citation found
+/// `model User {` and had to go looking for the row. The citation opened and showed nothing, which is
+/// worse than one that fails: it reads as evidence.
+///
+/// Three traps ride in one fixture, because each is a way the naive scan goes wrong: an EARLIER model
+/// carrying the same field name (must not win), a longer field with the searched name as its prefix
+/// (`updatedAtUtc` must not win), and the real field after both.
+#[test]
+fn field_decl_line_anchors_at_the_field_not_the_model_header() {
+    let text = "model Other {\n  updatedAt DateTime\n}\n\nmodel User {\n  id        Int      @id\n  updatedAtUtc DateTime\n  updatedAt DateTime @default(now())\n}\n";
+    assert_eq!(crate::model_decl_line(text, "User"), 5, "model header line");
+    assert_eq!(
+        crate::field_decl_line(text, "User", "updatedAt"),
+        8,
+        "the field itself: not the model header (5), not the same-named field in Other (2), not the \
+         prefix match updatedAtUtc (7)"
+    );
+}
+
+/// Failure is toward the MODEL line, never toward line 1 and never into another model's block. A coarse
+/// citation is still usable; one pointing at an unrelated declaration is worse than coarse.
+#[test]
+fn field_decl_line_falls_back_to_the_model_line_when_the_field_is_absent() {
+    let text = "model Other {\n  updatedAt DateTime\n}\n\nmodel User {\n  id        Int      @id\n  updatedAtUtc DateTime\n  updatedAt DateTime @default(now())\n}\n";
+    assert_eq!(
+        crate::field_decl_line(text, "User", "noSuchField"),
+        5,
+        "unplaceable field falls back to the model header, not to line 1 and not into Other"
+    );
+    assert_eq!(
+        crate::field_decl_line(text, "NoSuchModel", "updatedAt"),
+        1,
+        "no model at all keeps model_decl_line own fallback"
+    );
+}

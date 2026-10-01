@@ -17,7 +17,24 @@
 //! | TS     `let q = 1 + 1 + …`               | 5,000  | 127  |
 //! | JS     `"x" + "x" + …` (30,000 terms)    | 180 KB | 127  |
 //!
-//! Exit 127, empty stdout, and stderr carrying only `thread '<unknown>' has overflowed its stack`. No
+//! 🔴 THE EXIT CODE IN THAT COLUMN IS NOT PORTABLE, and the table did not say so until 2026-09-27
+//! (review ledger V446, Fable round 34). Every row was measured on 2026-09-07 — three days BEFORE
+//! this repo moved to macOS — on the Windows/Git-Bash machine it used until then. A stack overflow
+//! aborts the process, and what the caller then observes is decided by the OS and the shell, not by
+//! this code: a POSIX shell reports a signal death as 128+N, and Windows surfaces
+//! `STATUS_STACK_OVERFLOW` (0xC00000FD). None of the eight rows has been re-measured here.
+//!
+//! ⚠ This matters beyond tidiness because gate P1 proposes a 3-OS smoke that runs a deep input and
+//! READS THE EXIT CODE. Pointed at 127, that smoke goes red on Windows by design, for a reason
+//! nobody decided — and the cheap repair for that red is to loosen the check to `!= 0`, which also
+//! passes a run the CI runner killed for hanging. Decide the accepted code PER OS before it lands.
+//!
+//! What is portable, and what the tests actually assert, is the SHAPE: the process dies, stdout is
+//! empty, and stderr carries only the overflow line. `crates/engine/tests/deep_input_survival.rs`
+//! pins `status.success()` and the JSON, never the number — that was the right call and it is why
+//! no test had to change here.
+//!
+//! Empty stdout, and stderr carrying only `thread '<unknown>' has overflowed its stack`. No
 //! JSON, no warning naming the file, no partial answer for the other 1,950 files in the tree. Through
 //! `zzop-mcp` it is worse: the `tools/call` never returns and the server disappears from the client.
 //!

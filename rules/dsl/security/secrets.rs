@@ -530,6 +530,55 @@ fn a_concatenated_sql_password_clause_is_silent_and_the_jdbc_arm_still_fires() {
 
 // --- config-file-secret ---
 
+/// An OpenAPI `examples` block is documentation, and its wrapper key does not have to sit on the same
+/// line as the sample. The line-level carve-out reads the assignment's own line, so it never saw the
+/// `"Example 1"` one line up and a demo JWT fired — measured on nocodb `3a5cbd5`
+/// (`packages/nocodb/src/schema/swagger-v2.json:478`, whose `exp` expired 2023-03-06), found by an
+/// uncontaminated first-screen audit (review ledger V311).
+///
+/// The veto is the OpenAPI key exactly as JSON spells it (`\"examples\"`, quotes included) — the part the
+/// specification fixes. It reads the still-open `{`/`[` OPENER LINES above the hit, which is why it
+/// reaches this shape and why YAML is out of reach: block style opens no bracket and its keys are bare.
+///
+/// 🔴 The canary is the second file: the SAME token under a key that is not `examples`, in the same
+/// bracket shape. If the veto ever widened past the `examples` spelling — reading the block's content
+/// rather than its opener — this file would go quiet and a real committed credential with it.
+#[test]
+fn a_secret_inside_a_bracketed_examples_block_is_vetoed_and_one_outside_it_still_fires() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "docs/openapi.json",
+        "{\n\
+        \x20 \"examples\": {\n\
+        \x20   \"Example 1\": {\n\
+        \x20     \"token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9demo\"\n\
+        \x20   }\n\
+        \x20 }\n\
+        }\n",
+    );
+    dir.write(
+        "docs/real.json",
+        "{\n\
+        \x20 \"auth\": {\n\
+        \x20   \"Primary\": {\n\
+        \x20     \"token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9demo\"\n\
+        \x20   }\n\
+        \x20 }\n\
+        }\n",
+    );
+    let out = scan(&dir);
+    let files: Vec<&str> = hits(&out, "config-file-secret")
+        .iter()
+        .map(|f| f.file.as_str())
+        .collect();
+    assert_eq!(
+        files,
+        vec!["docs/real.json"],
+        "the sample under `examples` must be vetoed and the identical token under `auth` must still \
+         fire — the veto reads the OPENER, not the content: {:?}",
+        out.findings
+    );
+}
 #[test]
 fn high_entropy_secret_in_a_properties_file_is_flagged() {
     let dir = TempDir::new("zzop-be-sec");

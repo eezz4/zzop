@@ -185,10 +185,9 @@ fn main() {
                 reject_flag_like_args([name.as_str()], "usage: zzop contract [<name>]");
                 match zzop_summary::contracts::find(name) {
                     Some(doc) => {
-                        use std::io::Write;
-                        std::io::stdout()
-                            .write_all(zzop_summary::contracts::served_content(doc).as_bytes())
-                            .expect("write contract document to stdout");
+                        // Through the shared writer, not `write_all(...).expect(...)`: this document
+                        // is 212 KB and `| head` is its first honest use (review ledger V407).
+                        cli::emit(zzop_summary::contracts::served_content(doc).trim_end());
                     }
                     None => {
                         // An unknown NAME is a runtime lookup failure (exit 1, like an unknown

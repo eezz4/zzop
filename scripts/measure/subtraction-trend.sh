@@ -23,7 +23,17 @@
 #
 # Usage:  bash scripts/measure/subtraction-trend.sh [<git range>]     (default: origin/main..HEAD)
 set -euo pipefail
-cd /Users/eezz/Documents/project/zzop
+# The repository this invocation is in, NOT a machine path (2026-09-24, review ledger V326). This line
+# used to `cd` to one developer's absolute home directory, and was the only tracked file that did.
+# Two things made that worse than a portability wart: it is wrong from a WORKTREE — the script would
+# silently measure main while you read its output as a number about your branch — and
+# `check-guards-wired.sh` deliberately does not wire this script (its HAND_RUN_TOOLS entry says why),
+# so nothing in the fleet ever executed the line to find out.
+#
+# The path is not spelled anywhere above ON PURPOSE: the recount for this defect is
+# `git grep -l "$HOME" -- .` returning nothing, and writing the old value into the fix would leave
+# that check permanently red on its own explanation.
+cd "$(git rev-parse --show-toplevel)"
 RANGE="${1:-origin/main..HEAD}"
 commits=$(git rev-list --count "$RANGE")
 git log "$RANGE" --numstat --format='%x00' | awk -v commits="$commits" '

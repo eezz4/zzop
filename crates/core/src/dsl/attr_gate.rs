@@ -55,7 +55,7 @@ use std::collections::BTreeMap;
 
 use crate::attributes::{attr_is_truthy, AttributeStore};
 use crate::finding::Finding;
-use crate::registry::is_enabled;
+use crate::registry::{is_enabled, is_pack_enabled};
 use crate::RuleConfig;
 
 use super::def::{Matcher, RulePackDef};
@@ -121,7 +121,7 @@ struct GatedRule<'a> {
 /// whose `rule_id` matches a gated rule are ever touched, and the relative order of everything else is
 /// preserved (`Vec::retain`), so this is a no-op for a config where no loaded rule declares a gate.
 ///
-/// Rule ENABLEMENT is honored the same way the io-scan pass honors it (`is_enabled` at the pack id, then
+/// Rule ENABLEMENT is honored the same way the io-scan pass honors it (`is_pack_enabled` at the pack id, then
 /// at the `"{pack}/{rule}"` id): a disabled rule produced no findings to filter, and — more importantly —
 /// must not emit a disclosure about not having run. It was turned off on purpose.
 pub fn apply_attr_gates(
@@ -132,7 +132,20 @@ pub fn apply_attr_gates(
 ) -> Vec<String> {
     let gated: Vec<GatedRule> = packs
         .iter()
-        .filter(|pack| is_enabled(rule_config, &pack.id))
+        // `is_pack_enabled`, not `is_enabled`: the former adds the `packs.only` allowlist, and its
+        // own doc says why the two must stay apart. This line called the narrower one until
+        // 2026-09-28, so a `packs.only` that excluded a pack would not have stopped that pack's
+        // attribute-gated rules -- the user turns a pack off and it keeps judging, silently.
+        //
+        // 🔴 NO SHIPPED RULE COULD REACH THAT, and the count is the point rather than a footnote:
+        // `attr_gates` above returns `None` for `IoScan`, and the only rule in the shipped DSL
+        // declaring `attr_present`/`attr_absent`/`require_attr_declared` is `http/
+        // protected-path-no-auth-evidence`, which IS an io-scan. So this filter runs over an
+        // empty set today and the defect had zero observable effect. It is fixed anyway, because
+        // the first line-scan or call-scan rule to declare an attribute gate would have inherited
+        // a silent one, and nothing would have failed to say so.
+        // Recount: rules/dsl for those three field names, then check each hit's matcher `type`.
+        .filter(|pack| is_pack_enabled(rule_config, &pack.id))
         .flat_map(|pack| {
             pack.rules.iter().filter_map(move |rule| {
                 let gates = attr_gates(&rule.matcher)?;

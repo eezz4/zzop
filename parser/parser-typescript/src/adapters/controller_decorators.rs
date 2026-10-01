@@ -16,7 +16,7 @@
 //! - A `@Controller({ ... })` prefix that is present but not a string literal skips the WHOLE
 //!   controller — more conservative than Java's "default to empty prefix" fallback, since treating
 //!   an unresolvable prefix as empty would mis-join every route under a wrong path (this repo's
-//!   "never guess" IO convention — see `egress.rs`'s `resolve_url`). **Exception
+//!   "never guess" IO convention — see `egress/url_resolve.rs`'s `resolve_url_variants`). **Exception
 //!   (`controller-prefix-ref-v1`):** when the class-level prefix arg itself is exactly a two-segment
 //!   member expression (`RouteKey.Asset`) — the dotted shape `egress::const_map_fragment` keys its
 //!   constant-map entries by — the controller is no longer skipped outright: this DEFERS resolution

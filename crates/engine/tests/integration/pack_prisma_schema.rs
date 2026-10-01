@@ -76,7 +76,10 @@ fn invoice_model_fires_fk_no_index_float_money_and_stale_updated_at() {
     let fk = schema_hits(&out, "fk-no-index");
     assert_eq!(fk.len(), 1, "{:?}", out.findings);
     assert_eq!(fk[0].file, "prisma/schema.prisma");
-    assert_eq!(fk[0].line, 1); // `model Invoice {` declaration line
+    // 🔴 The FIELD, not the model header (2026-09-24, review ledger V312). `customerId` is line 3 of
+    // INVOICE_SCHEMA; this used to assert 1, which opened on `model Invoice {` and showed a reader
+    // nothing about the missing index. A field-level issue now anchors through `field_decl_line`.
+    assert_eq!(fk[0].line, 3); // `  customerId String`
 
     assert_eq!(
         schema_hits(&out, "float-money").len(),
@@ -301,7 +304,9 @@ fn referenced_model_skips_dead_model_but_flags_unused_field() {
         Some("nickname")
     );
     assert_eq!(dead_fields[0].file, "prisma/schema.prisma");
-    assert_eq!(dead_fields[0].line, 1); // anchors on the model declaration, same as structural rules
+    // 🔴 Was 1 with the comment "anchors on the model declaration, same as structural rules" — that
+    // sameness is exactly what review ledger V312 removed. `nickname` is line 4 of this fixture.
+    assert_eq!(dead_fields[0].line, 4); // `  nickname String`
 }
 
 // --- per-issue rule ids (the 12 `schema/<label>` ids are registered analyses, not bare labels) ---

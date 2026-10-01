@@ -253,3 +253,72 @@ fn mixed_tree_counts_capture_less_over_http_total_disjoint_from_the_sentinel() {
         "{capture}"
     );
 }
+
+/// V388 — a ref that RESOLVES against the merge but reads as nothing.
+///
+/// Before 2026-09-25 this arm copied the empty field list onto the provide, producing a `response`
+/// object no downstream consumer can tell apart from an adapter-resolved one — and the capture-less
+/// disclosure, which is read AT ENTRY, had already excluded it. MEASURED on immich the day this
+/// landed: 156 of 303 provides were in exactly this state and NONE carried fields, while the tree's
+/// three warnings accounted for precisely the other 147.
+#[test]
+fn a_ref_that_resolves_to_no_readable_field_is_stripped_and_disclosed_on_its_own_terms() {
+    let mut provides = vec![with_ref("src/a.controller.ts", 12, "ZodDto")];
+    // `extends createZodDto(...)` is the shape this models: the class is declared, so the merge
+    // finds it, and nothing about its members is readable — `complete: false` is that statement.
+    let merge = merge_of(&[("src/dto.ts", vec![shape("ZodDto", &[], false)])]);
+    let mut warnings = Vec::new();
+    resolve_provide_response_refs(&mut provides, &merge, &mut warnings);
+
+    assert!(
+        provides[0].response.is_none(),
+        "a shape that resolves to nothing must not reach rules, the join or JSON: {:?}",
+        provides[0].response
+    );
+    let hit: Vec<&String> = warnings
+        .iter()
+        .filter(|w| w.contains("RESOLVE but read as no fields"))
+        .collect();
+    assert_eq!(
+        hit.len(),
+        1,
+        "expected exactly one aggregated warning, got {warnings:?}"
+    );
+    assert!(
+        hit[0].contains("ZodDto") && hit[0].contains("src/a.controller.ts"),
+        "{}",
+        hit[0]
+    );
+    assert!(
+        !warnings
+            .iter()
+            .any(|w| w.contains("declare no return type")),
+        "this is NOT the no-return-type silence and must not be folded into it: {warnings:?}"
+    );
+}
+
+/// The control, and the reason the boundary is `complete` rather than `fields.is_empty()` alone: a
+/// DTO that genuinely declares no members resolves COMPLETE, and it is a real (empty) response
+/// contract — stripping it would delete a true fact and manufacture a disclosure.
+#[test]
+fn a_field_less_but_complete_dto_still_resolves_and_is_not_disclosed() {
+    let mut provides = vec![with_ref("src/a.controller.ts", 12, "EmptyDto")];
+    let merge = merge_of(&[("src/dto.ts", vec![shape("EmptyDto", &[], true)])]);
+    let mut warnings = Vec::new();
+    resolve_provide_response_refs(&mut provides, &merge, &mut warnings);
+
+    let shape = provides[0]
+        .response
+        .as_ref()
+        .expect("a complete empty DTO keeps its shape");
+    assert!(
+        shape.fields.is_empty() && shape.complete && shape.dto_ref.is_none(),
+        "{shape:?}"
+    );
+    assert!(
+        !warnings
+            .iter()
+            .any(|w| w.contains("RESOLVE but read as no fields")),
+        "a complete field-less DTO is not the blind case: {warnings:?}"
+    );
+}

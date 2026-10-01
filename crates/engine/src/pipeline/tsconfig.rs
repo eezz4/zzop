@@ -6,13 +6,8 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
-use std::sync::OnceLock;
 
-use regex::Regex;
-
-use super::manifest::{
-    is_tsconfig_json_path, join_and_normalize, package_json_dir, strip_jsonc_comments,
-};
+use super::manifest::{is_tsconfig_json_path, join_and_normalize, package_json_dir};
 
 mod emission;
 #[cfg(test)]
@@ -24,12 +19,13 @@ pub(crate) use emission::tsconfig_preserves_type_imports;
 /// written with in practice (comments, trailing commas). `None` on any parse failure — every caller
 /// degrades by skipping the file rather than guessing at its contents.
 fn parse_jsonc(text: &str) -> Option<serde_json::Value> {
-    static TRAILING_COMMA: OnceLock<Regex> = OnceLock::new();
-    let stripped = strip_jsonc_comments(text);
-    let cleaned = TRAILING_COMMA
-        .get_or_init(|| Regex::new(r",(\s*[}\]])").unwrap())
-        .replace_all(&stripped, "$1");
-    serde_json::from_str(&cleaned).ok()
+    // ONE stripper, in `zzop-core` (2026-09-26, review ledger V411). This lane used to carry its own
+    // comment scan plus a trailing-comma regex `,(\s*[}\]])`, and that regex did not know about
+    // strings: `{"a": "x, }"}` came out as `{"a": "x }"}`. The other implementation already had a
+    // passing test pinning that exact input as unchanged, and nothing in the repository fed one input
+    // to both, so the disagreement was invisible. The shared version is string-aware in both passes
+    // and re-pushes block-comment newlines, so `serde_json` error lines survive too.
+    serde_json::from_str(&zzop_core::jsonc::strip_json_comments(text)).ok()
 }
 
 /// One tsconfig file's own (unmerged, un-`extends`-resolved) `compilerOptions.baseUrl`/`paths` plus the

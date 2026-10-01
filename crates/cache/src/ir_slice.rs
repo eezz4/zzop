@@ -222,7 +222,7 @@ pub struct FileIrSlice {
     /// This file's contribution to the whole-tree call graph (`zzop_core::callgraph::CallGraphFacts`).
     ///
     /// The reason it is CACHED and not recomputed is the whole point of the field: the call-graph pass
-    /// used to re-read and re-parse every dispatched source, which was 68% of a warm run on this
+    /// used to re-read and re-parse every dispatched source. That work sat inside a pass measured at 68% of a warm run on this
     /// repository and a second full swc parse per `.ts` file (review ledger V108). Extraction now
     /// happens once, in the per-file lane where the parse already happened, and lands here — so a warm
     /// file pays neither the read nor the parse. TypeScript-only today, the same per-fact unevenness

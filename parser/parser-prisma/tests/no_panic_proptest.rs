@@ -27,6 +27,10 @@ fn hammer(rel: &str, text: &str) {
     }
     // A name that is NOT in the schema, and one drawn from the raw input, are separate paths.
     let _ = zzop_parser_prisma::model_decl_line(text, "NoSuchModel");
+    // The field-level twin, added with it (review ledger V312) — same three shapes: a real name, a
+    // name that is not there, and the whole text as a name.
+    let _ = zzop_parser_prisma::field_decl_line(text, "NoSuchModel", "x");
+    let _ = zzop_parser_prisma::field_decl_line(text, text, text);
     let _ = zzop_parser_prisma::model_decl_line(text, text);
 }
 

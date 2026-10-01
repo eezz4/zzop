@@ -110,6 +110,26 @@ pub struct LineScan {
     /// Tested against the same masked text as every other line regex when `strip_string_literals` is set.
     #[serde(default)]
     pub enclosing_call_exclude_pattern: Option<String>,
+    /// DOWNWARD veto over the MATCHED CALL'S OWN PARENTHESES: a matched line is skipped when the text
+    /// from the matched callee's `(` to the `)` that closes it matches this regex. The mirror of
+    /// `enclosing_call_exclude_pattern`, which looks UP at still-open openers; this one looks DOWN
+    /// into the call the line just matched. A single-line call yields exactly the line, so a rule can
+    /// move a line-level `exclude_pattern` here without losing the single-line case.
+    ///
+    /// Why it exists (2026-09-24, review ledger V311): `reliability/interval-no-clear` already carried
+    /// a `.unref()` veto and it did not fire, because the `setInterval(...)` call it belonged to spans
+    /// eleven lines and the veto was evaluated against ONE. Two findings in nocodb were false for that
+    /// reason alone, and the shape is the formatter's, not the author's — the same argument
+    /// `veto_window` already makes for `weak-crypto`'s `usedforsecurity=False` sitting on the next line.
+    /// `next_line_exclude_pattern` cannot reach eleven lines and must not: its doc explains why a span
+    /// of source is unsafe. A CALL's parentheses are not a span of source — they end where the call ends.
+    ///
+    /// Shares every residual with `veto_window::trigger_call_excluded`, and each one leaves the site
+    /// FIRING: the pattern matching twice on one line (ambiguous anchor), an unplaceable open paren, a
+    /// possible comment leader inside the argument list, and the line cap. A veto that cannot find its
+    /// window declines rather than guesses — absence of evidence must never become evidence of a waiver.
+    #[serde(default)]
+    pub call_window_exclude_pattern: Option<String>,
     /// Structural LINE gate over the projected call-site channel: when set, a line that matched
     /// `line_pattern`/`any` only fires if a `SourceFile::call_sites` entry of exactly this `kind` sits
     /// on that SAME line. The line-scan twin of `MethodScan::require_call_kind`, at line rather than
@@ -214,6 +234,7 @@ impl Default for LineScan {
             prev_line_exclude_pattern: None,
             next_line_exclude_pattern: None,
             enclosing_call_exclude_pattern: None,
+            call_window_exclude_pattern: None,
             line_call_kind: None,
             file_exclude_pattern: None,
             attr_present: None,

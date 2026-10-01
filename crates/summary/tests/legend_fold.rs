@@ -42,6 +42,7 @@ use reply_needle::as_json_body;
 enum Reply {
     Analyze,
     ModuleMap,
+    Coverage,
 }
 
 /// The reply paths the fold covers, spelled as a reader spells them, each beside the reply that
@@ -59,6 +60,12 @@ const FOLDED_KEYS: &[(Reply, &str)] = &[
     // The map reply's whole legend is one key, and its dotted name is `module_map.meaning` in the
     // document while the wire path is the bare `meaning` — see `wire_path`.
     (Reply::ModuleMap, "module_map.meaning"),
+    // The COVERAGE reply joined the fold on 2026-09-26 (review round 31). Until then this key was the
+    // one thing on the wire whose SHAPE depended on which subcommand you ran: a pointer object from
+    // `analyze`, the full five-field legend from `coverage`, same binary and same run. It is listed
+    // here for the reason the enum above exists — a third reply that nothing in this file named would
+    // have passed both directions while shipping the prose on every coverage call.
+    (Reply::Coverage, "nativeAnalysesMeaning"),
 ];
 
 /// A folded key's DOCUMENT name is its reply path prefixed by the reply it belongs to, once more than
@@ -177,12 +184,26 @@ fn map_reply(dir: &std::path::Path) -> (String, serde_json::Value) {
     (out, v)
 }
 
-/// Both shaped replies over ONE fixture tree, in the order [`Reply`] declares them.
+/// The COVERAGE reply over the same fixture — the aggregate-visibility view, which carries its own
+/// copy of `nativeAnalysesMeaning` and therefore its own chance to ship the prose.
+fn coverage_reply(dir: &std::path::Path) -> (String, serde_json::Value) {
+    let out = zzop_summary::coverage_summary(&[dir.display().to_string()], None)
+        .expect("coverage must succeed on a configured tree");
+    let v = serde_json::from_str(&out).expect("a reply is JSON");
+    (out, v)
+}
+
+/// Every shaped reply over ONE fixture tree, in the order [`Reply`] declares them.
 fn both_replies(name: &str) -> Vec<(Reply, String, serde_json::Value)> {
     let dir = git_tree(name);
     let (a_text, a) = reply_of(&dir);
     let (m_text, m) = map_reply(&dir);
-    vec![(Reply::Analyze, a_text, a), (Reply::ModuleMap, m_text, m)]
+    let (c_text, c) = coverage_reply(&dir);
+    vec![
+        (Reply::Analyze, a_text, a),
+        (Reply::ModuleMap, m_text, m),
+        (Reply::Coverage, c_text, c),
+    ]
 }
 
 fn document() -> &'static str {
@@ -246,6 +267,9 @@ fn the_shaped_replies_carry_no_legend_prose() {
         let present = match which {
             Reply::Analyze => v["findings"]["byRuleMeaning"].as_str(),
             Reply::ModuleMap => v["meaning"].as_str(),
+            // This lane's only folded key is an OBJECT, so its canary is the pointer's own `note` —
+            // the half that stays on the wire and therefore the half whose encoding this can test.
+            Reply::Coverage => v["nativeAnalysesMeaning"]["note"].as_str(),
         }
         .expect("every shaped reply carries at least one folded legend as a string");
         assert!(

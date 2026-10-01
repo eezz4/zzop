@@ -40,6 +40,34 @@ fn fetch_inside_for_of_loop_is_flagged() {
     assert!(snippet(&f[0]).contains("fetch"));
 }
 
+/// A call inside `await Promise.all(xs.map(async ...))` is THIS RULE'S OWN PRESCRIPTION, and it used to
+/// be reported as the defect. `trigger_in_loop` counts an array-iteration callback body as a loop, which
+/// is right — it is one — so the only place the concurrency is visible is the ENCLOSING expression, never
+/// on the call's line nor inside its parentheses. Two of cal.com's four api-in-loop findings were this
+/// shape, judged false by an uncontaminated auditor (review ledger V309).
+#[test]
+fn a_call_inside_an_awaited_bounded_promise_all_is_vetoed() {
+    let f = scan("svc.ts", "declare function fetch(u: string): Promise<any>;\nexport async function good(links: string[]) {\n  await Promise.all(\n    links.map(async (l) => {\n      await fetch(l);\n    }),\n  );\n}\n");
+    assert!(
+        f.is_empty(),
+        "an awaited bounded Promise.all is this rule's own remedy, not a defect: {f:?}"
+    );
+}
+
+/// 🔴 The canary for the veto above: the identical `.map(async ...)` whose `Promise.all` is NOT awaited,
+/// which really does leave the calls unconsumed. The veto requires the opener's own
+/// `await`/`return`/`yield` precisely so this keeps firing — a veto reading the CALLEE instead of the
+/// consumption would hide it, and that is the failure the line-scan original was written against.
+#[test]
+fn an_unawaited_promise_all_around_the_same_map_still_fires() {
+    let f = scan("svc.ts", "declare function fetch(u: string): Promise<any>;\nexport async function bad(links: string[]) {\n  Promise.all(\n    links.map(async (l) => {\n      await fetch(l);\n    }),\n  );\n}\n");
+    assert_eq!(
+        f.len(),
+        1,
+        "an UNawaited Promise.all consumes nothing, so the calls stay unbounded: {f:?}"
+    );
+}
+
 #[test]
 fn axios_get_inside_traditional_for_loop_is_flagged() {
     let f = scan(
@@ -211,14 +239,21 @@ fn fetch_in_a_for_of_retry_loop_mentioning_backoff_is_not_flagged() {
 // --- structural span-based containment: trigger_in_loop (rewritten from text co-occurrence) ---
 
 #[test]
-fn fetch_inside_promise_all_map_callback_is_flagged() {
+fn fetch_inside_a_multiline_map_callback_is_flagged() {
     // MULTILINE callback on purpose: a single-line `ids.map(async (id) => fetch(url(id)))` gets NO
     // loop span anymore (single-line callback spans prove nothing line-granularly — see the boundary
     // test at the bottom of this file), so the per-iteration claim is only made where the callback
     // body has lines of its own.
+    //
+    // 🔴 2026-09-24, review ledger V309: the scaffold changed and the SUBJECT did not. This fixture used
+    // to wrap the `.map` in `await Promise.all(...)`, which is incidental here — the thing under test is
+    // span granularity, not what consumes the promises — and that wrapper is now vetoed, because it is
+    // this rule's own prescription. Keeping the old fixture would have made this test assert that the
+    // remedy is the defect. The `.map` stands alone instead, so the test still measures exactly what its
+    // comment says it measures.
     let f = scan(
         "svc.ts",
-        "declare const ids: string[];\ndeclare function url(id: string): string;\nexport async function f() {\n  await Promise.all(ids.map(async (id) => {\n    return fetch(url(id));\n  }));\n}\n",
+        "declare const ids: string[];\ndeclare function url(id: string): string;\nexport function f() {\n  const ps = ids.map(async (id) => {\n    return fetch(url(id));\n  });\n  void ps;\n}\n",
     );
     assert_eq!(f.len(), 1, "{f:?}");
     assert_eq!(f[0].line, 5);

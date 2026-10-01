@@ -12,8 +12,10 @@
 //!
 //! Both facts are whole-project, not per-file — this module is a standalone whole-corpus pass callers
 //! run explicitly, never folded into the per-file pipeline. Live callers:
-//! `zzop_engine::analyze::native_rules::java_provides::run_java_provides_project_pass` and the engine's
-//! `java_provides_project` example.
+//! `zzop_engine::analyze::native_rules::java_provides::run_java_provides_project_pass` -- that is the
+//! only one. An `examples/java_provides_project.rs` was listed here too until 2026-09-27, when it was
+//! deleted for having no caller; this line outlived it by four commits because a `git grep` for the
+//! example's name returns 16 hits for the unrelated symbol above and one for the example.
 //!
 //! ## Two passes, not three
 //! Each class's own `(verb, path)` method routes are computed ONCE, during the single per-file AST

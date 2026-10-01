@@ -60,6 +60,7 @@ GUARDS=(
   check-version-lists-parsers
   check-framework-prose-enumeration
   check-asset-name-prose
+  check-subcommand-reachable
   check-deploy-facts-prose
   check-overclaim-prose
   check-version-relative-prose
@@ -76,6 +77,17 @@ GUARDS=(
   check-ci-job-timeouts
   check-cached-finding-producers
 )
+
+# BEFORE the fleet, because it explains the fleet's failures rather than adding one (review ledger
+# V340). On a shell without GNU userland MOST of the guards below go red -- the exact pair of counts is
+# deliberately not written here, because the one that was went stale the same day (`ls scripts/check-*.sh
+# | wc -l`) -- and NOT ONE of those reds
+# is a fact about this repository — one of them has already produced a wrong answer rather than an
+# error. This refuses to run them at all instead, and names what is missing.
+if ! bash scripts/lib/require-gnu-toolchain.sh; then
+  echo "pre-commit: refusing to run the guards in a shell that cannot run them." >&2
+  exit 1
+fi
 
 for g in "${GUARDS[@]}"; do
   if ! out=$(bash "scripts/$g.sh" 2>&1); then
@@ -94,10 +106,17 @@ echo "pre-commit: ${#GUARDS[@]} guards clean."
 # red for roughly ninety commits starting at 9b89e62 (2026-08-21) and three separate commits each took
 # a piece of it without any of them running it.
 #
-# It runs LAST because it is the expensive one. MEASURED on this machine: the guards above cost 287s
-# on an idle box and 586s while another batch was compiling; the gate adds 171s on top of that against
-# a warm target, and 2-3 min more when the release build is cold. It runs only when the staged set can
-# move a finding, which over the last 96 commits was 65.6% of them.
+# It runs LAST because it is the expensive one. MEASURED 2026-09-24 on this machine (Apple M2 Pro):
+# the 53 guards above cost 28.5s idle -- recount with
+#   time (for g in scripts/check-*.sh; do bash "$g" >/dev/null 2>&1; done)
+# The gate adds 171s on top of that against a warm target, and 2-3 min more when the release build is
+# cold. It runs only when the staged set can move a finding, which over the last 96 commits was 65.6%.
+#
+# 🔴 That 28.5s replaces a 287s that sat here across a MACHINE MOVE (external review round 26 found it).
+# The old number was true of the Windows box this repo left on 2026-09-10; here it is 10x wrong, and it
+# was load-bearing -- "the guards are expensive" is one of the reasons the gate below is conditional
+# rather than unconditional. A measured number that outlives its machine argues for a design on
+# evidence that no longer exists, and nothing in the move swept for numbers whose subject was the box.
 # The script owns the trigger, the announcement and the escape hatch; read its header for what the
 # trigger is blind to (crates/, notably) before quoting a green run as "detection is fine".
 # The README reproduction block is a COPY of numbers only a run knows, and it went stale four times
@@ -108,6 +127,53 @@ echo "pre-commit: ${#GUARDS[@]} guards clean."
 bash scripts/measure/readme-result-block.sh
 
 bash scripts/detection-gate-if-touched.sh
+
+# The POLICY-VALUE census, armed the same way and for a gap the gate above cannot see (2026-09-24,
+# review ledger V352/V371). The detection gate scores FINDINGS; the census in
+# `crates/core/src/dsl/inline_census_tests.rs` scores whether every inline policy value in the packs
+# has a triage record. A commit that changes a value therefore passes the gate and the guards while
+# leaving that test red, and `cargo test --workspace` is the only thing that reads it — which
+# pre-commit deliberately does not run.
+#
+# MEASURED, on me: a commit moving two `file_exclude_pattern` values to a different vocabulary landed
+# with "detection 305/305, 53 guards green" -- both true -- and the census was red for two commits
+# until ci-local found it. The message implied a completeness those two checks do not have.
+#
+# One test, not the workspace: 0.02s against a warm target, and it is the only workspace test whose
+# subject is a rule pack's VALUES. Armed off the index so a commit touching nothing in rules/dsl pays
+# nothing.
+# NEITHER `| grep -q` NOR a here-string, and the two guards that rejected those in turn are the reason
+# this line looks the way it does. `| grep -q` exits early and SIGPIPEs the producer under pipefail,
+# flipping the verdict (check-shell-pipe-sigpipe). A here-string fed by a whole-tree enumeration hangs
+# in a 64 KiB window with no error (check-shell-herestring-scale). Process substitution is the third
+# shape, and it is the one the second guard names in its own message.
+_staged_packs="$(git diff --cached --name-only || true)"
+if grep -qE '^rules/dsl/.*\.json$' < <(printf '%s\n' "$_staged_packs"); then
+  # git runs hooks with a PATH that does not include ~/.cargo/bin on this machine, and without this
+  # the block below prints "the census is RED" over a `cargo: command not found` -- attributing a
+  # PATH fault to the census. Same remedy, same scoping as scripts/detection-gate-if-touched.sh:
+  # prepend the rustup bin dir only if cargo is missing AND that dir has it, so a pinned toolchain
+  # already on PATH keeps winning.
+  if ! command -v cargo > /dev/null 2>&1; then
+    if [ -x "$HOME/.cargo/bin/cargo" ] || [ -x "$HOME/.cargo/bin/cargo.exe" ]; then
+      PATH="$HOME/.cargo/bin:$PATH"
+      export PATH
+    fi
+  fi
+  # Still missing means no toolchain at all, which is not a census verdict either. Say so and stop,
+  # rather than let the red message below name the wrong subject a second way.
+  if ! command -v cargo > /dev/null 2>&1; then
+    echo "pre-commit: a rule pack is staged but cargo is not on PATH, so the policy-value census could NOT be asked." >&2
+    echo "  This is NOT a census verdict. Install the toolchain or put it on PATH, then commit again." >&2
+    exit 1
+  fi
+  if ! out=$(cargo test -p zzop-core --lib dsl_inline_value_census 2>&1); then
+    echo "pre-commit: the DSL inline policy-value census is RED and a rule pack is staged." >&2
+    printf '%s\n' "$out" | tail -20 >&2
+    exit 1
+  fi
+  echo "pre-commit: policy-value census clean (a rule pack is staged, so it was asked)."
+fi
 
 # The other half of that gate's signal, and the half the ninety-commit episode actually turned on.
 # The line above runs the gate when this commit stages a path that can move a finding; it says nothing

@@ -26,7 +26,9 @@
 //! ## Rust joined on the same evidence (2026-09-08, review ledger V111)
 //! Splitting the call-graph pass's own wall clock said the TypeScript loop was never the expensive
 //! part of it. On this repository — 1,395 `.rs` files against 240 TypeScript ones — `rust_guard`
-//! was **4.4-5.8s of a ~7.5s warm run**, re-reading and re-parsing every Rust file with `syn` on
+//! was **4.4-5.8s of the ~7.5s PASS** (the warm run itself was 11.4s — this line said "~7.5s warm
+//! run" until 2026-09-26, which made the share read as 39-51% of the run when it is 59-77% of the
+//! pass; review ledger V401), re-reading and re-parsing every Rust file with `syn` on
 //! every run, warm or cold. Same shape, same remedy, and this time the number was measured before
 //! the edit rather than inferred from it.
 //!

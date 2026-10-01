@@ -65,5 +65,24 @@ pub fn coverage_summary(paths: &[String], config_path: Option<&str>) -> Result<S
     v["vocabularyDeclared"] =
         vocabulary_declared::rows(&loaded.request, &loaded.declared_vocabulary);
     v["vocabularyDeclaredMeaning"] = serde_json::json!(vocabulary_declared::MEANING);
+    // `nativeAnalysesMeaning` folds here for the same reason it folds on `analyze`, and until
+    // 2026-09-26 it did not — which made this key the one thing on the wire whose SHAPE depended on
+    // which subcommand you ran: a pointer object (`{command, note}`) from `analyze`, the full
+    // five-field legend from here, same binary, same run (review round 31). A consumer keying on it
+    // had to branch on the lane, which is exactly the "detect it by the field" contract this repo
+    // states everywhere else.
+    //
+    // Checked before folding, because a pointer whose target is missing is worse than the bytes it
+    // replaced: all five fields of this lane's legend are present in `zzop contract reply-legends`,
+    // the document the pointer names. MEASURED on corpus/audit/nocodb: 3,305 -> ~1,520 B.
+    //
+    // ⏸ The five OTHER invariant `*Meaning` keys on this reply (blindSpot, dispatch,
+    // frameworkRecognizer, unreadExtension, vocabularyDeclared) are NOT folded. Together with this one
+    // they are 13,456 B of a 51,901-byte reply (25.9%), so the remaining 11,674 B is real — but each
+    // needs its own registry entry AND its full text carried into the contract document first. That is
+    // a batch, not a line, and it is a size question rather than the contract inconsistency this is.
+    if v.get("nativeAnalysesMeaning").is_some() {
+        v["nativeAnalysesMeaning"] = crate::output::legends::folded_object("nativeAnalysesMeaning");
+    }
     serde_json::to_string_pretty(&v).map_err(|e| e.to_string())
 }

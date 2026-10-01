@@ -12,7 +12,10 @@ use std::sync::Mutex;
 /// Why it exists. `collect_git` runs once per analyzed TREE, and in a monorepo every tree resolves to
 /// the same `.git`; `zzop_git` does no path or branch scoping, so all of those calls spawn the same
 /// `git log --numstat` and get byte-identical output back. Measured 2026-08-07 on a 22-tree monorepo:
-/// one collection is ~1.66s, and 22 of them accounted for **90.9%** of the warm wall clock.
+/// one collection is ~1.66s, and 22 of them accounted for **90.9%** of the warm wall clock — the
+/// multiplication is the derivation, so 90.9% is a DERIVED figure and not an A/B result. The A/B
+/// exists on another corpus and agrees: 17 trees, 60.0s -> 5.1s (**91.5%**). Both numbers are in
+/// `performance.md`; this line used to say only "Measured" (2026-09-26, review ledger V401).
 ///
 /// Why the key is the REPO ROOT and not the tree root. Keying by tree root would give 22 distinct keys
 /// for one repository — a cache with a 0% hit rate. The root is resolved by `zzop_git::repo_root`, an

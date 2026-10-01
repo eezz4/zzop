@@ -9,8 +9,12 @@
 //!   here holding an id copied out of `zzop contract disclosure-classes` (or an older reply) — which is
 //!   why this lane now prints the class's own summary instead of pointing back at the reply for it;
 //! - `architecture.topRecommendation.id` (and `recommendations[].id` in the facade output view) — a
-//!   `zzop_metrics::roi::RecId`, 7 ids today (recount: the variants of `pub enum RecId` in
-//!   `crates/metrics/src/roi.rs`).
+//!   `zzop_metrics::roi::RecId`, 7 ids today (recount:
+//!   `awk '/^ *RecId \{/,/^ *\}/' crates/metrics/src/roi.rs | grep -oE '^ +[A-Z][A-Za-z]+,'`).
+//!   ⚠ The needle is `RecId {`, not `pub enum RecId`: the enum is declared inside the `rec_ids!`
+//!   macro, so the spelling this line carried until 2026-09-30 matched nothing and the recount
+//!   returned an empty set — a broken measuring stick beside a correct number, which is precisely
+//!   the state the paragraph below says this file exists to prevent.
 //!
 //! ⚠ Both counts were one out until 2026-09-07 (review ledger V92 ⑶) — 17 when there were 18, and 8
 //! when `KnowledgeSilo`'s removal had left 7. Each now carries the command that recounts it, because a

@@ -55,7 +55,6 @@
 
 use std::path::PathBuf;
 
-pub mod jsonc;
 #[cfg(test)]
 mod lib_tests;
 mod load;

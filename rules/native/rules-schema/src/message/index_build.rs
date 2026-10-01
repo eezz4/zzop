@@ -25,6 +25,18 @@
 /// in the EXITs, the same split `landing::DATA_LOSS_LANDING` and `landing::COLUMN_TYPE_CHANGE_LANDING`
 /// already use across three rules and two.
 ///
+/// 🔴 **Scoped to Postgres on 2026-09-24 (review ledger V313).** It was given unconditionally, and an
+/// uncontaminated auditor met it on a schema whose datasource line reads sqlite — in the very file the
+/// rule had just read. The sentence naming the SHARE lock was already scoped; the IMPERATIVE beside it
+/// was not, and SQLite has no CONCURRENTLY for a reader to hand-edit in. The failure is an instruction
+/// that cannot be followed, not the explanation next to it.
+///
+/// ⚠ The STRUCTURAL fix is to KNOW the provider rather than hedge in prose, and it is not done. Priced
+/// here so the next decision need not re-measure: the datasource is projected nowhere today
+/// (grep -rn datasource parser/parser-prisma/src crates/core/src returns nothing), and the join rules
+/// receive &[SchemaModel] with no schema text, so carrying it costs a new textual lookup plus a
+/// signature change through the join-rule API.
+///
 /// **What this sentence deliberately does NOT claim**: that Prisma cannot run `CREATE INDEX CONCURRENTLY`
 /// at all. The rule next door already has an escape hatch resting on a false premise, and arriving first
 /// did not make it true. Measured instead (2026-08-27, `corpus/cal.com/packages/prisma/migrations/`, 595
@@ -52,13 +64,16 @@ pub(super) const INDEX_BUILD_LANDING: &str = "COUNT THE ROWS IN THIS TABLE FIRST
 /// leaves an INVALID index that still costs every write while serving no query. Second, the multiplier is
 /// measured rather than imagined: `20230410234751_add_foreign_key_indexes` puts **61** `CREATE INDEX`
 /// statements in ONE file, which is precisely what acting on a page of these findings at once produces.
-pub(super) const CONCURRENT_INDEX_EXIT: &str = "IF THAT COUNT IS LARGE: do not let the generated migration \
+pub(super) const CONCURRENT_INDEX_EXIT: &str = "IF THAT COUNT IS LARGE, AND YOUR DATASOURCE IS POSTGRES: do not let the generated migration \
      build it. Hand-edit that migration to `CREATE INDEX CONCURRENTLY IF NOT EXISTS \"<name>\" ON \
      \"<Table>\" (\"<column>\")`, which takes no write lock — it cannot run inside a transaction block, so \
      it must be the ONLY statement in its migration file, and a build that fails leaves an INVALID index \
      behind that still slows every write and serves no query until you `DROP` it and redo it. And do not \
      batch them: plain `CREATE INDEX` statements sharing one migration are built one after another before \
-     the deploy returns, so the write-blocked window is their SUM, not the longest of them.";
+     the deploy returns, so the write-blocked window is their SUM, not the longest of them. ON ANY OTHER \
+     DATASOURCE THIS HALF DOES NOT APPLY AND THE INDEX STILL DOES: SQLite has no CONCURRENTLY at all, \
+     and no concurrent writer for it to spare; MySQL and MariaDB build in place, online, without the \
+     keyword. The index is the advice; the lock choreography above is Postgres-specific.";
 
 /// The exit only `fk-no-index` publishes — the one its sibling structurally cannot have, and the reason
 /// this rule does not simply share `orderby-unindexed`'s pair (rule-quality.md §30: a message describes the

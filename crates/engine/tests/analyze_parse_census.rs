@@ -139,16 +139,25 @@ const PARSES_PER_TS_FILE: u64 = 1;
 /// over their own file lists, so their parses are not consecutive with the per-file lane's and a
 /// one-entry memo cannot collapse them.
 ///
-/// 📏 **Fourteen, and that is the number as shipped.** A one-entry memo like TypeScript's takes it to
-/// three (8 files: 112 parses -> 24) and moves the wall clock by NOTHING — alternating A/B, fresh tree,
-/// 4,000-term ternary: 12.26/9.88/10.11s without against 10.40/10.23/10.91s with. So the memo is not in
-/// the tree and this constant pins the real cost rather than an aspiration;
-/// `zzop_parser_csharp::parse_census`'s module doc holds that measurement and the revival condition.
+/// 📏 **Three, and that is the number as shipped.** It was FOURTEEN until 2026-09-25: the per-file
+/// lane then learned to reuse its parse (a one-entry thread-local memo, `parse_tree_memo`), which
+/// collapsed thirteen of the fourteen into one and left the two whole-project passes — hence three.
+/// ⚠ **Read the wall clock separately from the count.** The memo moves the count and does NOT move
+/// the clock: alternating A/B, fresh tree, 4,000-term ternary, 12.26/9.88/10.11s without against
+/// 10.40/10.23/10.91s with; on a 10,740-file tree 490.06s -> 473.29s. So this constant pins the
+/// real cost, and the reason to keep the memo is the count, not a speedup it does not deliver.
+/// `zzop_parser_csharp::parse_census`'s module doc is the ONE owner of both measurements and of the
+/// condition under which the memo would come back out.
 /// ⇒ **A drop here is good news and needs its cause named**; a rise means a new pass or extractor.
 ///
-/// (Fourteen, not the nine entry points the crate exposes, because several parse more than once
-/// internally: `parse_csharp` alone parses as a failure gate and then again per sub-extractor.)
-const PARSES_PER_CSHARP_FILE: u64 = 14;
+/// (Three, not one, for the structural reason above; and the fourteen it replaced was not the nine
+/// entry points the crate exposes, because several parsed more than once internally.)
+// 14 -> 3 on 2026-09-25 (review ledger V402): the per-file lane learned to reuse its parse. The
+// residual three are that lane's ONE plus the two whole-project passes, which run in their own
+// phase over their own file lists and cannot share a one-entry slot. Revived with an alternating
+// A/B on a 10,740-file tree (490.06s -> 473.29s); `zzop_parser_csharp::parse_census`'s header
+// carries the numbers and the reason the memory axis does NOT defend it.
+const PARSES_PER_CSHARP_FILE: u64 = 3;
 
 #[test]
 fn one_analyze_pass_parses_one_ts_file_this_many_times() {

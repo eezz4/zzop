@@ -171,9 +171,12 @@ fn suppress_marker_str(rule: &RuleDef) -> String {
 /// One line per exclusion/veto field the rule's OWN matcher kind actually carries, each with its REAL
 /// value — never a blanket `exclude_pattern: no` across kinds that have no such field but do have others.
 /// The kinds genuinely differ (`zzop_core::dsl::def::matcher`): `LineScan` has `exclude_pattern` +
-/// `prev_line_exclude_pattern` + `next_line_exclude_pattern` + `enclosing_call_exclude_pattern` +
+/// `prev_line_exclude_pattern` + `next_line_exclude_pattern` + `enclosing_call_exclude_pattern`
+/// (UP, at the still-open openers) + `call_window_exclude_pattern` (DOWN, inside the matched call's own
+/// parentheses) +
 /// `file_exclude_pattern` + `require_file_absent`; `MethodScan` has `absent` (its WIDE veto, body
 /// scope) + `trigger_call_exclude_pattern` (its NARROW one, the trigger call's own parentheses) +
+/// `enclosing_call_exclude_pattern` (its UPWARD one, the still-open openers above the trigger) +
 /// `file_exclude_pattern` + `require_file_absent`; `IoScan` has `file_exclude_pattern` +
 /// `anchor_exclude_pattern`; `SymbolScan` has none at all and says so, rather than
 /// printing a `no` that reads as "this kind could carry one and this rule declines to".
@@ -205,6 +208,10 @@ fn exclusion_lines(matcher: &Matcher) -> Vec<String> {
                 "enclosing_call_exclude_pattern",
                 m.enclosing_call_exclude_pattern.as_deref(),
             ),
+            optional_pattern_line(
+                "call_window_exclude_pattern",
+                m.call_window_exclude_pattern.as_deref(),
+            ),
             optional_pattern_line("file_exclude_pattern", m.file_exclude_pattern.as_deref()),
             require_file_absent_line(&m.require_file_absent),
             optional_pattern_line("attr_present", m.attr_present.as_deref()),
@@ -226,6 +233,10 @@ fn exclusion_lines(matcher: &Matcher) -> Vec<String> {
                 optional_pattern_line(
                     "trigger_call_exclude_pattern",
                     m.trigger_call_exclude_pattern.as_deref(),
+                ),
+                optional_pattern_line(
+                    "enclosing_call_exclude_pattern",
+                    m.enclosing_call_exclude_pattern.as_deref(),
                 ),
                 optional_pattern_line("file_exclude_pattern", m.file_exclude_pattern.as_deref()),
                 require_file_absent_line(&m.require_file_absent),

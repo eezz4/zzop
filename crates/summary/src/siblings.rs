@@ -180,6 +180,89 @@ mod tests {
         assert_eq!(sibling_scope_warning(&[fe, be]), None);
     }
 
+    /// The CASE-SENSITIVE arm of `fold`. On such a filesystem `FE` and `fe` are two directories,
+    /// so analyzing one must still disclose the other; folding unconditionally would hide a real
+    /// unanalyzed tree, and this goes red if someone "simplifies" it that way.
+    ///
+    /// 🔴 IT PROBES THE FILESYSTEM INSTEAD OF ASSUMING ONE, because the first version of this test
+    /// assumed and was wrong: macOS ships a case-INSENSITIVE volume by default, so `mkdir("FE")`
+    /// beside `fe` returns the SAME directory and the assertion failed on a correct implementation.
+    /// A skip that says why beats a red that means nothing.
+    ///
+    /// ⚠ DECLARED GAP, stated rather than left for someone to discover: between this skip and the
+    /// `cfg!(windows)` arm being compiled out, `fold` has NO arm that is exercised on a developer
+    /// mac. Linux CI runs the branch below; the Windows arm is exercised by nothing anywhere.
+    #[test]
+    #[cfg(not(windows))]
+    fn on_a_case_sensitive_filesystem_a_case_variant_sibling_is_still_disclosed() {
+        let parent = TempDir::new("zzop-mcp-siblings-case");
+        let fe = parent.mkdir("fe");
+        parent.mkdir("FE");
+        let distinct = std::fs::read_dir(&parent.0)
+            .expect("read parent")
+            .filter_map(Result::ok)
+            .filter(|e| e.path().is_dir())
+            .count();
+        if distinct < 2 {
+            zzop_test_support::skip_notice!(
+                "case-insensitive filesystem: `FE` and `fe` are one directory here, so the \
+                 case-sensitive arm of `fold` cannot be reached"
+            );
+            return;
+        }
+        let warning = sibling_scope_warning(&[fe]).expect("FE is a distinct, unanalyzed directory");
+        assert!(
+            warning.contains("FE"),
+            "case-sensitive fold must keep `FE` and `fe` apart: {warning}"
+        );
+    }
+
+    /// THE WINDOWS ARM OF `fold` HAD NO TEST AT ALL UNTIL 2026-09-27 (review ledger V447,
+    /// Fable round 34), and its absence was the reason gate P5's recommended option bought nothing.
+    ///
+    /// P5 proposes paying for a Windows CI lane to exercise this one branch. Measured before that
+    /// decision: `sibling_scope_warning` had five unconditional tests and none of them varies case,
+    /// plus one `cfg(not(windows))` case test — so a Windows run would have executed `fold` five
+    /// times without ever reaching the property the Windows arm exists for. The lane would have
+    /// proven compilation, which `prebuild.yml` already proves.
+    ///
+    /// This is the mirror of its `cfg(not(windows))` sibling above: there, `FE` beside `fe` are two
+    /// trees and the unanalyzed one must be DISCLOSED; here they are one tree, so analyzing `fe`
+    /// covers `FE` and the warning must stay SILENT. Disclosing it would name the root the caller
+    /// just analyzed as its own unanalyzed sibling, which is the false report the arm prevents.
+    ///
+    /// ⚠ This test does not run on the machine that wrote it (macOS) and does not run in CI today
+    /// (`ci.yml` is entirely ubuntu). It is written so the P5 lane has something to prove the day it
+    /// is bought — stated plainly rather than left for someone to discover that the lane is idle.
+    #[test]
+    #[cfg(windows)]
+    fn on_windows_a_case_variant_of_an_analyzed_root_is_not_disclosed_as_unanalyzed() {
+        let parent = TempDir::new("zzop-mcp-siblings-case-win");
+        let fe = parent.mkdir("fe");
+        // On a case-insensitive filesystem this is the SAME directory as `fe`; the call is kept so
+        // the fixture reads the same as its case-sensitive sibling above.
+        parent.mkdir("FE");
+        let distinct = std::fs::read_dir(&parent.0)
+            .expect("read parent")
+            .filter_map(Result::ok)
+            .filter(|e| e.path().is_dir())
+            .count();
+        if distinct != 1 {
+            zzop_test_support::skip_notice!(
+                "case-SENSITIVE filesystem on Windows: `FE` and `fe` are two directories here, so                  the folding arm this test exists for is not the one that runs"
+            );
+            return;
+        }
+        // Ask about the root spelled the other way: the caller passed `./FE`, the directory on disk
+        // is `fe`, and a byte-exact compare would call the analyzed root an unanalyzed sibling.
+        let shouty = parent.0.join("FE");
+        assert!(
+            sibling_scope_warning(&[shouty]).is_none(),
+            "the Windows fold must treat `FE` and `fe` as the same tree, so an analyzed root is              never disclosed as its own unanalyzed sibling"
+        );
+        let _ = fe;
+    }
+
     #[test]
     fn files_next_to_the_roots_are_not_directories_and_stay_silent() {
         // A zzop.config.jsonc (or any file) sitting in the parent is not a sibling DIRECTORY.

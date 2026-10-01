@@ -109,7 +109,24 @@ pub const FRAMEWORK_RECOGNIZERS_CONTRACT_NAME: &str = "framework-recognizers";
 ///
 /// It is prepended at SERVE time rather than baked, because the alternative is a version string
 /// hand-written into 15 committed files — the rot this repo has a guard against.
+///
+/// ⚠ **15 is the count of COMMITTED FILES, not of served documents** (2026-09-26, review round 31,
+/// which read it as the latter). `zzop contract` serves **18**: 11 embedded from a file, 4 exported
+/// packs, and 3 RENDERED from compiled-in registries — and the last three are the strongest form of
+/// the argument above, because a rendered document has no file for anyone to hand-write a version
+/// into at all.
 pub fn served_content(doc: &ContractDoc) -> std::borrow::Cow<'static, str> {
+    // NON-MARKDOWN DOCUMENTS GET NO STAMP, and the reason is that the stamp is an HTML comment: a
+    // JSON schema or a JSONC template with a comment prepended stops being parseable by the tool that
+    // asked for it, which is worse than an undated document.
+    //
+    // 🔴 Say the cost out loud rather than leave it to be discovered (2026-09-26, review round 31):
+    // **8 of the 18 served documents carry the banner and 6 carry no build coordinate at all** —
+    // `envelope-schema`, `key-normalization-fixture`, `rule-pack-schema`, `config-surface`,
+    // `config-template`, `example-envelope`. The 4 exported packs are the exception among the
+    // unstamped: each carries `"exported_from": {"zzop_version": ...}` INSIDE its own JSON, which is
+    // the shape a stamp has to take here — a field the format already allows, not a comment bolted on.
+    // Giving the other six the same treatment is a per-format decision, not one edit.
     if doc.mime != "text/markdown" {
         return std::borrow::Cow::Borrowed(doc.content);
     }

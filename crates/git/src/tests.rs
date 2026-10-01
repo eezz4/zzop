@@ -476,9 +476,256 @@ fn collect_from_a_subdirectory_is_immune_to_diff_relative_config() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
+/// A BLOBLESS PARTIAL CLONE MUST NOT CAUSE A NETWORK CALL (2026-09-26, 1.0 gate P4).
+///
+/// `git log --numstat` needs blob CONTENT to count lines, and on a `--filter=blob:none` clone git
+/// will happily fetch every missing blob from the promisor remote — silently, for as long as it
+/// takes. This asserts the property that makes that impossible: `spawn_git` sets
+/// `GIT_ALLOW_PROTOCOL=none`, so the transport is unavailable and the fetch cannot start.
+///
+/// WHAT IS ASSERTED IS THE OBJECT STORE, NOT THE EXIT CODE. A collection that failed and a
+/// collection that fetched can both look "fine" from the outside; the only thing that separates
+/// them is whether missing objects are still missing afterwards. So the count is taken before and
+/// after and must not move.
+///
+/// Remove the `.env` line in `process.rs` and this goes red by fetching (verified 2026-09-26: the
+/// same clone goes from 3 missing objects to 0, and the assertion message names that same 3).
+///
+/// This line said 5 until 2026-09-26. Nothing measured 5 -- the fixture plants three blobs, the
+/// invalidation probe reported three, and the commit body says three. A count written into prose
+/// beside an assertion that carries the real one is the cheapest kind of wrong to make and the
+/// hardest to notice, because the test stays green either way.
+/// ⚠ WHAT THIS PROVES IS STRONGER THAN ITS NAME, and the difference matters the day the policy
+/// changes. The promisor here is a `file://` URL, so a pass means NO TRANSPORT RAN AT ALL -- not
+/// that the network specifically was refused. That is the stronger property and the right one to
+/// hold today (a tree whose objects live behind a local mirror would otherwise answer differently
+/// depending on whether the mirror is reachable, which is the determinism floor that closed gate
+/// P4 in the first place). But if `GIT_ALLOW_PROTOCOL` is ever widened to `file`, this test goes
+/// red as a REGRESSION when it is actually reporting a POLICY CHANGE. Read this line first then.
+/// (2026-09-27, review ledger V443.)
+#[test]
+fn a_blobless_clone_is_never_lazy_fetched_during_collection() {
+    use std::process::Command;
+    if Command::new("git").arg("--version").output().is_err() {
+        skip_notice!("git not on PATH");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!(
+        "zzop-git-blobless-{}-{}",
+        std::process::id(),
+        now_ms()
+    ));
+    let src = dir.join("src");
+    let clone = dir.join("clone");
+    std::fs::create_dir_all(&src).expect("create source dir");
+
+    let git = |args: &[&str], cwd: &std::path::Path| {
+        Command::new("git")
+            .args(args)
+            .current_dir(cwd)
+            .output()
+            .unwrap_or_else(|e| panic!("git {args:?}: {e}"))
+    };
+    git(&["init", "-q"], &src);
+    git(&["config", "user.email", "probe@example.com"], &src);
+    git(&["config", "user.name", "probe"], &src);
+    // Without this the local transport refuses to serve a filtered clone at all.
+    git(&["config", "uploadpack.allowFilter", "true"], &src);
+    for i in 0..3 {
+        std::fs::write(
+            src.join(format!("f{i}.txt")),
+            format!(
+                "line {i}
+line {i}
+"
+            ),
+        )
+        .expect("write fixture");
+        git(&["add", "-A"], &src);
+        git(&["commit", "-qm", &format!("commit {i}")], &src);
+    }
+    std::fs::create_dir_all(&clone).expect("create clone parent");
+    let url = format!("file://{}", src.display());
+    // `--no-checkout`: a checkout would fetch the blobs it writes out, leaving nothing missing and
+    // making this test assert nothing. That is how the first draft of a sibling pin passed vacuously.
+    let out = git(
+        &[
+            "clone",
+            "-q",
+            "--filter=blob:none",
+            "--no-checkout",
+            &url,
+            "clone",
+        ],
+        &dir,
+    );
+    if !out.status.success() {
+        skip_notice!("this git cannot make a filtered clone over the local transport");
+        std::fs::remove_dir_all(&dir).ok();
+        return;
+    }
+
+    let missing = |at: &std::path::Path| -> usize {
+        let out = Command::new("git")
+            .args(["rev-list", "--objects", "--all", "--missing=print"])
+            .env("GIT_NO_LAZY_FETCH", "1")
+            .current_dir(at)
+            .output()
+            .expect("rev-list");
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter(|l| l.starts_with('?'))
+            .count()
+    };
+
+    let before = missing(&clone);
+    assert!(
+        before > 0,
+        "FLOOR: the clone has no missing objects, so it cannot test a lazy fetch at all"
+    );
+    let _ = collect(&clone, &CollectOptions::default());
+    let after = missing(&clone);
+    assert_eq!(
+        before,
+        after,
+        "collection fetched {} object(s) from the promisor remote; \
+         `GIT_ALLOW_PROTOCOL=none` is what prevents that",
+        before.saturating_sub(after)
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// The network pin one module over chooses git's TRANSPORT. It does not see the programs git
+/// STARTS, and `log.showSignature` makes `git log` fork `gpg.program` once per signed commit.
+/// Measured 2026-09-27 (review ledger V442): with `GIT_ALLOW_PROTOCOL=none` set the whole time,
+/// a marker standing in for gpg was invoked with `--verify`, exit 0 — from the analyzed repo's
+/// own config, and again from the invoking user's global config. gpg's `auto-key-retrieve` is a
+/// keyserver call, so "this binary does not reach the network" was reachable AROUND the pin.
+///
+/// This asserts the argument that closes it, by the only evidence that cannot be faked: whether
+/// the program ran. Asserting the argv instead would pass against a `-c` git ignores.
+///
+/// ⚠ DECLARED GAP, in the shape P5 names: this is `cfg(unix)` because the marker is a shell
+/// script, so the Windows arm of this property is exercised by nothing. The pinned argument is
+/// not platform-specific, so what goes unproven there is the harness, not the behaviour — but
+/// that is an argument, not a measurement, and it is written here rather than left to be found.
+#[test]
+#[cfg(unix)]
+fn a_signed_commit_never_starts_gpg_even_when_the_tree_asks_for_it() {
+    use std::os::unix::fs::PermissionsExt;
+    use std::process::Command;
+    if Command::new("git").arg("--version").output().is_err() {
+        skip_notice!("git not on PATH");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!(
+        "zzop-git-gpgspawn-{}-{}",
+        std::process::id(),
+        now_ms()
+    ));
+    let repo = dir.join("repo");
+    std::fs::create_dir_all(&repo).expect("create repo dir");
+    let marker = dir.join("gpg-ran");
+    let helper = dir.join("fake-gpg.sh");
+    std::fs::write(
+        &helper,
+        format!("#!/bin/sh\ntouch {}\nexit 0\n", marker.display()),
+    )
+    .expect("write helper");
+    std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o755))
+        .expect("chmod helper");
+
+    let git = |args: &[&str], cwd: &std::path::Path| {
+        Command::new("git")
+            .args(args)
+            .current_dir(cwd)
+            .output()
+            .unwrap_or_else(|e| panic!("git {args:?}: {e}"))
+    };
+    git(&["init", "-q"], &repo);
+    git(&["config", "user.email", "probe@example.com"], &repo);
+    git(&["config", "user.name", "probe"], &repo);
+    git(&["config", "log.showSignature", "true"], &repo);
+    git(
+        &["config", "gpg.program", &helper.display().to_string()],
+        &repo,
+    );
+    std::fs::write(repo.join("a.txt"), "a\n").expect("write fixture");
+    git(&["add", "-A"], &repo);
+    git(&["commit", "-qm", "unsigned base"], &repo);
+
+    // A real signature needs a real key. What this test needs is only that git BELIEVES the
+    // commit is signed, which is the `gpgsig` header — so the object is written by hand.
+    let tree = git(&["rev-parse", "HEAD^{tree}"], &repo);
+    let tree = String::from_utf8_lossy(&tree.stdout).trim().to_string();
+    let who = "probe <probe@example.com> 1700000000 +0000";
+    let obj = format!(
+        "tree {tree}\nauthor {who}\ncommitter {who}\ngpgsig -----BEGIN PGP SIGNATURE-----\n \n NOTAREALSIGNATURE\n -----END PGP SIGNATURE-----\n\nsigned commit\n"
+    );
+    let objfile = dir.join("commit-object");
+    std::fs::write(&objfile, obj).expect("write commit object");
+    let hashed = Command::new("git")
+        .args(["hash-object", "-t", "commit", "-w", "--stdin"])
+        .current_dir(&repo)
+        .stdin(std::fs::File::open(&objfile).expect("open commit object"))
+        .output()
+        .expect("hash-object");
+    let sha = String::from_utf8_lossy(&hashed.stdout).trim().to_string();
+    if sha.is_empty() {
+        skip_notice!("this git would not write a hand-built commit object");
+        std::fs::remove_dir_all(&dir).ok();
+        return;
+    }
+    git(&["update-ref", "HEAD", &sha], &repo);
+
+    // FLOOR: prove the marker CAN fire, or a green here means nothing. This is the same
+    // spawn git makes internally, minus the one argument under test.
+    let control = Command::new("git")
+        .args([
+            "-c",
+            "core.quotepath=false",
+            "log",
+            "--no-merges",
+            "--numstat",
+        ])
+        .current_dir(&repo)
+        .output()
+        .expect("control git log");
+    assert!(
+        control.status.success(),
+        "FLOOR: the control git log failed, so this fixture proves nothing"
+    );
+    assert!(
+        marker.exists(),
+        "FLOOR: gpg did not run even WITHOUT the pinned argument, so this test \
+         cannot tell a fix from a broken fixture"
+    );
+    std::fs::remove_file(&marker).expect("clear marker between arms");
+
+    let _ = collect(&repo, &CollectOptions::default());
+    assert!(
+        !marker.exists(),
+        "collection started gpg: `log.showSignature` in the analyzed tree's config reached \
+         around the network pin. The argument that prevents it is `-c log.showSignature=false` \
+         at the single spawn in process.rs"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
 #[test]
 fn collect_on_a_non_git_directory_returns_a_typed_error() {
-    let dir = std::env::temp_dir().join(format!("zzop-git-not-a-repo-{}", now_ms()));
+    // `{pid}-{ms}`, not `{ms}` — the shape `collect_end_to_end_against_a_real_temp_git_repo`
+    // above and every temp-dir helper in this workspace already use. A clock-only name is unique
+    // within one process and not between two, and this test ASSERTS THE ABSENCE OF A `.git`
+    // ANCESTOR, so a directory another run is holding under the same name is exactly the input
+    // that would make it lie. It went red once, unreproducibly, on 2026-09-25 (review ledger
+    // V418) — this change is NOT a fix for that, because nothing here reproduces it. The
+    // asymmetry is true without the repro, and that is the whole reason it is being changed.
+    let dir = std::env::temp_dir().join(format!(
+        "zzop-git-not-a-repo-{}-{}",
+        std::process::id(),
+        now_ms()
+    ));
     std::fs::create_dir_all(&dir).expect("create plain temp dir");
     let result = collect(&dir, &CollectOptions::default());
     assert!(matches!(result, Err(GitError::NotAGitRepository { .. })));
@@ -487,7 +734,14 @@ fn collect_on_a_non_git_directory_returns_a_typed_error() {
 
 #[test]
 fn collect_on_a_missing_path_returns_a_typed_error_without_panicking() {
-    let dir = std::env::temp_dir().join(format!("zzop-git-missing-{}", now_ms()));
+    // Same `{pid}-{ms}` reason as its neighbour above. This one never creates the directory, so
+    // the failure mode is narrower — but it asserts the path is NOT a git repository, and a
+    // colliding name another process DID create is the one state that makes that false.
+    let dir = std::env::temp_dir().join(format!(
+        "zzop-git-missing-{}-{}",
+        std::process::id(),
+        now_ms()
+    ));
     let result = collect(&dir, &CollectOptions::default());
     assert!(matches!(result, Err(GitError::NotAGitRepository { .. })));
 }

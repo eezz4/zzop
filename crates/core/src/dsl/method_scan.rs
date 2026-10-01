@@ -79,6 +79,15 @@ pub(super) fn eval_method_scan(
     ) else {
         return;
     };
+    // The UPWARD twin — see `MethodScan::enclosing_call_exclude_pattern`. Multiline for the same
+    // reason its line-scan original is: the window is a stack of opener LINES, so an author's line
+    // anchors mean one opener line rather than the whole window.
+    let Some(enclosing_exclude_re) = diag.compile_opt_multiline(
+        "enclosing_call_exclude_pattern",
+        m.enclosing_call_exclude_pattern.as_ref(),
+    ) else {
+        return;
+    };
     // Whether the trigger call anchored on this line has a declared mitigator inside its OWN
     // parentheses. Unset field -> always false, i.e. byte-identical to the pre-field behaviour.
     let call_vetoed = |lines: &[&str], at: usize, scan: &str| -> bool {
@@ -245,6 +254,20 @@ pub(super) fn eval_method_scan(
                         // Same "not a hit at all" semantics as the two gates above it.
                         if pi == trigger_idx && call_vetoed(&lines, start_idx + i, &scan) {
                             continue;
+                        }
+                        // The UPWARD twin — the still-open openers ABOVE the trigger. Same "not a hit
+                        // at all" semantics; a walk that declines comes back as no window, which reads
+                        // as NO suppression and leaves the site firing.
+                        if pi == trigger_idx {
+                            if let Some(re) = &enclosing_exclude_re {
+                                if let Some(window) =
+                                    super::veto_window::enclosing_window(&lines, start_idx + i)
+                                {
+                                    if re.is_match(&window) {
+                                        continue;
+                                    }
+                                }
+                            }
                         }
                         satisfied[pi] = true;
                         if pi == trigger_idx {

@@ -82,6 +82,16 @@ pub(super) fn eval_line_scan(
     ) else {
         return;
     };
+    // The DOWNWARD twin — see `LineScan::call_window_exclude_pattern`. Plain, NOT multiline
+    // like the one above: that window is a stack of separate opener LINES, so a line anchor an author
+    // writes there means one opener line. This window is ONE call's argument text, where the same
+    // anchor would mean the call's own ends — not a thing a rule here wants to write.
+    let Some(call_window_exclude_re) = diag.compile_opt(
+        "call_window_exclude_pattern",
+        m.call_window_exclude_pattern.as_ref(),
+    ) else {
+        return;
+    };
     let marker = rule.suppress_marker();
     // The marker regexes are built from the rule id (escaped), so failure here means the id itself is
     // unusable — structural, not a pattern the author wrote wrong, but just as fatal to the rule. All
@@ -157,20 +167,32 @@ pub(super) fn eval_line_scan(
                     continue;
                 }
             }
-            let label: Option<&str> = match &matcher {
-                LineMatch::Single(re) => {
-                    if re.is_match(&scan) {
-                        Some("")
-                    } else {
-                        None
-                    }
-                }
+            // The matched regex rides along with the label: `call_window_exclude_pattern` anchors
+            // its window on THIS pattern's match offset, so it has to be the arm that actually fired —
+            // an `any` rule whose arms name different callees would otherwise anchor on the wrong call.
+            let hit: Option<(&regex::Regex, &str)> = match &matcher {
+                LineMatch::Single(re) => re.is_match(&scan).then_some((re, "")),
                 LineMatch::Any(alts) => alts
                     .iter()
                     .find(|(re, _)| re.is_match(&scan))
-                    .map(|(_, label)| label.as_str()),
+                    .map(|(re, label)| (re, label.as_str())),
             };
-            let Some(label) = label else { continue };
+            let Some((trigger_re, label)) = hit else {
+                continue;
+            };
+            // The DOWNWARD window veto — the matched call's OWN parentheses, not a span of source.
+            // Every residual of the walk (ambiguous anchor, unplaceable paren, a comment leader inside
+            // the argument list, the line cap) comes back as no window, which reads as NO suppression:
+            // the site keeps firing. A veto that cannot find its window declines rather than guesses.
+            if super::veto_window::trigger_call_excluded(
+                call_window_exclude_re.as_ref(),
+                trigger_re,
+                &lines,
+                i,
+                &scan,
+            ) {
+                continue;
+            }
             // One-line-lookback veto — the immediately preceding line (and ONLY that line — the same
             // 1-line window as marker suppression) is tested under the same string masking as every
             // other line regex. Checked after the positive match so the previous line is only masked

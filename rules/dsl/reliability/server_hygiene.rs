@@ -418,11 +418,19 @@ fn fs_in_loop_serial_require_file_gate_skips_a_file_with_no_fs_signal() {
 /// on nocodb `3a5cbd5`, where `packages/nocodb/src/helpers/tele.ts:33` ends in `.unref()` on the flagged
 /// line itself and was reported anyway.
 ///
-/// The veto is per-LINE, not per-file, and that is the load-bearing part: a file holding one unref'd
-/// timer and one genuinely leaked timer must still report the leaked one. Both ride here in one call.
+/// The veto is not per-file, and that is the load-bearing part: a file holding one unref'd timer and one
+/// genuinely leaked timer must still report the leaked one. Both ride here in one call.
 ///
-/// Stated miss: `.unref()` chained on the NEXT line is not seen. A line-scan sees one line, and widening
-/// to a window would need evidence this shape occurs — it did not in the tree that produced the finding.
+/// 🔴 **The stated miss is closed, and the evidence it asked for arrived from outside** (2026-09-24,
+/// review ledger V311). This doc used to end: *"`.unref()` chained on the NEXT line is not seen. A
+/// line-scan sees one line, and widening to a window would need evidence this shape occurs — it did not
+/// in the tree that produced the finding."* An uncontaminated first-screen audit of nocodb `3a5cbd5`
+/// then produced it twice — `migrationJobs.ts:114` and `throttlerLogger.ts:92`, where the `setInterval(`
+/// call spans eleven lines and the `.unref()` sits at its end. Both were judged FALSE by the auditor,
+/// and the veto they needed was already written.
+///
+/// So the veto moved from `exclude_pattern` (the line) to `call_window_exclude_pattern` (the matched
+/// call's own parentheses). A single-line call yields exactly the line, so the case below is unchanged.
 #[test]
 fn an_unrefd_interval_is_vetoed_on_its_own_line_and_a_leaked_sibling_still_fires() {
     let dir = TempDir::new("zzop-be-rel");
@@ -442,6 +450,79 @@ fn an_unrefd_interval_is_vetoed_on_its_own_line_and_a_leaked_sibling_still_fires
         lines,
         vec![3],
         "only the un-unref'd timer on line 3 may fire: {:?}",
+        out.findings
+    );
+}
+
+/// The shape the LINE veto could not see: a `setInterval(` whose `.unref()` sits on a later line of the
+/// SAME call. Two nocodb findings were false for exactly this reason (V311), and the veto they needed
+/// was already written — it was just being read against one line.
+///
+/// The canary rides in the same file: a second timer whose call also spans lines and carries no
+/// `.unref()`. If the window ever ran past the call it belongs to — the failure `veto_window`'s doc
+/// argues at length — the leaked one would be silenced too and this goes red.
+#[test]
+fn an_unrefd_interval_is_vetoed_across_its_own_multiline_call_and_a_leaked_sibling_still_fires() {
+    let dir = TempDir::new("zzop-be-rel");
+    dir.write(
+        "src/jobs.ts",
+        "export function start() {\n\
+        \x20 setInterval(\n\
+        \x20   () => {\n\
+        \x20     send();\n\
+        \x20   },\n\
+        \x20   60_000,\n\
+        \x20 ).unref();\n\
+        \x20 setInterval(\n\
+        \x20   () => leak(),\n\
+        \x20   1000,\n\
+        \x20 );\n\
+        }\n\
+        declare function send(): void;\n\
+        declare function leak(): void;\n",
+    );
+    let out = scan(&dir);
+    let lines: Vec<u32> = hits(&out, "interval-no-clear")
+        .iter()
+        .map(|f| f.line)
+        .collect();
+    assert_eq!(
+        lines,
+        vec![8],
+        "the unref'd timer opening on line 2 and closing on line 7 must be vetoed across its own call, \
+         and the leaked one opening on line 8 must still fire: {:?}",
+        out.findings
+    );
+}
+
+/// 🔴 **The residual, pinned so it cannot be forgotten: the window has a LINE CAP and the shape that
+/// produced this fix is past it.** `veto_window::MAX_CALL_WINDOW_LINES` is 8, and the two real nocodb
+/// sites (`migrationJobs.ts:114`, `throttlerLogger.ts:92`) open their `setInterval(` eleven lines above
+/// the `.unref()`. So those two findings are STILL false today — the mechanism moved from the line to
+/// the call, which is the right subject, and the reach did not.
+///
+/// Raising that cap is not this rule's call: the same constant bounds `CallScan::line_exclude_pattern`
+/// and `MethodScan::trigger_call_exclude_pattern`, so it would widen vetoes across three matcher
+/// families at once, and a veto that widens can only ever SILENCE findings. It needs the detection
+/// gate and a corpus run to price, which is review ledger V311's own next step.
+///
+/// This test exists so that number is machine-stated rather than prose: if the cap moves, this goes red
+/// and whoever moved it has to come here and say what they measured.
+#[test]
+fn an_unrefd_interval_further_than_the_window_cap_still_fires_and_that_is_the_stated_residual() {
+    let dir = TempDir::new("zzop-be-rel");
+    let mut src = String::from("export function start() {\n  setInterval(\n    () => {\n");
+    for _ in 0..8 {
+        src.push_str("      send();\n");
+    }
+    src.push_str("    },\n    60_000,\n  ).unref();\n}\ndeclare function send(): void;\n");
+    dir.write("src/far.ts", &src);
+    let out = scan(&dir);
+    assert_eq!(
+        hits(&out, "interval-no-clear").len(),
+        1,
+        "a `.unref()` past MAX_CALL_WINDOW_LINES is out of reach and the site keeps firing — the \
+         conservative direction, stated rather than discovered: {:?}",
         out.findings
     );
 }

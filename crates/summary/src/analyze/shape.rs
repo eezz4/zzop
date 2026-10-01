@@ -181,7 +181,7 @@ pub(super) fn shape_analyze_output(
     if let Some(architecture) = super::architecture::architecture_summary(output_view) {
         summary.insert("architecture".to_string(), architecture);
     }
-    // `gitWindow` ({recentDays, since}) — the engine's own always-serialized "which window produced
+    // `gitWindow` ({recentDays, since, commits}) — the engine's own always-serialized "which window produced
     // these numbers" echo (`null` when git signals did not run). `.get()`-defensive: forwarded
     // verbatim by name so an engine build that has not yet added the field degrades to "nothing to
     // forward" instead of a missing-key panic.

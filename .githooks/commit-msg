@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# commit-msg -- the "Subtraction considered:" gate.
+# commit-msg -- two gates: "Subtraction considered:" and "Population delta:".
+#
+# ── GATE 1: "Subtraction considered:" ─────────────────────────────────────────────────────────────
 #
 # WHAT IT STOPS: adding without first asking whether removing would do. The subject is the missing
 # QUESTION, not the ratio -- fixing a defect honestly often adds lines, and that is not a violation.
@@ -29,6 +31,51 @@
 # -- a required line becomes a ritual once it is tedious. Checking content would breed a sentence
 # written to pass. If these lines start coming back empty, that is a signal to revisit the ruling,
 # not to tighten this hook.
+#
+# ── GATE 2: "Population delta:" (2026-09-24, review ledger V318) ──────────────────────────────────
+#
+# WHAT IT STOPS: changing WHICH FILES OR LINES A RULE LOOKS AT without recording how many findings
+# that moved. Widening a veto or narrowing a file_pattern can only ever REMOVE findings, and a removed
+# finding leaves no trace anywhere -- not in the detection gate (which scores only what the answer key
+# names), not in CI, not in the diff. The change reads as a small edit to a regex.
+#
+# MEASURED, the case that produced it: one commit added an "examples" veto to
+# security/config-file-secret and the message mentioned it as a subordinate clause. A three-armed
+# comparison run later -- the old pack re-ided and loaded beside the new one, so one binary, one tree,
+# one config, zero rebuilds -- put the real figure at 31 -> 5 -> 3 findings on one corpus tree. MINUS
+# 26 for that veto, minus 2 for the lockfile and op:// arms. It was the largest population change of
+# its batch and no document carried the number.
+#
+# HOW TO PRODUCE THE LINE, which is one run and not a study:
+#     node scripts/measure/rule-population.mjs <pack>/<rule> [name-filter]
+#     ./target/release/zzop analyze --config corpus/audit/<tree>/zzop.config.jsonc     # before/after
+#
+# WHAT IT WATCHES: any changed line under rules/dsl/ or in shared_fragments.json that is not one of
+# five metadata keys. A NEGATIVE filter, and the positive list it replaced was wrong in two ways at
+# once (review ledger V332, external review round 29).
+#
+# It listed the population FIELDS by name -- and MEASURED, `"absent"` is a multi-line array in 32 of
+# 32 rules and `"patterns"` in 56 of 56, so adding one element to a veto array changes no line that
+# carries the key. Widening `absent` IS the commonest veto widening in this pack set, and it was the
+# single case the gate could never see. The list was also short: `line_pattern` (33 rules), `any`
+# (25), `trigger` (56), `after`, `after_in_same_function`, `trigger_in_loop`, `require_call_kind`,
+# `strip_string_literals`, `key_pattern`, `algorithm_pattern`, `attr_absent`, `entropy_min` and
+# `skip_value_equals_name` all move a population and none were in it.
+#
+# So the question is inverted: which changed lines in a rule pack are NOT about population? FOUR keys
+# -- `id`, `axis`, `severity`, `message`. Everything else fires, including the `{`/`}`/`],`
+# of an element being added or removed, which is exactly the case the key list missed.
+#
+# THE COST, stated rather than found later: a pure reformat of a pack demands the line too, and so
+# does a `label`-only edit -- `label` was the fifth key here until 2026-09-25 and the note beside
+# POP_METADATA below is the owner of why it came off (labels are wired by name, so swapping two
+# rewires which arm triggers which). This paragraph said FIVE, and exempted `label`, for five days
+# after the regex stopped agreeing; the file that rejects a contributor was the one reading wrong.
+#
+# NOT native (Rust) analyses -- their populations are code rather than a field, and a text gate cannot
+# see that edit. NOT vocabulary.* config keys, which are the user's to set.
+#
+# Presence, not content -- same reason gate 1 gives in its own words above.
 
 set -euo pipefail
 
@@ -41,31 +88,78 @@ MARKER='Subtraction considered:'
 # can say so -- a mute exit 1 that rejects every commit while printing nothing. check-shell-mute-floor
 # is the guard that names this class.
 ADDED="$(git diff --cached --diff-filter=A --name-only || true)"
-if [ -z "$ADDED" ]; then
-  exit 0
-fi
 
 # Comment lines are not the message -- a template hint must not satisfy the gate.
 # NOT `| grep -q`: under `set -o pipefail` a -q match exits early, SIGPIPEs the producer, and the
 # pipeline then reports failure even though the marker WAS found -- on a message long enough that the
 # producer has not finished. A small canary never sees it; check-shell-pipe-sigpipe does.
-if grep -v '^#' "$MSG_FILE" | grep -F "$MARKER" >/dev/null; then
-  exit 0
+#
+# Structured as a CONDITION rather than an early `exit 0`, because gate 2 below has its own subject
+# and must still run on a commit that adds no file. The first draft kept the early exit and would
+# have made the new gate invisible on exactly the commits it is for: a veto widening adds no file.
+if [ -n "$ADDED" ] && ! grep -v '^#' "$MSG_FILE" | grep -F "$MARKER" > /dev/null; then
+  COUNT="$(printf '%s\n' "$ADDED" | grep -c . || true)"
+  {
+    echo "commit-msg: this commit adds ${COUNT} tracked file(s) and the message has no '${MARKER}' line."
+    echo
+    printf '%s\n' "$ADDED" | sed 's/^/    + /'
+    echo
+    echo "  Write the subtraction you considered before you added. Two lines is enough:"
+    echo
+    echo "    Subtraction considered: <what removing would have looked like>"
+    echo "      -> <what that would have cost>"
+    echo "    Chose to add, because <reason>."
+    echo
+    echo "  \"Nothing to remove\" is a valid answer -- recording that the question was ASKED is the whole point."
+    echo "  Why: perfection is when there is nothing left to take away -- so ask before you add."
+  } >&2
+  exit 1
 fi
 
-COUNT="$(printf '%s\n' "$ADDED" | grep -c . || true)"
-{
-  echo "commit-msg: this commit adds ${COUNT} tracked file(s) and the message has no '${MARKER}' line."
-  echo
-  printf '%s\n' "$ADDED" | sed 's/^/    + /'
-  echo
-  echo "  Write the subtraction you considered before you added. Two lines is enough:"
-  echo
-  echo "    Subtraction considered: <what removing would have looked like>"
-  echo "      -> <what that would have cost>"
-  echo "    Chose to add, because <reason>."
-  echo
-  echo "  \"Nothing to remove\" is a valid answer -- recording that the question was ASKED is the whole point."
-  echo "  Why: perfection is when there is nothing left to take away -- so ask before you add."
-} >&2
-exit 1
+POP_MARKER='Population delta:'
+# The keys a rule pack changes WITHOUT changing what matches. Everything else is population.
+#
+# `label` WAS on this list and came off on 2026-09-25. The reason written next to
+# it -- "a label names an arm for reporting; it does not decide what matches" -- is false:
+# crates/core/src/dsl/def/pattern_fields.rs says `trigger` and `after` name a `patterns[].label` by
+# equality, so swapping two labels rewires which arm triggers which. Measured: a diff that swaps two
+# labels, in a pack that puts `"label"` on its own line (sql.json, reliability.json, security.json --
+# 101 such lines), produced ZERO hits here and the gate stayed silent. The same edit in a one-line
+# `{ "pattern": ..., "label": ... }` pack produced 4 hits -- i.e. the PACK'S FORMATTING decided whether
+# the gate could see a population change. An exemption whose reach depends on whitespace is not an
+# exemption, it is a hole. Cost accepted: reformatting a pack now asks for a population line.
+POP_METADATA='^[+-][[:space:]]*"(id|axis|severity|message)"[[:space:]]*:'
+
+# Only ADDED/REMOVED lines (`-U0` plus the `^[+-]` filter), so a rule that merely MOVED in the file is
+# not read as a population change. The `+++`/`---` file headers are dropped for the same reason.
+# `|| true` is load-bearing here for the reason gate 1 documents above.
+POP_HITS="$(git diff --cached -U0 -- 'rules/dsl/*.json' 'rules/dsl/**/*.json' 'crates/core/src/dsl/shared_fragments.json' 2> /dev/null \
+  | grep -E '^[+-]' | grep -vE '^(\+\+\+|---)' | grep -vE "$POP_METADATA" || true)"
+
+# shared_fragments.json carries no per-rule keys of its own: every line in it IS a population that
+# some rule interpolates, so ANY change to it counts. Asked separately rather than folded into the
+# regex above, because folding it in would read like an exception to a field list.
+FRAG_HITS="$(git diff --cached --name-only -- 'crates/core/src/dsl/shared_fragments.json' || true)"
+
+if [ -n "${POP_HITS}${FRAG_HITS}" ] && ! grep -v '^#' "$MSG_FILE" | grep -F "$POP_MARKER" > /dev/null; then
+  {
+    echo "commit-msg: this commit changes what a rule LOOKS AT, and the message has no '${POP_MARKER}' line."
+    echo
+    [ -n "$POP_HITS" ] && printf '%s\n' "$POP_HITS" | head -20 | sed 's/^/    /'
+    [ -n "$FRAG_HITS" ] && echo "    shared_fragments.json -- every line in it is a population some rule interpolates"
+    echo
+    echo "  Widening a veto or narrowing a file_pattern can ONLY remove findings, and a removed finding"
+    echo "  leaves no trace: not in the detection gate, not in CI, not in this diff. Measure it:"
+    echo
+    echo "    node scripts/measure/rule-population.mjs <pack>/<rule> [name-filter]"
+    echo "    ./target/release/zzop analyze --config corpus/audit/<tree>/zzop.config.jsonc   # before/after"
+    echo
+    echo "    Population delta: <rule> on <tree>, <before> -> <after> findings."
+    echo
+    echo "  \"No corpus tree reaches it\" is a valid answer and a useful one: it says the change is"
+    echo "  UNMEASURED, which is a different state from measured-at-zero."
+  } >&2
+  exit 1
+fi
+
+exit 0

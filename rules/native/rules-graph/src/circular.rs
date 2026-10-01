@@ -35,6 +35,19 @@ pub fn circular_findings(cycles: &[Vec<String>]) -> Vec<Finding> {
                 // dependency-graph surface are unchanged; they sit behind the rules that claim a defect.
                 severity: Severity::Info,
                 file: representative,
+                // 🔴 A PLACEHOLDER, not evidence (2026-09-24, review ledger V312). An uncontaminated
+                // auditor opened this citation on immich and found `import { dirname, join, resolve }
+                // from 'node:path'` — line 1 of the alphabetically-first member — while the import that
+                // actually closes the cycle sat on line 22. The file opened, so the citation read as
+                // evidence, and it was not.
+                //
+                // Anchoring at the edge is not available here and the price of making it available is
+                // known: `DepGraph` is `HashMap<String, Vec<String>>` (`zzop_core::ir`), so no import
+                // edge carries a line anywhere in the IR, and putting one there moves the type, all
+                // eight parser front-ends that build it, and every consumer that walks it. That is a
+                // whole-IR change to improve one anchor, so the honest move today is the message saying
+                // what this number is — the line below does that, and the chain in the message names
+                // every edge the reader actually needs.
                 line: 1,
                 message: format!(
                     "circular dependency: {} — a change to any file in this cycle can ripple through \
@@ -43,7 +56,12 @@ pub fn circular_findings(cycles: &[Vec<String>]) -> Vec<Finding> {
                      pieces into a module both sides import, or invert one dependency direction (e.g. an \
                      interface/callback in place of a direct import). {} if this cycle is an \
                      intentional, reviewed pattern (e.g. mutually recursive types re-exported through a \
-                     barrel).",
+                     barrel). WHERE THIS FINDING POINTS: at the FILE, not at a line. The cycle is a \
+                     property of the import graph, so `line: 1` here is a placeholder rather than \
+                     evidence — do not read it as the offending import. The file named is the \
+                     alphabetically first member, chosen for determinism, and the chain above names \
+                     every edge; the import you want is in one of those files, not necessarily on the \
+                     line this finding cites.",
                     cycle.join(" -> "),
                     disable_hint("circular")
                 ),
@@ -79,6 +97,13 @@ mod tests {
     /// went through during the 2026-07-10 dialect-consolidation sweep, and for the §27 landing spliced
     /// in front of the imperative on 2026-09-12.
     ///
+    /// Moved once more on 2026-09-24 the anchor disclosure (review ledger V312): an uncontaminated
+    /// auditor read this finding's `file:line` as evidence and found an unrelated import there, so the
+    /// message now says the anchor is the FILE. That clause is deliberately LAST — it tells a reader how
+    /// to read the citation, not what to do, and §27's order pin below owns the part that must come
+    /// first. Updating this expectation is the point of the pin, not a workaround for it: the pin exists
+    /// to make a message change deliberate and visible, and this one is both.
+    ///
     /// The landing is reached through the constant rather than written out again: a second copy of that
     /// sentence in this file would be the thing `landing.rs` exists to prevent, and the order pin below
     /// locates it with `find`, which means nothing against a needle that occurs twice.
@@ -97,7 +122,12 @@ mod tests {
                  interface/callback in place of a direct import). Disable via config `rules: {{ \
                  \"circular\": \"off\" }}` (embedders: `disabledRules`) if this cycle is an \
                  intentional, reviewed pattern (e.g. mutually recursive types re-exported through a \
-                 barrel)."
+                 barrel). WHERE THIS FINDING POINTS: at the FILE, not at a line. The cycle is a \
+                 property of the import graph, so `line: 1` here is a placeholder rather than \
+                 evidence — do not read it as the offending import. The file named is the \
+                 alphabetically first member, chosen for determinism, and the chain above names \
+                 every edge; the import you want is in one of those files, not necessarily on the \
+                 line this finding cites."
             )
         );
     }

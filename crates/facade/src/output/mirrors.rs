@@ -129,7 +129,7 @@ impl<'a> From<&'a zzop_engine::RuleOverridesApplied> for RuleOverridesAppliedVie
 }
 
 /// JSON view over `zzop_engine::GitWindow` — the operative git-window knobs (`gitWindow.recentDays` /
-/// `gitWindow.since`) echoed alongside `scores`/`health`/`critical`/`seams` so a consumer diffing two
+/// `gitWindow.since`) plus what walking them cost (`gitWindow.commits`), echoed alongside `scores`/`health`/`critical`/`seams` so a consumer diffing two
 /// runs can tell which window produced which numbers (`AnalyzeOutput::git_window`'s own doc has the
 /// full rationale). camelCase like every other output-facing type at this boundary.
 #[derive(Serialize)]
@@ -137,6 +137,9 @@ impl<'a> From<&'a zzop_engine::RuleOverridesApplied> for RuleOverridesAppliedVie
 pub(super) struct GitWindowView<'a> {
     recent_days: u32,
     since: &'a Option<String>,
+    /// The COST beside the two knobs -- see `zzop_engine::GitWindow::commits`. Additive field
+    /// (VERSIONING.md: "New fields are added (minor)"), shipped 2026-09-24 for review ledger V294.
+    commits: usize,
 }
 
 impl<'a> From<&'a GitWindow> for GitWindowView<'a> {
@@ -144,6 +147,7 @@ impl<'a> From<&'a GitWindow> for GitWindowView<'a> {
         GitWindowView {
             recent_days: g.recent_days,
             since: &g.since,
+            commits: g.commits,
         }
     }
 }

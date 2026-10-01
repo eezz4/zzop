@@ -365,3 +365,32 @@ fn tsconfig_scan_degrades_on_invalid_json() {
     let scan = tsconfig_scan(dir.path(), std::iter::once("tsconfig.json".to_string()));
     assert!(scan.is_empty());
 }
+
+/// The tsconfig lane reads JSONC through the ONE stripper, so a comma inside a string survives
+/// (2026-09-26, review ledger V411).
+///
+/// This lane used to strip trailing commas with `,(\s*[}\]])` -> `$1`, a regex that cannot see
+/// strings: `{"a": "x, }"}` came out as `{"a": "x }"}`. The shared implementation already carried a
+/// passing test pinning that exact input as unchanged — and nothing in the repository fed one input to
+/// both, which is the only reason the disagreement lasted. This is that missing test, on THIS side.
+#[test]
+fn a_comma_inside_a_tsconfig_string_is_not_eaten() {
+    let dir = TempDir::new("zzop-tsconfig-jsonc");
+    // `baseUrl` carries a comma followed by a space and a brace — the exact shape the old regex ate.
+    dir.write(
+        "tsconfig.json",
+        "{\n  // paths for the app\n  \"compilerOptions\": {\n    \"baseUrl\": \"x, }\",\n    \"paths\": { \"@app/*\": [\"src/app/*\"] },\n  },\n}\n",
+    );
+    let scan = tsconfig_scan(dir.path(), std::iter::once("tsconfig.json".to_string()));
+    let cfg = scan.get("").expect("the tsconfig must have parsed at all");
+    assert_eq!(
+        cfg.base_url, "x, }",
+        "the comma inside the string was eaten before serde saw it — this lane is not using the \
+         shared string-aware stripper"
+    );
+    assert!(
+        cfg.paths.contains_key("@app/*"),
+        "the trailing commas after `paths` and after `compilerOptions` must still be tolerated: {:?}",
+        cfg.paths
+    );
+}

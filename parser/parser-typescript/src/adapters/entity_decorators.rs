@@ -12,7 +12,7 @@
 //! name-derived from the class name: TypeORM's default table name for a bare `@Entity()` depends on
 //! the app's configured `NamingStrategy` (snake_case-by-convention, but overridable per project), so
 //! guessing one would risk a wrong key more often than omitting it helps — this repo's "never guess"
-//! IO convention (see `egress.rs`'s `resolve_url`, `controller_decorators.rs`'s dynamic-prefix skip).
+//! IO convention (see `egress/url_resolve.rs`'s `resolve_url_variants`, `controller_decorators.rs`'s dynamic-prefix skip).
 //! Any other non-literal argument shape (a computed/dynamic first arg, or an object's `name`
 //! property that isn't itself a string literal) is skipped for the same reason.
 

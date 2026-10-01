@@ -31,7 +31,7 @@
 //
 // Usage:  node scripts/measure/vocab-key-census.mjs
 
-import { execFileSync } from "child_process";
+import { execFileSync, spawnSync } from "child_process";
 import fs from "fs";
 
 const surface = JSON.parse(fs.readFileSync("crates/config/config-surface.json", "utf8"));
@@ -69,19 +69,51 @@ function laneOf(p) {
 }
 
 const IS_TEST = /(^|\/)tests?\//.test.bind(/(^|\/)tests?\//);
+/// camelCase -> snake_case. `VocabularyConfig` carries `#[serde(rename_all = "camelCase")]`, so the
+/// WIRE spelling is camelCase and every Rust reader spells the SAME key snake_case. Searching only
+/// the wire spelling finds the declaration and misses the readers.
+const snake = (key) => key.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
+
+/// One `git grep -l` over both spellings of one key.
+///
+/// 🔴 TWO DEFECTS LIVED HERE UNTIL 2026-09-26, and they produced a FALSE RED rather than a false
+/// green — rarer and, because nobody distrusts a report of work to do, slower to catch.
+///
+/// (1) IT SEARCHED THE camelCase SPELLING ONLY. Every Rust reader spells these snake_case under
+///     `#[serde(rename_all = "camelCase")]`, so a key whose only consumers are Rust looked unread.
+///     Measured: this printed `middlewareGuardCallees` and `schemaUsageSkipFields` as "declared and
+///     read by NOTHING" while both have complete production reader chains — `pipeline/fresh.rs` via
+///     `router_mounts()` and `analyze/assemble/rules.rs` via `schema_usage_findings`. A whole
+///     external-review question ("why does this repo ship two dead config keys?") rested on it.
+///
+/// (2) `catch { return [] }` TREATED TWO DIFFERENT EVENTS AS ONE. `git grep` exits 1 when nothing
+///     matches (legal) and >1 when git itself fails — a bad pathspec, a missing directory, a broken
+///     repo. Both arrived here as "no readers". That is this repo's named class: an instrument that
+///     cannot fail loudly reports a defect it never looked for.
 function readersOf(key) {
-  let out = "";
-  try {
-    out = execFileSync("git", ["grep", "-l", "--", key, "crates", "rules", "packages", "parser"], {
-      encoding: "utf8",
-    });
-  } catch {
-    return []; // git grep exits non-zero when nothing matches
+  const spellings = [...new Set([key, snake(key)])];
+  const files = new Set();
+  for (const needle of spellings) {
+    const r = spawnSync(
+      "git",
+      ["grep", "-l", "--", needle, "crates", "rules", "packages", "parser"],
+      { encoding: "utf8" },
+    );
+    // rc 0 = matches, rc 1 = none (legal). Anything else is the tool breaking, and it must not be
+    // laundered into an empty result.
+    if (r.status !== 0 && r.status !== 1) {
+      console.error(
+        `vocab-key-census: \`git grep\` failed for "${needle}" (status ${r.status}). ` +
+          `This is a broken search, not a key nobody reads.`,
+      );
+      console.error((r.stderr || "").trim());
+      process.exit(1);
+    }
+    for (const line of (r.stdout || "").split("\n")) {
+      if (line && !IS_TEST(line) && !/tests?\.rs$|_tests?\.rs$/.test(line)) files.add(line);
+    }
   }
-  return out
-    .split("\n")
-    .filter(Boolean)
-    .filter((p) => !IS_TEST(p) && !/tests?\.rs$|_tests?\.rs$/.test(p));
+  return [...files];
 }
 
 const rows = keys.map((k) => {

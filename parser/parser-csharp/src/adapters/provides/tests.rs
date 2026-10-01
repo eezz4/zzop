@@ -28,13 +28,13 @@ fn attribute_controller_composes_class_and_method_route() {
 fn controller_name_suffix_gates_without_attribute() {
     let src = r#"
         public class OrdersController {
-            [HttpPost]
+            [HttpPost("create")]
             public string Create() { return ""; }
         }
     "#;
     let provides = extract_csharp_http_provides("f.cs", src);
     assert_eq!(provides.len(), 1);
-    assert_eq!(provides[0].key, "POST /");
+    assert_eq!(provides[0].key, "POST /create");
 }
 
 #[test]
@@ -330,13 +330,53 @@ fn nested_controller_gates_independently() {
         public class Outer {
             [ApiController]
             public class InnerController {
-                [HttpGet]
+                [HttpGet("inner")]
                 public string Get() { return ""; }
             }
         }
     "#;
     let provides = extract_csharp_http_provides("f.cs", src);
     assert_eq!(provides.len(), 1);
+}
+
+/// A controller with NO class-level `[Route]` whose action carries no path of its own is routed by
+/// ASP.NET CONVENTION (`MapControllerRoute`'s `{controller}/{action}`), which lives in Program.cs and
+/// is not read by this pass. Keying it at the empty base produces `/`, which is the phantom this
+/// module already refuses for a non-literal class prefix and for a non-literal method path.
+///
+/// 📏 Why it earned a test (2026-09-28): on corpus/audit/eShop, five such controllers produced 12 of
+/// that tree's 17 total findings, every one keyed `GET /` or `POST /`, and they then reported as
+/// duplicate-route against each other -- 76% of everything the tool said about that repository.
+#[test]
+fn convention_routed_action_is_dropped_rather_than_keyed_at_the_empty_base() {
+    let src = r#"
+        public class AccountController {
+            [HttpGet]
+            public string Login() { return ""; }
+            [HttpPost]
+            public string Login(string u) { return ""; }
+        }
+    "#;
+    assert!(
+        extract_csharp_http_provides("f.cs", src).is_empty(),
+        "an action with no class [Route] and no method path has no resolvable key"
+    );
+}
+
+/// The control for the drop above: the same shape WITH a method path is ordinary attribute routing,
+/// where the method supplies the whole path and nothing is missing. Without this, the drop could
+/// widen to every `[Route]`-less controller and the suite would stay green.
+#[test]
+fn a_route_less_class_still_keys_actions_that_carry_their_own_path() {
+    let src = r#"
+        public class AccountController {
+            [HttpGet("login")]
+            public string Login() { return ""; }
+        }
+    "#;
+    let provides = extract_csharp_http_provides("f.cs", src);
+    assert_eq!(provides.len(), 1);
+    assert_eq!(provides[0].key, "GET /login");
 }
 
 #[test]

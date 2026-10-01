@@ -1,0 +1,236 @@
+# Deprecate MCP-registry versions whose download URLs no longer exist.
+#
+# ## Why a workflow and not a local command (2026-09-24, review ledger V328)
+#
+# The registry keeps one record per published version, each advertising five `.mcpb` download URLs.
+# The 2026-09-23 repository recreation took the assets of every tag below v0.35.0 with it, so 14 of
+# the 15 records now point at nothing while still saying `status: active` — a claim, made in this
+# project's name, that a version is installable when its bytes are gone. `VERSIONING.md` was narrowed
+# the same day (review ledger V304); this is the same narrowing on the other surface.
+#
+# Changing it needs a registry token for the `io.github.eezz4` namespace. Obtaining one by hand is a
+# device-code login; obtaining one HERE is `mcp-publisher login github-oidc` in a job holding
+# `id-token: write`, which is exactly what the release pipeline already does (`prebuild.yml`). So the
+# whole act becomes one button, and no long-lived credential exists anywhere.
+#
+# ## Why `workflow_dispatch` only, and why `apply` defaults to false
+#
+# It mutates a public surface, so nothing may trigger it on its own — §6.1 of the working agreements
+# puts remote-changing acts with the user. The default run MEASURES and stops: it prints exactly which
+# versions it would touch and changes nothing, so the button can be pressed to look. Setting `apply`
+# to `true` is the second, deliberate press.
+#
+# The act is REVERSIBLE — `mcp-publisher status --status active` puts a record back — which is why
+# `deprecated` was chosen over `deleted`. `deleted` would erase the true fact that the version existed
+# and leave nowhere to put the explanation; `deprecated` removes the false claim and keeps the record,
+# carrying a message that names where the working versions are.
+#
+# ## The subject is measured, never assumed
+#
+# The list of versions to deprecate comes from `scripts/measure/registry-dead-versions.mjs`, which
+# HEADs every advertised URL and only reports a record when status is `active` and NONE of its URLs
+# resolve. A version whose assets are restored drops out of the list by itself, and a half-broken
+# record is reported as MIXED and deliberately left alone. Nothing here hardcodes a version number or
+# a boundary, so this workflow cannot deprecate something merely for being old.
+name: registry-status
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Actually set the dead versions to `deprecated` (unchecked = measure and stop)"
+        type: boolean
+        default: false
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  # Two runs mutating the same registry records would interleave their reads and writes. Never
+  # cancel-in-progress: a cancelled run could stop between two `status` calls, and a half-applied
+  # change is the state this workflow exists to remove.
+  group: registry-status
+  cancel-in-progress: false
+
+jobs:
+  deprecate-dead-versions:
+    runs-on: ubuntu-latest
+    # A hang must name the job that hung rather than burning GitHub's 360-minute default and reporting
+    # `cancelled` (review ledger V27, widened to every workflow by V187). Sized generously against the
+    # real work: 75 HEAD requests plus at most 14 registry writes, measured at well under a minute.
+    timeout-minutes: 15
+    permissions:
+      # Only needed for the apply half; the job holds it in both modes because GitHub grants
+      # permissions per job, not per step. Nothing else in this job reads a credential.
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Measure which records advertise URLs that do not exist
+        id: measure
+        # Exit 1 is the EXPECTED answer while the defect stands, so it is captured rather than
+        # allowed to end the job -- this step's purpose is to produce the list, not to judge it. Exit
+        # 2 (registry unreadable, empty or shapeless) is a genuine failure and is re-raised below.
+        run: |
+          # `set +e` FIRST, and it is the whole reason this step works (review ledger V330). GitHub
+          # runs an unspecified `run:` as `bash -e {0}`, so the shell aborts on the first non-zero
+          # command -- and `set -uo pipefail` does NOT turn that off. The node call below exits 1
+          # whenever the defect this workflow exists for is standing, which is the ONLY interesting
+          # case, so without this line the step died before `rc=$?` and neither the summary nor the
+          # apply half ever ran. Measured: `bash -e` on these three lines prints nothing and exits 1;
+          # with `set +e` it prints `rc=1` and exits 0.
+          set +e
+          set -uo pipefail
+          # ONE pass, two outputs: the table goes to the log for a human and the same measurement is
+          # written to dead.json for the apply step. Measuring twice could disagree with itself, and
+          # then the list acted on would not be the list the log showed.
+          #
+          # No pipe on this line ON PURPOSE. `$?` after a pipeline is the LAST stage's status, which
+          # has silently swallowed this script's verdict elsewhere in this repo; the exit code here
+          # must be the node process's own.
+          node scripts/measure/registry-dead-versions.mjs --json-out=dead.json
+          rc=$?
+          if [ "$rc" -ge 2 ]; then
+            echo "::error::the registry could not be read; refusing to act on an unknown state"
+            exit "$rc"
+          fi
+          # FOUND BY RUNNING THIS STEP, not by reading it (review ledger V346). With `set +e` in place
+          # the step survives a node crash too -- and then `dead.json` does not exist, `jq` errors to
+          # stderr, and `count=` is written EMPTY. The apply gate below tests `count != '0'`, which an
+          # empty string PASSES, so a crashed measurement would have logged in to the registry and run
+          # the deprecation loop over an empty list. An unreadable measurement is not zero findings.
+          # TWO checks, and the canary showed why. `-s` catches the file being absent or empty; it does
+          # NOT catch `dead.json` existing as something jq cannot read -- a directory has a size, so the
+          # planted case sailed past this test and was caught by the count check below. Neither one
+          # alone is the guard.
+          if [ ! -s dead.json ]; then
+            echo "::error::the measurement produced no dead.json -- refusing to hand the apply step an"
+            echo "::error::empty list. An unreadable run is not a clean one."
+            exit 1
+          fi
+          # One line per output value: a multi-line value needs a heredoc delimiter in $GITHUB_OUTPUT,
+          # and this list is short by construction (one semver per record).
+          count="$(jq -r '.deadActive | length' dead.json)"
+          case "$count" in
+            ''|*[!0-9]*)
+              echo "::error::could not read a count out of dead.json (got '$count')"
+              exit 1
+              ;;
+          esac
+          echo "versions=$(jq -r '.deadActive | join(" ")' dead.json)" >> "$GITHUB_OUTPUT"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+
+      - name: Report and stop (measure-only run)
+        if: inputs.apply != true
+        env:
+          COUNT: ${{ steps.measure.outputs.count }}
+          VERSIONS: ${{ steps.measure.outputs.versions }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## registry-status: measured only, nothing changed"
+            echo ""
+            echo "Records that say \`status: active\` while none of their download URLs resolve: **$COUNT**"
+            echo ""
+            if [ -n "$VERSIONS" ]; then
+              echo "\`\`\`"
+              printf '%s\n' $VERSIONS
+              echo "\`\`\`"
+              echo ""
+              echo "Re-run this workflow with **apply** checked to set these to \`deprecated\`."
+              echo "Reversible: \`mcp-publisher status --status active io.github.eezz4/zzop <version>\`."
+            else
+              echo "Nothing to do."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install mcp-publisher
+        if: inputs.apply == true && steps.measure.outputs.count != '0'
+        env:
+          # TAG-PINNED, not `releases/latest`, and for the same reason `prebuild.yml` pins it: the
+          # binary this produces is run as `./mcp-publisher login github-oidc` in a job holding
+          # `id-token: write` for the `io.github.eezz4` namespace, so an unreviewed upstream major
+          # would be publishing under this project's identity. Bump deliberately, after reading the
+          # upstream release notes; do not float it. Kept in step with prebuild.yml's pin on purpose —
+          # two jobs authenticating to the same namespace should not be running different tools.
+          MCP_PUBLISHER_TAG: v1.8.1
+        run: |
+          set -euo pipefail
+          ver="${MCP_PUBLISHER_TAG#v}"
+          asset="mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz"
+          base="https://github.com/modelcontextprotocol/registry/releases/download/$MCP_PUBLISHER_TAG"
+          # `-f` so a 404 fails here rather than writing an error page to disk and dying later inside
+          # `tar` with an unrelated message.
+          curl -fsSL -o "$asset" "$base/$asset"
+          curl -fsSL -o mcp-publisher-checksums.txt "$base/registry_${ver}_checksums.txt"
+          # SCOPE, stated as narrowly as prebuild.yml states it: the checksums file lives on the SAME
+          # release page as the asset, so this catches a corrupted or truncated download and nothing
+          # more. It is the tag pin above that does the real work.
+          sha256sum -c --ignore-missing mcp-publisher-checksums.txt
+          tar xzf "$asset" mcp-publisher
+
+      - name: Authenticate to the MCP Registry (GitHub OIDC, io.github.eezz4 namespace)
+        if: inputs.apply == true && steps.measure.outputs.count != '0'
+        run: ./mcp-publisher login github-oidc
+
+      - name: Set each dead record to `deprecated`
+        if: inputs.apply == true && steps.measure.outputs.count != '0'
+        env:
+          VERSIONS: ${{ steps.measure.outputs.versions }}
+          SERVER: io.github.eezz4/zzop
+          # Under the registry's 500-character ceiling for `statusMessage`. It names the cause, the
+          # working routes, and the document that owns the promise, because the person who reads this
+          # is holding a 404 and needs the next step, not a diagnosis.
+          #
+          # It does NOT say "take it from npm" (review ledger V331). MEASURED: `npm view @zzop/mcp`
+          # is a 404 -- the only published packages are @zzop/cli and its five platform binaries, and
+          # every one of them ships the `zzop` CLI, never `zzop-mcp`. This message would have written
+          # that falsehood into fourteen public records in this project's name, which is the exact
+          # shape V304 refused when it declined to back-fill tags with wrong bytes.
+          MESSAGE: >-
+            Release assets for this version no longer exist: the repository was recreated on
+            2026-09-23 to remove a committed identity from its public history, and these .mcpb URLs
+            now return 404. Install v0.35.0 or later, or build the MCP server from source at the
+            matching git tag. There is no npm package for it. Details:
+            https://github.com/eezz4/zzop/blob/main/VERSIONING.md
+        run: |
+          set -euo pipefail
+          for v in $VERSIONS; do
+            echo "::group::deprecating $v"
+            ./mcp-publisher status --status deprecated --message "$MESSAGE" "$SERVER" "$v"
+            echo "::endgroup::"
+          done
+
+      - name: Re-measure and report
+        # Same guard as the three steps above, and for the same reason: with `count == 0` nothing was
+        # deprecated, so "the state after it acted" IS the state the measure step reported seconds
+        # earlier in this same run. Re-reading it would be a second opinion from the same instrument.
+        if: inputs.apply == true && steps.measure.outputs.count != '0'
+        # The verdict of this workflow is the state AFTER it acted, read back from the registry rather
+        # than inferred from the writes succeeding. Exit 1 here would mean records are still claiming
+        # to be installable, which is the thing that was supposed to have been fixed.
+        run: |
+          # `set +e` for the reason the measure step above states: the shell's own -e would end this
+          # step at the node call, and the run that most needs a report is exactly the one where that
+          # call exits non-zero.
+          set +e
+          set -uo pipefail
+          # Redirect, not `| tee`: under `pipefail` the pipeline's failure would end this step before
+          # the summary is written, so the ONE run that most needs a report -- records still claiming
+          # to be installable -- would produce none. Capture first, publish always, judge last.
+          node scripts/measure/registry-dead-versions.mjs > after.txt 2>&1
+          rc=$?
+          cat after.txt
+          {
+            echo "## registry-status: applied"
+            echo ""
+            echo '```'
+            cat after.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::records still advertise dead URLs after the run -- see the output above"
+          fi
+          exit "$rc"

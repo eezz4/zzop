@@ -91,3 +91,79 @@ fn write_in_loop_autocommit_landing_precedes_the_imperative() {
         "wrap the loop body in `$transaction(...)`",
     );
 }
+
+/// The landing is the FIRST sentence of the message, not merely the one before the verb.
+///
+/// WHY THIS IS A SECOND PIN AND NOT A TIGHTER VERSION OF THE ONE ABOVE (2026-09-24, review ledger
+/// V359/V361). That one asserts ORDER — landing before imperative — and it passed while the landing
+/// sat 1,217 characters into a 2,535-character message, behind the whole "what this rule matches"
+/// definition. An uncontaminated first-screen audit then measured the reader this message is written
+/// for: they read 28 of 100 messages in full and stopped reading new prose at row 15, after which
+/// they judged on the rule id, the path and the evidence line alone. The auditor came within one
+/// paragraph of wrapping a Twilio SMS loop in a database transaction, and wrote that what stopped
+/// them was "a capitalised paragraph 400 words in — that defence only works on a reader who reads
+/// 400 words, and by row 15 I was not one."
+///
+/// So ORDER was satisfied and the defence still nearly failed. The measurable property the audit
+/// actually named is POSITION AT THE FRONT: does the condition reach the reader before they decide?
+/// Position 0 is chosen rather than a character budget because a budget is a tuned threshold with no
+/// measurement behind it, and this repository bans those. "Is it the first thing" is structural.
+///
+/// The invalidation probe: put any sentence in front of the landing with every token still spelled
+/// once. The pin above stays green — which is the whole argument for this one existing.
+#[test]
+fn the_autocommit_replay_landing_is_the_first_sentence() {
+    // Reads the pack JSON directly, the way the sibling test above does — the engine loader returns a
+    // LoadResult and this pin is about the authored bytes, not about what a run assembles.
+    let pack: serde_json::Value =
+        serde_json::from_str(include_str!("db.json")).expect("db.json parses");
+    let message = pack["rules"]
+        .as_array()
+        .expect("rules array")
+        .iter()
+        .find(|r| r["id"].as_str() == Some("write-in-loop-no-tx"))
+        .and_then(|r| r["message"].as_str())
+        .expect("write-in-loop-no-tx carries a message")
+        .to_string();
+
+    assert!(
+        message.starts_with(AUTOCOMMIT_REPLAY_LANDING),
+        "db/write-in-loop-no-tx: the conditional landing must be the message's FIRST sentence, so a \
+         reader who stops after one sentence has still been told the remedy has a wrong branch. It \
+         starts at byte {:?} instead. In: {message}",
+        message.find(AUTOCOMMIT_REPLAY_LANDING)
+    );
+}
+/// SECOND rule, same property, measured the same way (2026-09-25, review ledger V378).
+///
+/// `db/multi-write-no-tx` is this rule's nearest sibling and carried the identical defect one step
+/// further along: its conditional sat 39% into the message, behind the whole matcher definition, and
+/// the ORDER pin in `transactions.rs` was green the entire time. Order and position are different
+/// properties and only the second one survives a reader who stops at row 15 — which is what an
+/// uncontaminated first-screen audit measured a reader doing.
+///
+/// The fix was a REORDER, not an addition: every token of the message is still spelled exactly the
+/// same number of times. The invalidation probe is the same one the pin above uses — put any sentence
+/// in front and this goes red while the order pin stays green.
+#[test]
+fn the_multi_write_conditional_is_the_first_sentence() {
+    let pack: serde_json::Value =
+        serde_json::from_str(include_str!("db.json")).expect("db.json parses");
+    let message = pack["rules"]
+        .as_array()
+        .expect("rules array")
+        .iter()
+        .find(|r| r["id"].as_str() == Some("multi-write-no-tx"))
+        .and_then(|r| r["message"].as_str())
+        .expect("multi-write-no-tx carries a message")
+        .to_string();
+
+    const HEAD: &str = "THE REMEDY IS CONDITIONAL. IF NOTHING";
+    assert!(
+        message.starts_with(HEAD),
+        "db/multi-write-no-tx: the conditional must be the message's FIRST sentence. A reader who \
+         stops after one sentence has to have been told the remedy has a branch that holds a pooled \
+         connection across an external round trip. It starts at byte {:?} instead. In: {message}",
+        message.find(HEAD)
+    );
+}

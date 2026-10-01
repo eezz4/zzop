@@ -53,7 +53,7 @@
 //! file; the assemble-time join filters candidates down to real invocations.
 //!
 //! Each of the first 6 args is captured positionally: string literal verbatim, template literal with
-//! `${...}` replaced by `{}` (same transform as `egress.rs`'s `resolve_url`), anything else `None` —
+//! `${...}` replaced by `{}` (same transform as `egress/url_resolve.rs`'s `resolve_url_variants`), anything else `None` —
 //! never guessed. `specifier` comes from the file's import map when `callee` is an imported binding;
 //! `None` means local-or-unresolved (assemble only resolves same-file when `specifier` is `None`).
 //!

@@ -6,7 +6,7 @@ use crate::{load_for_root, DEFAULT_CONFIG_FILENAME};
 
 /// Parses the template the way every real consumer does — JSONC strip, then JSON.
 fn parsed_template() -> serde_json::Value {
-    let stripped = crate::jsonc::strip_json_comments(CONFIG_TEMPLATE_JSONC);
+    let stripped = zzop_core::jsonc::strip_json_comments(CONFIG_TEMPLATE_JSONC);
     serde_json::from_str(&stripped).expect("the shipped template must be valid JSONC")
 }
 
