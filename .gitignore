@@ -36,6 +36,15 @@
 #                       joins. Kept out of oss/ so its join config keeps answering the question it
 #                       was written for.
 #   corpus/*.json*    — local e2e configs/overlays (machine-specific absolute paths)
+#   corpus/legacy/    — a hand-built legacy JSP + jQuery + Spring MVC measurement fixture
+#                      (2026-10-02, 53 files). The reason differs from its siblings above: those
+#                      are third-party code we CANNOT commit, this one is ours. It is ignored
+#                      because it is a MEASUREMENT POPULATION — tracking it moves the denominators
+#                      the detection gate and the line census compute over. `cases/` is where
+#                      tracked fixtures live. Rebuild instructions: corpus/legacy/README.md.
+#                      ⚠ Without this line it showed as `?? corpus/` and could be committed by
+#                      accident: the list above names each sibling by hand, so a NEW sibling is
+#                      tracked by default. Adding a corpus subdirectory means adding a line here.
 # The line that used to be here ignored `/corpus` wholesale, which also swallowed the labeled
 # detection benchmark. That fixture is 100% our own synthetic code — no third-party source, no
 # embedded .git, ~150 files / ~120 KB — so "we cannot ship it" was never true of it. It moved to
@@ -45,6 +54,7 @@
 /corpus/x/
 /corpus/frameworks/
 /corpus/audit/
+/corpus/legacy/
 /corpus/*.json
 /corpus/*.jsonc
 
