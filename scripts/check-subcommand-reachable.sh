@@ -40,7 +40,8 @@ SUBJECTS=(README.md 'site-src/*' docs/ARCHITECTURE.md docs/getting-started.md)
 
 # The subcommand list comes from the binary's own usage block, never from a list kept here — a list
 # kept here would go stale the first time a subcommand is added, and going stale IS this guard's
-# subject. Falls back to the source's dispatch when no release binary is around (CI builds one; a
+# subject. Falls back to the source's dispatch when no release binary is around (the `guards:` CI job
+# does NOT build one — it checks out and runs guards — so the fallback is the path CI actually takes; a
 # fresh clone may not have).
 ZZOP=./target/release/zzop
 if [ -x "$ZZOP" ]; then
@@ -48,9 +49,39 @@ if [ -x "$ZZOP" ]; then
     grep -oE '^  [a-z][a-z-]+' | tr -d ' ' | sort -u)
   SOURCE="the binary's own --help"
 else
-  mapfile -t COMMANDS < <(grep -oE '^\s+"[a-z][a-z-]+" =>' packages/cli-bin/src/main.rs |
-    grep -oE '"[a-z][a-z-]+"' | tr -d '"' | sort -u)
+  # The dispatch arms are `Some("analyze") => …`, not `"analyze" => …`. The first spelling of this
+  # needle omitted `Some(` and therefore matched ZERO arms — and because the floor below refuses to
+  # score a read it does not believe, this guard failed its FIRST CI run (2026-10-02) rather than
+  # passing vacuously. It had been green locally the whole time because a release binary was present
+  # and the binary branch was taken; the fallback had never once run. The comment above this block
+  # said "CI builds one" — the `guards:` job checks out and runs guards, it does not build.
+  # `help` is excluded on purpose: it IS a dispatch arm (`Some("help") | Some("--help") | Some("-h")`)
+  # but the binary's own `--help` does not list itself, and that listing is this guard's definition of
+  # "a subcommand a user can reach". Keeping it would make the two read paths disagree by one forever.
+  # 📏 Found by the cross-check below on its first run (binary 17, source 18).
+  #
+  # NOT anchored on `=>`: an arm may be an OR-pattern. `version` is dispatched as
+  # `Some("version") | Some("--version") | Some("-V") =>`, so a needle ending in `) *=>` reads 16 of
+  # the binary's 17 and silently stops checking `version`. Match every `Some("…")` on a dispatch
+  # line instead, then drop the flag spellings (they start with a dash and are not subcommands).
+  mapfile -t COMMANDS < <(grep -E 'Some\("[a-z-]' packages/cli-bin/src/main.rs |
+    grep -oE 'Some\("[a-z][a-z-]*"\)' | grep -oE '"[a-z][a-z-]*"' | tr -d '"' | grep -vxF help | sort -u)
   SOURCE="packages/cli-bin/src/main.rs (no release binary present)"
+fi
+
+# 🔴 CROSS-CHECK, not just a floor. The two read paths must agree: if a release binary is present we
+# ALSO run the source needle and compare counts. A silent divergence is how this guard shipped
+# checking 16 of 17 — green on both paths, each reading a different set. 📏 2026-10-02: binary 17,
+# source 16, missing `version` (an OR-pattern arm the first needle's `) *=>` anchor could not see).
+if [ -x "$ZZOP" ]; then
+  SRC_COUNT="$(grep -E 'Some\("[a-z-]' packages/cli-bin/src/main.rs |
+    grep -oE 'Some\("[a-z][a-z-]*"\)' | grep -oE '"[a-z][a-z-]*"' | tr -d '"' | grep -vxF help | sort -u | wc -l | tr -d ' ')"
+  if [ "$SRC_COUNT" != "${#COMMANDS[@]}" ]; then
+    echo "check-subcommand-reachable: the two read paths DISAGREE — binary ${#COMMANDS[@]}, source $SRC_COUNT." >&2
+    echo "  CI takes the SOURCE path (the guards job does not build), so a divergence means CI checks" >&2
+    echo "  a different set than you do locally. Fix the needle in this file, not the binary." >&2
+    exit 1
+  fi
 fi
 
 if [ "${#COMMANDS[@]}" -lt 5 ]; then

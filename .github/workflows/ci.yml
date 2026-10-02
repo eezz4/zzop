@@ -492,6 +492,21 @@ jobs:
           node --test $files
 
   detection-benchmark:
+    # FULL HISTORY ON PURPOSE (2026-10-02). `fetch-depth: 0` below is required by
+    # `scripts/measure/readme-result-block.sh`, which runs `zzop analyze` — and the ANALYZER reads
+    # commits (`gitWindow`, churn, authorCount), unlike every git call in the `guards:` job. That
+    # job's "SHALLOW ON PURPOSE" note measured its own git calls and found none that read a commit;
+    # the measurement was right and its SCOPE was the guards job, which is why this job inherited a
+    # shallow clone it could not live with.
+    #
+    # 📏 Measured, same source and same binary, `cases/trees/api-be`: full clone `pain 7.5`,
+    # `--depth 1` `pain 7.4` (`gitWindow.commits` 8 vs 1). The README result block records what a
+    # user sees on a normal clone, so CI must read the same history or this guard reports a drift
+    # that only CI can see. It failed exactly that way on v0.37.0's first run.
+    #
+    # The rule the guards job set stands: a full clone must NAME its reader here. This one's reader is
+    # readme-result-block.sh. If that script stops running the analyzer, this line goes back to shallow.
+    #
     # Scores the labeled detection benchmark (cases + its adjudicated EXPECTED.jsonc) and fails
     # on any FN or FP. Committed 2026-07-26 so CI *could* see these cases; nothing scored them until
     # 2026-07-28, which meant a 298-line ground truth was documentation rather than a gate.
@@ -519,6 +534,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # see FULL HISTORY ON PURPOSE above
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Detection benchmark
