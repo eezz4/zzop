@@ -24,6 +24,12 @@
 //!   20+ times across other files, while extracted KEYED `http` consumes stay near-zero — blind-field
 //!   test R10's fe-svelte class (`src/lib/api.js`, callers across `src/routes/**`), the wrapper-
 //!   indirection shape S5's own tree-wide token count structurally cannot see.
+//! - S19 (`path_literal_denominator_warning`): the one that names no library. A tree writing many
+//!   internal path literals (`'/user/list.do'`) while io stays near-zero in BOTH directions. The
+//!   jQuery-era class: jQuery arrives by `<script>` tag so there is no import for S4, the call idioms
+//!   are not an extraction shape so they produce NO fact (not an unresolved one), and every tripwire
+//!   above anchors on a vocabulary this tree does not carry. Measured on such a tree: 22 real call
+//!   sites, 1 extracted, and not one tripwire fired before this one existed.
 //!
 //! Each covers the NEXT unknown framework/idiom at least getting a warning instead of silent
 //! cross-layer-join darkness.
@@ -89,6 +95,7 @@ const S3_WARNING_SUBSTRING: &str = "committed OpenAPI/Swagger spec exists at";
 const S4_WARNING_SUBSTRING: &str = "http-client package(s) imported but only";
 const S6_WARNING_SUBSTRING: &str = "ORM schema marker(s) detected but zero db-table io facts";
 const S7_WARNING_SUBSTRING: &str = "exports a fetch-wrapper idiom";
+const S19_WARNING_SUBSTRING: &str = "internal path literal(s)";
 
 /// 3 files carrying an invented `@FastController`/`@FastGet` decorator shape — structurally identical
 /// (class-level gate + method-level verb) to Nest's own idiom, but under decorator NAMES that
@@ -1120,6 +1127,63 @@ fn a_tree_whose_framework_files_all_register_routes_stays_silent() {
             .iter()
             .any(|w| w.contains("import a server framework but contributed NO http route")),
         "{:?}",
+        out.warnings
+    );
+}
+
+/// The jQuery-era class S19 exists for: a frontend that talks to its backend entirely through call
+/// idioms this build does not extract, loaded from a `<script>` tag rather than a module specifier.
+///
+/// Deliberately contains NO builtin `fetch(`: fetch IS a recognized shape, so one would both key a
+/// consume (raising the gate substrate) and feed S5 instead — and the point of this fixture is the
+/// population where every OTHER tripwire is structurally blind. Twelve path literals clears
+/// `PATH_LITERAL_SITES_MIN` with headroom; no route registration appears, so provides stay at zero
+/// and the both-directions gate is satisfied honestly rather than by construction.
+fn jquery_era_frontend_tree() -> TempDir {
+    let dir = TempDir::new("zzop-engine-coverage-jquery-era");
+    let mut body = String::new();
+    for i in 0..12 {
+        body.push_str(&format!(
+            "$.ajax({{ url: '/user/op{i}.do', type: 'POST', success: function (d) {{ render(d); }} }});\n"
+        ));
+    }
+    dir.write("js/user.js", &body);
+    dir.write("index.html", "<script src=\"/vendor/jquery-1.7.2.min.js\"></script>\n");
+    dir
+}
+
+/// The wiring test, not the function test: the unit tests in
+/// `framework_silence::path_literal_denominator` prove the predicate, and would all stay green if the
+/// call site in `analyze::assemble::warnings` were deleted. This one fails in that case.
+#[test]
+fn a_jquery_era_frontend_gets_a_denominator_even_though_no_vocabulary_matches() {
+    let dir = jquery_era_frontend_tree();
+    let out = analyze_tree(dir.path(), &config());
+
+    assert!(
+        out.warnings
+            .iter()
+            .any(|w| w.contains(S19_WARNING_SUBSTRING)),
+        "expected the path-literal denominator, got: {:?}",
+        out.warnings
+    );
+}
+
+/// The conflation guard, end to end. A real Nest tree registers its routes with the same leading-slash
+/// literals this census counts -- `@Get('/users')` is lexically indistinguishable from `$.get('/users')`
+/// to S19. What separates them is that this tree EXTRACTED its provides, so the both-directions gate
+/// closes before the census ever reads a file. If S19 ever gated on the consume side alone, this is the
+/// test that goes red.
+#[test]
+fn a_healthy_nest_tree_gets_no_denominator_even_though_it_writes_path_literals() {
+    let dir = healthy_nest_tree();
+    let out = analyze_tree(dir.path(), &config());
+
+    assert!(
+        !out.warnings
+            .iter()
+            .any(|w| w.contains(S19_WARNING_SUBSTRING)),
+        "a tree that extracted its routes must not get a denominator, got: {:?}",
         out.warnings
     );
 }
