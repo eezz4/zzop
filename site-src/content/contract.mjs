@@ -456,13 +456,22 @@ export default {
         ],
         [
           "p",
+        // 🔴 이 두 수는 2026-10-04 에 **둘 다 틀린 채로 발행돼 있었다**: 28행/9 omissions 라고 적혀
+        // 있었고 실측은 30행/7 이다. 어떤 가드도 이 문장을 `surface-parity.json` 과 잇지 않는다 —
+        // `check-shipped-off-sync.sh` 는 그 파일의 다른 축(커버리지 %)만 보고, 이 페이지의 수를 세는
+        // 가드는 없다. 📏 재는 법:
+        //   node -e 'const d=require("./docs/contracts/surface-parity.json");
+        //     const r=[...Object.values(d.analyzeOutputView),...Object.values(d.multiAnalyzeOutputView)];
+        //     console.log(r.length, r.filter(x=>x.mcpAnalyzeReply==="omit").length)'
+        // ⚠ 인구는 두 뷰의 합이다 — `analyzeOutputView` 25 + `multiAnalyzeOutputView` 5. 어느 한쪽만
+        // 세면 28 도 30 도 안 나오고, 옛 수 28 은 그 어느 부분집합과도 맞지 않는다(순수 드리프트다).
           {
             ko: `응답이 무엇을 <strong>떨어뜨렸는지</strong>도 등록돼 있다. 엔진이 계산한 최상위 필드는 전부 레지스트리에 한 행씩 갖고,
-      전달 표면이 그것을 그대로 싣는지 · 조건부로 싣는지 · 아예 안 싣는지를 적는다. 지금 <strong>28행</strong>이고
-      그중 <strong>9행</strong>이 “안 실음”이다 — 그리고 안 싣는 행은 <em>그 값을 어디서 얻는지</em>를 같이 적어야 통과한다.`,
+      전달 표면이 그것을 그대로 싣는지 · 조건부로 싣는지 · 아예 안 싣는지를 적는다. 지금 <strong>30행</strong>이고
+      그중 <strong>7행</strong>이 “안 실음”이다 — 그리고 안 싣는 행은 <em>그 값을 어디서 얻는지</em>를 같이 적어야 통과한다.`,
             en: `What the reply <strong>drops</strong> is registered too. Every top-level field the engine computes gets exactly one
-      row saying whether the delivery surface carries it, carries it conditionally, or omits it — <strong>28</strong> rows
-      today, <strong>9</strong> of them omissions, and an omission row does not pass unless it also names <em>where that
+      row saying whether the delivery surface carries it, carries it conditionally, or omits it — <strong>30</strong> rows
+      today, <strong>7</strong> of them omissions, and an omission row does not pass unless it also names <em>where that
       value can be had instead</em>.`,
           },
         ],

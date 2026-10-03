@@ -1112,8 +1112,8 @@ const items = list.map(x =&gt; db.find(x.id)); <span class="hit">// zzop-nplus1-
       Rust 메타테스트가 대조한다. 사본을 여기 만들면 그 사본만 테스트 밖에 있게 된다.</p>
 
     <p>응답이 무엇을 <strong>떨어뜨렸는지</strong>도 등록돼 있다. 엔진이 계산한 최상위 필드는 전부 레지스트리에 한 행씩 갖고,
-      전달 표면이 그것을 그대로 싣는지 · 조건부로 싣는지 · 아예 안 싣는지를 적는다. 지금 <strong>28행</strong>이고
-      그중 <strong>9행</strong>이 “안 실음”이다 — 그리고 안 싣는 행은 <em>그 값을 어디서 얻는지</em>를 같이 적어야 통과한다.</p>
+      전달 표면이 그것을 그대로 싣는지 · 조건부로 싣는지 · 아예 안 싣는지를 적는다. 지금 <strong>30행</strong>이고
+      그중 <strong>7행</strong>이 “안 실음”이다 — 그리고 안 싣는 행은 <em>그 값을 어디서 얻는지</em>를 같이 적어야 통과한다.</p>
 
     <p class="note">오퍼레이션 열두 개 각각의 필드 표는 <a href="https://eezz4.github.io/zzop/reference.html" target="_blank" rel="noreferrer">원문 레퍼런스</a>에 있다.
       이 페이지가 링크만 거는 이유가 그것이다 — 표에는 주인이 하나여야 하고, 그 주인은 <em>테스트가 읽는 쪽</em>이다.</p>

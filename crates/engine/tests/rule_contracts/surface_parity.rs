@@ -1080,3 +1080,74 @@ fn mcp_lane_forwards_exactly_the_rows_marked_carry_and_never_forwards_the_rows_m
         }
     }
 }
+
+/// T2-shape census pin: the Contract tab restates this registry's SIZE in prose, and nothing tied the
+/// two together until 2026-10-04 — when both numbers were measured wrong in the shipped page. It read
+/// "28 rows today, 9 of them omissions" in both editions while the registry held 30 and 7. No subset of
+/// the file yields 28, so it was not a narrower population; it was drift nobody could see.
+///
+/// Modelled on `zzop_summary::graph::tests::the_top_cap_prose_on_the_site_source_and_registry_matches_default_top`,
+/// which already pins the graph tab's `--top` caps the same way. The mechanism existed; it had simply
+/// never been pointed at this sentence.
+///
+/// Pinned on the `.mjs` SOURCE rather than the generated HTML: `scripts/check-site-generated.sh`
+/// already proves `site/` matches `site-src/`, so one pin covers both editions and both files. The
+/// Korean copy cannot be matched as text here — this crate's sources are English-only by guard — so it
+/// is pinned as a DIGIT-TOKEN census: the row count and the omission count must each appear exactly
+/// twice in the file (once per language). A reworded sentence drops a count to 0 or 1 and reddens.
+#[test]
+fn the_site_contract_prose_states_the_registry_row_and_omission_counts() {
+    let registry = load_registry();
+    let mut rows = 0usize;
+    let mut omissions = 0usize;
+    for root in ["analyzeOutputView", "multiAnalyzeOutputView"] {
+        let obj = registry[root]
+            .as_object()
+            .unwrap_or_else(|| panic!("surface-parity.json's `{root}` must be an object"));
+        rows += obj.len();
+        omissions += obj
+            .values()
+            .filter(|v| v["mcpAnalyzeReply"].as_str() == Some("omit"))
+            .count();
+    }
+    assert!(
+        rows > 0 && omissions > 0,
+        "empty registry — this pin would be vacuous"
+    );
+
+    let mjs_path = workspace_root().join("site-src/content/contract.mjs");
+    let mjs = std::fs::read_to_string(&mjs_path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", mjs_path.display()));
+
+    // One occurrence per language, and the two counts must not collide into one token row.
+    assert_ne!(
+        rows, omissions,
+        "row count and omission count are equal, so the per-token census below cannot tell them \
+         apart — re-derive this pin with contextual needles instead"
+    );
+    for (what, n) in [("row count", rows), ("omission count", omissions)] {
+        // Two spellings, one per language: the Korean copy carries its unit INSIDE the tag, so a
+        // single needle finds one of the two, and a bare `<strong>30` prefix would also swallow
+        // `<strong>300`. Count both closed forms.
+        //
+        // The unit is written as an ESCAPE (`\u{d589}`), not as the letter: this crate's sources are
+        // English-only by guard (`scripts/check-english-source.sh`), which is the same wall
+        // `zzop_summary::graph::tests` hit and worked around with a digit-token census. The escape
+        // keeps that test's precision — two distinct needles, each with its own count in the failure
+        // message — without putting a non-Latin letter in an OSS file. 📏 Found by the guard on the
+        // first commit attempt, after this file's sibling had already written the constraint down.
+        let needle = format!("<strong>{n}</strong>");
+        let haeng = char::from_u32(0xd589).expect("U+D589 is a valid scalar");
+        let needle_ko = format!("<strong>{n}{haeng}</strong>");
+        let found_en = mjs.matches(&needle).count();
+        let found_ko = mjs.matches(&needle_ko).count();
+        let found = found_en + found_ko;
+        assert_eq!(
+            found, 2,
+            "site-src/content/contract.mjs states the {what} as {needle:?} {found} time(s), \
+             expected 2 — {found_en} as {needle:?} (en) and {found_ko} as {needle_ko:?} (ko). \
+             Either the registry changed and a sentence went stale, or a sentence was reworded so \
+             its needle no longer matches; re-anchor here in the same edit"
+        );
+    }
+}

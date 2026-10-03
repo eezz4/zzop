@@ -92,7 +92,7 @@ pub(super) fn minified_files_warning(
         sample_str.push_str(&format!(", +{} more", skipped.len() - SAMPLE));
     }
     Some(format!(
-        "{} file(s) a DSL rule-pack rule targets have MINIFIED LINE SHAPE and were skipped for ALL DSL rule-pack rules (5000+ byte single lines, or long lines dominating half the file's bytes; native structural analyses still cover them): {sample_str}. This is a measurement of line shape ONLY -- it does not decide whether a file is machine-generated, and a generated file with ordinary line lengths is not skipped by it. Files no loaded rule's `file_pattern` targets (docs, data, images, ...) are not counted here — they were never DSL candidates, so nothing was skipped for them.",
+        "{} file(s) a DSL rule-pack rule targets have MINIFIED LINE SHAPE and were skipped for ALL DSL rule-pack rules (a single line of 5000+ bytes, or 500+ byte lines accounting for half the file's bytes or more; native structural analyses still cover them): {sample_str}. This is a measurement of line shape ONLY -- it does not decide whether a file is machine-generated, and a generated file with ordinary line lengths is not skipped by it. Files no loaded rule's `file_pattern` targets (docs, data, images, ...) are not counted here — they were never DSL candidates, so nothing was skipped for them.",
         skipped.len()
     ))
 }
