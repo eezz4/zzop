@@ -14,21 +14,7 @@
 
 <div class="docs-layout">
 
-  <button type="button" class="docs-nav-toggle" aria-expanded="false" aria-controls="docs-nav">
-    Docs menu
-  </button>
-
-  <aside class="docs-nav" id="docs-nav">
-    <div class="docs-nav__group">
-      <div class="docs-nav__group-label">Docs</div>
-      <a href="index.html" class="docs-nav__link">Overview</a>
-      <a href="architecture.html" class="docs-nav__link">Architecture</a>
-      <a href="graph.html" class="docs-nav__link">Graph</a>
-      <a href="usage.html" class="docs-nav__link">Usage</a>
-      <a href="reference.html" class="docs-nav__link is-active">Reference</a>
-      <a href="rules.html" class="docs-nav__link">Rules</a>
-    </div>
-  </aside>
+  <!--zzop:docsnav--><!--/zzop:docsnav-->
 
   <main class="docs-content">
     <div class="docs-content-header">
@@ -37,30 +23,30 @@
     </div>
 
     <section id="functions">
-      <span class="eyebrow eyebrow--sm">Operations</span>
+      <span class="eyebrow eyebrow--sm">{{ch2}}</span>
       <h2>{{h23}}</h2>
       <p>{{p4}}</p>
       <div class="cmd-index cmd-index--ops">
-        <div class="cmd-index__head"><span>Operation &middot; CLI &middot; MCP tool</span><span>What it answers</span><span></span></div>
+        <div class="cmd-index__head"><span>{{ix1}}</span><span>{{ix2}}</span><span></span></div>
         <div class="cmd-band"><span class="cmd-band__label">analyze</span></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>analyze_json</code><span class="cmd-row__twin"><code>zzop analyze</code> &middot; <code>analyze_repo</code></span></span><span class="cmd-row__desc">One tree in, one <code>AnalyzeOutputView</code> out.</span><a class="cmd-row__anchor" href="#op-analyze-json" aria-label="Details for analyze_json">&para;</a></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>analyze_trees_json</code><span class="cmd-row__twin"><code>zzop cross</code> &middot; <code>cross_repo</code></span></span><span class="cmd-row__desc">Several trees, joined across the layer boundary.</span><a class="cmd-row__anchor" href="#op-analyze-trees-json" aria-label="Details for analyze_trees_json">&para;</a></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>analyze_envelope_json</code><span class="cmd-row__twin"><code>zzop analyze-envelope</code> &middot; <code>analyze_envelope</code></span></span><span class="cmd-row__desc">Mode A: an adapter's envelope replaces native parsing.</span><a class="cmd-row__anchor" href="#op-analyze-envelope-json" aria-label="Details for analyze_envelope_json">&para;</a></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>analyze_json</code><span class="cmd-row__twin"><code>zzop analyze</code> &middot; <code>analyze_repo</code></span></span><span class="cmd-row__desc">{{cd1}}</span><a class="cmd-row__anchor" href="#op-analyze-json" aria-label="Details for analyze_json">&para;</a></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>analyze_trees_json</code><span class="cmd-row__twin"><code>zzop cross</code> &middot; <code>cross_repo</code></span></span><span class="cmd-row__desc">{{cd2}}</span><a class="cmd-row__anchor" href="#op-analyze-trees-json" aria-label="Details for analyze_trees_json">&para;</a></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>analyze_envelope_json</code><span class="cmd-row__twin"><code>zzop analyze-envelope</code> &middot; <code>analyze_envelope</code></span></span><span class="cmd-row__desc">{{cd3}}</span><a class="cmd-row__anchor" href="#op-analyze-envelope-json" aria-label="Details for analyze_envelope_json">&para;</a></div>
         <div class="cmd-band"><span class="cmd-band__label">query</span></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>query_io_json</code><span class="cmd-row__twin"><code>zzop endpoint</code> &middot; <code>check_endpoint</code></span></span><span class="cmd-row__desc">Is one io key provided, consumed or joined? One sealed verdict.</span><a class="cmd-row__anchor" href="#op-query-io-json" aria-label="Details for query_io_json">&para;</a></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>query_file_json</code><span class="cmd-row__twin"><code>zzop file</code> &middot; <code>check_file</code></span></span><span class="cmd-row__desc">Everything zzop knows about ONE file — uncapped.</span><a class="cmd-row__anchor" href="#op-query-file-json" aria-label="Details for query_file_json">&para;</a></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>query_coverage_json</code><span class="cmd-row__twin"><code>zzop coverage</code> &middot; no MCP tool</span></span><span class="cmd-row__desc">How much of this tree does zzop actually see?</span><a class="cmd-row__anchor" href="#op-query-coverage-json" aria-label="Details for query_coverage_json">&para;</a></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>query_io_json</code><span class="cmd-row__twin"><code>zzop endpoint</code> &middot; <code>check_endpoint</code></span></span><span class="cmd-row__desc">{{cd4}}</span><a class="cmd-row__anchor" href="#op-query-io-json" aria-label="Details for query_io_json">&para;</a></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>query_file_json</code><span class="cmd-row__twin"><code>zzop file</code> &middot; <code>check_file</code></span></span><span class="cmd-row__desc">{{cd5}}</span><a class="cmd-row__anchor" href="#op-query-file-json" aria-label="Details for query_file_json">&para;</a></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>query_coverage_json</code><span class="cmd-row__twin"><code>zzop coverage</code> &middot; no MCP tool</span></span><span class="cmd-row__desc">{{cd6}}</span><a class="cmd-row__anchor" href="#op-query-coverage-json" aria-label="Details for query_coverage_json">&para;</a></div>
         <div class="cmd-band"><span class="cmd-band__label">validate</span></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>validate_envelope_only_json</code><span class="cmd-row__twin"><code>zzop validate-envelope</code> &middot; <code>validate_envelope</code></span></span><span class="cmd-row__desc">Offline &ldquo;is my envelope well-formed?&rdquo; — it never fails.</span><a class="cmd-row__anchor" href="#op-validate-envelope-only-json" aria-label="Details for validate_envelope_only_json">&para;</a></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>validate_rule_pack_json</code><span class="cmd-row__twin"><code>zzop validate-rule-pack</code> &middot; <code>validate_rule_pack</code></span></span><span class="cmd-row__desc">Offline &ldquo;does this pack load, and can every rule in it fire?&rdquo;</span><a class="cmd-row__anchor" href="#op-validate-rule-pack-json" aria-label="Details for validate_rule_pack_json">&para;</a></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>validate_envelope_only_json</code><span class="cmd-row__twin"><code>zzop validate-envelope</code> &middot; <code>validate_envelope</code></span></span><span class="cmd-row__desc">{{cd7}}</span><a class="cmd-row__anchor" href="#op-validate-envelope-only-json" aria-label="Details for validate_envelope_only_json">&para;</a></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>validate_rule_pack_json</code><span class="cmd-row__twin"><code>zzop validate-rule-pack</code> &middot; <code>validate_rule_pack</code></span></span><span class="cmd-row__desc">{{cd8}}</span><a class="cmd-row__anchor" href="#op-validate-rule-pack-json" aria-label="Details for validate_rule_pack_json">&para;</a></div>
         <div class="cmd-band"><span class="cmd-band__label">meta</span></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>version</code><span class="cmd-row__twin"><code>zzop version</code> &middot; no MCP tool</span></span><span class="cmd-row__desc">The bare release number — one token a script can parse.</span><a class="cmd-row__anchor" href="#op-version" aria-label="Details for version">&para;</a></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>version_string</code><span class="cmd-row__twin"><code>zzop version --verbose</code> &middot; no MCP tool</span></span><span class="cmd-row__desc">Engine + parser fingerprint string. Cannot fail.</span><a class="cmd-row__anchor" href="#op-version-string" aria-label="Details for version_string">&para;</a></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>explain</code><span class="cmd-row__twin"><code>zzop explain</code> &middot; no MCP tool</span></span><span class="cmd-row__desc">One bundled rule id &rarr; that rule's own compiled-in data.</span><a class="cmd-row__anchor" href="#op-explain" aria-label="Details for explain">&para;</a></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>explain_with_config</code><span class="cmd-row__twin"><code>zzop explain --config</code> &middot; no MCP tool</span></span><span class="cmd-row__desc">The same lookup over the packs a config's trees really load.</span><a class="cmd-row__anchor" href="#op-explain-with-config" aria-label="Details for explain_with_config">&para;</a></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>version</code><span class="cmd-row__twin"><code>zzop version</code> &middot; no MCP tool</span></span><span class="cmd-row__desc">{{cd9}}</span><a class="cmd-row__anchor" href="#op-version" aria-label="Details for version">&para;</a></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>version_string</code><span class="cmd-row__twin"><code>zzop version --verbose</code> &middot; no MCP tool</span></span><span class="cmd-row__desc">{{cd10}}</span><a class="cmd-row__anchor" href="#op-version-string" aria-label="Details for version_string">&para;</a></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>explain</code><span class="cmd-row__twin"><code>zzop explain</code> &middot; no MCP tool</span></span><span class="cmd-row__desc">{{cd11}}</span><a class="cmd-row__anchor" href="#op-explain" aria-label="Details for explain">&para;</a></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>explain_with_config</code><span class="cmd-row__twin"><code>zzop explain --config</code> &middot; no MCP tool</span></span><span class="cmd-row__desc">{{cd12}}</span><a class="cmd-row__anchor" href="#op-explain-with-config" aria-label="Details for explain_with_config">&para;</a></div>
       </div>
 
-      <span class="eyebrow eyebrow--sm cmd-details__label">Details — analyze</span>
+      <span class="eyebrow eyebrow--sm cmd-details__label">{{ch3}}</span>
       <h3 id="op-analyze-json" class="cmd-detail">{{h35}}</h3>
       <p class="cmd-note">{{p6}}</p>
       <p>{{p7}}</p>
@@ -71,7 +57,7 @@
       <p class="cmd-note">{{p12}}</p>
       <p>{{p13}}</p>
 
-      <span class="eyebrow eyebrow--sm cmd-details__label">Details — query</span>
+      <span class="eyebrow eyebrow--sm cmd-details__label">{{ch4}}</span>
       <h3 id="op-query-io-json" class="cmd-detail">{{h314}}</h3>
       <p class="cmd-note">{{p15}}</p>
       <p>{{p16}}</p>
@@ -83,7 +69,7 @@
       <p class="cmd-note">{{p22}}</p>
       <p>{{p23}}</p>
 
-      <span class="eyebrow eyebrow--sm cmd-details__label">Details — validate</span>
+      <span class="eyebrow eyebrow--sm cmd-details__label">{{ch5}}</span>
       <h3 id="op-validate-envelope-only-json" class="cmd-detail">{{h324}}</h3>
       <p class="cmd-note">{{p25}}</p>
       <p>{{p26}}</p>
@@ -91,7 +77,7 @@
       <p class="cmd-note">{{p28}}</p>
       <p>{{p29}}</p>
 
-      <span class="eyebrow eyebrow--sm cmd-details__label">Details — meta</span>
+      <span class="eyebrow eyebrow--sm cmd-details__label">{{ch6}}</span>
       <h3 id="op-version" class="cmd-detail">{{h330}}</h3>
       <p class="cmd-note">{{p31}}</p>
       <p>{{p32}}</p>
@@ -107,7 +93,7 @@
     </section>
 
     <section id="config-required">
-      <span class="eyebrow eyebrow--sm">Defaults</span>
+      <span class="eyebrow eyebrow--sm">{{ch7}}</span>
       <h2>{{h242}}</h2>
       <p>{{p43}}</p>
       <p>{{p44}}</p>
@@ -120,7 +106,7 @@ zzop analyze .   # that config is auto-discovered; bundled packs +
       </div>
       <p>{{p46}}</p>
       <div class="code-panel">
-        <div class="code-panel__tab">Direct zzop-facade call (Rust)</div>
+        <div class="code-panel__tab">{{ch8}}</div>
         <pre class="code-block"><code>let config = serde_json::json!({ "root": ".", "git": {} }).to_string();
 let result: serde_json::Value =
     serde_json::from_str(&amp;zzop_facade::analyze_json(&amp;config)?)?;</code></pre>
@@ -136,17 +122,17 @@ let result: serde_json::Value =
     </section>
 
     <section id="config-reference">
-      <span class="eyebrow eyebrow--sm">Config reference</span>
+      <span class="eyebrow eyebrow--sm">{{chCfgRef}}</span>
       <h2>{{h253}}</h2>
       <p>{{p54}}</p>
       <div class="cmd-index cmd-index--fields" data-wire-fields>
-        <div class="cmd-index__head"><span>Field &middot; type</span><span>What it is</span></div>
+        <div class="cmd-index__head"><span>{{ix3}}</span><span>{{ix4}}</span></div>
 
-        <div class="cmd-band"><span class="cmd-band__label">identity</span></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>root</code><span class="cmd-row__req">required</span><span class="cmd-row__type">string</span></span><span class="cmd-row__desc">Tree root to analyze. An empty string is rejected with <code>Err</code>.</span></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>sourceId</code><span class="cmd-row__type">string &mdash; default <code>""</code></span></span><span class="cmd-row__desc">Free-form label carried through into cross-tree output.</span></div>
+        <div class="cmd-band"><span class="cmd-band__label">{{ch9}}</span></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>root</code><span class="cmd-row__req">{{ch10}}</span><span class="cmd-row__type">string</span></span><span class="cmd-row__desc">{{cd13}}</span></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>sourceId</code><span class="cmd-row__type">string &mdash; default <code>""</code></span></span><span class="cmd-row__desc">{{cd14}}</span></div>
 
-        <div class="cmd-band"><span class="cmd-band__label">rules &amp; findings</span></div>
+        <div class="cmd-band"><span class="cmd-band__label">{{ch11}}</span></div>
         <details class="cmd-fold">
           <summary>{{summary55}}</summary>
           <div class="design-notes__body">
@@ -159,14 +145,14 @@ let result: serde_json::Value =
             <p>{{p58}}</p>
           </div>
         </details>
-        <div class="cmd-row"><span class="cmd-row__name"><code>disabledRules</code><span class="cmd-row__type">string[]</span></span><span class="cmd-row__desc">Rule / native-analysis ids to disable entirely (exact match).</span></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>disabledRules</code><span class="cmd-row__type">string[]</span></span><span class="cmd-row__desc">{{cd15}}</span></div>
         <details class="cmd-fold">
           <summary>{{summary59}}</summary>
           <div class="design-notes__body">
             <p>{{p60}}</p>
           </div>
         </details>
-        <div class="cmd-row"><span class="cmd-row__name"><code>severityOverrides</code><span class="cmd-row__type">object</span></span><span class="cmd-row__desc">Rule id &rarr; <code>"critical" | "warning" | "info"</code>. Promote or demote a specific id without forking its pack.</span></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>severityOverrides</code><span class="cmd-row__type">object</span></span><span class="cmd-row__desc">{{cd16}}</span></div>
         <details class="cmd-fold">
           <summary>{{summary61}}</summary>
           <div class="design-notes__body">
@@ -182,7 +168,7 @@ let result: serde_json::Value =
           </div>
         </details>
 
-        <div class="cmd-band"><span class="cmd-band__label">analysis</span></div>
+        <div class="cmd-band"><span class="cmd-band__label">{{ch12}}</span></div>
         <details class="cmd-fold">
           <summary>{{summary67}}</summary>
           <div class="design-notes__body">
@@ -198,7 +184,7 @@ let result: serde_json::Value =
             <p>{{p73}}</p>
           </div>
         </details>
-        <div class="cmd-row"><span class="cmd-row__name"><code>sizeCap</code><span class="cmd-row__type">number &mdash; optional</span></span><span class="cmd-row__desc">Default <code>1,500,000</code> bytes (~1.5&nbsp;MB). Files larger than this skip structural parsing and are listed under <code>degraded</code>.</span></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>sizeCap</code><span class="cmd-row__type">number &mdash; optional</span></span><span class="cmd-row__desc">{{cd17}}</span></div>
         <details class="cmd-fold">
           <summary>{{summary74}}</summary>
           <div class="design-notes__body">
@@ -217,7 +203,7 @@ let result: serde_json::Value =
           </div>
         </details>
 
-        <div class="cmd-band"><span class="cmd-band__label">deployment topology</span></div>
+        <div class="cmd-band"><span class="cmd-band__label">{{ch13}}</span></div>
         <details class="cmd-fold">
           <summary>{{summary83}}</summary>
           <div class="design-notes__body">
@@ -251,7 +237,7 @@ let result: serde_json::Value =
           </div>
         </details>
 
-        <div class="cmd-band"><span class="cmd-band__label">extension points</span></div>
+        <div class="cmd-band"><span class="cmd-band__label">{{ch14}}</span></div>
         <details class="cmd-fold">
           <summary>{{summary95}}</summary>
           <div class="design-notes__body">
@@ -280,11 +266,11 @@ let result: serde_json::Value =
     </section>
 
     <section id="multi-repo">
-      <span class="eyebrow eyebrow--sm">Cross-repo</span>
+      <span class="eyebrow eyebrow--sm">{{ch15}}</span>
       <h2>{{h2103}}</h2>
       <p>{{p104}}</p>
       <div class="code-panel">
-        <div class="code-panel__tab">Cross-repo — direct zzop-facade (Rust)</div>
+        <div class="code-panel__tab">{{ch16}}</div>
         <pre class="code-block"><code>let config = serde_json::json!({
   "trees": [
     { "root": "../frontend", "sourceId": "web" },
@@ -300,27 +286,27 @@ let result: serde_json::Value = serde_json::from_str(&amp;zzop_facade::analyze_t
     </section>
 
     <section id="output-schema">
-      <span class="eyebrow eyebrow--sm">Output</span>
+      <span class="eyebrow eyebrow--sm">{{ch17}}</span>
       <h2>{{h2106}}</h2>
       <p>{{p107}}</p>
       <p>{{p108}}</p>
       <div class="cmd-index cmd-index--fields" data-wire-fields>
-        <div class="cmd-index__head"><span>Key &middot; type</span><span>What it carries</span></div>
+        <div class="cmd-index__head"><span>{{ix5}}</span><span>{{ix6}}</span></div>
 
-        <div class="cmd-band"><span class="cmd-band__label">structure</span></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>ir</code><span class="cmd-row__type">object</span></span><span class="cmd-row__desc">Language-neutral common IR: <code>symbols</code>, <code>dep</code> (import graph), <code>loc</code>, <code>io</code> (IoFacts).</span></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>fileCount</code><span class="cmd-row__type">number</span></span><span class="cmd-row__desc">Files walked.</span></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>degraded</code><span class="cmd-row__type">string[]</span></span><span class="cmd-row__desc">Paths that hit <code>sizeCap</code> or otherwise failed to parse structurally.</span></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>buildScriptPaths</code><span class="cmd-row__type">string[]</span></span><span class="cmd-row__desc">Files this tree's own <code>package.json</code> <code>scripts</code> names, sorted — build surface, not shipped code. Always present; <code>[]</code> means the manifests declared none.</span></div>
+        <div class="cmd-band"><span class="cmd-band__label">{{ch18}}</span></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>ir</code><span class="cmd-row__type">object</span></span><span class="cmd-row__desc">{{cd18}}</span></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>fileCount</code><span class="cmd-row__type">number</span></span><span class="cmd-row__desc">{{cd19}}</span></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>degraded</code><span class="cmd-row__type">string[]</span></span><span class="cmd-row__desc">{{cd20}}</span></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>buildScriptPaths</code><span class="cmd-row__type">string[]</span></span><span class="cmd-row__desc">{{cd21}}</span></div>
         <details class="cmd-fold">
           <summary>{{summary109}}</summary>
           <div class="design-notes__body">
             <p>{{p110}}</p>
           </div>
         </details>
-        <div class="cmd-row"><span class="cmd-row__name"><code>nodes</code><span class="cmd-row__type">object[]</span></span><span class="cmd-row__desc">Per-file churn/fan-in/fan-out/risk metrics — fully populated only when <code>git</code> is set.</span></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>nodes</code><span class="cmd-row__type">object[]</span></span><span class="cmd-row__desc">{{cd22}}</span></div>
 
-        <div class="cmd-band"><span class="cmd-band__label">rule verdicts</span></div>
+        <div class="cmd-band"><span class="cmd-band__label">{{ch19}}</span></div>
         <details class="cmd-fold">
           <summary>{{summary113}}</summary>
           <div class="design-notes__body">
@@ -328,7 +314,7 @@ let result: serde_json::Value = serde_json::from_str(&amp;zzop_facade::analyze_t
           </div>
         </details>
 
-        <div class="cmd-band"><span class="cmd-band__label">git-gated</span></div>
+        <div class="cmd-band"><span class="cmd-band__label">{{ch20}}</span></div>
         <details class="cmd-fold">
           <summary>{{summary115}}</summary>
           <div class="design-notes__body">
@@ -381,7 +367,7 @@ let result: serde_json::Value = serde_json::from_str(&amp;zzop_facade::analyze_t
           </div>
         </details>
 
-        <div class="cmd-band"><span class="cmd-band__label">what this run itself did</span></div>
+        <div class="cmd-band"><span class="cmd-band__label">{{ch21}}</span></div>
         <details class="cmd-fold">
           <summary>{{summary136}}</summary>
           <div class="design-notes__body">
@@ -416,14 +402,14 @@ let result: serde_json::Value = serde_json::from_str(&amp;zzop_facade::analyze_t
             <p>{{p141}}</p>
           </div>
         </details>
-        <div class="cmd-row"><span class="cmd-row__name"><code>warnings</code><span class="cmd-row__type">string[]</span></span><span class="cmd-row__desc">Non-fatal issues plus capability self-report notes — see <a href="#self-report">Honest output</a>.</span></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>warnings</code><span class="cmd-row__type">string[]</span></span><span class="cmd-row__desc">{{cd23}}</span></div>
         <details class="cmd-fold">
           <summary>{{summary142}}</summary>
           <div class="design-notes__body">
             <p>{{p143}}</p>
           </div>
         </details>
-        <div class="cmd-row"><span class="cmd-row__name"><code>cache</code><span class="cmd-row__type">{ hits, misses } | null</span></span><span class="cmd-row__desc">Set only when <code>cacheDir</code> was given.</span></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>cache</code><span class="cmd-row__type">{ hits, misses } | null</span></span><span class="cmd-row__desc">{{cd24}}</span></div>
         <details class="cmd-fold">
           <summary>{{summary144}}</summary>
           <div class="design-notes__body">
@@ -441,45 +427,45 @@ let result: serde_json::Value = serde_json::from_str(&amp;zzop_facade::analyze_t
       </div>
       <p>{{p150}}</p>
       <div class="def-list" id="finding-shape">
-        <div class="def-list__title">Finding — the common shape every finding shares</div>
+        <div class="def-list__title">{{dt1}}</div>
         <div class="def-list__grid">
-          <code>ruleId</code><span><code>"{pack}/{rule}"</code> for a DSL rule (e.g. <code>"sql/nplus1"</code>), or a plain id for a native analysis (e.g. <code>"circular"</code>).</span>
-          <code>severity</code><span><code>"critical" | "warning" | "info"</code> — the finding's <em>effective</em> severity: the rule's default, as remapped by <code>severityOverrides</code>, and as de-escalated by the rules that lower their own confidence when the run is blind (see below).</span>
-          <code>file</code><span>Path relative to <code>root</code>.</span>
-          <code>line</code><span>1-based line number.</span>
-          <code>message</code><span>Human-facing cause/fix hint, copied verbatim from the rule definition — unless <code>messageRef</code> or <code>templateParts</code> is present, in which case this is a short pointer and the text itself is rebuilt from the sibling table that pointer names.</span>
-<code>messageRef</code><span><strong>Present only when the text was folded.</strong> A key into <code>ruleMessages</code>, the object sitting beside the <code>shown</code> list this finding came from — a sibling, not a fixed path, because one shaper feeds both <code>findings</code> and <code>crossLayerFindings</code>. A text carried by more than one finding is stored there once and pointed at, but only where doing so removes more bytes than the pointer and the table cost, so a repeated text can also be absent. Read <code>message</code> directly when <code>messageRef</code> is absent. The stored text is byte-identical to the inline one — nothing is shortened or dropped, and no second request is needed. <code>ruleMessagesMeaning</code> states the same contract on the wire.</span>
-          <code>templateParts</code><span><strong>Present only when the text was folded on its TEMPLATE.</strong> A rule that writes a finding's own subject into its prose — a table name, a symbol, a cycle path — emits a different string every time, so <code>ruleMessages</code> above cannot hold it. What those messages share is stored in a sibling <code>ruleMessageTemplates</code> instead, keyed by the <em>rule id</em>: an array of literal segments. This field holds the bytes that differ, in order. Rebuild by interleaving them, segment first, ending on the last segment — <code>templateParts</code> is always exactly one shorter than the template, and a segment may be empty at either end. There is no separate key field, because a finding already names its rule; a rule whose messages do not all fit one template is left inline instead. A finding never carries both this and <code>messageRef</code>. The rebuilt text is byte-identical to the inline one. <code>ruleMessageTemplatesMeaning</code> states the same contract on the wire.</span>
-          <code>data</code><span>Matcher-specific JSON payload — opaque, rule-specific keys.</span>
+          <code>ruleId</code><span>{{dd1}}</span>
+          <code>severity</code><span>{{dd2}}</span>
+          <code>file</code><span>{{dd3}}</span>
+          <code>line</code><span>{{dd4}}</span>
+          <code>message</code><span>{{dd5}}</span>
+<code>messageRef</code><span>{{dd6}}</span>
+          <code>templateParts</code><span>{{dd7}}</span>
+          <code>data</code><span>{{dd8}}</span>
         </div>
       </div>
       <p>{{p151}}</p>
       <div class="def-list" id="coverage-census">
-        <div class="def-list__title">coverage — structural census, always present</div>
+        <div class="def-list__title">{{dt2}}</div>
         <div class="def-list__grid">
-          <code>files / symbols / resolvedImportEdges</code><span>How much of each channel this tree filled. A <code>0</code> means "counted and found none", never "not run" — the census lets a consumer tell an empty result apart from a dark one. <code>resolvedImportEdges</code> (renamed from <code>importEdges</code>, 2026-07-31) counts only edges the resolver mapped to a file in this tree: an import of a published package, and a specifier nothing could resolve, are dropped during dep resolution and never counted. A low number can mean unresolved imports rather than few imports.</span>
-          <code>parserDispatched</code><span>The subset of <code>files</code> a native frontend dispatched on (or an overlay covers) — <code>files</code> counts every walked path including docs and assets, so read code scale here, not there. Dispatch is by extension: a size-capped or unparsable file still counts, so this is "a frontend existed for it", not "structure was extracted" (see <code>degraded</code>). Envelope ingest sets it equal to <code>files</code>, where the equality is construction rather than a coverage claim.</span>
-          <code>ioProvides / ioConsumesKeyed / ioConsumesUnresolved</code><span>Provides, resolved consumes, and recognized-but-unresolved consumes — the substrate the cross-layer join reasons over.</span>
-          <code>degraded</code><span>Files that fell back to a lexical count (same as <code>degraded.length</code>).</span>
-          <code>joinContributionZero</code><span><code>true</code> when this tree analyzed files but extracted zero IO — the active-blindness fact: it is invisible to the cross-layer join, so any join finding referencing it is not meaningful for it. A client the extractor can't see (a hand-rolled HTTP wrapper, a generated SDK) is a common cause.</span>
+          <code>files / symbols / resolvedImportEdges</code><span>{{dd9}}</span>
+          <code>parserDispatched</code><span>{{dd10}}</span>
+          <code>ioProvides / ioConsumesKeyed / ioConsumesUnresolved</code><span>{{dd11}}</span>
+          <code>degraded</code><span>{{dd12}}</span>
+          <code>joinContributionZero</code><span>{{dd13}}</span>
         </div>
       </div>
       <div class="def-list" id="disclosure-registry">
-        <div class="def-list__title">disclosure — what zzop does and doesn't detect</div>
+        <div class="def-list__title">{{dt3}}</div>
         <div class="def-list__grid">
-          <code>id / group</code><span>A stable kebab-case class id and its taxonomy group: <code>extraction-blind</code>, <code>analysis-dark</code>, <code>input-config</code>, or <code>trust-calibration</code>.</span>
-          <code>summary</code><span>The concrete way an agent could silently misread the output for this class.</span>
-          <code>status</code><span><code>"asserted"</code> (surfaced from a structural fact every run — cannot be silently missed), <code>"partial"</code> (detected in common cases, a member can still slip past), or <code>"notYetDetected"</code> (a real class zzop does <em>not</em> yet detect — declared so you never assume coverage it lacks).</span>
+          <code>id / group</code><span>{{dd14}}</span>
+          <code>summary</code><span>{{dd15}}</span>
+          <code>status</code><span>{{dd16}}</span>
         </div>
       </div>
     </section>
 
     <section id="self-report">
-      <span class="eyebrow eyebrow--sm">Honest output</span>
+      <span class="eyebrow eyebrow--sm">{{ch22}}</span>
       <h2>{{h2152}}</h2>
       <p>{{p153}}</p>
       <div class="code-panel">
-        <div class="code-panel__tab">git option omitted</div>
+        <div class="code-panel__tab">{{ch23}}</div>
         <pre class="code-block"><code>"warnings": [
   "git history not requested (git option omitted): scores, health,
    recommendations, criticality, seams and layerCoChurn are null.
@@ -490,7 +476,7 @@ let result: serde_json::Value = serde_json::from_str(&amp;zzop_facade::analyze_t
     </section>
 
     <section id="errors">
-      <span class="eyebrow eyebrow--sm">Panic safety</span>
+      <span class="eyebrow eyebrow--sm">{{chPanic}}</span>
       <h2>{{h2155}}</h2>
       <p>{{p156}}</p>
     </section>
@@ -498,14 +484,14 @@ let result: serde_json::Value = serde_json::from_str(&amp;zzop_facade::analyze_t
   </main>
 
   <aside class="docs-toc">
-    <div class="docs-toc__label">On this page</div>
-    <a href="#functions" class="docs-toc__link">API functions</a>
-    <a href="#config-required" class="docs-toc__link">A config is required</a>
-    <a href="#config-reference" class="docs-toc__link">Config reference</a>
-    <a href="#multi-repo" class="docs-toc__link">Multi-repo analysis</a>
-    <a href="#output-schema" class="docs-toc__link">Output schema</a>
-    <a href="#self-report" class="docs-toc__link">Warnings self-report</a>
-    <a href="#errors" class="docs-toc__link">Panic safety</a>
+    <div class="docs-toc__label">{{ch24}}</div>
+    <a href="#functions" class="docs-toc__link">{{ch25}}</a>
+    <a href="#config-required" class="docs-toc__link">{{ch26}}</a>
+    <a href="#config-reference" class="docs-toc__link">{{chCfgRef}}</a>
+    <a href="#multi-repo" class="docs-toc__link">{{ch27}}</a>
+    <a href="#output-schema" class="docs-toc__link">{{ch28}}</a>
+    <a href="#self-report" class="docs-toc__link">{{ch29}}</a>
+    <a href="#errors" class="docs-toc__link">{{chPanic}}</a>
   </aside>
 
 </div>

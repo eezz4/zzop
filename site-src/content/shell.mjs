@@ -54,7 +54,35 @@ export default {
   // (ROOT_PAGES 가 손 목록이 아니라 **한국어 판이 있는 문서 집합에서 파생**되기 때문이다).
   extras: [
     { href: "x-showcase.html", label: { ko: "실전", en: "In the field" } },
+    // 🔴 2026-10-03: 이 줄이 없던 동안 **페이지 전체에 GitHub 링크가 푸터의 1개뿐**이었다. 📏 세어
+    // 봤다 — `site/ko/index.html` 에 `github.com/eezz4/zzop` 가 1회. 오픈소스 랜딩에서 *"어디서
+    // 받나"* 가 네비에 없는 것은 디자인 취향이 아니라 막다른 길이고, 받아 온 시안도 같은 자리에
+    // GitHub 와 Download 를 두고 있었다. Download 는 넣지 않았다 — 설치는 `사용법` 탭이 이미
+    // 네비에서 한 번에 닿고, 같은 목적지로 가는 두 번째 입구는 둘 중 하나가 낡는다.
+    // ⚠ 라벨은 두 판이 같은 글자를 찍는다: 고유명사다. 화살표는 바깥으로 나간다는 표시다.
+    { href: "https://github.com/eezz4/zzop", label: { ko: "GitHub ↗", en: "GitHub ↗" } },
   ],
+
+  // 문서 페이지 왼쪽의 **문서 메뉴**. 상단 네비(`tabs`/`extras`)와 다른 목록인 이유는 가리키는
+  // 곳이 다르기 때문이다 — 상단은 index 의 탭으로 가고, 이쪽은 `site/` 의 독립 문서로 간다.
+  //
+  // 🔴 2026-10-03 까지 이 블록은 graph·reference·rules **세 page.html 에 각각 하드코딩**돼 있었고,
+  // 세 벌 모두 영어였다. 📏 그래서 한국어 판에서 상단 네비는 한국어인데(개요·구조·…) 문서로 들어가는
+  // 순간 메뉴만 영어로 바뀌었다. 세 벌은 `is-active` 한 글자만 달랐다.
+  // ⇒ 라벨을 여기 하나로 모으고 `gen-site` 가 `<!--zzop:docsnav-->` 사이에 넣는다. 상단 네비가
+  // 이미 그렇게 사는 이유와 같다(그 파일의 주석: *"the menus cannot drift apart again"*).
+  docsNav: {
+    button: { ko: "문서 메뉴", en: "Docs menu" },
+    groupLabel: { ko: "문서", en: "Docs" },
+    links: [
+      { href: "index.html", label: { ko: "개요", en: "Overview" } },
+      { href: "architecture.html", label: { ko: "구조", en: "Architecture" } },
+      { href: "graph.html", label: { ko: "그래프", en: "Graph" } },
+      { href: "usage.html", label: { ko: "사용법", en: "Usage" } },
+      { href: "reference.html", label: { ko: "레퍼런스", en: "Reference" } },
+      { href: "rules.html", label: { ko: "룰", en: "Rules" } },
+    ],
+  },
 
   // 언어 전환 링크의 aria-label. 링크에 보이는 글자("EN · KO")는 언어 무관이라 조립기가 낸다.
   langLink: {

@@ -876,5 +876,431 @@ export default {
       en: `<code>crates/facade/src/lib.rs</code> (crate <code>zzop-facade</code>) never panics by contract — every fallible path (malformed JSON, a missing <code>root</code>, an invalid envelope) returns a <code>Result&lt;String, String&gt;</code> instead. The engine already isolates a single file's parse/rule failure internally, well before it would ever reach that outer boundary. A direct Rust caller sees either <code>Ok(String)</code> or <code>Err(String)</code>, never a process abort; the <code>zzop-mcp</code> binary calls these functions with no FFI boundary in between, so there is no separate addon-side <code>catch_unwind</code> layer to reason about — the facade's own contract is the whole story. <code>version_string</code> has no <code>Result</code> at all — it cannot fail.`,
     },
 
+
+    // ── 계약 표의 정의 리스트 세 블록 + 인덱스 표 헤더 (2026-10-03) ──────────────────────────
+    //
+    // 🔴 이 22자리는 슬롯이 아니라 **템플릿에 박힌 영어**였다. 그래서 이 페이지는 한국어 판에서
+    // 제목과 산문은 한국어인데 **필드 설명만 영어**로 나왔다 — 번역이 빠진 것이 아니라 번역할
+    // 자리가 없었던 것이고, 슬롯이 154자리나 있는 페이지라 더 눈에 띈다.
+    // 📏 실측(2026-10-03, 렌더된 `site/ko/reference.html` 의 텍스트 노드): 한글이 한 글자도 없는
+    // 산문 65조각, 그 전부가 `site-src/reference/page.html` 에 하드코딩. 그 조각들은 이 22자리가
+    // `<code>` 토큰으로 쪼개진 것이다.
+    //
+    // ⚠ `en` 은 템플릿에 있던 바이트 그대로다 — 이 파일 머리글의 규약(발행된 영어를 번역하면서
+    // 덤으로 고치지 않는다)을 지킨다. `<code>` 토큰과 `href` 는 목적지이지 번역 대상이 아니므로
+    // 두 판의 다중집합이 같아야 하고, 빌더가 그것을 검사한다.
+    ix1: {
+      ko: `오퍼레이션 &middot; CLI &middot; MCP 도구`,
+      en: `Operation &middot; CLI &middot; MCP tool`,
+    },
+
+    ix2: {
+      ko: `무엇에 답하나`,
+      en: `What it answers`,
+    },
+
+    ix3: {
+      ko: `필드 &middot; 타입`,
+      en: `Field &middot; type`,
+    },
+
+    ix4: {
+      ko: `무엇인가`,
+      en: `What it is`,
+    },
+
+    ix5: {
+      ko: `키 &middot; 타입`,
+      en: `Key &middot; type`,
+    },
+
+    ix6: {
+      ko: `무엇을 담나`,
+      en: `What it carries`,
+    },
+
+    dt1: {
+      ko: `Finding — 모든 발견이 공유하는 공통 모양`,
+      en: `Finding — the common shape every finding shares`,
+    },
+
+    dd1: {
+      ko: `DSL 룰이면 <code>"{pack}/{rule}"</code>(예: <code>"sql/nplus1"</code>), 네이티브 분석이면 맨 id(예: <code>"circular"</code>).`,
+      en: `<code>"{pack}/{rule}"</code> for a DSL rule (e.g. <code>"sql/nplus1"</code>), or a plain id for a native analysis (e.g. <code>"circular"</code>).`,
+    },
+
+    dd2: {
+      ko: `<code>"critical" | "warning" | "info"</code> — 그 발견의 <em>실효</em> 심각도다: 룰의 기본값에 <code>severityOverrides</code> 의 재매핑을 적용하고, 런이 눈먼 상태일 때 스스로 확신을 낮추는 룰들의 강등까지 반영한 값이다(아래 참조).`,
+      en: `<code>"critical" | "warning" | "info"</code> — the finding's <em>effective</em> severity: the rule's default, as remapped by <code>severityOverrides</code>, and as de-escalated by the rules that lower their own confidence when the run is blind (see below).`,
+    },
+
+    dd3: {
+      ko: `<code>root</code> 기준 상대 경로.`,
+      en: `Path relative to <code>root</code>.`,
+    },
+
+    dd4: {
+      ko: `1부터 시작하는 줄 번호.`,
+      en: `1-based line number.`,
+    },
+
+    dd5: {
+      ko: `사람이 읽는 원인/수정 힌트. 룰 정의에서 그대로 복사된다 — 단 <code>messageRef</code> 나 <code>templateParts</code> 가 있으면 이 자리는 짧은 포인터이고, 본문 자체는 그 포인터가 이름 대는 형제 표에서 재구성된다.`,
+      en: `Human-facing cause/fix hint, copied verbatim from the rule definition — unless <code>messageRef</code> or <code>templateParts</code> is present, in which case this is a short pointer and the text itself is rebuilt from the sibling table that pointer names.`,
+    },
+
+    dd6: {
+      ko: `<strong>본문이 접혔을 때만 있다.</strong> <code>ruleMessages</code> 로 들어가는 키다. 그 객체는 이 발견이 나온 <code>shown</code> 목록 <em>옆에</em> 앉아 있다 — 고정 경로가 아니라 형제인 이유는 한 셰이퍼가 <code>findings</code> 와 <code>crossLayerFindings</code> 를 모두 먹이기 때문이다. 둘 이상의 발견이 든 본문은 거기 한 번만 저장하고 가리키지만, 포인터와 표의 비용보다 더 많은 바이트를 줄일 때만 그렇게 하므로 반복되는 본문이 거기 없을 수도 있다. <code>messageRef</code> 가 없으면 <code>message</code> 를 그대로 읽어라. 저장된 본문은 인라인 본문과 바이트까지 같다 — 줄이거나 버리는 것이 없고, 두 번째 요청도 필요 없다. <code>ruleMessagesMeaning</code> 이 와이어에서 같은 계약을 말한다.`,
+      en: `<strong>Present only when the text was folded.</strong> A key into <code>ruleMessages</code>, the object sitting beside the <code>shown</code> list this finding came from — a sibling, not a fixed path, because one shaper feeds both <code>findings</code> and <code>crossLayerFindings</code>. A text carried by more than one finding is stored there once and pointed at, but only where doing so removes more bytes than the pointer and the table cost, so a repeated text can also be absent. Read <code>message</code> directly when <code>messageRef</code> is absent. The stored text is byte-identical to the inline one — nothing is shortened or dropped, and no second request is needed. <code>ruleMessagesMeaning</code> states the same contract on the wire.`,
+    },
+
+    dd7: {
+      ko: `<strong>본문이 그 TEMPLATE 에서 접혔을 때만 있다.</strong> 발견 자신의 주어 — 테이블 이름, 심볼, 순환 경로 — 를 산문에 적어 넣는 룰은 매번 다른 문자열을 내므로 위의 <code>ruleMessages</code> 가 담을 수 없다. 그런 메시지들이 공유하는 부분은 형제인 <code>ruleMessageTemplates</code> 에 <em>rule id</em> 로 키잉돼 저장된다: 리터럴 조각의 배열이다. 이 필드는 달라지는 바이트를 순서대로 담는다. 조각부터 시작해 번갈아 끼우고 마지막 조각으로 끝내면 복원된다 — <code>templateParts</code> 는 템플릿보다 항상 정확히 하나 짧고, 양 끝의 조각은 비어 있을 수 있다. 별도의 키 필드는 없다. 발견이 이미 자기 룰을 이름 대기 때문이다. 메시지가 한 템플릿에 다 들어가지 않는 룰은 인라인으로 남긴다. 한 발견이 이것과 <code>messageRef</code> 를 같이 들지는 않는다. 복원된 본문은 인라인 본문과 바이트까지 같다. <code>ruleMessageTemplatesMeaning</code> 이 와이어에서 같은 계약을 말한다.`,
+      en: `<strong>Present only when the text was folded on its TEMPLATE.</strong> A rule that writes a finding's own subject into its prose — a table name, a symbol, a cycle path — emits a different string every time, so <code>ruleMessages</code> above cannot hold it. What those messages share is stored in a sibling <code>ruleMessageTemplates</code> instead, keyed by the <em>rule id</em>: an array of literal segments. This field holds the bytes that differ, in order. Rebuild by interleaving them, segment first, ending on the last segment — <code>templateParts</code> is always exactly one shorter than the template, and a segment may be empty at either end. There is no separate key field, because a finding already names its rule; a rule whose messages do not all fit one template is left inline instead. A finding never carries both this and <code>messageRef</code>. The rebuilt text is byte-identical to the inline one. <code>ruleMessageTemplatesMeaning</code> states the same contract on the wire.`,
+    },
+
+    dd8: {
+      ko: `매처별 JSON 페이로드 — 불투명하고, 룰마다 키가 다르다.`,
+      en: `Matcher-specific JSON payload — opaque, rule-specific keys.`,
+    },
+
+    dt2: {
+      ko: `coverage — 구조 센서스, 항상 있다`,
+      en: `coverage — structural census, always present`,
+    },
+
+    dd9: {
+      ko: `이 트리가 각 채널을 얼마나 채웠나. <code>0</code> 은 "세어 봤고 없었다"이지 "안 돌았다"가 아니다 — 센서스가 있어서 소비자는 빈 결과와 어두운 결과를 구별할 수 있다. <code>resolvedImportEdges</code>(2026-07-31 에 <code>importEdges</code> 에서 개명)는 리졸버가 이 트리 안의 파일로 매핑한 엣지만 센다: 발행된 패키지의 import 와 아무것도 못 푼 스펙시파이어는 의존 해석 중에 떨어지고 결코 세지 않는다. 수가 낮다는 것은 import 가 적다는 뜻이 아니라 안 풀린 import 가 있다는 뜻일 수 있다.`,
+      en: `How much of each channel this tree filled. A <code>0</code> means "counted and found none", never "not run" — the census lets a consumer tell an empty result apart from a dark one. <code>resolvedImportEdges</code> (renamed from <code>importEdges</code>, 2026-07-31) counts only edges the resolver mapped to a file in this tree: an import of a published package, and a specifier nothing could resolve, are dropped during dep resolution and never counted. A low number can mean unresolved imports rather than few imports.`,
+    },
+
+    dd10: {
+      ko: `<code>files</code> 중 네이티브 프런트엔드가 디스패치한(또는 오버레이가 덮는) 부분집합이다 — <code>files</code> 는 문서와 에셋까지 걸은 경로를 전부 세므로 코드 규모는 저기가 아니라 여기서 읽는다. 디스패치는 확장자로 한다: 크기 상한에 걸리거나 파싱 못 하는 파일도 여전히 세므로, 이것은 "구조를 뽑았다"가 아니라 "그것을 받을 프런트엔드가 있었다"이다(<code>degraded</code> 참조). 엔벨로프 수용은 이 값을 <code>files</code> 와 같게 두는데, 그 일치는 커버리지 주장이 아니라 구성이다.`,
+      en: `The subset of <code>files</code> a native frontend dispatched on (or an overlay covers) — <code>files</code> counts every walked path including docs and assets, so read code scale here, not there. Dispatch is by extension: a size-capped or unparsable file still counts, so this is "a frontend existed for it", not "structure was extracted" (see <code>degraded</code>). Envelope ingest sets it equal to <code>files</code>, where the equality is construction rather than a coverage claim.`,
+    },
+
+    dd11: {
+      ko: `provides, 해소된 consumes, 그리고 인식은 했으나 해소하지 못한 consumes — 크로스레이어 조인이 추론의 바탕으로 삼는 기반이다.`,
+      en: `Provides, resolved consumes, and recognized-but-unresolved consumes — the substrate the cross-layer join reasons over.`,
+    },
+
+    dd12: {
+      ko: `어휘 카운트로 떨어진 파일(<code>degraded.length</code> 와 같다).`,
+      en: `Files that fell back to a lexical count (same as <code>degraded.length</code>).`,
+    },
+
+    dd13: {
+      ko: `이 트리가 파일을 분석했는데 IO 를 하나도 못 뽑았을 때 <code>true</code> — 능동적 실명 사실이다: 크로스레이어 조인에 이 트리는 보이지 않으므로, 이 트리를 참조하는 조인 발견은 이 트리에 대해서는 의미가 없다. 추출기가 못 보는 클라이언트(손으로 만든 HTTP 래퍼, 생성된 SDK)가 흔한 원인이다.`,
+      en: `<code>true</code> when this tree analyzed files but extracted zero IO — the active-blindness fact: it is invisible to the cross-layer join, so any join finding referencing it is not meaningful for it. A client the extractor can't see (a hand-rolled HTTP wrapper, a generated SDK) is a common cause.`,
+    },
+
+    dt3: {
+      ko: `disclosure — zzop 이 무엇을 탐지하고 무엇을 못 하나`,
+      en: `disclosure — what zzop does and doesn't detect`,
+    },
+
+    dd14: {
+      ko: `안정적인 kebab-case 클래스 id 와 그 분류 그룹: <code>extraction-blind</code>, <code>analysis-dark</code>, <code>input-config</code>, <code>trust-calibration</code>.`,
+      en: `A stable kebab-case class id and its taxonomy group: <code>extraction-blind</code>, <code>analysis-dark</code>, <code>input-config</code>, or <code>trust-calibration</code>.`,
+    },
+
+    dd15: {
+      ko: `이 클래스에서 에이전트가 출력을 조용히 오독할 수 있는 구체적인 경로.`,
+      en: `The concrete way an agent could silently misread the output for this class.`,
+    },
+
+    dd16: {
+      ko: `<code>"asserted"</code>(매 런마다 구조적 사실에서 드러난다 — 조용히 놓칠 수 없다), <code>"partial"</code>(흔한 경우는 잡지만 일부가 빠져나갈 수 있다), 또는 <code>"notYetDetected"</code>(zzop 이 아직 탐지하지 <em>못</em> 하는 실재 클래스 — 없는 커버리지를 가정하지 않도록 선언해 둔다).`,
+      en: `<code>"asserted"</code> (surfaced from a structural fact every run — cannot be silently missed), <code>"partial"</code> (detected in common cases, a member can still slip past), or <code>"notYetDetected"</code> (a real class zzop does <em>not</em> yet detect — declared so you never assume coverage it lacks).`,
+    },
+
+    // ── 커맨드/필드 표의 설명 셀 24개 (2026-10-03, 위 블록과 같은 결함의 나머지) ───────────
+    //
+    // 📏 `<span class="cmd-row__desc">` 24자리 중 슬롯은 **0** 이었다. 이 페이지의 표는 왼쪽이
+    // 식별자(`__name`·`__twin`·`__type` — 번역 대상이 아니다)이고 오른쪽이 설명인데, 그 오른쪽이
+    // 통째로 템플릿에 박혀 있었다. 한국어 판에서 표의 **왼쪽은 원래 영어라 정상이고 오른쪽만
+    // 영어라 비정상**인데, 둘이 나란히 있어서 그 차이가 잘 안 보였다.
+    cd1: {
+      ko: `트리 하나 넣으면 <code>AnalyzeOutputView</code> 하나가 나온다.`,
+      en: `One tree in, one <code>AnalyzeOutputView</code> out.`,
+    },
+
+    cd2: {
+      ko: `여러 트리를 레이어 경계를 넘어 조인한다.`,
+      en: `Several trees, joined across the layer boundary.`,
+    },
+
+    cd3: {
+      ko: `모드 A: 어댑터의 엔벨로프가 네이티브 파싱을 대체한다.`,
+      en: `Mode A: an adapter's envelope replaces native parsing.`,
+    },
+
+    cd4: {
+      ko: `io 키 하나가 제공됐나, 소비됐나, 조인됐나? 봉인된 판정 하나.`,
+      en: `Is one io key provided, consumed or joined? One sealed verdict.`,
+    },
+
+    cd5: {
+      ko: `zzop 이 파일 하나에 대해 아는 전부 — 상한 없이.`,
+      en: `Everything zzop knows about ONE file — uncapped.`,
+    },
+
+    cd6: {
+      ko: `zzop 이 이 트리를 실제로 얼마나 보나?`,
+      en: `How much of this tree does zzop actually see?`,
+    },
+
+    cd7: {
+      ko: `오프라인 &ldquo;내 엔벨로프가 제대로 된 모양인가?&rdquo; — 결코 실패하지 않는다.`,
+      en: `Offline &ldquo;is my envelope well-formed?&rdquo; — it never fails.`,
+    },
+
+    cd8: {
+      ko: `오프라인 &ldquo;이 팩이 로드되나, 그리고 안의 모든 룰이 발화할 수 있나?&rdquo;`,
+      en: `Offline &ldquo;does this pack load, and can every rule in it fire?&rdquo;`,
+    },
+
+    cd9: {
+      ko: `맨 릴리스 번호 — 스크립트가 파싱할 수 있는 토큰 하나.`,
+      en: `The bare release number — one token a script can parse.`,
+    },
+
+    cd10: {
+      ko: `엔진 + 파서 지문 문자열. 실패할 수 없다.`,
+      en: `Engine + parser fingerprint string. Cannot fail.`,
+    },
+
+    cd11: {
+      ko: `번들된 룰 id 하나 &rarr; 그 룰에 컴파일돼 들어간 자기 데이터.`,
+      en: `One bundled rule id &rarr; that rule's own compiled-in data.`,
+    },
+
+    cd12: {
+      ko: `config 의 트리들이 실제로 로드하는 팩들에 대고 같은 조회를 한다.`,
+      en: `The same lookup over the packs a config's trees really load.`,
+    },
+
+    cd13: {
+      ko: `분석할 트리 루트. 빈 문자열은 <code>Err</code> 로 거부된다.`,
+      en: `Tree root to analyze. An empty string is rejected with <code>Err</code>.`,
+    },
+
+    cd14: {
+      ko: `크로스트리 출력까지 그대로 실려 가는 자유 형식 라벨.`,
+      en: `Free-form label carried through into cross-tree output.`,
+    },
+
+    cd15: {
+      ko: `통째로 끌 룰 / 네이티브 분석 id (정확히 일치).`,
+      en: `Rule / native-analysis ids to disable entirely (exact match).`,
+    },
+
+    cd16: {
+      ko: `룰 id &rarr; <code>"critical" | "warning" | "info"</code>. 팩을 포크하지 않고 특정 id 만 올리거나 내린다.`,
+      en: `Rule id &rarr; <code>"critical" | "warning" | "info"</code>. Promote or demote a specific id without forking its pack.`,
+    },
+
+    cd17: {
+      ko: `기본 <code>1,500,000</code> 바이트(약 1.5&nbsp;MB). 이보다 큰 파일은 구조 파싱을 건너뛰고 <code>degraded</code> 아래 실린다.`,
+      en: `Default <code>1,500,000</code> bytes (~1.5&nbsp;MB). Files larger than this skip structural parsing and are listed under <code>degraded</code>.`,
+    },
+
+    cd18: {
+      ko: `언어 중립 공통 IR: <code>symbols</code>, <code>dep</code>(import 그래프), <code>loc</code>, <code>io</code>(IoFacts).`,
+      en: `Language-neutral common IR: <code>symbols</code>, <code>dep</code> (import graph), <code>loc</code>, <code>io</code> (IoFacts).`,
+    },
+
+    cd19: {
+      ko: `걸은 파일 수.`,
+      en: `Files walked.`,
+    },
+
+    cd20: {
+      ko: `<code>sizeCap</code> 에 걸렸거나 그 밖의 이유로 구조 파싱에 실패한 경로.`,
+      en: `Paths that hit <code>sizeCap</code> or otherwise failed to parse structurally.`,
+    },
+
+    cd21: {
+      ko: `이 트리 자신의 <code>package.json</code> 의 <code>scripts</code> 가 이름 대는 파일들, 정렬됨 — 출하 코드가 아니라 빌드 표면이다. 항상 있다. <code>[]</code> 는 매니페스트가 하나도 선언하지 않았다는 뜻이다.`,
+      en: `Files this tree's own <code>package.json</code> <code>scripts</code> names, sorted — build surface, not shipped code. Always present; <code>[]</code> means the manifests declared none.`,
+    },
+
+    cd22: {
+      ko: `파일별 churn/fan-in/fan-out/risk 지표 — <code>git</code> 이 설정됐을 때만 온전히 채워진다.`,
+      en: `Per-file churn/fan-in/fan-out/risk metrics — fully populated only when <code>git</code> is set.`,
+    },
+
+    cd23: {
+      ko: `치명적이지 않은 문제들과 능력 자가보고 노트 — <a href="#self-report">정직한 출력</a> 참조.`,
+      en: `Non-fatal issues plus capability self-report notes — see <a href="#self-report">Honest output</a>.`,
+    },
+
+    cd24: {
+      ko: `<code>cacheDir</code> 가 주어졌을 때만 설정된다.`,
+      en: `Set only when <code>cacheDir</code> was given.`,
+    },
+
+    // ── 페이지 크롬 (2026-10-03, 같은 결함의 마지막 묶음) ─────────────────────────────────
+    //
+    // 📏 이 페이지만 크롬을 슬롯화하지 않았다. 같은 클래스를 쓰는 다른 페이지와 나란히 세면:
+    //   reference 하드코딩 38 · 슬롯 0 | rules 2 · 11 | graph 0 · 1 | privacy·showcase·redirect 0 · 0
+    // 사이트 규약이 아니라 이 한 페이지의 누락이고, 하필 **독자가 가장 먼저 여는 목차**가 거기 있었다.
+    //
+    // ⚠ 전부를 슬롯으로 만들지는 않았다 — `analyze`/`query`/`validate`/`meta` 와 `zzop CLI` 는
+    // CLI 서브커맨드 계열 이름과 제품 이름이라 두 판이 같은 글자를 찍는 것이 맞다. 빠뜨린 것이
+    // 아니라는 뜻으로 여기 적어 둔다(이 파일 머리글의 '시그니처만 있는 슬롯' 규약과 같은 판단).
+    //
+    // 🔵 `chCfgRef` 와 `chPanic` 은 **한 쌍이 두 자리를 소유한다** — 섹션 eyebrow 와 목차 링크가
+    // 같은 글자를 찍어야 하고, 쌍을 둘로 두면 한쪽만 고쳐질 수 있다. 빌더의 `fill` 은 구멍의
+    // 모든 출현을 치환하므로 이것이 그대로 동작한다.
+    ch2: {
+      ko: `오퍼레이션`,
+      en: `Operations`,
+    },
+
+    ch3: {
+      ko: `상세 — analyze`,
+      en: `Details — analyze`,
+    },
+
+    ch4: {
+      ko: `상세 — query`,
+      en: `Details — query`,
+    },
+
+    ch5: {
+      ko: `상세 — validate`,
+      en: `Details — validate`,
+    },
+
+    ch6: {
+      ko: `상세 — meta`,
+      en: `Details — meta`,
+    },
+
+    ch7: {
+      ko: `기본값`,
+      en: `Defaults`,
+    },
+
+    ch8: {
+      ko: `zzop-facade 직접 호출 (Rust)`,
+      en: `Direct zzop-facade call (Rust)`,
+    },
+
+    chCfgRef: {
+      ko: `config 레퍼런스`,
+      en: `Config reference`,
+    },
+
+    ch9: {
+      ko: `식별`,
+      en: `identity`,
+    },
+
+    ch10: {
+      ko: `필수`,
+      en: `required`,
+    },
+
+    ch11: {
+      ko: `룰과 발견`,
+      en: `rules &amp; findings`,
+    },
+
+    ch12: {
+      ko: `분석`,
+      en: `analysis`,
+    },
+
+    ch13: {
+      ko: `배포 토폴로지`,
+      en: `deployment topology`,
+    },
+
+    ch14: {
+      ko: `확장 지점`,
+      en: `extension points`,
+    },
+
+    ch15: {
+      ko: `크로스레포`,
+      en: `Cross-repo`,
+    },
+
+    ch16: {
+      ko: `크로스레포 — zzop-facade 직접 호출 (Rust)`,
+      en: `Cross-repo — direct zzop-facade (Rust)`,
+    },
+
+    ch17: {
+      ko: `출력`,
+      en: `Output`,
+    },
+
+    ch18: {
+      ko: `구조`,
+      en: `structure`,
+    },
+
+    ch19: {
+      ko: `룰 판정`,
+      en: `rule verdicts`,
+    },
+
+    ch20: {
+      ko: `git 게이트`,
+      en: `git-gated`,
+    },
+
+    ch21: {
+      ko: `이 런 자신이 무엇을 했나`,
+      en: `what this run itself did`,
+    },
+
+    ch22: {
+      ko: `정직한 출력`,
+      en: `Honest output`,
+    },
+
+    ch23: {
+      ko: `git 옵션 생략`,
+      en: `git option omitted`,
+    },
+
+    chPanic: {
+      ko: `패닉 안전성`,
+      en: `Panic safety`,
+    },
+
+    ch24: {
+      ko: `이 페이지 안에서`,
+      en: `On this page`,
+    },
+
+    ch25: {
+      ko: `API 함수`,
+      en: `API functions`,
+    },
+
+    ch26: {
+      ko: `config 는 필수다`,
+      en: `A config is required`,
+    },
+
+    ch27: {
+      ko: `다중 레포 분석`,
+      en: `Multi-repo analysis`,
+    },
+
+    ch28: {
+      ko: `출력 스키마`,
+      en: `Output schema`,
+    },
+
+    ch29: {
+      ko: `warnings 자가보고`,
+      en: `Warnings self-report`,
+    },
   },
 };

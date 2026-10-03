@@ -379,6 +379,31 @@ function sheetFor(mode) {
 //   active     for a standalone page: which entry is the current page — a page id
 //              ("p-graph"), an extra's href ("x-showcase.html"), or null for a
 //              footer-reached reference page that highlights nothing.
+/** The docs-page side menu. One owner (`shell.docsNav`) for what used to be three hand-written
+ *  copies — graph, reference and rules each carried the same block, differing only in which link had
+ *  `is-active`, and all three were English in BOTH editions. A page that wants it carries an empty
+ *  <!--zzop:docsnav-->…<!--/zzop:docsnav--> pair; a page without the pair simply does not get one. */
+function docsNavMarkup(mode, activeFile) {
+  const links = shell.docsNav.links
+    .map(
+      (l) =>
+        `<a href="${l.href}" class="docs-nav__link${l.href === activeFile ? " is-active" : ""}">` +
+        `${say(l.label, mode, `docsNav.${l.href}`)}</a>`
+    )
+    .join("\n      ");
+  return (
+    `  <button type="button" class="docs-nav-toggle" aria-expanded="false" aria-controls="docs-nav">\n` +
+    `    ${say(shell.docsNav.button, mode, "docsNav.button")}\n` +
+    `  </button>\n\n` +
+    `  <aside class="docs-nav" id="docs-nav">\n` +
+    `    <div class="docs-nav__group">\n` +
+    `      <div class="docs-nav__group-label">${say(shell.docsNav.groupLabel, mode, "docsNav.groupLabel")}</div>\n` +
+    `      ${links}\n` +
+    `    </div>\n` +
+    `  </aside>`
+  );
+}
+
 function navMarkup(mode, { crossPage = false, active = null, alt = ALT } = {}) {
   const tabHref = (p) =>
     crossPage ? (p.id === "p-index" ? "index.html" : `index.html#${p.id}`) : `#${p.id}`;
@@ -576,6 +601,9 @@ function buildTemplatedPage(page, mode) {
 
   const nav = navMarkup(mode, { crossPage: true, active: page.navActive ? page.file : null, alt: altFor(page.file) });
   html = injectBetween(html, "zzop:nav", nav, page.id);
+  if (html.includes("<!--zzop:docsnav-->")) {
+    html = injectBetween(html, "zzop:docsnav", docsNavMarkup(mode, page.file), page.id);
+  }
   html = injectBetween(html, "zzop:foot", footMarkup(mode), page.id);
   return fixRootLinks(html, mode);
 }

@@ -23,6 +23,7 @@
     <a href="index.html#p-rules" class="nav__link">룰</a>
     <a href="index.html#p-graph" class="nav__link">그래프</a>
     <a href="x-showcase.html" class="nav__extra">실전</a>
+    <a href="https://github.com/eezz4/zzop" class="nav__extra">GitHub ↗</a>
   </div>
   <a class="langbtn" id="langlink" href="../reference.html" hreflang="en" aria-label="영어판으로 보기">EN · <b>KO</b></a>
 </nav>
@@ -30,21 +31,23 @@
 
 <div class="docs-layout">
 
+  <!--zzop:docsnav-->
   <button type="button" class="docs-nav-toggle" aria-expanded="false" aria-controls="docs-nav">
-    Docs menu
+    문서 메뉴
   </button>
 
   <aside class="docs-nav" id="docs-nav">
     <div class="docs-nav__group">
-      <div class="docs-nav__group-label">Docs</div>
-      <a href="index.html" class="docs-nav__link">Overview</a>
-      <a href="architecture.html" class="docs-nav__link">Architecture</a>
-      <a href="graph.html" class="docs-nav__link">Graph</a>
-      <a href="usage.html" class="docs-nav__link">Usage</a>
-      <a href="reference.html" class="docs-nav__link is-active">Reference</a>
-      <a href="rules.html" class="docs-nav__link">Rules</a>
+      <div class="docs-nav__group-label">문서</div>
+      <a href="index.html" class="docs-nav__link">개요</a>
+      <a href="architecture.html" class="docs-nav__link">구조</a>
+      <a href="graph.html" class="docs-nav__link">그래프</a>
+      <a href="usage.html" class="docs-nav__link">사용법</a>
+      <a href="reference.html" class="docs-nav__link is-active">레퍼런스</a>
+      <a href="rules.html" class="docs-nav__link">룰</a>
     </div>
   </aside>
+<!--/zzop:docsnav-->
 
   <main class="docs-content">
     <div class="docs-content-header">
@@ -53,30 +56,30 @@
     </div>
 
     <section id="functions">
-      <span class="eyebrow eyebrow--sm">Operations</span>
+      <span class="eyebrow eyebrow--sm">오퍼레이션</span>
       <h2>공유되는 오퍼레이션</h2>
       <p>아래의 모든 오퍼레이션은 최소 두 갈래로 닿는다 — <code>zzop</code> CLI 서브커맨드와 인프로세스 호출 — 그리고 그 둘은 하나의 구현을 공유한다(<code>crates/facade</code>, 그리고 CLI 와 MCP 도구가 받는 설정 자동탐색·결과 정형을 맡는 <code>crates/summary</code>). 어느 표면을 쓰든 같은 요청을 넣으면 같은 JSON 이 나오고, <code>version</code> 을 빼면 전부 JSON 문자열 입력 / JSON 문자열 출력이다. <strong><code>zzop-mcp</code> MCP 도구가 세 번째 갈래이고, 모든 오퍼레이션에 하나씩 있는 것은 아니다</strong> — 아래 각 행은 자기 오퍼레이션이 닿는 표면을 스스로 밝히고, MCP 도구가 없는 행은 없다는 사실과 그 이유를 함께 적는다. 메워야 할 구멍이 아니라 의도된 비대칭이다: CLI 전용 레인마다 짝이 없는 이유가 <code>docs/contracts/surface-parity.json</code>(<code>_cliOnlyLanes</code>)에 레인 단위로 기록돼 있고, 메타 테스트(<code class="code-wrap">crates/engine/tests/rule_contracts/surface_parity.rs</code>)가 그것을 읽어 MCP 응답을 그 등기부가 말하는 것에 붙들어 둔다.</p>
       <div class="cmd-index cmd-index--ops">
-        <div class="cmd-index__head"><span>Operation &middot; CLI &middot; MCP tool</span><span>What it answers</span><span></span></div>
+        <div class="cmd-index__head"><span>오퍼레이션 &middot; CLI &middot; MCP 도구</span><span>무엇에 답하나</span><span></span></div>
         <div class="cmd-band"><span class="cmd-band__label">analyze</span></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>analyze_json</code><span class="cmd-row__twin"><code>zzop analyze</code> &middot; <code>analyze_repo</code></span></span><span class="cmd-row__desc">One tree in, one <code>AnalyzeOutputView</code> out.</span><a class="cmd-row__anchor" href="#op-analyze-json" aria-label="Details for analyze_json">&para;</a></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>analyze_trees_json</code><span class="cmd-row__twin"><code>zzop cross</code> &middot; <code>cross_repo</code></span></span><span class="cmd-row__desc">Several trees, joined across the layer boundary.</span><a class="cmd-row__anchor" href="#op-analyze-trees-json" aria-label="Details for analyze_trees_json">&para;</a></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>analyze_envelope_json</code><span class="cmd-row__twin"><code>zzop analyze-envelope</code> &middot; <code>analyze_envelope</code></span></span><span class="cmd-row__desc">Mode A: an adapter's envelope replaces native parsing.</span><a class="cmd-row__anchor" href="#op-analyze-envelope-json" aria-label="Details for analyze_envelope_json">&para;</a></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>analyze_json</code><span class="cmd-row__twin"><code>zzop analyze</code> &middot; <code>analyze_repo</code></span></span><span class="cmd-row__desc">트리 하나 넣으면 <code>AnalyzeOutputView</code> 하나가 나온다.</span><a class="cmd-row__anchor" href="#op-analyze-json" aria-label="Details for analyze_json">&para;</a></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>analyze_trees_json</code><span class="cmd-row__twin"><code>zzop cross</code> &middot; <code>cross_repo</code></span></span><span class="cmd-row__desc">여러 트리를 레이어 경계를 넘어 조인한다.</span><a class="cmd-row__anchor" href="#op-analyze-trees-json" aria-label="Details for analyze_trees_json">&para;</a></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>analyze_envelope_json</code><span class="cmd-row__twin"><code>zzop analyze-envelope</code> &middot; <code>analyze_envelope</code></span></span><span class="cmd-row__desc">모드 A: 어댑터의 엔벨로프가 네이티브 파싱을 대체한다.</span><a class="cmd-row__anchor" href="#op-analyze-envelope-json" aria-label="Details for analyze_envelope_json">&para;</a></div>
         <div class="cmd-band"><span class="cmd-band__label">query</span></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>query_io_json</code><span class="cmd-row__twin"><code>zzop endpoint</code> &middot; <code>check_endpoint</code></span></span><span class="cmd-row__desc">Is one io key provided, consumed or joined? One sealed verdict.</span><a class="cmd-row__anchor" href="#op-query-io-json" aria-label="Details for query_io_json">&para;</a></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>query_file_json</code><span class="cmd-row__twin"><code>zzop file</code> &middot; <code>check_file</code></span></span><span class="cmd-row__desc">Everything zzop knows about ONE file — uncapped.</span><a class="cmd-row__anchor" href="#op-query-file-json" aria-label="Details for query_file_json">&para;</a></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>query_coverage_json</code><span class="cmd-row__twin"><code>zzop coverage</code> &middot; no MCP tool</span></span><span class="cmd-row__desc">How much of this tree does zzop actually see?</span><a class="cmd-row__anchor" href="#op-query-coverage-json" aria-label="Details for query_coverage_json">&para;</a></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>query_io_json</code><span class="cmd-row__twin"><code>zzop endpoint</code> &middot; <code>check_endpoint</code></span></span><span class="cmd-row__desc">io 키 하나가 제공됐나, 소비됐나, 조인됐나? 봉인된 판정 하나.</span><a class="cmd-row__anchor" href="#op-query-io-json" aria-label="Details for query_io_json">&para;</a></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>query_file_json</code><span class="cmd-row__twin"><code>zzop file</code> &middot; <code>check_file</code></span></span><span class="cmd-row__desc">zzop 이 파일 하나에 대해 아는 전부 — 상한 없이.</span><a class="cmd-row__anchor" href="#op-query-file-json" aria-label="Details for query_file_json">&para;</a></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>query_coverage_json</code><span class="cmd-row__twin"><code>zzop coverage</code> &middot; no MCP tool</span></span><span class="cmd-row__desc">zzop 이 이 트리를 실제로 얼마나 보나?</span><a class="cmd-row__anchor" href="#op-query-coverage-json" aria-label="Details for query_coverage_json">&para;</a></div>
         <div class="cmd-band"><span class="cmd-band__label">validate</span></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>validate_envelope_only_json</code><span class="cmd-row__twin"><code>zzop validate-envelope</code> &middot; <code>validate_envelope</code></span></span><span class="cmd-row__desc">Offline &ldquo;is my envelope well-formed?&rdquo; — it never fails.</span><a class="cmd-row__anchor" href="#op-validate-envelope-only-json" aria-label="Details for validate_envelope_only_json">&para;</a></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>validate_rule_pack_json</code><span class="cmd-row__twin"><code>zzop validate-rule-pack</code> &middot; <code>validate_rule_pack</code></span></span><span class="cmd-row__desc">Offline &ldquo;does this pack load, and can every rule in it fire?&rdquo;</span><a class="cmd-row__anchor" href="#op-validate-rule-pack-json" aria-label="Details for validate_rule_pack_json">&para;</a></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>validate_envelope_only_json</code><span class="cmd-row__twin"><code>zzop validate-envelope</code> &middot; <code>validate_envelope</code></span></span><span class="cmd-row__desc">오프라인 &ldquo;내 엔벨로프가 제대로 된 모양인가?&rdquo; — 결코 실패하지 않는다.</span><a class="cmd-row__anchor" href="#op-validate-envelope-only-json" aria-label="Details for validate_envelope_only_json">&para;</a></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>validate_rule_pack_json</code><span class="cmd-row__twin"><code>zzop validate-rule-pack</code> &middot; <code>validate_rule_pack</code></span></span><span class="cmd-row__desc">오프라인 &ldquo;이 팩이 로드되나, 그리고 안의 모든 룰이 발화할 수 있나?&rdquo;</span><a class="cmd-row__anchor" href="#op-validate-rule-pack-json" aria-label="Details for validate_rule_pack_json">&para;</a></div>
         <div class="cmd-band"><span class="cmd-band__label">meta</span></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>version</code><span class="cmd-row__twin"><code>zzop version</code> &middot; no MCP tool</span></span><span class="cmd-row__desc">The bare release number — one token a script can parse.</span><a class="cmd-row__anchor" href="#op-version" aria-label="Details for version">&para;</a></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>version_string</code><span class="cmd-row__twin"><code>zzop version --verbose</code> &middot; no MCP tool</span></span><span class="cmd-row__desc">Engine + parser fingerprint string. Cannot fail.</span><a class="cmd-row__anchor" href="#op-version-string" aria-label="Details for version_string">&para;</a></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>explain</code><span class="cmd-row__twin"><code>zzop explain</code> &middot; no MCP tool</span></span><span class="cmd-row__desc">One bundled rule id &rarr; that rule's own compiled-in data.</span><a class="cmd-row__anchor" href="#op-explain" aria-label="Details for explain">&para;</a></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>explain_with_config</code><span class="cmd-row__twin"><code>zzop explain --config</code> &middot; no MCP tool</span></span><span class="cmd-row__desc">The same lookup over the packs a config's trees really load.</span><a class="cmd-row__anchor" href="#op-explain-with-config" aria-label="Details for explain_with_config">&para;</a></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>version</code><span class="cmd-row__twin"><code>zzop version</code> &middot; no MCP tool</span></span><span class="cmd-row__desc">맨 릴리스 번호 — 스크립트가 파싱할 수 있는 토큰 하나.</span><a class="cmd-row__anchor" href="#op-version" aria-label="Details for version">&para;</a></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>version_string</code><span class="cmd-row__twin"><code>zzop version --verbose</code> &middot; no MCP tool</span></span><span class="cmd-row__desc">엔진 + 파서 지문 문자열. 실패할 수 없다.</span><a class="cmd-row__anchor" href="#op-version-string" aria-label="Details for version_string">&para;</a></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>explain</code><span class="cmd-row__twin"><code>zzop explain</code> &middot; no MCP tool</span></span><span class="cmd-row__desc">번들된 룰 id 하나 &rarr; 그 룰에 컴파일돼 들어간 자기 데이터.</span><a class="cmd-row__anchor" href="#op-explain" aria-label="Details for explain">&para;</a></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>explain_with_config</code><span class="cmd-row__twin"><code>zzop explain --config</code> &middot; no MCP tool</span></span><span class="cmd-row__desc">config 의 트리들이 실제로 로드하는 팩들에 대고 같은 조회를 한다.</span><a class="cmd-row__anchor" href="#op-explain-with-config" aria-label="Details for explain_with_config">&para;</a></div>
       </div>
 
-      <span class="eyebrow eyebrow--sm cmd-details__label">Details — analyze</span>
+      <span class="eyebrow eyebrow--sm cmd-details__label">상세 — analyze</span>
       <h3 id="op-analyze-json" class="cmd-detail"><code>analyze_json</code></h3>
       <p class="cmd-note"><code>(config_json: &amp;str) -&gt; Result&lt;String, String&gt;</code></p>
       <p><code>AnalyzeRequest</code> &rarr; <code>AnalyzeOutputView</code>. 트리 하나를 분석한다. <code>zzop analyze &lt;path&gt;</code> / <code>analyze --config &lt;path&gt;</code> CLI 서브커맨드와 <code>analyze_repo</code> MCP 도구(<code>zzop-summary</code> 경유)를 떠받친다.</p>
@@ -87,7 +90,7 @@
       <p class="cmd-note"><code>(envelope_json: &amp;str, config_json: &amp;str) -&gt; Result&lt;String, String&gt;</code></p>
       <p><code>NormalizedEnvelope</code> + <code>EnvelopeAnalyzeRequest</code> &rarr; <code>AnalyzeOutputView</code>. 외부 파서 어댑터가 만든 Normalized AST 엔벨로프를 분석한다. <code>zzop analyze-envelope</code> / <code>analyze_envelope</code> MCP 도구를 떠받친다.</p>
 
-      <span class="eyebrow eyebrow--sm cmd-details__label">Details — query</span>
+      <span class="eyebrow eyebrow--sm cmd-details__label">상세 — query</span>
       <h3 id="op-query-io-json" class="cmd-detail"><code>query_io_json</code></h3>
       <p class="cmd-note"><code>(analysis_json: &amp;str, query_json: &amp;str) -&gt; Result&lt;String, String&gt;</code></p>
       <p><code>analyze_trees_json</code> 출력 + <code>{ pattern: string }</code> &rarr; 엔드포인트/io 키에 대한 확정 답. 이미 만들어진 다중 트리 분석 위의 순수 후처리이고 재분석은 없다: <code>pattern</code> 은 모든 크로스레이어 io 키(HTTP 라우트, env 키, DB 테이블, 토픽, 그리고 풀리지 않은 consume 을 위한 <code>raw</code>)에 대소문자 무시 부분 문자열로 맞춰 보고, 결과는 봉인된 <code>verdict</code> 어휘(<code>linked</code> | <code>provided-only</code> | <code>consumed-unprovided</code> | <code>external</code> | <code>unresolved-only</code> | <code>ambiguous</code> | <code>mixed</code> | <code>not-found</code>)를 그 뒤의 매치·개수·관련 발견과 함께 싣는다. 질의가 망가졌을 때와 단일 트리 <code>analyze_json</code> 출력이 들어왔을 때는 에러를 낸다 — 안내가 붙은 에러다. verdict 는 조인 사실이기 때문이다(트리가 하나여도 조인하는 <code>analyze_trees_json</code> 을 돌려라). <code>zzop endpoint</code> / <code>check_endpoint</code> MCP 도구를 떠받친다.</p>
@@ -99,7 +102,7 @@
       <p class="cmd-note"><code>(analysis_json: &amp;str) -&gt; Result&lt;String, String&gt;</code></p>
       <p><code>analyze_trees_json</code> 출력 &rarr; <strong>총량 가시성</strong> 뷰: &ldquo;zzop 이 이 트리를 실제로 얼마나 보고 있나?&rdquo; 트리마다 디스패치별 확장자 표(구조 / lexical-only / degraded, 그리고 <code>inDepGraph</code>), <code>blindSpots</code> &mdash; 컴파일된 각 룰의 시선을 그 트리의 구조 확장자 구성과 교차시킨 <strong>능력</strong> 축 &mdash; 그 트리 자신의 엔진 경고를 그대로 전달한 것(프레임워크 침묵 자기보고가 여기 실린다), 커버리지 센서스, <code>ioChannels</code>(<code>extracted</code> — 룰이 읽는 io 종류마다 한 행씩, <strong>0 이어도 반드시 실린다</strong>: 종류를 구분하지 않는 <code>joinContributionZero</code> 처럼 채워진 채널이 빈 채널을 대신 보증하지 못하게 한다. <code>zeroExtraction</code> — 이 빌드가 인식기를 가진 (채널, 확장자) 중 추출이 0 으로 돌아온 것을 이름 붙인 <strong>능력×실측</strong> 교차: 이 실행이 구조적으로 읽은 것 중 주요 비중인 확장자만 실리고(그 아래는 목록에서 <strong>빠지는 것이지 통과한 것이 아니다</strong>), 프레임워크 이름을 알아보는 게 아니라 트리 자체를 모집단으로 삼는 <strong>커버리지 사실</strong>이다), 그리고 <code>joinVisibility</code> 를 개수로(provides, consumesKeyed, consumesUnresolved) 의미와 함께 낸다 — 파생 비율은 내지 않는다. 몫은 1 중 1 에서나 440 중 400 에서나 똑같이 읽히기 때문이다. <strong>단일 점수는 일부러 없다</strong>: zzop 이 당신 트리에서 한 번도 재지 못한 축은, 그 사실 없이 인용될 숫자에 접혀 들어가는 대신 <strong>재지 못했다는 필드</strong>에 실려 간다. <code>zzop coverage</code> 와 <code>check_coverage</code> MCP 도구를 떠받친다.</p>
 
-      <span class="eyebrow eyebrow--sm cmd-details__label">Details — validate</span>
+      <span class="eyebrow eyebrow--sm cmd-details__label">상세 — validate</span>
       <h3 id="op-validate-envelope-only-json" class="cmd-detail"><code>validate_envelope_only_json</code></h3>
       <p class="cmd-note"><code>(envelope_json: &amp;str) -&gt; String</code></p>
       <p>엔벨로프 JSON &rarr; <code>{ valid: boolean, issues: string[], hints: string[] }</code> — <code>hints</code> 는 언제나 있고, 구조적으로 <strong>유효한</strong> 엔벨로프가 그럼에도 아무것도 조인하지 못할 이유를 듣는 자리다. <code>analyze_envelope_json</code> 이 자기 엔벨로프에 적용하는 구조·의미 검사를 똑같이 돌리고 거기서 멈춘다 — 설정도, 팩 로딩도, 엔진 실행도 없다 — 어댑터 작성자를 위한 빠르고 오프라인인 "내 엔벨로프가 잘 생겼나" 피드백이다. 실패하지 않는다: 유효하지 않은 엔벨로프도 평범한 <code>{ valid: false, issues: [...] }</code> 결과로 돌아온다. <code>zzop validate-envelope</code> 와 <code>validate_envelope</code> MCP 도구를 떠받친다.</p>
@@ -107,7 +110,7 @@
       <p class="cmd-note"><code>(pack_json: &amp;str) -&gt; String</code></p>
       <p>룰팩 JSON &rarr; <code>{ valid: boolean, issues: string[] }</code>. 엔진의 팩 로더가 적재 시점에 적용하는 구조 판정을 그대로 돌리고(망가진 JSON, 빠진 필드, 틀린 타입, 너무 새로운 <code>schema_version</code>), 여기에 적재는 되지만 말없이 영영 발화하지 못할 룰까지 잡는다 — 컴파일되지 않는 matcher 정규식, <code>line_pattern</code> 도 <code>any</code> 도 선언하지 않은 line-scan, <code>trigger</code> 가 어떤 <code>patterns</code> 항목도 선언하지 않은 라벨을 가리키는 method-scan. 모양만 보고 룰 품질의 의미는 절대 보지 않는다. 팩 작성자를 위한 배포 전 피드백이다. 실패하지 않는다: 유효하지 않은 팩도 평범한 <code>{ valid: false, issues: [...] }</code> 결과로 돌아온다. <code>zzop validate-rule-pack</code> 과 <code>validate_rule_pack</code> MCP 도구를 떠받친다.</p>
 
-      <span class="eyebrow eyebrow--sm cmd-details__label">Details — meta</span>
+      <span class="eyebrow eyebrow--sm cmd-details__label">상세 — meta</span>
       <h3 id="op-version" class="cmd-detail"><code>version</code></h3>
       <p class="cmd-note"><code>() -&gt; String</code></p>
       <p>핑거프린트 없는 맨 릴리스 번호 — 그냥 <code>zzop version</code> / <code>zzop-mcp version</code> 이 찍는 것. <code>version_string</code> 과 일부러 갈라 뒀다: 이쪽은 스크립트가 파싱하는 토큰 하나여서, 길어지면 그렇게 하는 호출자가 전부 깨진다. MCP 도구 짝은 없고, 이유는 <code>version_string</code> 과 같다.</p>
@@ -123,7 +126,7 @@
     </section>
 
     <section id="config-required">
-      <span class="eyebrow eyebrow--sm">Defaults</span>
+      <span class="eyebrow eyebrow--sm">기본값</span>
       <h2>설정은 필수다; 시작용 설정만으로도 전체 분석이 돈다</h2>
       <p>모든 분석 레인은 <code>zzop.config.jsonc</code> 가 없는 트리를 거부한다 — 두 배포 바이너리 모두에서, 같은 거부를 같은 문서 이름을 대며 한다. 의례가 아니다: <code>vocabulary</code> 블록은 그것이 없으면 zzop 이 당신 프로젝트에 대해 추측해야 할 이름들을 담고 있고, 선언되지 않은 키는 zzop 이 <strong>내리지 않는</strong> 판정이다 — 이름 기반 인증 면제, 생성 파일 탐지, 쓰기 지점 판정이 그것과 함께 전부 꺼진다. <code>zzop init</code> 은 zzop 자신의 값이 이미 들어 있는 그 파일을 써 준다.</p>
       <p>나머지는 전부 기본값이 선다. <code>roots</code> 만 선언한 시작용 설정으로도 <em>두 바이너리 모두에서 똑같이</em> 전체 분석이 돈다 — 둘 다 공유 <code>zzop-summary</code> 층과 그 <code>zzop-config</code> 크레이트를 지나가고, 그 층이 번들 DSL 룰팩(바이너리에 컴파일돼 있다), 엔진의 <code>recentDays: 30</code> git 기본값, 그리고 <code>.zzop/cache</code> 라는 <code>cacheDir</code> 을 주입한다:</p>
@@ -136,7 +139,7 @@ zzop analyze .   # that config is auto-discovered; bundled packs +
       </div>
       <p><code>zzop_facade::analyze_json</code> 을 직접 부르면 그 앞에 그런 래퍼가 없다 — 파사드는 <strong>암묵적 기본값을 하나도</strong> 적용하지 않는다. 맨 <code>{"root": "."}</code> 설정 JSON 은 DSL 팩을 0개 적재하고(네이티브 분석만) git 수집을 끈 채 돈다(<code>scores</code>/<code>health</code>/<code>recommendations</code> 가 <code>null</code> 로 남는다) — <code>packsDir</code>/<code>packDefs</code> 와 <code>git</code> 을 직접 세우지 않는 한:</p>
       <div class="code-panel">
-        <div class="code-panel__tab">Direct zzop-facade call (Rust)</div>
+        <div class="code-panel__tab">zzop-facade 직접 호출 (Rust)</div>
         <pre class="code-block"><code>let config = serde_json::json!({ "root": ".", "git": {} }).to_string();
 let result: serde_json::Value =
     serde_json::from_str(&amp;zzop_facade::analyze_json(&amp;config)?)?;</code></pre>
@@ -152,17 +155,17 @@ let result: serde_json::Value =
     </section>
 
     <section id="config-reference">
-      <span class="eyebrow eyebrow--sm">Config reference</span>
+      <span class="eyebrow eyebrow--sm">config 레퍼런스</span>
       <h2>AnalyzeRequest</h2>
       <p><code>#[serde(rename_all = "camelCase", default)]</code> — <code>root</code> 를 빼면 모든 필드가 선택이고, 모르는 필드는 거부가 아니라 무시된다.</p>
       <div class="cmd-index cmd-index--fields" data-wire-fields>
-        <div class="cmd-index__head"><span>Field &middot; type</span><span>What it is</span></div>
+        <div class="cmd-index__head"><span>필드 &middot; 타입</span><span>무엇인가</span></div>
 
-        <div class="cmd-band"><span class="cmd-band__label">identity</span></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>root</code><span class="cmd-row__req">required</span><span class="cmd-row__type">string</span></span><span class="cmd-row__desc">Tree root to analyze. An empty string is rejected with <code>Err</code>.</span></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>sourceId</code><span class="cmd-row__type">string &mdash; default <code>""</code></span></span><span class="cmd-row__desc">Free-form label carried through into cross-tree output.</span></div>
+        <div class="cmd-band"><span class="cmd-band__label">식별</span></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>root</code><span class="cmd-row__req">필수</span><span class="cmd-row__type">string</span></span><span class="cmd-row__desc">분석할 트리 루트. 빈 문자열은 <code>Err</code> 로 거부된다.</span></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>sourceId</code><span class="cmd-row__type">string &mdash; default <code>""</code></span></span><span class="cmd-row__desc">크로스트리 출력까지 그대로 실려 가는 자유 형식 라벨.</span></div>
 
-        <div class="cmd-band"><span class="cmd-band__label">rules &amp; findings</span></div>
+        <div class="cmd-band"><span class="cmd-band__label">룰과 발견</span></div>
         <details class="cmd-fold">
           <summary><div class="cmd-row"><span class="cmd-row__name"><code>packsDir</code><span class="cmd-row__type">string | string[] &mdash; 선택</span></span><span class="cmd-row__desc">적재할 <code>*.json</code> DSL 룰팩 디렉터리(또는 디렉터리들).<span class="cmd-row__more">계약</span></span></div></summary>
           <div class="design-notes__body">
@@ -175,14 +178,14 @@ let result: serde_json::Value =
             <p>디스크에 팩 디렉터리가 없는 호스트를 위한, <code>packsDir</code> 의 자기완결 바이너리 대안이다(예: <code>zzop-mcp</code> 의 컴파일 시점 내장 팩). <code>packsDir</code> 디렉터리보다 <em>먼저</em> 적재되므로 같은 id 의 디렉터리 팩이 충돌을 통째로 이긴다. 더하기만 한 변경이고(v0.16.0), 은퇴한 JS 래퍼는 이것을 보낸 적이 없다. <code>analyzeEnvelope</code> 의 설정에서도 동일한 계약으로 받는다.</p>
           </div>
         </details>
-        <div class="cmd-row"><span class="cmd-row__name"><code>disabledRules</code><span class="cmd-row__type">string[]</span></span><span class="cmd-row__desc">Rule / native-analysis ids to disable entirely (exact match).</span></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>disabledRules</code><span class="cmd-row__type">string[]</span></span><span class="cmd-row__desc">통째로 끌 룰 / 네이티브 분석 id (정확히 일치).</span></div>
         <details class="cmd-fold">
           <summary><div class="cmd-row"><span class="cmd-row__name"><code>packsOnly</code><span class="cmd-row__type">string[] &mdash; 기본값 <code>[]</code></span></span><span class="cmd-row__desc">DSL 팩 <strong>허용 목록</strong>. 설정 파일 방언: <code>packs.only</code>.<span class="cmd-row__more">계약</span></span></div></summary>
           <div class="design-notes__body">
             <p>비어 있지 않으면, id 가 여기 없는 팩은 돌지 않는다. "이것만 빼고"밖에 말하지 못하는 <code>disabledRules</code> 의 옵트인 쌍둥이다. 비어 있다는 것은 허용 목록이 <em>없다</em>는 뜻(적재된 모든 팩이 돈다)이지 아무것도 허용하지 않는다는 뜻이 아니다. 범위는 팩까지다: 네이티브 분석은 계속 돌고 <code>disabledRules</code> 의 소관으로 남는다. <code>disabledRules</code> 와 함께 쓰인다(허용 목록이 고르고, <code>disabledRules</code> 가 여전히 빼낸다).</p>
           </div>
         </details>
-        <div class="cmd-row"><span class="cmd-row__name"><code>severityOverrides</code><span class="cmd-row__type">object</span></span><span class="cmd-row__desc">Rule id &rarr; <code>"critical" | "warning" | "info"</code>. Promote or demote a specific id without forking its pack.</span></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>severityOverrides</code><span class="cmd-row__type">object</span></span><span class="cmd-row__desc">룰 id &rarr; <code>"critical" | "warning" | "info"</code>. 팩을 포크하지 않고 특정 id 만 올리거나 내린다.</span></div>
         <details class="cmd-fold">
           <summary><div class="cmd-row"><span class="cmd-row__name"><code>suppressions</code><span class="cmd-row__type">object[]</span></span><span class="cmd-row__desc">룰별 발견 수용 목록. 경로 부분 문자열이나 글롭으로.<span class="cmd-row__more">계약</span></span></div></summary>
           <div class="design-notes__body">
@@ -198,7 +201,7 @@ let result: serde_json::Value =
           </div>
         </details>
 
-        <div class="cmd-band"><span class="cmd-band__label">analysis</span></div>
+        <div class="cmd-band"><span class="cmd-band__label">분석</span></div>
         <details class="cmd-fold">
           <summary><div class="cmd-row"><span class="cmd-row__name"><code>cacheDir</code><span class="cmd-row__type">string &mdash; 선택</span></span><span class="cmd-row__desc">파일 단위 IR/룰 결과 캐시 디렉터리 — 생략하면 이 와이어는 캐시 없이 돈다.<span class="cmd-row__more">계약</span></span></div></summary>
           <div class="design-notes__body">
@@ -214,7 +217,7 @@ let result: serde_json::Value =
             <p><code>warnings</code> 자기보고가 둘이다: 컴파일되지 않는 <code>pattern</code>(건너뛰고 아무것도 맞히지 않는다), 그리고 수집된 커밋을 하나도 맞히지 못한 선언 표. <strong>오늘 그 경고들이 이 키의 유일한 관측 가능한 효과다</strong> — 보존된 제목과 그 라벨은 엔진 내부의 커밋별 레코드에 머물고 아직 어떤 출력 채널에도 실리지 않는다. 알려진 한계: git 출력은 <code>from_utf8_lossy</code> 로 디코딩되므로, 레거시 인코딩 제목(<code>encoding</code> 헤더가 없는 커밋 객체)은 UTF-8 이 아닌 바이트가 이미 U+FFFD 로 바뀐 상태로 매칭된다 — 그 원래 글자를 적은 패턴은 맞힐 수 없고, U+FFFD 가 관측되면 무매치 경고가 그렇게 말한다.</p>
           </div>
         </details>
-        <div class="cmd-row"><span class="cmd-row__name"><code>sizeCap</code><span class="cmd-row__type">number &mdash; optional</span></span><span class="cmd-row__desc">Default <code>1,500,000</code> bytes (~1.5&nbsp;MB). Files larger than this skip structural parsing and are listed under <code>degraded</code>.</span></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>sizeCap</code><span class="cmd-row__type">number &mdash; optional</span></span><span class="cmd-row__desc">기본 <code>1,500,000</code> 바이트(약 1.5&nbsp;MB). 이보다 큰 파일은 구조 파싱을 건너뛰고 <code>degraded</code> 아래 실린다.</span></div>
         <details class="cmd-fold">
           <summary><div class="cmd-row"><span class="cmd-row__name"><code>vocabulary</code><span class="cmd-row__type">object &mdash; 기본값 <code>{}</code></span></span><span class="cmd-row__desc"><strong>관습 어휘</strong> — <em>프로젝트</em>가 고르는 이름들을, 추측 대신 선언한다.<span class="cmd-row__more">계약</span></span></div></summary>
           <div class="design-notes__body">
@@ -233,7 +236,7 @@ let result: serde_json::Value =
           </div>
         </details>
 
-        <div class="cmd-band"><span class="cmd-band__label">deployment topology</span></div>
+        <div class="cmd-band"><span class="cmd-band__label">배포 토폴로지</span></div>
         <details class="cmd-fold">
           <summary><div class="cmd-row"><span class="cmd-row__name"><code>mountedAt</code><span class="cmd-row__type">string &mdash; 선택</span></span><span class="cmd-row__desc">트리 전체의 게이트웨이/인그레스 마운트 접두사. <code>http</code> provide 에만 붙는다.<span class="cmd-row__more">계약</span></span></div></summary>
           <div class="design-notes__body">
@@ -267,7 +270,7 @@ let result: serde_json::Value =
           </div>
         </details>
 
-        <div class="cmd-band"><span class="cmd-band__label">extension points</span></div>
+        <div class="cmd-band"><span class="cmd-band__label">확장 지점</span></div>
         <details class="cmd-fold">
           <summary><div class="cmd-row"><span class="cmd-row__name"><code>adapterOverlays</code><span class="cmd-row__type">object[]</span></span><span class="cmd-row__desc">모드 B: 네이티브 분석 <em>위에</em> 병합되는 부분 엔벨로프.<span class="cmd-row__more">계약</span></span></div></summary>
           <div class="design-notes__body">
@@ -296,11 +299,11 @@ let result: serde_json::Value =
     </section>
 
     <section id="multi-repo">
-      <span class="eyebrow eyebrow--sm">Cross-repo</span>
+      <span class="eyebrow eyebrow--sm">크로스레포</span>
       <h2>여러 레포지토리를 함께 분석하기</h2>
       <p><code>analyze_trees_json</code>(CLI: <code>zzop cross</code>, MCP 도구: <code>cross_repo</code>)은 트리마다 <code>analyze</code> 를 한 번씩 돌린 다음, 모든 트리가 선언한 IoFact(HTTP/DB/tRPC 의 provide 와 consume)를 전부에 걸쳐 잇는다. 프런트엔드 체크아웃과 백엔드 체크아웃이 디스크에서 아무것도 공유하지 않는 완전히 별개의 git 레포지토리여도 조인된다.</p>
       <div class="code-panel">
-        <div class="code-panel__tab">Cross-repo — direct zzop-facade (Rust)</div>
+        <div class="code-panel__tab">크로스레포 — zzop-facade 직접 호출 (Rust)</div>
         <pre class="code-block"><code>let config = serde_json::json!({
   "trees": [
     { "root": "../frontend", "sourceId": "web" },
@@ -316,27 +319,27 @@ let result: serde_json::Value = serde_json::from_str(&amp;zzop_facade::analyze_t
     </section>
 
     <section id="output-schema">
-      <span class="eyebrow eyebrow--sm">Output</span>
+      <span class="eyebrow eyebrow--sm">출력</span>
       <h2>AnalyzeOutputView</h2>
       <p>같은 입력이면 바이트까지 같은 출력이다 — 타임스탬프도, 불안정한 맵/배열 순서도 없다. 어떤 실행이 제공할 수 없는 능력은 <strong>스키마에서 빠지고 <code>warnings</code> 에 스스로 보고된다</strong>. 가짜 빈 값으로 채워 넣는 일은 결코 없다. 반대로 빈 배열은 언제나 "분석했고 아무것도 찾지 못했다"는 뜻이다.</p>
       <p>이 색인은 <em>와이어</em> 모양이고, 이름이 가리키는 타입보다 한 겹 넓다: 응답 루트는 <code>AnalyzeOutputView</code> 를 평평하게 펴고 실행 전역인 <code>disclosure</code> 등기부를 형제로 덧붙인다. 두 쪽 다 <code>docs/contracts/surface-parity.json</code> 에 한 번씩 열거돼 있다 — 최상위 키는 전부 거기에 행이 있어야 하고, 없으면 빌드 테스트가 실패한다.</p>
       <div class="cmd-index cmd-index--fields" data-wire-fields>
-        <div class="cmd-index__head"><span>Key &middot; type</span><span>What it carries</span></div>
+        <div class="cmd-index__head"><span>키 &middot; 타입</span><span>무엇을 담나</span></div>
 
-        <div class="cmd-band"><span class="cmd-band__label">structure</span></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>ir</code><span class="cmd-row__type">object</span></span><span class="cmd-row__desc">Language-neutral common IR: <code>symbols</code>, <code>dep</code> (import graph), <code>loc</code>, <code>io</code> (IoFacts).</span></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>fileCount</code><span class="cmd-row__type">number</span></span><span class="cmd-row__desc">Files walked.</span></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>degraded</code><span class="cmd-row__type">string[]</span></span><span class="cmd-row__desc">Paths that hit <code>sizeCap</code> or otherwise failed to parse structurally.</span></div>
-        <div class="cmd-row"><span class="cmd-row__name"><code>buildScriptPaths</code><span class="cmd-row__type">string[]</span></span><span class="cmd-row__desc">Files this tree's own <code>package.json</code> <code>scripts</code> names, sorted — build surface, not shipped code. Always present; <code>[]</code> means the manifests declared none.</span></div>
+        <div class="cmd-band"><span class="cmd-band__label">구조</span></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>ir</code><span class="cmd-row__type">object</span></span><span class="cmd-row__desc">언어 중립 공통 IR: <code>symbols</code>, <code>dep</code>(import 그래프), <code>loc</code>, <code>io</code>(IoFacts).</span></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>fileCount</code><span class="cmd-row__type">number</span></span><span class="cmd-row__desc">걸은 파일 수.</span></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>degraded</code><span class="cmd-row__type">string[]</span></span><span class="cmd-row__desc"><code>sizeCap</code> 에 걸렸거나 그 밖의 이유로 구조 파싱에 실패한 경로.</span></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>buildScriptPaths</code><span class="cmd-row__type">string[]</span></span><span class="cmd-row__desc">이 트리 자신의 <code>package.json</code> 의 <code>scripts</code> 가 이름 대는 파일들, 정렬됨 — 출하 코드가 아니라 빌드 표면이다. 항상 있다. <code>[]</code> 는 매니페스트가 하나도 선언하지 않았다는 뜻이다.</span></div>
         <details class="cmd-fold">
           <summary><div class="cmd-row"><span class="cmd-row__name"><code>coverage</code><span class="cmd-row__type">object</span></span><span class="cmd-row__desc">구조 커버리지 센서스 — 언제나 있다.<span class="cmd-row__more">계약</span></span></div></summary>
           <div class="design-notes__body">
             <p>이 트리가 어느 채널을 채웠는지를 어휘 없이 세어 놓은 것(<code>files</code>, <code>parserDispatched</code>, <code>symbols</code>, <code>resolvedImportEdges</code>, <code>declaredImportsByExt</code> — 그 간선 개수에 대한 확장자별 선언 지정자 분모이고 해석 이전에 센다. 확장자 키가 없다는 것은 0 이 아니라 잰 적이 없다는 뜻이다 — <code>ioProvides</code>, <code>ioConsumesKeyed</code>, <code>ioConsumesUnresolved</code>, <code>degraded</code>)에 더해, 능동적 실명 사실인 <code>joinContributionZero</code> 가 실린다. 각 칸의 정의는 아래 <a href="#coverage-census">커버리지 센서스</a>에 있다.</p>
           </div>
         </details>
-        <div class="cmd-row"><span class="cmd-row__name"><code>nodes</code><span class="cmd-row__type">object[]</span></span><span class="cmd-row__desc">Per-file churn/fan-in/fan-out/risk metrics — fully populated only when <code>git</code> is set.</span></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>nodes</code><span class="cmd-row__type">object[]</span></span><span class="cmd-row__desc">파일별 churn/fan-in/fan-out/risk 지표 — <code>git</code> 이 설정됐을 때만 온전히 채워진다.</span></div>
 
-        <div class="cmd-band"><span class="cmd-band__label">rule verdicts</span></div>
+        <div class="cmd-band"><span class="cmd-band__label">룰 판정</span></div>
         <details class="cmd-fold">
           <summary><div class="cmd-row"><span class="cmd-row__name"><code>findings</code><span class="cmd-row__type">object[]</span></span><span class="cmd-row__desc"><code>(severity, file, line, ruleId)</code> 오름차순 정렬, critical 이 먼저.<span class="cmd-row__more">계약</span></span></div></summary>
           <div class="design-notes__body">
@@ -344,7 +347,7 @@ let result: serde_json::Value = serde_json::from_str(&amp;zzop_facade::analyze_t
           </div>
         </details>
 
-        <div class="cmd-band"><span class="cmd-band__label">git-gated</span></div>
+        <div class="cmd-band"><span class="cmd-band__label">git 게이트</span></div>
         <details class="cmd-fold">
           <summary><div class="cmd-row"><span class="cmd-row__name"><code>scores</code><span class="cmd-row__type">object | null</span></span><span class="cmd-row__desc">구조 세부 점수, 0&ndash;100. <code>git</code> 이 서 있지 않으면 <code>null</code>.<span class="cmd-row__more">계약</span></span></div></summary>
           <div class="design-notes__body">
@@ -397,7 +400,7 @@ let result: serde_json::Value = serde_json::from_str(&amp;zzop_facade::analyze_t
           </div>
         </details>
 
-        <div class="cmd-band"><span class="cmd-band__label">what this run itself did</span></div>
+        <div class="cmd-band"><span class="cmd-band__label">이 런 자신이 무엇을 했나</span></div>
         <details class="cmd-fold">
           <summary><div class="cmd-row"><span class="cmd-row__name"><code>packsLoaded</code><span class="cmd-row__type">object[]</span></span><span class="cmd-row__desc">팩 적재의 긍정 확인: 적재된 DSL 팩마다 한 항목. 끈 팩은 <code>didNotRun</code> 으로 갈린다.<span class="cmd-row__more">계약</span></span></div></summary>
           <div class="design-notes__body">
@@ -432,14 +435,14 @@ let result: serde_json::Value = serde_json::from_str(&amp;zzop_facade::analyze_t
             <p>모양: <code>{ disabled, severityRemapped, only }</code> — <code>disabledRules</code>/<code>severityOverrides</code>/<code>packsOnly</code> 가 적용됐다는 것과 영향을 받은 룰 id 들을 싣고, <code>only</code> 는 존중된 팩 허용 목록(<code>packs.only</code>)으로 그 바깥의 팩은 돌지 않았다는 뜻이다. 셋 중 아무것도 요청되지 않았으면 빠지거나 비어 있다 — 없는 키는 <code>null</code> 이 아니라 "오버라이드 없음"으로 읽어라.</p>
           </div>
         </details>
-        <div class="cmd-row"><span class="cmd-row__name"><code>warnings</code><span class="cmd-row__type">string[]</span></span><span class="cmd-row__desc">Non-fatal issues plus capability self-report notes — see <a href="#self-report">Honest output</a>.</span></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>warnings</code><span class="cmd-row__type">string[]</span></span><span class="cmd-row__desc">치명적이지 않은 문제들과 능력 자가보고 노트 — <a href="#self-report">정직한 출력</a> 참조.</span></div>
         <details class="cmd-fold">
           <summary><div class="cmd-row"><span class="cmd-row__name"><code>configWarnings</code><span class="cmd-row__type">string[]</span></span><span class="cmd-row__desc">설정을 쓰다 난 문제. <code>warnings</code> 바깥에 따로 둔다. 언제나 있다.<span class="cmd-row__more">계약</span></span></div></summary>
           <div class="design-notes__body">
             <p>분석 시점에 계산된다: 알려진 어떤 룰 id 와도 맞지 않는 <code>disabledRules</code>/<code>severityOverrides</code> 항목이 여기 보고된다(알려진 id 전체 집합을 가진 것은 분석 시점뿐이다). <code>[]</code> 는 두 손잡이 어느 쪽에도 아무것도 맞히지 못한 항목이 없었다는 뜻이다.</p>
           </div>
         </details>
-        <div class="cmd-row"><span class="cmd-row__name"><code>cache</code><span class="cmd-row__type">{ hits, misses } | null</span></span><span class="cmd-row__desc">Set only when <code>cacheDir</code> was given.</span></div>
+        <div class="cmd-row"><span class="cmd-row__name"><code>cache</code><span class="cmd-row__type">{ hits, misses } | null</span></span><span class="cmd-row__desc"><code>cacheDir</code> 가 주어졌을 때만 설정된다.</span></div>
         <details class="cmd-fold">
           <summary><div class="cmd-row"><span class="cmd-row__name"><code>ruleTimings</code><span class="cmd-row__type">object[] | null</span></span><span class="cmd-row__desc">프로파일링이 켜져 있을 때, 룰 id + 걸린 시간 + 발견 개수.<span class="cmd-row__more">계약</span></span></div></summary>
           <div class="design-notes__body">
@@ -457,45 +460,45 @@ let result: serde_json::Value = serde_json::from_str(&amp;zzop_facade::analyze_t
       </div>
       <p>JSON 트리는 위에서 아래까지 전부 camelCase 다 — 최상위 뷰뿐 아니라 중첩된 모든 타입이 자기 표기 규칙을 함께 지닌다. <code>Finding.data</code> 가 의도된 단 하나의 예외다: 균일한 표기 규칙이 없는, 룰 작성자가 쓴 불투명한 JSON 이다.</p>
       <div class="def-list" id="finding-shape">
-        <div class="def-list__title">Finding — the common shape every finding shares</div>
+        <div class="def-list__title">Finding — 모든 발견이 공유하는 공통 모양</div>
         <div class="def-list__grid">
-          <code>ruleId</code><span><code>"{pack}/{rule}"</code> for a DSL rule (e.g. <code>"sql/nplus1"</code>), or a plain id for a native analysis (e.g. <code>"circular"</code>).</span>
-          <code>severity</code><span><code>"critical" | "warning" | "info"</code> — the finding's <em>effective</em> severity: the rule's default, as remapped by <code>severityOverrides</code>, and as de-escalated by the rules that lower their own confidence when the run is blind (see below).</span>
-          <code>file</code><span>Path relative to <code>root</code>.</span>
-          <code>line</code><span>1-based line number.</span>
-          <code>message</code><span>Human-facing cause/fix hint, copied verbatim from the rule definition — unless <code>messageRef</code> or <code>templateParts</code> is present, in which case this is a short pointer and the text itself is rebuilt from the sibling table that pointer names.</span>
-<code>messageRef</code><span><strong>Present only when the text was folded.</strong> A key into <code>ruleMessages</code>, the object sitting beside the <code>shown</code> list this finding came from — a sibling, not a fixed path, because one shaper feeds both <code>findings</code> and <code>crossLayerFindings</code>. A text carried by more than one finding is stored there once and pointed at, but only where doing so removes more bytes than the pointer and the table cost, so a repeated text can also be absent. Read <code>message</code> directly when <code>messageRef</code> is absent. The stored text is byte-identical to the inline one — nothing is shortened or dropped, and no second request is needed. <code>ruleMessagesMeaning</code> states the same contract on the wire.</span>
-          <code>templateParts</code><span><strong>Present only when the text was folded on its TEMPLATE.</strong> A rule that writes a finding's own subject into its prose — a table name, a symbol, a cycle path — emits a different string every time, so <code>ruleMessages</code> above cannot hold it. What those messages share is stored in a sibling <code>ruleMessageTemplates</code> instead, keyed by the <em>rule id</em>: an array of literal segments. This field holds the bytes that differ, in order. Rebuild by interleaving them, segment first, ending on the last segment — <code>templateParts</code> is always exactly one shorter than the template, and a segment may be empty at either end. There is no separate key field, because a finding already names its rule; a rule whose messages do not all fit one template is left inline instead. A finding never carries both this and <code>messageRef</code>. The rebuilt text is byte-identical to the inline one. <code>ruleMessageTemplatesMeaning</code> states the same contract on the wire.</span>
-          <code>data</code><span>Matcher-specific JSON payload — opaque, rule-specific keys.</span>
+          <code>ruleId</code><span>DSL 룰이면 <code>"{pack}/{rule}"</code>(예: <code>"sql/nplus1"</code>), 네이티브 분석이면 맨 id(예: <code>"circular"</code>).</span>
+          <code>severity</code><span><code>"critical" | "warning" | "info"</code> — 그 발견의 <em>실효</em> 심각도다: 룰의 기본값에 <code>severityOverrides</code> 의 재매핑을 적용하고, 런이 눈먼 상태일 때 스스로 확신을 낮추는 룰들의 강등까지 반영한 값이다(아래 참조).</span>
+          <code>file</code><span><code>root</code> 기준 상대 경로.</span>
+          <code>line</code><span>1부터 시작하는 줄 번호.</span>
+          <code>message</code><span>사람이 읽는 원인/수정 힌트. 룰 정의에서 그대로 복사된다 — 단 <code>messageRef</code> 나 <code>templateParts</code> 가 있으면 이 자리는 짧은 포인터이고, 본문 자체는 그 포인터가 이름 대는 형제 표에서 재구성된다.</span>
+<code>messageRef</code><span><strong>본문이 접혔을 때만 있다.</strong> <code>ruleMessages</code> 로 들어가는 키다. 그 객체는 이 발견이 나온 <code>shown</code> 목록 <em>옆에</em> 앉아 있다 — 고정 경로가 아니라 형제인 이유는 한 셰이퍼가 <code>findings</code> 와 <code>crossLayerFindings</code> 를 모두 먹이기 때문이다. 둘 이상의 발견이 든 본문은 거기 한 번만 저장하고 가리키지만, 포인터와 표의 비용보다 더 많은 바이트를 줄일 때만 그렇게 하므로 반복되는 본문이 거기 없을 수도 있다. <code>messageRef</code> 가 없으면 <code>message</code> 를 그대로 읽어라. 저장된 본문은 인라인 본문과 바이트까지 같다 — 줄이거나 버리는 것이 없고, 두 번째 요청도 필요 없다. <code>ruleMessagesMeaning</code> 이 와이어에서 같은 계약을 말한다.</span>
+          <code>templateParts</code><span><strong>본문이 그 TEMPLATE 에서 접혔을 때만 있다.</strong> 발견 자신의 주어 — 테이블 이름, 심볼, 순환 경로 — 를 산문에 적어 넣는 룰은 매번 다른 문자열을 내므로 위의 <code>ruleMessages</code> 가 담을 수 없다. 그런 메시지들이 공유하는 부분은 형제인 <code>ruleMessageTemplates</code> 에 <em>rule id</em> 로 키잉돼 저장된다: 리터럴 조각의 배열이다. 이 필드는 달라지는 바이트를 순서대로 담는다. 조각부터 시작해 번갈아 끼우고 마지막 조각으로 끝내면 복원된다 — <code>templateParts</code> 는 템플릿보다 항상 정확히 하나 짧고, 양 끝의 조각은 비어 있을 수 있다. 별도의 키 필드는 없다. 발견이 이미 자기 룰을 이름 대기 때문이다. 메시지가 한 템플릿에 다 들어가지 않는 룰은 인라인으로 남긴다. 한 발견이 이것과 <code>messageRef</code> 를 같이 들지는 않는다. 복원된 본문은 인라인 본문과 바이트까지 같다. <code>ruleMessageTemplatesMeaning</code> 이 와이어에서 같은 계약을 말한다.</span>
+          <code>data</code><span>매처별 JSON 페이로드 — 불투명하고, 룰마다 키가 다르다.</span>
         </div>
       </div>
       <p><strong>severity 가 주장하는 것.</strong> severity 는 그 발견 하나에 대한 zzop 의 확신을 말하고, 그 확신은 이번 실행이 볼 수 있었던 것에 묶여 있다 — zzop 은 소스를 읽지, 돌아가는 시스템을 찔러 보지 않는다. 크로스레이어 룰 둘이 스스로 등급을 낮춤으로써 그 경계를 눈에 보이게 만든다: <code>cross-layer/unconsumed-mutation-endpoint</code> 와 <code>cross-layer/unprovided-mutation-call</code> 은, HTTP 호출이 대부분 풀리지 않은 채 돌아온 소스를(각각, 서버 프레임워크를 import 하면서도 라우트를 거의 내놓지 못한 소스를) 실행이 들고 있을 때 <code>warning</code> 이 아니라 <code>info</code> 로 보고하고 그 소스를 메시지에서 이름 댄다. 어느 쪽이든 발견은 발화하므로, 이것은 억제가 아니라 확신의 눈금 맞추기다. 그 역은 <strong>성립하지 않고</strong>, warning 갈래의 메시지가 스스로 그렇게 말한다: 실명 검사 하나하나는 좁은 술어 하나이므로, 룰이 <code>warning</code> 에 머물렀다는 것은 실명이 <em>목격되지 않았다</em>는 뜻이지 커버리지가 완전하다고 증명됐다는 뜻이 아니다. 이 추출이 모델링하지 않는 호출 모양이나 언어로 부르는 호출자, 또는 이번 실행 바깥의 레포지토리에 있는 호출자는, 룰에게 그런 것과 똑같이 이 검사에게도 보이지 않는다. severity 를 판결로 대하기 전에, 이번 실행이 자기 한계를 스스로 적은 <code>warnings</code> 와 아래 <code>coverage</code> 센서스를 읽어라.</p>
       <div class="def-list" id="coverage-census">
-        <div class="def-list__title">coverage — structural census, always present</div>
+        <div class="def-list__title">coverage — 구조 센서스, 항상 있다</div>
         <div class="def-list__grid">
-          <code>files / symbols / resolvedImportEdges</code><span>How much of each channel this tree filled. A <code>0</code> means "counted and found none", never "not run" — the census lets a consumer tell an empty result apart from a dark one. <code>resolvedImportEdges</code> (renamed from <code>importEdges</code>, 2026-07-31) counts only edges the resolver mapped to a file in this tree: an import of a published package, and a specifier nothing could resolve, are dropped during dep resolution and never counted. A low number can mean unresolved imports rather than few imports.</span>
-          <code>parserDispatched</code><span>The subset of <code>files</code> a native frontend dispatched on (or an overlay covers) — <code>files</code> counts every walked path including docs and assets, so read code scale here, not there. Dispatch is by extension: a size-capped or unparsable file still counts, so this is "a frontend existed for it", not "structure was extracted" (see <code>degraded</code>). Envelope ingest sets it equal to <code>files</code>, where the equality is construction rather than a coverage claim.</span>
-          <code>ioProvides / ioConsumesKeyed / ioConsumesUnresolved</code><span>Provides, resolved consumes, and recognized-but-unresolved consumes — the substrate the cross-layer join reasons over.</span>
-          <code>degraded</code><span>Files that fell back to a lexical count (same as <code>degraded.length</code>).</span>
-          <code>joinContributionZero</code><span><code>true</code> when this tree analyzed files but extracted zero IO — the active-blindness fact: it is invisible to the cross-layer join, so any join finding referencing it is not meaningful for it. A client the extractor can't see (a hand-rolled HTTP wrapper, a generated SDK) is a common cause.</span>
+          <code>files / symbols / resolvedImportEdges</code><span>이 트리가 각 채널을 얼마나 채웠나. <code>0</code> 은 "세어 봤고 없었다"이지 "안 돌았다"가 아니다 — 센서스가 있어서 소비자는 빈 결과와 어두운 결과를 구별할 수 있다. <code>resolvedImportEdges</code>(2026-07-31 에 <code>importEdges</code> 에서 개명)는 리졸버가 이 트리 안의 파일로 매핑한 엣지만 센다: 발행된 패키지의 import 와 아무것도 못 푼 스펙시파이어는 의존 해석 중에 떨어지고 결코 세지 않는다. 수가 낮다는 것은 import 가 적다는 뜻이 아니라 안 풀린 import 가 있다는 뜻일 수 있다.</span>
+          <code>parserDispatched</code><span><code>files</code> 중 네이티브 프런트엔드가 디스패치한(또는 오버레이가 덮는) 부분집합이다 — <code>files</code> 는 문서와 에셋까지 걸은 경로를 전부 세므로 코드 규모는 저기가 아니라 여기서 읽는다. 디스패치는 확장자로 한다: 크기 상한에 걸리거나 파싱 못 하는 파일도 여전히 세므로, 이것은 "구조를 뽑았다"가 아니라 "그것을 받을 프런트엔드가 있었다"이다(<code>degraded</code> 참조). 엔벨로프 수용은 이 값을 <code>files</code> 와 같게 두는데, 그 일치는 커버리지 주장이 아니라 구성이다.</span>
+          <code>ioProvides / ioConsumesKeyed / ioConsumesUnresolved</code><span>provides, 해소된 consumes, 그리고 인식은 했으나 해소하지 못한 consumes — 크로스레이어 조인이 추론의 바탕으로 삼는 기반이다.</span>
+          <code>degraded</code><span>어휘 카운트로 떨어진 파일(<code>degraded.length</code> 와 같다).</span>
+          <code>joinContributionZero</code><span>이 트리가 파일을 분석했는데 IO 를 하나도 못 뽑았을 때 <code>true</code> — 능동적 실명 사실이다: 크로스레이어 조인에 이 트리는 보이지 않으므로, 이 트리를 참조하는 조인 발견은 이 트리에 대해서는 의미가 없다. 추출기가 못 보는 클라이언트(손으로 만든 HTTP 래퍼, 생성된 SDK)가 흔한 원인이다.</span>
         </div>
       </div>
       <div class="def-list" id="disclosure-registry">
-        <div class="def-list__title">disclosure — what zzop does and doesn't detect</div>
+        <div class="def-list__title">disclosure — zzop 이 무엇을 탐지하고 무엇을 못 하나</div>
         <div class="def-list__grid">
-          <code>id / group</code><span>A stable kebab-case class id and its taxonomy group: <code>extraction-blind</code>, <code>analysis-dark</code>, <code>input-config</code>, or <code>trust-calibration</code>.</span>
-          <code>summary</code><span>The concrete way an agent could silently misread the output for this class.</span>
-          <code>status</code><span><code>"asserted"</code> (surfaced from a structural fact every run — cannot be silently missed), <code>"partial"</code> (detected in common cases, a member can still slip past), or <code>"notYetDetected"</code> (a real class zzop does <em>not</em> yet detect — declared so you never assume coverage it lacks).</span>
+          <code>id / group</code><span>안정적인 kebab-case 클래스 id 와 그 분류 그룹: <code>extraction-blind</code>, <code>analysis-dark</code>, <code>input-config</code>, <code>trust-calibration</code>.</span>
+          <code>summary</code><span>이 클래스에서 에이전트가 출력을 조용히 오독할 수 있는 구체적인 경로.</span>
+          <code>status</code><span><code>"asserted"</code>(매 런마다 구조적 사실에서 드러난다 — 조용히 놓칠 수 없다), <code>"partial"</code>(흔한 경우는 잡지만 일부가 빠져나갈 수 있다), 또는 <code>"notYetDetected"</code>(zzop 이 아직 탐지하지 <em>못</em> 하는 실재 클래스 — 없는 커버리지를 가정하지 않도록 선언해 둔다).</span>
         </div>
       </div>
     </section>
 
     <section id="self-report">
-      <span class="eyebrow eyebrow--sm">Honest output</span>
+      <span class="eyebrow eyebrow--sm">정직한 출력</span>
       <h2>좁아진 범위는 말없이가 아니라 warnings 에 스스로 보고한다</h2>
       <p>에러는 호출이 실패했다는 뜻이다. 능력이 없는 것은 에러가 아니다 — 분석은 정상적으로 끝나고, 엔진이 무엇을 건너뛰었으며 왜 그랬는지를 정확히 말한다. 이 자기보고는 JS 래퍼가 아니라 엔진 자신 안에서 일어나므로, Rust 엔진을 직접 부르는 JS 아닌 소비자에게도 똑같이 적용된다.</p>
       <div class="code-panel">
-        <div class="code-panel__tab">git option omitted</div>
+        <div class="code-panel__tab">git 옵션 생략</div>
         <pre class="code-block"><code>"warnings": [
   "git history not requested (git option omitted): scores, health,
    recommendations, criticality, seams and layerCoChurn are null.
@@ -506,7 +509,7 @@ let result: serde_json::Value = serde_json::from_str(&amp;zzop_facade::analyze_t
     </section>
 
     <section id="errors">
-      <span class="eyebrow eyebrow--sm">Panic safety</span>
+      <span class="eyebrow eyebrow--sm">패닉 안전성</span>
       <h2>프로세스는 죽지 않는다</h2>
       <p><code>crates/facade/src/lib.rs</code>(크레이트 <code>zzop-facade</code>)는 계약상 결코 패닉하지 않는다 — 실패할 수 있는 모든 경로(망가진 JSON, 빠진 <code>root</code>, 유효하지 않은 엔벨로프)는 대신 <code>Result&lt;String, String&gt;</code> 을 돌려준다. 엔진은 파일 하나의 파싱/룰 실패를 이미 내부에서 격리하고, 그것이 바깥 경계에 닿기 한참 전에 그렇게 한다. Rust 로 직접 부르는 쪽은 <code>Ok(String)</code> 아니면 <code>Err(String)</code> 만 보고, 프로세스 중단은 결코 보지 않는다. <code>zzop-mcp</code> 바이너리는 사이에 FFI 경계 없이 이 함수들을 부르므로, 따로 따져 볼 애드온 쪽 <code>catch_unwind</code> 층 같은 것은 없다 — 파사드 자신의 계약이 이야기의 전부다. <code>version_string</code> 에는 <code>Result</code> 자체가 없다 — 실패할 수 없다.</p>
     </section>
@@ -514,14 +517,14 @@ let result: serde_json::Value = serde_json::from_str(&amp;zzop_facade::analyze_t
   </main>
 
   <aside class="docs-toc">
-    <div class="docs-toc__label">On this page</div>
-    <a href="#functions" class="docs-toc__link">API functions</a>
-    <a href="#config-required" class="docs-toc__link">A config is required</a>
-    <a href="#config-reference" class="docs-toc__link">Config reference</a>
-    <a href="#multi-repo" class="docs-toc__link">Multi-repo analysis</a>
-    <a href="#output-schema" class="docs-toc__link">Output schema</a>
-    <a href="#self-report" class="docs-toc__link">Warnings self-report</a>
-    <a href="#errors" class="docs-toc__link">Panic safety</a>
+    <div class="docs-toc__label">이 페이지 안에서</div>
+    <a href="#functions" class="docs-toc__link">API 함수</a>
+    <a href="#config-required" class="docs-toc__link">config 는 필수다</a>
+    <a href="#config-reference" class="docs-toc__link">config 레퍼런스</a>
+    <a href="#multi-repo" class="docs-toc__link">다중 레포 분석</a>
+    <a href="#output-schema" class="docs-toc__link">출력 스키마</a>
+    <a href="#self-report" class="docs-toc__link">warnings 자가보고</a>
+    <a href="#errors" class="docs-toc__link">패닉 안전성</a>
   </aside>
 
 </div>
