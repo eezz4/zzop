@@ -532,14 +532,16 @@ window.ZZOP_DEP = {"f":["cases/trees/api-be/api","cases/trees/api-be/config","ca
       /* Each direction is shifted off the centre line, so a mutual pair draws as two lanes instead of
          the heavier one painting over the lighter. It matters here: `parser`→`crates` is 154 imports
          against 5 coming back, and a single line would report that as a two-way relationship. The
-         two numbers come from the `dl:` array in the ZZOP_DEP block at the top of this file
-         (`[1,0,N]` is parser->crates, `[0,1,N]` is the return) -- read them there rather than
-         trusting this sentence. It said 143 against 2 from the day it was written until
-         2026-09-30, and the data block on this same page said 152/4 on that day and says 154/5
-         now: hand-typed, never regenerated, and matching nothing at any point. No guard sees it --
-         `site-graph-data.mjs` owns three anchors and publishes `grep -rn 'files and .* imports'`
-         as its sweep, which neither of these two sentences can match.
-         shift is signed by the pair's index order, so the two lanes always land on opposite sides. */
+         two numbers are OWNED by `site-graph-data.mjs` as of 2026-10-04: a `proseSites` anchor
+         rewrites them from the `dl:` array on every regeneration, and a reworded sentence makes
+         that script hard-error rather than drift. CI re-runs the regeneration and diffs it, so this
+         sentence now describes the drawing above it by construction.
+         It was hand-typed until then, and it showed: it read 143 against 2 from the day it was
+         written until 2026-09-30 while the data block on this same page said 152/4, so it matched
+         the picture at no point in between. The sweep this script publishes
+         (`grep -rn 'files and .* imports' site/`) structurally cannot see a sentence shaped like
+         this one, which is why an anchor was the fix and a wider sweep was not.
+         The shift is signed by the pair's index order, so the two lanes always land on opposite sides. */
       var side = (dl[0] < dl[1] ? 1 : -1) * (w / 2 + 3);
       ax += -uy * side; ay += ux * side; bx += -uy * side; by += ux * side;
       var tipX = bx - ux * db.r * view.k, tipY = by - uy * db.r * view.k;

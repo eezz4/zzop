@@ -507,6 +507,18 @@ const next0 = page.slice(0, from + BEGIN.length) + eol + 'window.ZZOP_DEP = ' + 
 const nodeCount = rows.length;
 const linkCount = links.length;
 const commas = (n) => n.toLocaleString('en-US');
+// The two numbers the "two lanes" comment in the viewer quotes. Looked up by domain NAME, never by
+// index: `domains` is sorted by size, so an index that is `parser` today is something else the
+// first time another area overtakes it — and that failure writes a WRONG number rather than
+// erroring. Absent edge reads 0, which is the honest answer for a pair with no imports.
+const domainEdge = (fromName, toName) => {
+  const i = domains.findIndex((d) => d.a === fromName);
+  const j = domains.findIndex((d) => d.a === toName);
+  const hit = domainLinks.find((l) => l[0] === i && l[1] === j);
+  return hit ? hit[2] : 0;
+};
+const parserToCrates = domainEdge('parser', 'crates');
+const cratesToParser = domainEdge('crates', 'parser');
 const proseSites = [
   {
     file: PAGE,
@@ -525,6 +537,18 @@ const proseSites = [
     what: 'off-axis block note, degree-0 count',
     re: /There are [\d,]+ of them here/,
     to: `There are ${commas(isolated.length)} of them here`,
+  },
+  {
+    // The FOURTH anchor, added 2026-10-04. Until then these two numbers were hand-typed, and the
+    // comment carrying them said so: it read "143 against 2" from the day it was written until
+    // 2026-09-30 while the data block on the same page said 152/4, so it matched the drawing at no
+    // point in between. The sweep this script publishes
+    // (`grep -rn 'files and .* imports' site/`) structurally cannot see that sentence — a number
+    // outside every anchor AND outside the sweep is a number nothing holds.
+    file: PAGE,
+    what: 'parser-crates lane note, both directions',
+    re: /is [\d,]+ imports(\s+)against [\d,]+ coming back/,
+    to: `is ${commas(parserToCrates)} imports$1against ${commas(cratesToParser)} coming back`,
   },
 ];
 
