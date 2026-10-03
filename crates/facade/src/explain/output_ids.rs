@@ -56,7 +56,8 @@ fn disclosure_class(query: &str) -> Option<String> {
     let class = blindness_registry().iter().find(|c| c.id == query)?;
     Some(format!(
         "{query:?} is a coverage-DISCLOSURE class id (group {:?}, status {:?}), not a rule id — it names \
-         one way zzop's own output can be silently misread. Every `zzop analyze` reply carries how many \
+         one way zzop's own output can be silently misread. Every analyze reply (`zzop analyze` on the \
+         CLI, the `analyze_repo` tool over MCP) carries how many \
          such classes there are and how many are NOT fully detected (`disclosure.classes` and the \
          per-status counts); the full text of all of them is one lookup away, at \
          `zzop contract disclosure-classes` on the CLI or the `zzop://contract/disclosure-classes` \
@@ -84,7 +85,8 @@ fn disclosure_group(query: &str) -> Option<String> {
     }
     Some(format!(
         "{query:?} is a coverage-disclosure GROUP, not a rule id — it is the taxonomy bucket over {} \
-         disclosure classes, counted in every `zzop analyze` reply's `disclosure` block and spelled out \
+         disclosure classes, counted in every analyze reply's `disclosure` block (`zzop analyze` on the \
+         CLI, `analyze_repo` over MCP) and spelled out \
          in full by `zzop contract disclosure-classes` on the CLI, or the \
          `zzop://contract/disclosure-classes` resource over MCP: {}. Explain one of those for what it \
          means; the rule ids are in the rule catalog (`zzop contract rule-catalog`, or the \
@@ -103,8 +105,10 @@ fn recommendation_id(query: &str) -> Option<String> {
          recommendations zzop computes (`architecture.topRecommendation.id`, and `recommendations[].id` \
          in the full output view), not anything a rule pack declares. The family is gated as a whole by \
          the registered native analysis id {RECOMMENDATION_GATE:?} (that is what `disabledRules` / \
-         `rules: {{ \"<id>\": \"off\" }}` takes); there is no per-recommendation toggle. `zzop explain` \
-         only reads the compiled-in DSL pack data — see `zzop contract rule-catalog`."
+         `rules: {{ \"<id>\": \"off\" }}` takes); there is no per-recommendation toggle. This lookup \
+         (`zzop explain` on the CLI, the `zzop://rule/<id>` resource over MCP) only reads the \
+         compiled-in DSL pack data — the rule ids are in the rule catalog: `zzop contract rule-catalog` \
+         on the CLI, or the `zzop://contract/rule-catalog` resource over MCP."
     ))
 }
 

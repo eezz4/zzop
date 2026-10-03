@@ -314,8 +314,10 @@ fn explain_over(
             // this sentence the two surfaces simply disagree and the reader has nothing to go on.
             Corpus::Bundled =>
                 " This searched only the packs compiled into this binary; a rule from a pack in \
-                 `zzop/rules/` or `packs.extraDirs` is not among them — re-run as `zzop explain \
-                 <rule-id> --config <path>` to search the packs a run over that config actually loads."
+                 `zzop/rules/` or `packs.extraDirs` is not among them. Point the lookup at that \
+                 config to search the packs a run over it actually loads: the CLI's `zzop explain` \
+                 takes the config as an argument, while the `zzop://rule/` resource does not and \
+                 always reads the compiled-in packs."
                     .to_string(),
             // The symmetric answer once they HAVE done that: the remaining ways to still miss are a
             // config that names other trees, or a pack that failed to load (a warning the analyze
@@ -323,9 +325,9 @@ fn explain_over(
             // Backticks, not `{path:?}`: a Windows path debug-formats with every separator escaped
             // (`C:\\Users\\...`), which is not a path the reader can copy back into a command.
             Corpus::Config(path) => format!(
-                " The packs `{path}` loads were searched too — `packsLoaded` in that config's `zzop \
-                 analyze` reply names every pack that did load, and its `warnings` name any that \
-                 failed to."
+                " The packs `{path}` loads were searched too — `packsLoaded` in that config's \
+                 analyze reply (`zzop analyze` on the CLI, the `analyze_repo` tool over MCP) names \
+                 every pack that did load, and its `warnings` name any that failed to."
             ),
         }
     ))
