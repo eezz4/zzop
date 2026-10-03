@@ -1131,24 +1131,35 @@ fn a_tree_whose_framework_files_all_register_routes_stays_silent() {
     );
 }
 
-/// The jQuery-era class S19 exists for: a frontend that talks to its backend entirely through call
-/// idioms this build does not extract, loaded from a `<script>` tag rather than a module specifier.
+/// The class S19 exists for: a frontend that talks to its backend through a shape this build does
+/// not extract — here a route TABLE plus a house transport, which is what a pre-module-era app looks
+/// like once its paths stop being written at the call site.
 ///
-/// Deliberately contains NO builtin `fetch(`: fetch IS a recognized shape, so one would both key a
-/// consume (raising the gate substrate) and feed S5 instead — and the point of this fixture is the
-/// population where every OTHER tripwire is structurally blind. Twelve path literals clears
-/// `PATH_LITERAL_SITES_MIN` with headroom; no route registration appears, so provides stay at zero
-/// and the both-directions gate is satisfied honestly rather than by construction.
-fn jquery_era_frontend_tree() -> TempDir {
-    let dir = TempDir::new("zzop-engine-coverage-jquery-era");
-    let mut body = String::new();
+/// 🔴 This fixture used to be twelve `$.ajax({ url: '/user/opN.do' })` calls, and it stopped being a
+/// subject on 2026-10-03 — the same day `egress/jquery_xhr` taught the extractor jQuery. The test went
+/// red for the RIGHT reason: twelve newly-extracted consumes lifted the tree over the near-zero gate,
+/// so S19 correctly said nothing. That is the designed interlock — the denominator goes quiet exactly
+/// when the vocabulary catches up — and it is also a standing hazard for this test: **a denominator's
+/// fixture must use a shape outside the CURRENT vocabulary, which is a moving target by construction.**
+/// When this test reddens again, read it as "extraction grew" first and fix the fixture, not the gate.
+///
+/// Deliberately carries no recognized call shape at all — no `fetch(`, no `$.`, no `.open(` — so the
+/// tree's io stays at zero in BOTH directions and the gate is satisfied honestly rather than by
+/// construction. Twelve path literals clears `PATH_LITERAL_SITES_MIN` with headroom.
+fn unrecognized_shape_frontend_tree() -> TempDir {
+    let dir = TempDir::new("zzop-engine-coverage-path-literals");
+    let mut body = String::from("var ROUTES = {\n");
     for i in 0..12 {
-        body.push_str(&format!(
-            "$.ajax({{ url: '/user/op{i}.do', type: 'POST', success: function (d) {{ render(d); }} }});\n"
-        ));
+        body.push_str(&format!("  op{i}: '/user/op{i}.do',\n"));
     }
+    body.push_str(
+        "};\n\nfunction send(key, data) {\n  legacyTransport.dispatch(ROUTES[key], data);\n}\n",
+    );
     dir.write("js/user.js", &body);
-    dir.write("index.html", "<script src=\"/vendor/jquery-1.7.2.min.js\"></script>\n");
+    dir.write(
+        "index.html",
+        "<script src=\"/vendor/legacy-transport.js\"></script>\n",
+    );
     dir
 }
 
@@ -1156,8 +1167,8 @@ fn jquery_era_frontend_tree() -> TempDir {
 /// `framework_silence::path_literal_denominator` prove the predicate, and would all stay green if the
 /// call site in `analyze::assemble::warnings` were deleted. This one fails in that case.
 #[test]
-fn a_jquery_era_frontend_gets_a_denominator_even_though_no_vocabulary_matches() {
-    let dir = jquery_era_frontend_tree();
+fn a_tree_whose_io_shape_no_vocabulary_matches_still_gets_a_denominator() {
+    let dir = unrecognized_shape_frontend_tree();
     let out = analyze_tree(dir.path(), &config());
 
     assert!(

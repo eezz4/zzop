@@ -114,9 +114,9 @@ pub(crate) const NOT_A_FRAMEWORK: &[(&str, &str)] = &[
     ),
     (
         "parser-typescript/egress",
-        "declared as the `axios`/`fetch`/`ky`/`$fetch`/`angular`/`openapi generated client` rows — SIX \
+        "declared as the `axios`/`fetch`/`ky`/`$fetch`/`angular`/`openapi generated client`/`jquery`/`xhr` rows — EIGHT \
          client vocabularies in one module, which is why this reason lists them instead of saying \
-         `axios`/`fetch` and leaving four undisclosed (as it did until 2026-08-01)",
+         `axios`/`fetch` and leaving the rest undisclosed (as it did until 2026-08-01). `jquery` and `xhr` arrived 2026-10-03 in the `egress/jquery_xhr` submodule; this reason is what BINDS a row to a module, so a new client vocabulary missing from it reads to recognizer_channels as a row no module backs",
     ),
     (
         "parser-python-3/guard_vocab",

@@ -139,10 +139,14 @@ Field semantics (all mirror the Rust `zzop-core` serde types — those are the n
     `externalConsumes` (see `docs/modules/facade.md`'s `hosts` field and `hostRekeyCounts`).
   - OPTIONAL client provenance (additive since `axios-defaults-base-v1`; omit and nothing changes):
     an `IoConsume` may carry `client: "axios"` naming the HTTP client that produced the call site.
-    `client` is a free-form string (`Option<String>` in `crates/core/src/io.rs`), not a closed enum —
-    the native TS parser's own recognizers currently tag `"axios"`, `"ky"`, `"fetch"`, `"$fetch"`,
-    and `"angular"`, but those are examples of the vocabulary in active use, not an exhaustive or
-    enforced list — a generated-SDK injection adapter (e.g. for oazapfts) is free to set its own
+    `client` is a free-form string (`Option<String>` in `crates/core/src/io.rs`), not a closed enum.
+    The tags the native TS parser's own recognizers use are NOT listed here: the authoritative set is
+    the `frameworkRecognizers` cell of `zzop coverage`, read from the same `FRAMEWORK_RECOGNIZERS`
+    const the engine's `recognizer_channels` / `recognizer_drift` tests check against the io the
+    adapters really build. This sentence used to carry five of them, which drifted the moment a sixth
+    landed — the same partial-list defect `scripts/check-framework-prose-enumeration.sh` was built
+    from after it was measured in four parser docs at once, and the same remedy it applied: a pointer,
+    not a copy. An external producer is free to set its own
     `client` tag. Client-SCOPED normalization seams (e.g. the engine's
     `axios.defaults.baseURL` path-prefix application) act only on consumes tagged with their client
     and leave untagged consumes untouched — an external producer that doesn't tag simply opts out.

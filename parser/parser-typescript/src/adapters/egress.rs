@@ -85,6 +85,9 @@ mod concat;
 mod consts;
 mod correlation;
 mod generated_client;
+mod jquery_xhr;
+#[cfg(test)]
+mod jquery_xhr_tests;
 mod keying;
 pub(crate) mod local_consts;
 mod matchers;

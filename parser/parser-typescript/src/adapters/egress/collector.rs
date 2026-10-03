@@ -13,6 +13,7 @@ use super::body_shape::witnessed_body_shape;
 use super::consts::build_const_map;
 use super::correlation::method_url_pairs;
 use super::generated_client::match_generated_client_call;
+use super::jquery_xhr::match_jquery_or_xhr_call;
 use super::keying::consume_key_for;
 use super::local_consts::LocalConsts;
 use super::matchers::match_http_call;
@@ -102,6 +103,10 @@ impl Visit for EgressCollector<'_> {
             .or_else(|| match_angular_http_call(call, self.angular_receivers))
             .or_else(|| match_generated_client_call(call))
             .or_else(|| match_react_query_call(call, self.react_query_file))
+            // LAST in the chain on purpose: the arms above claim the module-era clients by
+            // receiver name, and this one is the widest (any identifier receiver for `.open(`).
+            // Trying it last means a tree that imports a real client never reaches it.
+            .or_else(|| match_jquery_or_xhr_call(call))
         {
             // Body-shape evidence is a property of THIS call site (its `args[1]`), independent of which
             // method/URL variant a given emitted IoConsume ends up carrying — computed once and cloned

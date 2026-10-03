@@ -143,6 +143,20 @@ pub const FRAMEWORK_RECOGNIZERS: &[FrameworkRecognizer] = &[
         extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
         emits: &[channel::CONSUMES],
     },
+    // The pre-module-era pair, added 2026-10-03 with `egress/jquery_xhr.rs`. The comment above says
+    // widening the egress vocabulary needs a row here BY HAND, because `recognizer_drift` binds
+    // modules to rows and these live inside the already-declared `egress` module -- so this is that
+    // hand. Measured on a jQuery-era tree: 22 call sites, 1 extracted before these existed.
+    FrameworkRecognizer {
+        framework: "jquery",
+        extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
+        emits: &[channel::CONSUMES],
+    },
+    FrameworkRecognizer {
+        framework: "xhr",
+        extensions: &["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs"],
+        emits: &[channel::CONSUMES],
+    },
     // The rest of that same residual, paid down 2026-08-01: `egress/angular.rs` and
     // `egress/generated_client.rs` are two more client recognizers living inside the declared `egress`
     // module, and neither had a row. `angular` is the dependency-injected `HttpClient` idiom, hard-gated

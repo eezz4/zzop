@@ -108,7 +108,7 @@ pub struct IoConsume {
     /// See `ConsumeBodyShape` — additive/optional, same envelope-compat note as `IoProvide::body`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<ConsumeBodyShape>,
-    /// Which client recognizer produced this consume (`"axios"`, `"ky"`, `"fetch"`, `"$fetch"`,
+    /// Which client recognizer produced this consume (`"axios"`, `"ky"`, `"fetch"`, `"$fetch"`, `"jquery"`, `"xhr"`,
     /// `"angular"`) — provenance for CLIENT-SCOPED normalization seams, e.g. an
     /// `axios.defaults.baseURL` path prefix must apply to axios call sites only, never to a fetch
     /// call in the same tree. `None` = producer doesn't tag (older envelopes, non-egress kinds);
