@@ -39,14 +39,22 @@ export default {
       en: `zzop's own import graph, uncapped`,
     },
 
+    // 🔴 이 쌍은 2026-10-03 에 고쳐졌다 — **발행돼 있던 문장이 거짓이었다.** 두 판 모두
+    // *"CI 가 이걸 걸어 두지 않았다 / Nothing wires it to CI"* 라고 적고 있었는데,
+    // 📏 `.github/workflows/ci.yml:418` 에 바로 그 스텝이 있다(`site graph is regenerated from the
+    // tree it claims to draw`), 그리고 그 스텝 자신의 주석이 *"Until 2026-07-29 NOTHING ran the
+    // generator"* 라고 적는다 — 즉 **배선된 날 이 문장이 안 따라왔고 두 달 넘게 거짓으로 서 있었다.**
+    // ⚠ 그 거짓이 실제로 판단을 틀리게 했다: 드리프트를 재고 *"CI 가 안 거니 재생성할 값이 없다"* 로
+    // 읽었고, 같은 날 `ci-local` 이 바로 그 자리에서 빨개졌다. 발행된 영어를 번역 중에 덤으로
+    // 고치지 않는다는 이 디렉터리의 규약은 **문장이 참일 때**의 규약이다.
     p4: {
-      ko: `스냅숏이다: 이 그림과 이 페이지의 모든 수치는 페이지를 재생성할 때마다
-      <code>scripts/site-graph-data.mjs</code> 가 다시 쓴다. 즉 <strong>그 재생성이 돌았던 트리</strong>를
-      설명한다. CI 가 이걸 걸어 두지 않았으므로 레포는 그 뒤로 움직였다. 지금 체크아웃에 대고 위 커맨드
-      둘을 다시 돌리는 것이 곧 재계수다.`,
-      en: `Snapshot: this drawing and every count on this page are rewritten by
-      <code>scripts/site-graph-data.mjs</code> each time the page is regenerated, so they describe the tree
-      that regeneration ran against. Nothing wires it to CI, so the repository has moved since.
+      ko: `스냅숏이 아니다: 이 그림과 이 페이지의 모든 수치는
+      <code>scripts/site-graph-data.mjs</code> 가 다시 쓰고, CI 가 매 런마다 그 재생성을 돌려
+      커밋된 바이트와 대조한다 — 어긋나면 빨개진다. 즉 <strong>이 커밋의 트리</strong>를 설명한다.
+      지금 체크아웃에 대고 위 커맨드 둘을 다시 돌리는 것이 곧 재계수다.`,
+      en: `Not a snapshot: this drawing and every count on this page are written by
+      <code>scripts/site-graph-data.mjs</code>, and CI re-runs that regeneration on every run and diffs it
+      against the committed bytes — a mismatch is red. So they describe the tree at THIS commit.
       Re-running the two commands above against the current checkout is the recount.`,
     },
 

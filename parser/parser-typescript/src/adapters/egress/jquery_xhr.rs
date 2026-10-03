@@ -34,6 +34,16 @@
 //! is strictly worse than silence. An ABSENT verb is different and is not a guess: jQuery's documented
 //! default for `$.ajax` is GET, the same standing the `fetch` arm's spec-default GET has.
 //!
+//! ## The adversarial case, measured
+//! 📏 2026-10-03, run against jQuery's OWN library source — the hardest input for this matcher,
+//! because a library that IMPLEMENTS ajax mentions the call shape more than any application that
+//! uses it. `jquery-validation`'s `jquery.validate.js` (1,702 lines, 13 `$.ajax` mentions)
+//! produced `ioConsumesKeyed` 0, `ioConsumesUnresolved` 0 — not one false consume. The two shapes it
+//! carries are exactly the ones this file drops on purpose: `$.ajax( $.extend( true, {…` passes a
+//! CALL as its single argument (not an object literal, not a written-out url), and
+//! `$.ajax({ mode: "abort" })` is a settings object with no `url:` to key on. Under-report is what
+//! makes this safe to run on a tree that vendors its own client library.
+//!
 //! Bodies are deliberately not witnessed for `$.ajax` or `xhr.open`: jQuery carries its payload at
 //! `settings.data` and XHR passes it to a LATER `.send(body)` call, neither of which any reader here
 //! extracts. `$.post(url, data)` does put the payload at `args[1]`, the [`BodyStyle::DirectArg`]
