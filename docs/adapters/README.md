@@ -101,7 +101,7 @@ host-carrying key to `externalConsumes` — third-party egress, never cross-tree
 contains `"://"`, so it silently falls through to a normal, wrong, join attempt instead).
 
 The native TS parser gets this right by never calling either normalizer on an external URL in the first
-place: `consume_key_for` (`parser/parser-typescript/src/adapters/egress.rs`) checks `is_external(url)`
+place: `consume_key_for` (`parser/parser-typescript/src/adapters/egress/keying.rs`) checks `is_external(url)`
 (an `http://`/`https://` prefix) BEFORE normalizing, and for that branch keys the consume as
 `format!("{} {}", method.to_uppercase(), url)` — the raw URL, untouched. An external adapter must do
 the same: detect `://` in the resolved target first, and if present, key it as `"<METHOD> <url>"` with

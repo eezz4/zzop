@@ -310,7 +310,7 @@ function configDeclaredDisabledPacks() {
  * The materials to tell the two apart are already in hand, and neither needs a new engine field:
  *   1. `packsLoaded` lists a pack even when the config DISABLED it — since 2026-08-26 the row says so
  *      outright (`didNotRun: "disabled"`, with `filesInScopeIfEnabled` in place of `filesInScope`);
- *      pinned by `crates/engine/tests/analyze_zero_scope_packs.rs`, "loading is not gating". So a
+ *      pinned by `crates/engine/tests/integration/analyze_zero_scope_packs.rs`, "loading is not gating". So a
  *      disabled pack MISSING from `packsLoaded` is a pack that was never loaded — not one turned off.
  *   2. The config's own `packs.disabled` says which ids to expect there.
  * Zero loaded packs is the degenerate case of the same test and is named separately, because it is the
@@ -325,7 +325,7 @@ function packCensusBlindness(loaded) {
       `No DSL rule pack was loaded AT ALL — \`packsLoaded\` is empty.`,
       `  ${CONFIG} declares packs.disabled: ${JSON.stringify(declared)}`,
       `A disabled pack is still LOADED and still listed (loading is not gating — see`,
-      `crates/engine/tests/analyze_zero_scope_packs.rs), so an empty list is not what disabling looks`,
+      `crates/engine/tests/integration/analyze_zero_scope_packs.rs), so an empty list is not what disabling looks`,
       `like. It is what a broken pack loader, an empty packs directory or a lost embed looks like.`,
       `Half of what \`findings.total\` sums is not being computed, and the DSL-AXIS-NOT-PROVEN banner`,
       `would have blamed the config for it and exited 0.`,

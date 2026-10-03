@@ -78,9 +78,17 @@ use std::collections::BTreeSet;
 /// framework-silence tripwire a crate that does not exist).
 pub const PATH_ATTR_HEAD: &str = "#path";
 
-/// `PATH_ATTR_HEAD` plus its separator — the form actually stripped, defined once so the head and the
-/// separator cannot drift apart.
-const PATH_ATTR_PREFIX: &str = "#path::";
+/// The separator between `PATH_ATTR_HEAD` and the literal. One owner, used by the PRODUCER
+/// (`imports.rs` builds the specifier) and by the CONSUMER (`resolve_path_attr` strips it), so
+/// the two cannot spell it differently.
+///
+/// ⚠ There used to be a second constant here — `PATH_ATTR_PREFIX`, the head and separator joined
+/// into one independent literal `"#path::"` — whose doc claimed the halves "cannot drift apart"
+/// while nothing made that true: the only pin was `PATH_ATTR_PREFIX.starts_with(PATH_ATTR_HEAD)`,
+/// which passes for `"#path:"` and `"#path-"` alike. A diverged separator would send every
+/// `#[path]` mod specifier down ordinary path resolution with that pin green (2026-10-04 release
+/// audit). Two shared constants and a two-step strip make the claim structural instead of asserted.
+pub(super) const PATH_ATTR_SEP: &str = "::";
 
 /// Candidates for a `#[path = "<literal>"] mod x;` declaration — see `lang::imports`' own doc for why
 /// the literal cannot ride the `self::` path.
@@ -140,7 +148,10 @@ pub fn rust_import_candidates(
     from_file: &str,
     target_roots: &BTreeSet<String>,
 ) -> Vec<String> {
-    if let Some(literal) = specifier.strip_prefix(PATH_ATTR_PREFIX) {
+    if let Some(literal) = specifier
+        .strip_prefix(PATH_ATTR_HEAD)
+        .and_then(|rest| rest.strip_prefix(PATH_ATTR_SEP))
+    {
         return path_attr_candidates(literal, from_file);
     }
     let segs: Vec<&str> = specifier.split("::").filter(|s| !s.is_empty()).collect();

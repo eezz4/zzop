@@ -1,8 +1,11 @@
 //! Cross-boundary policy-vocabulary pins — one policy spelled twice because the boundary it straddles
 //! admits no shared symbol, so the RELATIONSHIP between the two spellings is asserted here instead.
 //! Every pin reads both sides from what actually ships (a hand-copied list in this file would just be a
-//! third mirror to drift). Two boundaries so far: pack↔pack (a DSL rule cannot reference another pack's
-//! pattern) and crate↔pack (a JSON pack cannot reference a Rust constant).
+//! third mirror to drift). Three boundaries so far: pack↔pack (a DSL rule cannot reference another
+//! pack's pattern), crate↔pack (a JSON pack cannot reference a Rust constant), and crate↔crate (two
+//! Rust crates that must spell the same set and share no symbol — the write-verb and auth-channel pins
+//! below). ⚠ This line said "Two" until 2026-10-04 while two of the five pins were already crate↔crate,
+//! so a reader deciding whether a new respelling belonged in this file read a list that excluded it.
 //!
 //! A third pack↔pack pin lives in the sibling `path_anchor_pin.rs` rather than here — the path-anchor
 //! idiom `(?:^|/)` shared across `sql`/`http`, whose structural analyzer is large enough that folding it
@@ -232,8 +235,12 @@ const ORDER_GATE_RESIDUAL: &str = "A trigger line that sits inside NO parser-pro
 /// Why a byte-identical sentence spliced across every such rule instead of one shared symbol: a rule `message` is not
 /// a pattern-bearing field, so the fragment mechanism structurally cannot reach it
 /// (`docs/contracts/rule-pack.schema.json` — a fragment reference resolves only in fields whose
-/// description ends "fragment reference supported"), and the rules live in five separate packs that share
-/// no vocabulary anyway. Same boundary `handler_context_pattern_is_identical_across_reliability_and_db`
+/// ⚠ **the pack count is not written here** — it said "five" until 2026-10-04 and the shipped packs
+/// had been four since v0.35.0 (the react pack lost its gated rule). The same paragraph already
+/// records why: the subject set is DISCOVERED by this pin, so no count belongs in prose beside it.
+/// Recount: `git grep -c '"after_in_same_function": true' -- 'rules/dsl/*/*.json'`.
+/// description ends "fragment reference supported"), and the rules live in several separate packs that share
+/// no vocabulary anyway. Same boundary `every_handler_context_pattern_is_byte_identical_across_every_pack_that_spells_one`
 /// straddles, same remedy: spell it out on each side and pin the RELATIONSHIP here.
 ///
 /// Two-sided by construction: the subject set is DISCOVERED from the shipped matchers, never listed here,

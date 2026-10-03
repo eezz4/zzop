@@ -612,7 +612,7 @@ jobs:
         run: npm install -g npm@12
       - name: Download zzop CLI binaries
         # Over the binary artifacts the `build` job's "Collect the zzop + zzop-mcp binaries" step
-        # uploads (`zzop-mcp-<target>`, containing both `zzop-<platform>[.exe]` and
+        # uploads (`zzop-mcp-<target>`, containing both `zzop-cli-<platform>[.exe]` and
         # `zzop-mcp-<platform>[.exe]`) — `place-artifacts.mjs` below picks out only the
         # `zzop-cli-<platform>[.exe]` binaries it needs.
         uses: actions/download-artifact@v4

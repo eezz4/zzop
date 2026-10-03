@@ -1,6 +1,6 @@
 // Byte-exact port of zzop_core's HTTP interface-key normalization (crates/core/src/io.rs,
 // `http_interface_key` / `http_consume_interface_key`) plus the consume-side veto list a call-site
-// URL must clear before it is safe to key at all (parser/parser-typescript/src/adapters/egress.rs,
+// URL must clear before it is safe to key at all (parser/parser-typescript/src/adapters/egress/keying.rs,
 // `consume_key_for` / `base_relative_path` / `is_external`).
 //
 // Cross-layer linking is an EXACT string join on `key` — there is no fuzzy fallback. An adapter (in
@@ -67,7 +67,7 @@ export function normalizeConsumeKey(method, rawUrl) {
 
 /**
  * True when `url` carries an explicit scheme this kit treats as third-party egress — matches
- * `is_external` in `parser/parser-typescript/src/adapters/egress.rs`. Only `http://`/`https://` count;
+ * `is_external` in `parser/parser-typescript/src/adapters/egress/keying.rs`. Only `http://`/`https://` count;
  * anything else (`ws://`, a bare `://`-containing string with no recognized scheme) falls through to
  * the base-relative check in `resolveConsumeKey`.
  */
@@ -87,7 +87,7 @@ export function isExternalUrl(url) {
  * (`?page=2` — "same path, new query", which names no path at all), any scheme-carrying string (`://`
  * anywhere), or whitespace-carrying text (not a path).
  *
- * Ported from `base_relative_path` in `parser/parser-typescript/src/adapters/egress.rs`. Unlike
+ * Ported from `base_relative_path` in `parser/parser-typescript/src/adapters/egress/keying.rs`. Unlike
  * `normalizeProvideKey`/`normalizeConsumeKey` above, this veto list is NOT covered by the
  * key-normalization parity fixture (that fixture only exercises the two normalize* functions) —
  * treat this as a best-effort mirror, and re-check against the Rust source if the two drift.
@@ -116,7 +116,7 @@ export function baseRelativePath(url) {
  * unresolved (`null`) — reported, never guessed.
  *
  * Extracted from the veto-list + dispatch shape the JS adapters formerly re-derived inline; they
- * now import this. Ported from `consume_key_for` in `parser/parser-typescript/src/adapters/egress.rs`.
+ * now import this. Ported from `consume_key_for` in `parser/parser-typescript/src/adapters/egress/keying.rs`.
  */
 export function resolveConsumeKey(method, url) {
   if (url.startsWith('/')) {

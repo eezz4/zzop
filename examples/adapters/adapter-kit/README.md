@@ -27,7 +27,7 @@ Tests: `node --test test/*.test.js`
 - **Keying** — `normalizeProvideKey`/`normalizeConsumeKey` are exact ports of
   `zzop_core::http_interface_key`/`http_consume_interface_key` (`crates/core/src/io.rs`);
   `resolveConsumeKey` adds the internal/external/base-relative veto list from
-  `parser/parser-typescript/src/adapters/egress.rs`. Cross-layer linking is an exact string join —
+  `parser/parser-typescript/src/adapters/egress/keying.rs`. Cross-layer linking is an exact string join —
   a key computed even slightly differently silently fails to join, so `test/keys.test.js` replays
   every row of
   [`docs/adapters/key-normalization.fixture.json`](../../../docs/adapters/key-normalization.fixture.json).

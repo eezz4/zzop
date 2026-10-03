@@ -134,6 +134,7 @@ use syn::{Item, UseTree};
 use zzop_core::{ImportBinding, ImportMap};
 
 pub use super::resolve::PATH_ATTR_HEAD;
+use super::resolve::PATH_ATTR_SEP;
 
 /// Extract this file's import bindings — see module doc. Empty on parse failure (never panics).
 pub fn parse_imports(text: &str) -> ImportMap {
@@ -148,7 +149,7 @@ pub fn parse_imports(text: &str) -> ImportMap {
             Item::Mod(m) if m.content.is_none() => {
                 let name = m.ident.to_string();
                 let specifier = match path_attr_value(&m.attrs) {
-                    Some(literal) => format!("{PATH_ATTR_HEAD}::{literal}"),
+                    Some(literal) => format!("{PATH_ATTR_HEAD}{PATH_ATTR_SEP}{literal}"),
                     None => format!("self::{name}"),
                 };
                 map.insert(

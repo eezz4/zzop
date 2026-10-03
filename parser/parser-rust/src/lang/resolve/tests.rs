@@ -259,7 +259,17 @@ fn path_attr_head_is_not_reachable_as_an_ordinary_rust_path() {
         .chars()
         .next()
         .is_some_and(|c| c.is_alphabetic() || c == '_'));
-    assert!(PATH_ATTR_PREFIX.starts_with(PATH_ATTR_HEAD));
+    // The pin that replaced `PATH_ATTR_PREFIX.starts_with(PATH_ATTR_HEAD)`: that one could not see a
+    // changed separator at all. There is no joined literal left to check — the producer and the
+    // consumer now share both halves — so what is worth asserting is that the round trip holds.
+    let built = format!("{PATH_ATTR_HEAD}{PATH_ATTR_SEP}src/x.rs");
+    assert_eq!(
+        built
+            .strip_prefix(PATH_ATTR_HEAD)
+            .and_then(|rest| rest.strip_prefix(PATH_ATTR_SEP)),
+        Some("src/x.rs"),
+        "the specifier the producer builds must be the one the consumer strips"
+    );
 }
 
 // --- manifest-declared target roots -------------------------------------------------------------------

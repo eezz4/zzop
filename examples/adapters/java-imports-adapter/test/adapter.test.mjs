@@ -1,7 +1,7 @@
 // Snapshot test: runs adapter.mjs as a subprocess against the COMMITTED fixture tree
 // (test/fixture/, a 3-file Java mini-app) and deep-equals the parsed envelope JSON against the
 // committed test/expected-envelope.json. That same expected-envelope.json is also consumed by the
-// engine-side test (crates/engine/tests/analyze_java_imports_overlay.rs), which validates it with
+// engine-side test (crates/engine/tests/integration/analyze_java_imports_overlay.rs), which validates it with
 // the REAL `zzop_core::validate_envelope` and proves the overlay yields dep-graph import edges on a
 // lexically-parsed Java tree — the two tests pin the same bytes from both sides of the contract.
 //
