@@ -41,6 +41,14 @@
 //!   surface is large (blind-field test R10's fe-svelte: `src/lib/api.js`, 20+ callers under
 //!   `src/routes/**`).
 //!
+//! - S19 [`path_literal_denominator_warning`]: the DENOMINATOR the others cannot provide — a lexical
+//!   census of internal-path string literals (`'/user/list.do'`) over the tree's js/ts sources, gated on
+//!   near-zero io in BOTH directions. It names no library, which is the point: the others each anchor on a
+//!   vocabulary, so each new legacy stack re-opens the same silence. 📏 2026-10-03, a jQuery-era frontend
+//!   with 22 real call sites extracted 1 and fired NOT ONE tripwire in this build (jQuery enters by `<script>` tag, so S4
+//!   has no import; one builtin `fetch(` sits under S5's floor; the house wrapper under S7's). The reading
+//!   that makes it worth a channel: an unrecognized call shape produces NO fact, so every field that
+//!   counts what a run could not resolve is computed over facts that already exist and cannot see the loss.
 //! - S8 [`call_graph_language_gap_warning`]: the odd one out — it fires when extraction SUCCEEDED. A tree
 //!   whose http routes were extracted from a language with no `RawCall` producer parses fine, censuses
 //!   healthy, and still leaves `mutating-route-no-auth` structurally inert on those routes. No channel
@@ -119,6 +127,7 @@ mod fetch_wrapper;
 mod gateway_declaration;
 mod orm_schema_silence;
 mod partial_route_silence;
+mod path_literal_denominator;
 mod protected_path_auth_range;
 mod python_mount_prefix;
 mod route_language_zero_extraction;
@@ -149,6 +158,7 @@ pub(crate) use fetch_wrapper::WRAPPER_EXPORT_NAMES;
 pub use gateway_declaration::gateway_declaration_warning;
 pub use orm_schema_silence::orm_schema_silence_warning;
 pub use partial_route_silence::partial_route_silence_warning;
+pub use path_literal_denominator::path_literal_denominator_warning;
 pub use protected_path_auth_range::protected_path_auth_range_warning;
 pub use python_mount_prefix::python_mount_prefix_warning;
 pub use route_language_zero_extraction::route_language_zero_extraction_warning;

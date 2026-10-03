@@ -169,6 +169,8 @@ crates/engine/src/framework_silence/orm_schema_silence.rs:ORM_SCHEMA_SPECIFIERS 
 crates/engine/src/framework_silence/orm_schema_silence.rs:SILENCED_RULE_ID internal # zzop rule id
 crates/engine/src/framework_silence/partial_route_silence.rs:MIN_SILENT_FILES cap
 crates/engine/src/framework_silence/partial_route_silence.rs:SAMPLE cap
+crates/engine/src/framework_silence/path_literal_denominator.rs:MAX_SAMPLES cap # example-file display cap for the S19 warning text. A presentation bound, not a firing threshold -- same role and value as the sibling tripwires' own MAX_SAMPLES, and free to diverge from them (T3)
+crates/engine/src/framework_silence/path_literal_denominator.rs:PATH_LITERAL_SITES_MIN cap # minimum internal-path string literals before S19 speaks. Counts LITERAL OCCURRENCES -- a different axis from builtin_fetch's FETCH_CALL_SITES_MIN (call tokens) and from MIN_PROVIDES_FLOOR (extracted facts), so each moves without re-justifying the others. Measured 2026-10-03: the jQuery-era fixture that motivated S19 carries 27, and the floor sits far enough below that a tree with half that path surface still fires; a frontend whose only path strings are one asset and one router entry stays quiet
 crates/engine/src/framework_silence/protected_path_auth_range.rs:AFFECTED_PACK_ID internal # zzop pack id, pinned against the shipped pack JSON beside it
 crates/engine/src/framework_silence/protected_path_auth_range.rs:AFFECTED_RULE_ID internal # zzop rule id
 crates/engine/src/framework_silence/protected_path_auth_range.rs:MAX_EXAMPLES cap

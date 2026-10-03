@@ -225,6 +225,21 @@ pub(super) fn framework_silence_warnings(
             ) {
                 warnings.push(w);
             }
+            // S19 -- internal-path-literal DENOMINATOR. Shares S3's gate rather than declaring its
+            // own: both ask "is this tree near-silent in BOTH io directions", and for S19 the
+            // both-directions condition is not a tuning choice but the conflation guard -- a
+            // leading-slash literal is a consume on a client and a provide on a server, and this
+            // census cannot tell them apart. Runs after S3 because a committed spec is a more
+            // specific answer to the same silence; both may fire, which is intended (S3 names a
+            // cause, S19 sizes the loss).
+            if let Some(w) = crate::framework_silence::path_literal_denominator_warning(
+                root,
+                &all_walked_rels,
+                io_provides_count,
+                io_consumes_keyed_count,
+            ) {
+                warnings.push(w);
+            }
         }
         // S5 — builtin-fetch internal-intent census (consume side), PER-APP: many lexical internal
         // `fetch(` call sites within an app whose keyed http consumes stay near-zero. May push multiple

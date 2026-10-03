@@ -2,7 +2,7 @@
 //! next to its own adapters, WHICH frameworks that parser can recognize at all.
 //!
 //! # Why this exists
-//! Every silence tripwire this engine ships (`framework_silence`'s S1-S8) fires only on a tree that
+//! Every silence tripwire this engine ships (`zzop_engine::framework_silence`) fires only on a tree that
 //! ALREADY shows the symptom: a controller-shaped file with zero http provides, a server-framework
 //! import with nothing extracted. That is the right shape for "this run went quiet unexpectedly", and
 //! it is structurally unable to answer the question a user has BEFORE the first run — *does this tool
