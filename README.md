@@ -19,10 +19,11 @@ comprehension, not capability.
 
 ## See it break something
 
-**[Break a route](docs/demo/break-a-route.md)** is the whole product in one change: rename
-one backend route in a frontend/backend pair that share no code and no types. The frontend still
-compiles, its tests still pass — and zzop names both ends of the break, file and line (abridged here;
-the demo page shows the run's own format):
+**[Break a route](docs/demo/break-a-route.md)** is the join axis in one change — one of the four this
+tool reports, and the one hardest to see any other way: rename one backend route in a
+frontend/backend pair that share no code and no types. The frontend still compiles, its tests still
+pass — and zzop names both ends of the break, file and line (abridged here; the demo page shows
+the run's own format):
 
 ```
 === unprovided consumes ===
