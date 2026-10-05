@@ -149,7 +149,7 @@ mod by_id;
 // Private on purpose: nothing outside this module needs the by-id lane's names. Only these two are
 // reached from shipped code here — the pass, and the legend `publish` pairs with its marker. The
 // lane's own wire spellings are used inside `by_id` and by the tests, which name them by path.
-use by_id::{point_at_rule_id, MESSAGE_BY_ID_MEANING};
+use by_id::{collect_caveats, point_at_rule_id, MESSAGE_BY_ID_MEANING, RULE_CAVEATS_MEANING};
 mod cost;
 mod template;
 #[cfg(test)]
@@ -168,6 +168,11 @@ pub(crate) struct Folded {
     /// where a `message` and the legend explaining it are paired, and a third marker landing without
     /// its legend is the failure [`Folded::publish`] exists to make impossible.
     by_id: bool,
+    /// One "when this is wrong" clause per DISTINCT rule shown. Unlike the two folds above this is not
+    /// a saving — it is prose the reply did not carry at all until 2026-10-04, added because the folds
+    /// had made the first screen silent about the half of each rule that decides the verdict. See
+    /// [`collect_caveats`] for the measurement that bought it.
+    caveats: Option<serde_json::Value>,
 }
 
 impl Folded {
@@ -187,6 +192,10 @@ impl Folded {
         }
         if self.by_id {
             out["messageByIdMeaning"] = MESSAGE_BY_ID_MEANING.into();
+        }
+        if let Some(table) = self.caveats {
+            out["ruleCaveats"] = table;
+            out["ruleCaveatsMeaning"] = RULE_CAVEATS_MEANING.into();
         }
     }
 }
@@ -208,12 +217,17 @@ pub(crate) fn fold(shown: &mut [serde_json::Value]) -> Folded {
     // FIRST, on the prose the facade handed over: the two folds below price `message`, and pricing a
     // pointer they were about to replace would be the wrong arithmetic on the wrong text.
     let by_id = point_at_rule_id(shown);
+    // AFTER the pointer pass and before the folds: this reads `ruleId`, which none of the three
+    // touches, so the order is free — but it is written here so the lane that CREATED the silence and
+    // the lane that answers it sit together.
+    let caveats = collect_caveats(shown);
     let messages = fold_exact(shown);
     let templates = template::fold(shown);
     Folded {
         messages,
         templates,
         by_id,
+        caveats,
     }
 }
 

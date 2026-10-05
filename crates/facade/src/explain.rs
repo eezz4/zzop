@@ -150,6 +150,37 @@ pub fn explain(query: &str) -> Result<String, String> {
 ///
 /// Built once. The corpus is compile-time (`zzop_config::BUNDLED_PACK_SOURCES`), which is also what
 /// lets the shortening live in the shaper rather than needing a run's `config.packs` at the seam.
+/// The `when this finding is wrong` clause of a bundled rule, by fully-qualified id — the half of
+/// the rule's prose that ships INLINE on a reply while the message itself rides a pointer.
+///
+/// Sibling of [`bundled_verbatim_message`] and deliberately the same shape: same corpus
+/// (`bundled_packs`), same compile-time source, same `OnceLock` — so a rule the message lookup can
+/// open is one this lookup can open too, and "the door cannot open that pack" means the same thing
+/// on both. `None` for a native analysis, for a pack outside the bundle, and for a rule that
+/// declares no caveat, which is the common case and not a defect: a rule with no known
+/// false-positive shape must not invent one.
+///
+/// ⚠ Unlike its sibling this does NOT run `message_with_hints`. The suppress/disable hints belong to
+/// the message — appending them here would put two copies of each on a reply that carries both
+/// halves, and the pointer lane already states where they live.
+pub fn bundled_caveat(rule_id: &str) -> Option<&'static str> {
+    static TABLE: std::sync::OnceLock<std::collections::HashMap<String, String>> =
+        std::sync::OnceLock::new();
+    TABLE
+        .get_or_init(|| {
+            let mut out = std::collections::HashMap::new();
+            for pack in bundled_packs() {
+                for rule in &pack.rules {
+                    if let Some(caveat) = rule.caveat.as_deref() {
+                        out.insert(format!("{}/{}", pack.id, rule.id), caveat.to_string());
+                    }
+                }
+            }
+            out
+        })
+        .get(rule_id)
+        .map(String::as_str)
+}
 pub fn bundled_verbatim_message(rule_id: &str) -> Option<&'static str> {
     static TABLE: std::sync::OnceLock<std::collections::HashMap<String, String>> =
         std::sync::OnceLock::new();

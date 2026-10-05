@@ -19,6 +19,7 @@ fn pack(matcher: LineScan) -> RulePackDef {
             axis: crate::RuleAxis::Defect,
             id: "r".to_string(),
             severity: Severity::Info,
+            caveat: None,
             message: "m".to_string(),
             scan_test_regions: false,
             matcher: Matcher::LineScan(matcher),

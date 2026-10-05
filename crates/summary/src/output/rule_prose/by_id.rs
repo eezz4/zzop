@@ -138,3 +138,54 @@ pub(super) fn point_at_rule_id(shown: &mut [serde_json::Value]) -> bool {
     }
     fired
 }
+
+/// The legend for [`collect_caveats`]'s table.
+pub(super) const RULE_CAVEATS_MEANING: &str =
+    "One entry per DISTINCT rule on this screen that declares what to know before acting on it: \
+     the shape of its common false positive, what its matcher cannot see, or what breaks if the \
+     fix is applied blind. Read it BEFORE acting on a finding, not after. This table is keyed by \
+     `ruleId` and costs one copy per rule rather than one per finding, which is why it can ship \
+     inline while the full `message` cannot: on real repositories the full messages run several \
+     times the size of this table, and the table buys back most of the screen. (The exact ratios \
+     are not quoted here on purpose — they move with every rule edit, and this is the one surface \
+     that cannot carry the command that re-derives them.) Each entry is a VERBATIM SPAN of that \
+     rule's own `message`, not a summary of it and not text taken out of it, so `zzop explain \
+     <ruleId>` and the `zzop://rule/<ruleId>` resource return the message with this clause still \
+     inside it — resolving one of them gets you the surrounding prose, never a second, different \
+     caveat. ABSENCE means one of THREE things and none of them is a promise the finding is \
+     right. (1) No caveat has been written down for that rule. (2) The rule is a NATIVE analysis \
+     rather than a DSL rule: natives have no field to declare one and can never appear here, \
+     however much their own prose hedges — and their prose is inline on the finding, so read it \
+     there. (3) The rule comes from a pack this binary does not carry (`zzop/rules/`, \
+     `packs.extraDirs`): the same exclusion `messageByIdMeaning` names, and those findings also \
+     keep their `message` inline. In cases 2 and 3 the caveat you want is in the `message` you \
+     already have.";
+
+/// One caveat per distinct `ruleId` among `shown`, or `None` when no rule on this screen declares one.
+///
+/// # Why this exists
+/// 📏 2026-10-04 release audit. Three uncontaminated evaluators each triaged a 50-finding first
+/// screen from a real repository and returned **33 HARMFUL verdicts** between them — findings where
+/// acting on the advice would have made the code worse. One evaluator traced six of its thirteen to
+/// the same cause and said so: *"the engine knows six of my thirteen HARMFULs by shape and name,
+/// writes the refutation into the rule, and then withholds it from the only screen a reader
+/// actually sees."* `sql/truncate-in-app-code` opens "FIRST CHECK WHETHER THIS STATEMENT IS EXECUTED
+/// OR EMITTED" and both criticals it produced on that screen were SQL generators.
+///
+/// Keyed on the rules of the findings SHOWN, not of the whole run: a caveat for a rule the reader
+/// cannot see is bytes spent on nothing.
+pub(super) fn collect_caveats(shown: &[serde_json::Value]) -> Option<serde_json::Value> {
+    let mut table = serde_json::Map::new();
+    for finding in shown {
+        let Some(rule_id) = finding.get("ruleId").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if table.contains_key(rule_id) {
+            continue;
+        }
+        if let Some(caveat) = zzop_facade::bundled_caveat(rule_id) {
+            table.insert(rule_id.to_string(), caveat.into());
+        }
+    }
+    (!table.is_empty()).then_some(serde_json::Value::Object(table))
+}

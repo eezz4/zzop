@@ -945,8 +945,8 @@ export default {
     },
 
     dd5: {
-      ko: `사람이 읽는 원인/수정 힌트. 룰 정의에서 그대로 복사된다 — 단 <code>messageRef</code> 나 <code>templateParts</code> 가 있으면 이 자리는 짧은 포인터이고, 본문 자체는 그 포인터가 이름 대는 형제 표에서 재구성된다.`,
-      en: `Human-facing cause/fix hint, copied verbatim from the rule definition — unless <code>messageRef</code> or <code>templateParts</code> is present, in which case this is a short pointer and the text itself is rebuilt from the sibling table that pointer names.`,
+      ko: `사람이 읽는 원인/수정 힌트 — 단 세 형제 필드 중 하나가 있으면 이 자리는 짧은 포인터다. <code>messageRef</code> 와 <code>templateParts</code> 는 같은 리플라이 안의 형제 표를 가리키고, <code>messageBy</code> 는 리플라이 밖을 가리킨다 — 본문이 룰 id 로 복원 가능해 아예 안 실린 경우이고, <code>zzop explain &lt;ruleId&gt;</code> 로 받는다. 세 가지 중 둘을 동시에 드는 발견은 없다. 그리고 화면에 선 룰이 "이 발견이 틀리는 경우" 를 선언하면 그 구간만 <code>findings.ruleCaveats</code> 로 따로 실린다.`,
+      en: `Human-facing cause/fix hint — unless one of three sibling fields is present, in which case this is a short pointer. <code>messageRef</code> and <code>templateParts</code> point at a table inside the same reply; <code>messageBy</code> points OUTSIDE it, because the text was rebuildable from the rule id and so was not sent at all — resolve it with <code>zzop explain &lt;ruleId&gt;</code>. No finding ever carries two of the three. Separately, where a rule on the screen declares when it is wrong, that span ships in <code>findings.ruleCaveats</code>.`,
     },
 
     dd6: {

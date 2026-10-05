@@ -139,6 +139,8 @@ jobs:
         run: bash scripts/check-site-generated.sh
       - name: rule description ↔ matcher token guard
         run: bash scripts/check-rule-desc-tokens.sh
+      - name: rule caveat ↔ own message substring guard
+        run: bash scripts/check-rule-caveat-substring.sh
       - name: pack message ↔ engine-appended suppress sentence guard
         run: bash scripts/check-pack-suppress-sentence.sh
       - name: matcher glossary ↔ Matcher enum guard

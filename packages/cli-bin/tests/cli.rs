@@ -1702,8 +1702,12 @@ fn explain_config_reaches_a_recovered_pack_the_binary_does_not_carry() {
         "an exported pack's rule is not compiled in — if this became exit 0, the pack came back into \
          the bundle and this test's premise changed"
     );
+    // The needle was the literal `--config` until 40a81df twinned these refusals for MCP, where a
+    // dash-flag names nothing a caller can reach — the tail now points at the CONFIG rather than at
+    // the CLI's spelling of it. Same assertion, same reason: this failure is the only place a reader
+    // learns the config form exists. (`from_config.rs`'s sibling test carries the twin of this line.)
     assert!(
-        stderr(&bundled_only).contains("--config"),
+        stderr(&bundled_only).contains("takes the config as an argument"),
         "the bundled-only failure is the only place a reader learns the config form exists: {}",
         stderr(&bundled_only)
     );

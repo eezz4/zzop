@@ -60,6 +60,14 @@
           "enum": ["critical", "warning", "info"],
           "description": "Finding severity (zzop_core::Severity, lowercase serde form)."
         },
+        "caveat": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "description": "When this finding is wrong: the shape of its common false positive, what the matcher cannot see, what to check before acting. OPTIONAL — a rule with no known false-positive shape omits it rather than inventing one, and an absent caveat is silence, not a claim that the finding is right. It is a VERBATIM SUBSTRING of this rule's own `message`, never a span taken out of it: the message keeps every byte it had and nothing is re-joined anywhere, so the field says only WHICH part of the text answers that question. `scripts/check-rule-caveat-substring.sh` fails the build unless `message` contains `caveat` byte for byte, which is what makes the copy safe — two copies that cannot differ are one fact. The reason the span is named at all is that it ships INLINE on the first screen (`ruleCaveats`) while `message` does not: a finding whose message is rebuildable from its rule id carries a pointer, so without this field the claim reaches the reader and the caveat does not."
+        },
         "message": { "type": "string", "description": "Human-facing finding message (cause / fix hint)." },
         "scan_test_regions": { "type": "boolean", "default": false, "description": "OPT OUT of the test-region gate. By default a finding anchored on a line a parser PROVED is compiled out of the shipping build (`fileProjection.test_spans` in the external-parser contract; `#[cfg(test)]`/`#[test]`-family items for zzop's own Rust frontend) is dropped after the matcher runs, for every matcher kind that reads a file — see docs/rules/dsl-reference.md's 'Test-region exclusion'. Set true and the rule keeps those findings. Set it for exactly one class: a finding about a CREDENTIAL AT REST, where the commit itself is the leak and it makes no difference whether the surrounding code runs — a PEM header or a `scheme://user:pass@host` URL inside a test module is still in git history and still has to be rotated. Every other rule class judges code that RUNS, and test-only code does not run in production, so leave it false. A rule that sets this must NOT also set `file_exclude_pattern`: excluding test PATHS while insisting on test SPANS is the same decision reached both ways at once." },
         "matcher": { "$ref": "#/definitions/matcher" }

@@ -38,6 +38,7 @@ GUARDS=(
   check-shipped-off-sync
   check-site-generated
   check-rule-desc-tokens
+  check-rule-caveat-substring
   check-pack-suppress-sentence
   check-matcher-glossary-sync
   check-docs-rule-ids

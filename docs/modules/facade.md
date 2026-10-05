@@ -907,6 +907,28 @@ points the findings at it. Two lanes, both under `findings`:
 | `ruleMessageTemplates` | `{ [ruleId]: string }` — one entry per folded TEMPLATE, for rules whose text interpolates a per-finding value. A finding supplies its own pieces in `templateParts`. |
 | `ruleMessageTemplatesMeaning` | The same, for the template map. |
 
+One further sibling rides beside those tables and is **not** a fold — it is the fold's correction:
+
+| Field | Value |
+|---|---|
+| `ruleCaveats` | `{ [ruleId]: string }` — one entry per DISTINCT rule among the findings SHOWN that declares when it is wrong: the shape of its common false positive, what its matcher cannot see, what to check before acting. The string is a verbatim SUBSTRING of that rule's own `message`, so a consumer that also resolves the message holds the clause twice rather than two different clauses. |
+| `ruleCaveatsMeaning` | The sentence that says what the map above is, including what a rule's ABSENCE from it means: no false-positive shape has been written down for that rule, which is not a claim the finding is right. |
+
+Why this one is not a fold: the three mechanisms above remove or deduplicate bytes a reader could get
+back, and this one adds bytes the reply was not carrying at all. A rule's text is half *what the defect
+is* and half *when that reading is wrong*, and `messageBy` pointed both halves away at once — so the
+claim reached the first screen and the refutation did not. It costs one copy per RULE rather than one
+per finding, which is the whole reason it can ship inline while a full `message` cannot.
+
+**Two populations never appear in this map, and neither absence means the finding is sound.** A
+NATIVE analysis has no `RuleDef`, so there is no field for it to declare — that covers every
+`cross-layer/*` rule and every native rule in the single-tree lane too, however much their own prose
+hedges. A rule from a pack this binary does not carry (`zzop/rules/`, `packs.extraDirs`) is excluded
+for the same reason `messageBy` excludes it: the resolver reads compiled-in packs only. In both cases
+the finding keeps its `message` inline, so the clause the map would have carried is already in the
+reader's hands — which is exactly why the exclusion is safe, and exactly why a consumer must not read
+absence as "nothing is known against this rule".
+
 Three properties a consumer can rely on. **Folding is byte-driven, not shape-driven**: a reply folds a
 message only when doing so makes the serialized reply smaller, so the same rule on the same tree may be
 folded at one `limit` and inline at another, and a small reply is typically not folded at all. **A

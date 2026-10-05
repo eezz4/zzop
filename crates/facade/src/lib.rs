@@ -70,7 +70,9 @@ mod test_region_promise_tests;
 
 pub use analyze::{analyze_json, analyze_trees_json};
 pub use envelope::{analyze_envelope_json, validate_envelope_only_json};
-pub use explain::{bundled_verbatim_message, explain, explain_with_config, native_analysis_ids};
+pub use explain::{
+    bundled_caveat, bundled_verbatim_message, explain, explain_with_config, native_analysis_ids,
+};
 
 /// The WHOLE of those two legends, run-free — what `zzop_summary`'s reply-legends contract document is
 /// rendered from. The reply keeps a pointer and these functions keep the text, so the two can never

@@ -1170,9 +1170,16 @@ fn check_file_folds_repeated_rule_prose_exactly_as_analyze_does() {
 
     // Whichever lane claimed them, the reply must carry that lane's legend — a pointer whose legend
     // did not travel with it is an address into nothing.
+    // `ruleCaveats` joined on 2026-10-04. It is not a fold like the two above — it ADDS prose
+    // rather than deduplicating it — but it is a table paired with a legend published by the same
+    // `Folded::publish`, so it fails the same way: a table whose legend did not travel is a map
+    // nobody can read the absences of, and a legend with no table is bytes about nothing. The pin
+    // was missing for one review cycle and a module owner found it, which is the round-18 shape
+    // (`file` lane shipped a marker with no legend) asking to happen again.
     for (key, legend) in [
         ("ruleMessages", "ruleMessagesMeaning"),
         ("ruleMessageTemplates", "ruleMessageTemplatesMeaning"),
+        ("ruleCaveats", "ruleCaveatsMeaning"),
     ] {
         assert_eq!(
             f["findings"].get(key).is_some(),

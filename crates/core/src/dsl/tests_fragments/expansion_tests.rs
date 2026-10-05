@@ -13,6 +13,7 @@ fn line_scan_rule(id: &str, file_exclude_pattern: Option<&str>) -> RuleDef {
         axis: crate::RuleAxis::Defect,
         id: id.to_string(),
         severity: Severity::Info,
+        caveat: None,
         message: "m".to_string(),
         scan_test_regions: false,
         matcher: Matcher::LineScan(LineScan {
@@ -218,6 +219,7 @@ fn expand_fragments_covers_every_pattern_bearing_field_on_every_matcher_kind() {
         axis: crate::RuleAxis::Defect,
         id: "ls".to_string(),
         severity: Severity::Info,
+        caveat: None,
         message: "m".to_string(),
         scan_test_regions: false,
         matcher: Matcher::LineScan(LineScan {
@@ -248,6 +250,7 @@ fn expand_fragments_covers_every_pattern_bearing_field_on_every_matcher_kind() {
         axis: crate::RuleAxis::Defect,
         id: "ms".to_string(),
         severity: Severity::Info,
+        caveat: None,
         message: "m".to_string(),
         scan_test_regions: false,
         matcher: Matcher::MethodScan(MethodScan {
@@ -280,6 +283,7 @@ fn expand_fragments_covers_every_pattern_bearing_field_on_every_matcher_kind() {
         axis: crate::RuleAxis::Defect,
         id: "ss".to_string(),
         severity: Severity::Info,
+        caveat: None,
         message: "m".to_string(),
         scan_test_regions: false,
         matcher: Matcher::SymbolScan(SymbolScan {
@@ -297,6 +301,7 @@ fn expand_fragments_covers_every_pattern_bearing_field_on_every_matcher_kind() {
         axis: crate::RuleAxis::Defect,
         id: "cs".to_string(),
         severity: Severity::Info,
+        caveat: None,
         message: "m".to_string(),
         scan_test_regions: false,
         matcher: Matcher::CallScan(CallScan {
@@ -313,6 +318,7 @@ fn expand_fragments_covers_every_pattern_bearing_field_on_every_matcher_kind() {
         axis: crate::RuleAxis::Defect,
         id: "ls2".to_string(),
         severity: Severity::Info,
+        caveat: None,
         message: "m".to_string(),
         scan_test_regions: false,
         matcher: Matcher::LiteralScan(LiteralScan {
@@ -327,6 +333,7 @@ fn expand_fragments_covers_every_pattern_bearing_field_on_every_matcher_kind() {
         axis: crate::RuleAxis::Defect,
         id: "is".to_string(),
         severity: Severity::Info,
+        caveat: None,
         message: "m".to_string(),
         scan_test_regions: false,
         matcher: Matcher::IoScan(IoScan {

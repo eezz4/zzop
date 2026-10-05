@@ -28,6 +28,12 @@ pub(super) fn render(pack: &RulePackDef, rule: &RuleDef) -> String {
         // `mutating-route-no-auth`, which is a real unauthenticated write.
         format!("axis: {}", axis_str(rule.axis)),
         format!("severity: {}", severity_str(rule.severity)),
+        // `message` is the whole published text, caveat included — [`RuleDef::caveat`] is a
+        // verbatim SUBSTRING of it, not a piece taken out of it, so nothing is re-joined here.
+        // That shape was chosen over a split after measuring the alternative — the measurement and
+        // the counting command live on [`RuleDef::caveat`] and are deliberately not copied here. The
+        // three numbers this comment used to spell were a copy of that paragraph's, and they were
+        // already wrong when both were written.
         format!("message: {}", rule.message),
         format!("suppress marker: {}", suppress_marker_str(rule)),
         // The third leg of the "how do I stop seeing this" answer, and the one this command did NOT

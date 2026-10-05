@@ -91,7 +91,64 @@ pub struct RuleDef {
     #[serde(default)]
     pub axis: RuleAxis,
     pub severity: Severity,
-    /// Human-facing message (cause / fix hint).
+    /// The clause that says WHEN THIS FINDING IS WRONG — the shape of its common false positive,
+    /// what the matcher cannot see, what to check before acting. Optional: a rule with no known
+    /// false-positive shape has nothing to put here and must not invent one.
+    ///
+    /// ## Why this is its own field and not the first sentence of `message`
+    /// 📏 Measured 2026-10-04, during the release audit that caused it: three uncontaminated
+    /// evaluators read a 50-finding first screen each and returned 33 HARMFUL verdicts between them —
+    /// findings where acting on the advice would make the code worse. Six of one evaluator's thirteen
+    /// were shapes the rule ALREADY described: `sql/truncate-in-app-code` opens "FIRST CHECK WHETHER
+    /// THIS STATEMENT IS EXECUTED OR EMITTED", and the two criticals it produced were both SQL
+    /// GENERATORS. The engine knew, wrote it down, and then did not show it: a finding whose message
+    /// is rebuildable from its rule id ships a `messageBy` pointer and no prose at all, so the first
+    /// screen carries the claim without the caveat.
+    ///
+    /// Shipping the whole message per distinct rule instead would cost **52-80%** of the reply;
+    /// shipping only this clause costs **8-11%** and covers **62-72%** of the findings on the
+    /// screen. The bounds are rounded OUTWARD on purpose: one edit to the legend's own wording moved
+    /// two of these by a tenth of a point, which is the rot a decimal in prose invites. 📏 `node scripts/measure/caveat-cost.mjs corpus/audit/{immich,nocodb,cal.com}/zzop.config.jsonc`
+    /// — the metric (what counts as the denominator, whether the legend's own bytes count, which
+    /// window) is fixed in that script's header rather than in this sentence, because the first
+    /// two numbers published here were taken through two DIFFERENT windows and compared anyway.
+    /// ⚠ This line said
+    /// **3.0-4.5%** until 2026-10-04, and it was wrong twice over: that was the PILOT's cost,
+    /// measured while one rule carried the field, and it was a `--limit 1000` figure sitting beside a
+    /// default-window one, so the two halves of the comparison were taken through different windows.
+    /// Four other sites carried the corrected number and this one did not. Taking the
+    /// first sentence was tried first and rejected by measurement: of 41 rules on those screens, 23
+    /// carry a caveat somewhere and only **5** carry it in sentence one — so that shortcut would have
+    /// shipped a bare claim for the other 18, which is worse than shipping nothing.
+    ///
+    /// ⚠ **This is a verbatim SUBSTRING of [`RuleDef::message`], not a piece cut out of it.** The
+    /// published text is unchanged and nothing is re-joined anywhere; this field says WHICH span of
+    /// it answers "when is this wrong", so the reply can ship that span alone.
+    ///
+    /// A split was built first and abandoned on measurement: most of the rules that carry a caveat do
+    /// NOT carry it at the front, so splitting meant rewriting the prose of nearly all of them — and
+    /// two of them open their caveat with "THE CLAUSE ABOVE DESCRIBES A GATE THIS RULE DOES NOT
+    /// IMPLEMENT" (`security/cmd-injection`, `security/unsafe-deserialization`), a backward reference a
+    /// cut would silently break.
+    ///
+    /// 🔴 **The three counts this paragraph used to spell were wrong on the day they were written.**
+    /// It said "61 of 118 ... only 9 at the front ... 52 messages" while the tree held 65 / 12 / 53:
+    /// the measurement was taken mid-batch and the batch went on marking rules. It also named
+    /// `db/non-atomic-counter-update` as the backward-reference example, and that rule's caveat does
+    /// not contain the string at all. Recount rather than read a number here —
+    /// `bash scripts/check-rule-caveat-substring.sh` prints the population on every run.
+    ///
+    /// Duplication is the obvious objection and it is answered structurally, not by discipline:
+    /// `check-rule-caveat-substring.sh` fails the build unless every caveat is a verbatim substring of
+    /// its own message. Two copies that cannot differ are one fact, which is the test this repo
+    /// applies to every other mirror it keeps.
+    #[serde(default)]
+    pub caveat: Option<String>,
+    /// Human-facing message (cause / fix hint). CARRIES the caveat clause inline, because
+    /// [`RuleDef::caveat`] is a verbatim substring of this string rather than a piece taken out of
+    /// it — see that field. This line claimed the opposite until 2026-10-04: it was written for the
+    /// split design that was built and then abandoned on measurement, and it sat fifteen lines below
+    /// the paragraph that abandoned it.
     pub message: String,
     pub matcher: Matcher,
     /// OPT OUT of the test-region gate: `true` means this rule keeps judging lines a parser proved are

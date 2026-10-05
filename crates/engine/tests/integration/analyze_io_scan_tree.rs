@@ -80,6 +80,9 @@ fn io_scan_rule(id: &str, m: IoScan) -> RuleDef {
         axis: zzop_core::RuleAxis::Defect,
         id: id.to_string(),
         severity: Severity::Warning,
+        // No caveat: these synthetic rules have no false-positive shape to declare, and an invented
+        // one would be the thing `RuleDef::caveat`'s own doc forbids.
+        caveat: None,
         message: format!("io-scan-e2e/{id} fired"),
         // The test-region opt-out is for credential-at-rest rules only, and io-scan is not gated by it
         // at all (see `RuleDef::scan_test_regions`) — false is both the default and the honest value.

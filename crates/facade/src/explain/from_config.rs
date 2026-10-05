@@ -192,8 +192,14 @@ mod tests {
 
         let bundled = super::super::explain("no-such-rule-anywhere")
             .expect_err("an unknown id is a lookup failure on either corpus");
+        // The needle used to be the literal `--config`, and 40a81df made that false without
+        // updating this line: the refusals were twinned for MCP, where a dash-flag names nothing a
+        // caller can reach, so the tail now points at the CONFIG rather than at the CLI's spelling
+        // of it. What the assertion is for is unchanged — the bundled lane is the only place a
+        // reader learns the wider corpus exists — so it keeps `zzop/rules/` and swaps the flag for
+        // the surface-neutral sentence that replaced it.
         assert!(
-            bundled.contains("--config") && bundled.contains("zzop/rules/"),
+            bundled.contains("takes the config as an argument") && bundled.contains("zzop/rules/"),
             "the bundled lane's tail is the only place a reader learns the wider corpus exists: \
              {bundled}"
         );
