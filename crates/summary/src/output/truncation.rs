@@ -9,7 +9,7 @@
 //!   carry a SEVERITY, and the cut can take a whole severity band away.
 //!
 //! # Why the findings lane needs more than a count
-//! Ordering is `deployment role desc -> severity desc` (see [`super::deployment_role`]), so every
+//! Ordering is `deployment role desc -> severity (warning > info > critical)` (see [`super::deployment_role`]), so every
 //! finding on test or build surface sorts behind every shipped finding no matter what severity
 //! either carries. That is deliberate and stays. Its residue, filed by the commit that landed it:
 //! on a tree over the cap the demoted rows leave the reply entirely. Measured on cal.com at

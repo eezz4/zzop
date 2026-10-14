@@ -46,7 +46,7 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 
-const BIN = process.argv[2] ?? "./target/release/zzop-mcp";
+const BIN = process.argv[2] ?? `./target/release/zzop-mcp${process.platform === "win32" ? ".exe" : ""}`;
 if (!fs.existsSync(BIN)) {
   console.error(`mcp-meaning-delegation: no binary at ${BIN}`);
   console.error("  Build it first: cargo build --release -p zzop-mcp");

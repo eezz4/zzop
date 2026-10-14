@@ -1,5 +1,17 @@
-use super::unparsed_extension_warning;
-use std::collections::BTreeMap;
+use super::unparsed_extension_warning as warn_with_scope;
+use std::collections::{BTreeMap, BTreeSet};
+
+/// Every test below this line predates the rule-reach clause and asserts the PARSER half, which that
+/// clause does not move. They therefore run with an empty scope set — no file matched any loaded rule's
+/// `file_pattern` — which is also the koel case the clause was built for. The two branches of the clause
+/// itself are pinned by their own tests at the bottom of this file.
+fn unparsed_extension_warning(unparsed: &BTreeMap<String, (usize, Vec<String>)>) -> Vec<String> {
+    warn_with_scope(unparsed, &BTreeSet::new())
+}
+
+fn scope_of(rels: &[&str]) -> BTreeSet<String> {
+    rels.iter().map(|r| (*r).to_string()).collect()
+}
 
 fn unparsed(entries: &[(&str, usize, &[&str])]) -> BTreeMap<String, (usize, Vec<String>)> {
     entries
@@ -319,5 +331,91 @@ fn the_on_ramp_note_samples_the_same_order_the_fact_lines_are_in() {
              +2 more)"
         ),
         "{w}"
+    );
+}
+
+/// 🔴 The gap this clause closes, stated as the two-file tree that found it.
+///
+/// A `.php` carrying a 26-character committed password and a `.pem` carrying a private key, one run,
+/// `parserDispatched` 0: the `.pem` drew `security/private-key-committed` and the `.php` drew nothing. So
+/// "no native parser" is NOT the reason a filetype's findings list is empty, and the reader of that
+/// sentence alone cannot tell which of the two gaps they have.
+///
+/// The rule half cannot be deferred to the channel whose job it is, because that channel's census is
+/// built over files a parser CLAIMED — an unparsed extension is structurally absent from it. Measured
+/// on koel `a8ac1f0c`: `.php` is 1,412 files, 50.9% of the tree, zero rules in range, and the words
+/// "NO loaded DSL rule targets" appear nowhere in that reply's 16 warnings.
+#[test]
+fn an_unparsed_extension_that_no_rule_matched_says_so_on_its_own_line() {
+    let warnings = warn_with_scope(&unparsed(&[("php", 1412, &["a.php"])]), &BTreeSet::new());
+    assert!(
+        warnings[0].contains("NOT ONE LOADED DSL RULE MATCHED ANY OF THEM EITHER"),
+        "{}",
+        warnings[0]
+    );
+    assert!(
+        warnings[0].contains("SCOPE rather than a measurement"),
+        "{}",
+        warnings[0]
+    );
+}
+
+/// The other branch, and the reason the clause COUNTS rather than asserting: a parser gap does not
+/// imply a rule gap.
+///
+/// `.vue` is the measured case and it is the one a real tree carries — 📏 nocodb has 962 of them, no
+/// native parser claims one, and `browser/vue-v-html` names that extension in its own `file_pattern`, so
+/// all 962 are in scope of a rule that reads their raw text. A zero over them IS a measurement and this
+/// line must not claim otherwise.
+///
+/// ⚠ A `.pem` would be the wrong fixture here even though it is the file that proved a line-scan rule
+/// needs no parser: the COLLECTION site drops non-source extensions before they reach this map
+/// ([`record_unparsed_extension`]), so `.pem` can never be a key of `unparsed` at all.
+#[test]
+fn an_unparsed_extension_some_rule_did_match_reports_the_count_instead() {
+    let warnings = warn_with_scope(
+        &unparsed(&[("vue", 2, &["app.vue", "b.vue"])]),
+        &scope_of(&["app.vue"]),
+    );
+    assert!(
+        warnings[0].contains("1 of them still matched at least one loaded DSL rule"),
+        "{}",
+        warnings[0]
+    );
+    assert!(
+        !warnings[0].contains("NOT ONE LOADED DSL RULE"),
+        "{}",
+        warnings[0]
+    );
+    // The structural loss is still stated for ALL of them: the two gaps are independent in both
+    // directions, so a matched file has lost its io/symbol facts just the same.
+    assert!(warnings[0].contains("lost for all 2"), "{}", warnings[0]);
+}
+
+/// The scope set is keyed by the SAME extension derivation the collection site uses, so a rel whose
+/// extension differs in case still counts. Without this the clause would report a false zero on any
+/// tree spelling its filetype in capitals.
+#[test]
+fn the_scope_count_is_case_insensitive_on_the_extension() {
+    let warnings = warn_with_scope(&unparsed(&[("vue", 1, &["A.VUE"])]), &scope_of(&["A.VUE"]));
+    assert!(
+        warnings[0].contains("1 of them still matched"),
+        "{}",
+        warnings[0]
+    );
+}
+
+/// A rel in scope carrying a DIFFERENT extension must not be credited to this entry — the counter is
+/// per filetype, and a tree where one `.ts` file is in scope says nothing about its `.php` files.
+#[test]
+fn a_scoped_rel_of_another_extension_does_not_count_toward_this_one() {
+    let warnings = warn_with_scope(
+        &unparsed(&[("php", 3, &["a.php"])]),
+        &scope_of(&["src/app.ts", "src/b.ts"]),
+    );
+    assert!(
+        warnings[0].contains("NOT ONE LOADED DSL RULE MATCHED ANY OF THEM EITHER"),
+        "{}",
+        warnings[0]
     );
 }

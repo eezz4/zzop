@@ -38,16 +38,12 @@ fn the_reproduction_that_aborted_the_process_is_refused_and_a_shallow_sibling_is
 #[test]
 fn the_gate_covers_every_dispatched_language() {
     let deep = "(".repeat(MAX_NESTING_DEPTH + 1);
-    for lang in [
-        Language::TypeScript,
-        Language::Python,
-        Language::Java21,
-        Language::Rust,
-        Language::Go,
-        Language::CSharp,
-        Language::Prisma,
-        Language::Sql,
-    ] {
+    // Derived here too, and this test is the sharpest place for it: the doc above condemns the test
+    // it replaced for stating a causal claim its body could not reach — and then carried a
+    // hand-written 8-element list, so a ninth frontend would have arrived outside the loop and this
+    // name would have gone on saying "every dispatched language" about eight of nine. Found by
+    // external review round 9, one layer inside the lesson.
+    for (lang, _rel) in crate::dispatch::shipped_parser_languages() {
         assert!(
             gated(&deep, Some(lang), "a.ts"),
             "{lang:?} parses recursively like the rest and must be gated too"
@@ -68,14 +64,10 @@ fn the_gate_covers_every_dispatched_language() {
 #[test]
 fn a_file_at_the_deepest_measured_real_depth_is_not_gated() {
     let real = "(".repeat(DEEPEST_REAL_FILE_MEASURED);
-    for lang in [
-        Language::Rust,
-        Language::TypeScript,
-        Language::Go,
-        Language::CSharp,
-        Language::Java21,
-        Language::Python,
-    ] {
+    // 📏 This loop listed SIX while the doc above cites an "eight-language census" — Prisma and Sql
+    // were missing with no reason given, so the census the cap is derived FROM covered two languages
+    // the cap's own headroom was never checked against. Derived, which removes the question.
+    for (lang, _rel) in crate::dispatch::shipped_parser_languages() {
         assert!(
             !gated(&real, Some(lang), "a.ts"),
             "{lang:?}: depth {DEEPEST_REAL_FILE_MEASURED} is the deepest REAL file measured and must parse"
@@ -155,6 +147,24 @@ fn the_statement_cap_is_chosen_by_path_and_a_prescan_host_gets_one_too() {
 /// direction — a frontend that nobody classified falls into it silently. Python did, and a 1.5 MB
 /// file inside the size cap took the process down with exit 127 and no findings (review ledger V130).
 /// A test that merely asserted today's three caps would have been green through all of it.
+/// # WHAT THIS ASSERTION SEPARATES, AND WHAT IT CANNOT
+/// Stated because the three-way enum below reads as three checks and the primary assertion is a
+/// two-way one (external review round 9). `statement_policy(rel).0` is `None` for BOTH `CstDepth`
+/// and `NoRecursiveParser`, and `defence == Defence::StatementCap` is `false` for both, so those two
+/// arms assert the identical proposition. What is pinned here is `StatementCap` against everything
+/// else, plus — since 2026-10-09 — the statement BOUNDARY, which is the V140 fact and was unasserted.
+///
+/// `CstDepth` versus `NoRecursiveParser` is a claim about the parser crates, not about this module:
+/// whether the frontend has a recursive descent to overflow, and whether it calls
+/// `zzop_core::cst_depth::exceeds_max_depth`. Nothing visible from here can tell them apart. Where
+/// that distinction IS exercised is `crates/engine/tests/deep_input_survival.rs`, whose `refused(...)`
+/// cases assert that a `CstDepth` language's over-cap tree comes back named in `degraded` — the
+/// observable the cap actually produces, and a thing a unit test on `statement_policy` cannot see.
+///
+/// So this test's job is narrower than its name: every SHIPPED frontend gets a classification, and
+/// the one classification this module owns is checked. That is worth having — V130 was exactly a
+/// frontend nobody had classified — but it is not "accounted for" in the full sense, and pretending
+/// otherwise is what let the round-9 reviewer find this.
 #[test]
 fn every_dispatched_language_is_accounted_for_by_one_defence() {
     #[derive(PartialEq, Debug)]
@@ -167,25 +177,36 @@ fn every_dispatched_language_is_accounted_for_by_one_defence() {
         NoRecursiveParser,
     }
 
-    for (lang, rel) in [
-        (Language::CSharp, "a.cs"),
-        (Language::Go, "a.go"),
-        (Language::Java21, "A.java"),
-        (Language::Rust, "a.rs"),
-        (Language::TypeScript, "a.ts"),
-        (Language::Python, "a.py"),
-        (Language::Sql, "a.sql"),
-        (Language::Prisma, "schema.prisma"),
-    ] {
+    // Subjects come from `dispatch::shipped_parser_languages()`, which derives them from
+    // `version_string()`'s parser tokens and carries the population floor. It is shared with
+    // `cache::tests::parser_fingerprints_surface_matches_every_dispatch_arm`, which had the same
+    // hand-written-list hole; that function's doc holds the measurement and the reasoning.
+    for (lang, rel) in crate::dispatch::shipped_parser_languages() {
+        // No wildcard: a ninth `Language` variant is E0004 here.
         let defence = match lang {
             Language::CSharp | Language::Go | Language::Java21 => Defence::CstDepth,
             Language::Rust | Language::TypeScript | Language::Python => Defence::StatementCap,
             Language::Sql | Language::Prisma => Defence::NoRecursiveParser,
         };
+
+        let (cap, ends) = statement_policy(rel);
         assert_eq!(
-            statement_policy(rel).0.is_some(),
+            cap.is_some(),
             defence == Defence::StatementCap,
             "{lang:?} ({rel}) is classified {defence:?} but statement_cap disagrees"
+        );
+
+        // 🔴 THE SECOND ELEMENT, which this test ignored entirely until 2026-10-09 — and it is the
+        // one review ledger V140 was filed for. `scan_depths` assumed `;`/`{`/`}` ended a statement
+        // in every language, which is false for Python and turned that language's cap into a cap on
+        // the whole FILE. `statement_policy` returns the boundary for exactly that reason, and
+        // nothing was checking it.
+        let expect_linebreak = lang == Language::Python;
+        assert_eq!(
+            ends == StatementEnd::DelimitersOrLineBreak,
+            expect_linebreak,
+            "{lang:?} ({rel}) statement boundary is {ends:?}; only a language without `;`/`{{`/`}}` \
+             statement terminators may read a line break as one (V140)"
         );
     }
 }

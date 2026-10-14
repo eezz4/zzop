@@ -169,11 +169,45 @@ pub(crate) fn uncompilable_rule_warnings(packs: &[zzop_core::RulePackDef]) -> Ve
 /// remedy restated until it read as noise, which is how a genuine capability gap loses the reader. The
 /// per-extension entries keep only their own facts (count, extension, sample paths); the funnel is not
 /// weakened, only de-duplicated — see [`adapter_on_ramp_note`] for the reachability contract it carries.
+///
+/// ## The SECOND gap, stated on the same line as the first
+/// "No parser" and "no rule read it" are INDEPENDENT, and this channel used to carry only the first.
+/// A line-scan rule needs no parser: measured on a two-file tree, `parserDispatched` 0, a `.pem` still
+/// drew `security/private-key-committed` while a `.php` carrying a 26-character committed password drew
+/// nothing. So a reader who takes "no io/symbol facts were extracted" as the whole story infers the
+/// wrong thing in both directions.
+///
+/// The rule half cannot be left to its own channel, because that channel's population EXCLUDES these
+/// extensions by construction: [`super::pack_scope::uncovered_extension`]'s census
+/// (`DslScope::ext_census`) is built over the files a native frontend CLAIMED, so an extension with no
+/// parser can never appear in it and its "does any loaded rule target this filetype" question is never
+/// asked. Measured on koel `a8ac1f0c`: `.php` is 1,412 files, 50.9% of the tree, zero rules in range —
+/// and the words "NO loaded DSL rule targets" appear nowhere in that reply's 16 warnings. That is a
+/// disclosure whose population excludes the condition it discloses, so the fact is stated HERE, where
+/// the population is the unread files themselves.
+///
+/// `in_scope_rels` is `DslScope::in_scope_rels` — every walked rel matching >=1 loaded rule `file_pattern`,
+/// which is the one census taken over the WHOLE walk rather than over dispatch-claimed files, and
+/// therefore the only one that can see a `.pem`. Counted, not asserted: the clause says how many files
+/// of that extension a rule would have read, so a zero is distinguishable from "some were read".
 pub(in crate::analyze) fn unparsed_extension_warning(
     unparsed: &BTreeMap<String, (usize, Vec<String>)>,
+    in_scope_rels: &std::collections::BTreeSet<String>,
 ) -> Vec<String> {
     if unparsed.is_empty() {
         return Vec::new();
+    }
+    // One pass over the scope set, not one per extension: the map is keyed the same way the collection
+    // site keys `unparsed` (`Path::extension`, lowercased), so the two cannot drift on what an extension is.
+    let mut in_scope_by_ext: BTreeMap<String, usize> = BTreeMap::new();
+    for rel in in_scope_rels {
+        if let Some(ext) = std::path::Path::new(rel)
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(str::to_ascii_lowercase)
+        {
+            *in_scope_by_ext.entry(ext).or_insert(0) += 1;
+        }
     }
     // Biggest unread population first, name breaking the ties. `BTreeMap::iter` is already
     // name-ascending, and `sort_by_key` is stable, so the tie-break needs no second comparator.
@@ -186,9 +220,25 @@ pub(in crate::analyze) fn unparsed_extension_warning(
             if *count > sample_rels.len() {
                 sample_str.push_str(&format!(", +{} more", count - sample_rels.len()));
             }
+            let reached = in_scope_by_ext.get(ext.as_str()).copied().unwrap_or(0);
+            // Stated in both directions, because the reader cannot tell them apart from the sentence
+            // above: a parser gap and a rule gap are different losses and this filetype may have one,
+            // both, or only the first.
+            let rule_reach = if reached == 0 {
+                "AND NOT ONE LOADED DSL RULE MATCHED ANY OF THEM EITHER, so this filetype's empty \
+                 findings list is SCOPE rather than a measurement — a rule needs no parser to read a \
+                 line, so the two gaps are independent and this tree has both"
+                    .to_string()
+            } else {
+                format!(
+                    "{reached} of them still matched at least one loaded DSL rule's `file_pattern` — a \
+                     rule needs no parser to read a line, so a zero from those {reached} is measured, \
+                     while the structural facts above are lost for all {count}"
+                )
+            };
             format!(
                 "{count} file(s) with extension .{ext} have no native parser — no io/symbol facts were \
-                 extracted from them: {sample_str}."
+                 extracted from them: {sample_str}. {rule_reach}."
             )
         })
         .collect();

@@ -252,6 +252,40 @@ fn the_message_conditions_the_shadowing_claim_and_names_the_tree_split_remedy() 
     );
 }
 
+/// The THIRD shape the disable reason has to name, and the only one of the three that an auditor
+/// reached before we did: both registrations in ONE process's source, with exactly one of them ever
+/// running. Measured 2026-10-10 on nocodb, where it was 2 of 2 shown rows — two branches of one
+/// if/else in one function, and a controller list a ternary picks. The hedge above already made the
+/// verdict survivable (the reader is told the premise is a condition, and here it is false), so what
+/// was missing is not a warning but an EXIT: a `trees[]` split is meaningless inside one unit, and the
+/// disable reason described a convention that registers the route twice, which is not this. Pinned
+/// because the fix is one clause inside a 2,600-character message and a future reword would not
+/// notice it was load-bearing.
+#[test]
+fn the_disable_reason_names_registrations_of_which_exactly_one_of_them_ever_runs() {
+    let provides = vec![
+        provide("GET /", "src/Noco.ts", 238),
+        provide("GET /", "src/Noco.ts", 254),
+    ];
+    let found = duplicate_route_findings(&provides, &Default::default());
+    assert_eq!(found.len(), 1);
+    let m = &found[0].message;
+    assert!(
+        m.contains("MUTUALLY EXCLUSIVE registrations of which exactly one ever runs"),
+        "the disable reason must name the one-of-two-ever-runs shape: {m}"
+    );
+    assert!(
+        m.contains("registration SITES, not") && m.contains("reachability"),
+        "and must say WHY the rule counts it as two, in the rule's own terms: {m}"
+    );
+    // The two older reasons stay — this widened one of them rather than replacing either.
+    assert!(
+        m.contains("a framework convention that legitimately registers the same route")
+            && m.contains("the units genuinely ship apart"),
+        "both original reasons must survive the widening: {m}"
+    );
+}
+
 fn dirs(items: &[&str]) -> std::collections::BTreeSet<String> {
     items.iter().map(|s| s.to_string()).collect()
 }

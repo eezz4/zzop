@@ -254,8 +254,18 @@ pattern="^[[:space:]]*(pub(\\((crate|super|in [^)]+)\\))? )?(const|static) [A-Z_
 #           wildcard arm, so a new variant cannot compile without being given one. A census entry here
 #           would track the enumeration rather than any policy value, and the thing worth guarding is
 #           already guarded by the compiler plus a round-trip test.
+#   &[Language]
+#         — the SAME shape, written the only way a FREE const can write it. Both spellings are listed on
+#           purpose and neither is redundant: `WIRE_NAMES` is an associated const inside `impl Language`,
+#           where clippy's `redundant_static_lifetimes` does not fire, so it can say `&'static`. A free
+#           const (one inside a module rather than an impl) cannot — that lint is denied workspace-wide by
+#           `-D warnings`, and writing `&'static` there fails `cargo clippy` while writing `&[Language]`
+#           fails THIS census. Measured 2026-10-12 the hard way: the census refused `&[Language]`, the
+#           obvious remedy was to match the waived spelling, and that spelling then failed clippy in the
+#           full local mirror. Listing both is what lets the two guards be satisfied at once.
 ignored_types='char
 &'"'"'static [Language]
+&[Language]
 ()'
 
 # The axis vocabulary — see the header block. `?` is deliberately absent: it is what --update writes for

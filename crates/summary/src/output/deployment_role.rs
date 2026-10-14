@@ -54,8 +54,9 @@
 //! So REACH and RANKING were separated. Reach is unchanged and stays argued in each rule's own prose (an
 //! actual PEM header in a fixture IS a committed key, so the credential rules keep scanning test paths and
 //! the catalog says so). Ranking is this: a finding in code the tree does not ship sorts below every
-//! finding in code it does, whatever band either carries. Inside `SHIPPED`, severity orders exactly as it
-//! always did, so a shipped `critical` is still row one overall.
+//! finding in code it does, whatever band either carries. Inside `SHIPPED`, severity orders by the window's
+//! own key (warning > info > critical, `ordering::window_severity_key`), so a shipped `critical` sits at the end
+//! of the shipped band, still above every test or build finding.
 //!
 //! ⚠ This is still ORDERING ONLY. No finding's `severity` value moves, `bySeverity` is untouched, and
 //! `--fail-on` reads those counts rather than this list — so a CI gate sees nothing here. Whether a

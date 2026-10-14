@@ -101,6 +101,20 @@ pub(crate) enum Corpus<'a> {
 /// Naming both is deliberately preferred over threading a surface flag through this crate: an error
 /// path is the one place a reader is already stuck, one extra clause is cheap there, and a flag would
 /// put the "which surface am I" question into every caller of a shared text.
+///
+/// 🔴 AND THE SAME CLASS FIRED AGAIN ON THE OTHER HALF OF THE SENTENCE (2026-10-07). The address
+/// was right; what two callers CLAIMED TO FIND THERE was not. Both said a native analysis id's
+/// "full prose entry is in the rule catalog" — 📏 measured on `circular`: the catalog's row for it is
+/// **274 characters**, and three phrases that are in the shipped message appear in the catalog ZERO
+/// times (`BREAKING A CYCLE CAN CHANGE WHAT RUNS FIRST`, which lives in
+/// `rules/native/rules-graph/src/circular/landing.rs`; `WHERE THIS FINDING POINTS`; `placeholder
+/// rather than`). So a reader following the refusal arrived at a real document that does not answer.
+///
+/// The truth was already written down in a different crate —
+/// `zzop_summary::output::rule_prose::by_id`'s caveat legend says natives "have no field to declare
+/// one ... and their prose is inline on the finding, so read it there." Two surfaces stated opposite
+/// things about the same lookup; this one was the wrong one. ⚠ The THIRD use below (the unknown-id
+/// lane) is untouched and stays correct: it promises the catalog carries the LIST OF IDS, and it does.
 const RULE_CATALOG_BOTH_WAYS: &str =
     "`zzop contract rule-catalog` on the CLI, or the `zzop://contract/rule-catalog` resource over MCP.";
 
@@ -298,7 +312,10 @@ fn explain_over(
     if native_ids.iter().any(|id| id == query) {
         return Err(format!(
             "{query:?} is a native analysis id, not a bundled DSL rule — this lookup only reads the \
-             compiled-in DSL pack data. Its full prose entry is in the rule catalog: {RULE_CATALOG_BOTH_WAYS}"
+             compiled-in DSL pack data, and natives have no pack entry to read. Unlike a DSL rule, \
+             its prose ships INLINE on every finding it produces, so the place to read it is a \
+             finding's own `message`. The rule catalog carries its id, severity and a one-line \
+             summary — not that prose: {RULE_CATALOG_BOTH_WAYS}"
         ));
     }
 
@@ -313,7 +330,9 @@ fn explain_over(
                 "{query:?} is the bare form of the native analysis id {full:?} (compiled into \
                  zzop-engine, not a bundled DSL pack) — real, just not data this lookup reads. Config \
                  matches ids EXACTLY, so `disabledRules` / `severityOverrides` need the full \
-                 {full:?}. Its full prose entry is in the rule catalog: {RULE_CATALOG_BOTH_WAYS}"
+                 {full:?}. Its prose ships INLINE on every finding it produces — read it on a \
+                 finding's own `message`. The rule catalog carries the id, severity and a one-line \
+                 summary, not that prose: {RULE_CATALOG_BOTH_WAYS}"
             ));
         }
         [] => {}

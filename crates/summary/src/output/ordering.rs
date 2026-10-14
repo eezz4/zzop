@@ -22,6 +22,46 @@ use super::FindingFilters;
 ///
 /// `min_rank` is the caller's already-resolved severity floor (the parent owns the argument parsing);
 /// `build_script_paths` is the analyzed tree's own manifest declaration of its build surface.
+/// The WINDOW's severity key, and deliberately **not** [`severity_rank`]: `warning` > `info` > `critical` >
+/// anything else. Two different questions live on one word, and keeping them in two functions is why
+/// neither can quietly answer the other:
+///
+/// * [`severity_rank`] is the THRESHOLD — it is public, a host gate (`zzop --fail-on`) orders by it, and
+///   `min_rank` filters with it. A `critical` is still the highest thing that function knows, so
+///   `--severity critical` still means what it says and a gate still trips on it.
+/// * this one is the PLACEMENT, consulted only by the comparator below, never emitted.
+///
+/// ## Why `critical` sits LAST (user verdict, 2026-10-11 — ledger V367, option (A))
+/// A `critical` in this engine means a CONSTRUCTION is present — a PEM block, a `FLUSHALL`, a
+/// `TRUNCATE`, a `new Function` — and **a construction can be present and inert.** The band reads the
+/// construction; it cannot read whether anything executes it.
+///
+/// 📏 Measured on three trees the same day, by three evaluators who could not see each other's work and
+/// were not told the baseline: **6 of 6 `critical` rows needed no edit.** An e2e OIDC fixture keypair in
+/// a `private: true` package (its matching public key three lines down), an `ioredis-mock` client, a
+/// deliberate `destroy()` teardown flush, an env-guarded startup flush, and two functions that only
+/// GENERATE `TRUNCATE` text and assign it to a result field.
+///
+/// The role key above this one already demotes fixtures and build scripts, and its own note says why —
+/// *"a `critical` band made of fixtures and build scripts is a first screen that found nothing."* These
+/// six went THROUGH that demotion: five sit on production paths, and the sixth is a test fixture the
+/// deployment-role classifier does not recognise. So no path-shaped key can reach them.
+///
+/// ## What this is NOT
+/// Not a filter: nothing is dropped, every count still includes these findings, and `byRule`/
+/// `bySeverity`/`total` are untouched. And not a silent demotion — when the cap drops the band
+/// entirely, `truncated.severitiesNotShown` carries its count and its first omitted rows. **Hiding
+/// without that disclosure is not this verdict**; the verdict was recorded with the disclosure as its
+/// condition.
+fn window_severity_key(severity: &str) -> u8 {
+    match severity {
+        "warning" => 3,
+        "info" => 2,
+        "critical" => 1,
+        _ => 0,
+    }
+}
+
 pub(super) fn window_order<'a>(
     findings: &'a [serde_json::Value],
     filters: &FindingFilters,
@@ -57,7 +97,9 @@ pub(super) fn window_order<'a>(
         })
         .map(|(i, f)| {
             let sev = f.get("severity").and_then(|v| v.as_str()).unwrap_or("");
-            let rank = severity_rank(sev);
+            // PLACEMENT, not threshold — see [`window_severity_key`]. The filter above still uses
+            // `severity_rank`, so what `--severity` admits did not move.
+            let rank = window_severity_key(sev);
             let role = deployment_role(f, build_script_paths);
             let rule = f.get("ruleId").and_then(|v| v.as_str()).unwrap_or("");
             let counter = seen_per_rule.entry((role, rank, rule)).or_insert(0);
@@ -85,7 +127,7 @@ pub(super) fn window_order<'a>(
             (i, f, rank, role, occurrence, dup_in_file, dup_at_site)
         })
         .collect();
-    // DEPLOYMENT ROLE descending, THEN severity-desc within a role, original engine order as the stable
+    // DEPLOYMENT ROLE descending, THEN severity (warning > info > critical) within a role, original engine order as the stable
     // tiebreak — deterministic. See [`deployment_role`] for what the three roles are, why, and why role
     // is the OUTER key: a reader stops when the list stops paying, and the place they stop is the end of
     // the `critical` band, so a `critical` band made of fixtures and build scripts is a first screen that

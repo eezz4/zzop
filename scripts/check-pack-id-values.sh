@@ -51,7 +51,7 @@ fi
 node --input-type=module -e '
 import fs from "fs";
 import path from "path";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 
 // The pack id set, read from the directory `crates/config/build.rs` compiles into the binary — never
 // a hand list, so a pack added or exported changes what this guard demands on the very next run.
@@ -73,7 +73,7 @@ if (packIds.size < 5) {
   process.exit(1);
 }
 
-const files = execSync("git ls-files \"*.md\" \"*.html\" \"*.jsonc\" \"*.json\"", { encoding: "utf8" })
+const files = execFileSync("git", ["ls-files", "*.md", "*.html", "*.jsonc", "*.json"], { encoding: "utf8" })
   .split("\n")
   .filter((f) => f && !f.startsWith("corpus/") && !/(^|\/)tests?(\/|$)/.test(f));
 

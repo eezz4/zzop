@@ -89,8 +89,13 @@ pub(crate) fn module_map_note() -> String {
 pub(crate) fn shown_note() -> String {
     format!(
         "An ORDER, not a RANKING — the caveat first, because it is the one that changes what a reader \
-         does with row 1. Deployment role descending (its two demoted tiers disclose themselves in this \
-         same reply, as `testPaths` and `buildPaths`), then severity descending, then THREE keys that \
+         does with row 1. Deployment role descending (its two demoted tiers disclose themselves as \
+         `testPaths` and `buildPaths`, each riding a reply exactly when that tier holds a finding \
+         anywhere in the FULL set — never only in this window, which is why an ABSENT one means that \
+         tier is empty in this tree rather than that the reply lacks the channel, and a PRESENT one \
+         can still have no row on this screen), then \
+         severity — `warning`, then `info`, then `critical` LAST, so a `critical` row sits at the END \
+         of its role and not at row 1 — then THREE keys that \
          INTERLEAVE rather than rank: distinct file-and-line first, then distinct rule-and-file, then \
          rule round-robin — with the engine's own severity/file/line/rule-id order as the deterministic \
          tiebreak. Shaping only — this ORDER drops nothing, and every count beside `shown` is over the \

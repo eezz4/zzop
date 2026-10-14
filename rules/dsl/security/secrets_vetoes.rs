@@ -341,3 +341,186 @@ fn a_dollar_or_braced_screaming_snake_placeholder_is_vetoed_like_the_bare_one() 
         out.findings
     );
 }
+
+/// 🔴 The shape that was 7 of 9 rows on one outside audit's screen, and 0 of the 9 was a secret.
+///
+/// `config-file-secret`'s veto list already covered every OTHER placeholder spelling —
+/// `${VAR}`, `$VAR`, `<angle>`, and the mock-word family — so a reader could reasonably read its
+/// silence on `{braces}` as a judgement. It was an omission. Measured on a 9-line fixture before this
+/// landed: `databricks://token:{access_token}@{host}:{port}` fired while the real 20-character secret
+/// three lines below it fired too, so the screen gave the two the same weight.
+///
+/// The value here is a DOCUMENTED CONNECTION TEMPLATE — the thing a database-catalog file is for — and
+/// rotating it is not merely useless but impossible: there is nothing behind the braces.
+#[test]
+fn a_brace_placeholder_connection_template_is_not_a_committed_secret() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "databases.yml",
+        "dsn: \"databricks://token:{access_token}@{host}:{port}\"\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "config-file-secret").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+/// The boundary that makes the veto safe, and the reason it is anchored to the VALUE position rather
+/// than to "the line contains braces". A TOML inline table opens with `{` immediately followed by an
+/// identifier — byte-identical to a placeholder's opening — so a veto written as "a brace appears
+/// anywhere" would silence every real secret inside one.
+#[test]
+fn a_real_secret_inside_a_toml_inline_table_keeps_firing() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "app.toml",
+        "creds = {password = \"Hx7Qd9Zt2Lm4Pk8Vb3Nc\"}\n",
+    );
+    let out = scan(&dir);
+    assert_eq!(
+        hits(&out, "config-file-secret").len(),
+        1,
+        "{:?}",
+        out.findings
+    );
+}
+
+/// The other half of that boundary: a real secret nested one level inside a JSON object. The enclosing
+/// `{` is followed by whitespace rather than an identifier, which is what keeps it out of the veto —
+/// and this is the case that sat three lines below the placeholder in the fixture that found the gap.
+#[test]
+fn a_real_secret_nested_in_a_json_object_keeps_firing() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "conf.json",
+        "{\n  \"real\": { \"password\": \"Hx7Qd9Zt2Lm4Pk8Vb3Nc\" }\n}\n",
+    );
+    let out = scan(&dir);
+    assert_eq!(
+        hits(&out, "config-file-secret").len(),
+        1,
+        "{:?}",
+        out.findings
+    );
+}
+
+/// A real secret whose TRAILING COMMENT mentions a brace token. The veto reads the value position, so a
+/// placeholder-looking word after the closing quote cannot reach it — without this anchor the rule would
+/// lose any secret documented with a `{...}` reference beside it.
+#[test]
+fn a_brace_token_in_a_trailing_comment_does_not_veto_the_secret() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "svc.properties",
+        "password = Hx7Qd9Zt2Lm4Pk8Vb3Nc  # rotate per {runbook}\n",
+    );
+    let out = scan(&dir);
+    assert_eq!(
+        hits(&out, "config-file-secret").len(),
+        1,
+        "{:?}",
+        out.findings
+    );
+}
+
+/// 🔴 The whole yield of this rule on one 3,363-file tree, and it was wrong — precision 0/1.
+///
+/// `server-password: CI_DEPLOY_PASSWORD` inside an `actions/setup-java` block is the DOCUMENTED
+/// contract of that key: it takes the NAME of the environment variable holding the credential, and the
+/// real value arrives eight lines below as `CI_DEPLOY_PASSWORD: ${{ secrets.CI_DEPLOY_PASSWORD }}`.
+/// The matched token is 19 characters, so it clears this rule's own 16-character floor, and it is
+/// byte-identical to the semantic name of its own key.
+///
+/// Why the veto keys on the SECRET WORD being a segment rather than on "the value looks like an
+/// environment variable": Rust's regex engine has no backreferences, so "the value equals the key" is
+/// not expressible here. An all-caps-with-underscores shape alone is too wide — it would silence a
+/// human-chosen passphrase like `CORRECT_HORSE_BATTERY_STAPLE`, which is pinned below.
+#[test]
+fn a_value_that_is_the_env_var_name_for_the_secret_is_not_the_secret() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write("ci.yml", "      server-password: CI_DEPLOY_PASSWORD\n");
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "config-file-secret").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}
+
+/// The upper boundary: an all-caps, underscore-joined value that is NOT naming a credential variable is
+/// a passphrase, and this rule must keep it. This is the case that rules out the wider veto.
+#[test]
+fn an_all_caps_passphrase_is_still_a_committed_secret() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "svc.properties",
+        "password = CORRECT_HORSE_BATTERY_STAPLE\n",
+    );
+    let out = scan(&dir);
+    assert_eq!(
+        hits(&out, "config-file-secret").len(),
+        1,
+        "{:?}",
+        out.findings
+    );
+}
+
+/// 🔴 The regression this rule's own `(?i)` prefix invites, and the reason the new alternative is
+/// wrapped in `(?-i:)`.
+///
+/// `exclude_pattern` is case-INSENSITIVE for the whole expression, so an alternative written as
+/// `[A-Z][A-Z0-9]*_...` matches lowercase too — and then a real secret spelled
+/// `my_password_value_here` is silenced by a veto whose entire justification was that the value is
+/// SHOUTED like a variable name. The uppercase requirement is the discriminator; without the scoped
+/// flag it does not exist.
+#[test]
+fn a_lowercase_underscore_secret_is_not_caught_by_the_env_var_name_veto() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write("app.conf", "password = my_password_value_here\n");
+    let out = scan(&dir);
+    assert_eq!(
+        hits(&out, "config-file-secret").len(),
+        1,
+        "{:?}",
+        out.findings
+    );
+}
+
+/// The other direction of the same discriminator: a real secret that merely CONTAINS the keyword. The
+/// veto requires every segment after the keyword to be all-caps, so a mixed-case tail keeps the finding.
+#[test]
+fn a_secret_whose_text_contains_the_keyword_keeps_firing() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write("app.ini", "password = MY_PASSWORD_IS_Hx7Qd9Zt2Lm\n");
+    let out = scan(&dir);
+    assert_eq!(
+        hits(&out, "config-file-secret").len(),
+        1,
+        "{:?}",
+        out.findings
+    );
+}
+
+/// The two rows that survived the brace veto on one 10,585-file tree, and both were still false: a
+/// generated OpenAPI spec writes its sample request body under `"example":` (SINGULAR), while this
+/// rule's enclosing-call veto named only `"examples"`. One character.
+///
+/// Measured on superset `e7dccd44a7`: this rule's full yield was 24 rows and not one was a secret —
+/// 22 brace-placeholder connection templates in `databases.json` plus these 2. After both vetoes it
+/// is 0, and on mall `0504e86b1f` the count is unchanged at 2, so the narrowing cost nothing there.
+#[test]
+fn a_sample_value_under_a_singular_example_key_is_not_a_committed_secret() {
+    let dir = TempDir::new("zzop-be-sec");
+    dir.write(
+        "openapi.json",
+        "{\n  \"example\": {\n    \"password\": \"complex-password-here\"\n  }\n}\n",
+    );
+    let out = scan(&dir);
+    assert!(
+        hits(&out, "config-file-secret").is_empty(),
+        "{:?}",
+        out.findings
+    );
+}

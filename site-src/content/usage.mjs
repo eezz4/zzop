@@ -286,11 +286,11 @@ export default {
           {
             ko: `같은 자리가 <b>켜는</b> 자리이기도 하다. <code>unimported-export</code> · <code>dead-candidates</code> ·
       <code>unreachable</code> 셋은 기본이 off 다 — 미사용 코드 위생이지 결함 주장이 아니고, 도그푸드 코퍼스에서
-      전체 발견의 61.7% 였다. 심각도를 적어 이름을 부르면 켜진다: <code>"dead-candidates": "info"</code>.
+      2026-09-03 에 잰 여섯 트리에서 전체 발견의 61.7% 였다(그 뒤 코퍼스가 자랐다). 심각도를 적어 이름을 부르면 켜진다: <code>"dead-candidates": "info"</code>.
       모든 실행이 <code>nativeAnalyses.shippedOff</code> 에 무엇을 안 봤는지 적는다 — 당신이 끈 것만 담는
       <code>nativeAnalyses.disabled</code> 와는 일부러 다른 칸이다.`,
             en: `The same place is where you turn one <b>on</b>. <code>unimported-export</code>, <code>dead-candidates</code> and
-      <code>unreachable</code> ship OFF — they are unused-code hygiene rather than defect claims, and were 61.7% of
+      <code>unreachable</code> ship OFF — they are unused-code hygiene rather than defect claims, and across the six trees measured 2026-09-03 were 61.7% of
       every finding across the dogfood corpus. Name one with a severity to get it back:
       <code>"dead-candidates": "info"</code>. Every run lists what it skipped under
       <code>nativeAnalyses.shippedOff</code> — deliberately a different box from

@@ -7,7 +7,7 @@
 //! leaves a reader whose build just broke with nothing to open ([`truncation`]) — warnings are never capped (the
 //! honest self-report channel outranks brevity), and
 //! ordering is deterministic and lives one module over ([`ordering`], which owns the five keys and the
-//! measurement behind each) — deployment role descending, then severity rank descending, then three
+//! measurement behind each) — deployment role descending, then severity (warning > info > critical), then three
 //! diversity keys that interleave places and rules so a window shows subjects rather than one cluster,
 //! with original engine order as the final tiebreak, so the same analysis produces byte-identical tool
 //! output. The key list is NOT restated here: it moved out on 2026-09-05 precisely because it had grown
@@ -56,7 +56,7 @@ pub use timings::RunKnobs;
 
 /// Shapes a findings array into `{total, bySeverity, byRule, byRuleMeaning, shown, truncated?}`.
 /// Counts are ALWAYS over the full set (the summary never shrinks with the filter); `shown` is the
-/// filtered list sorted by deployment role desc, then severity-desc, capped; `truncated`
+/// filtered list sorted by deployment role desc, then severity (warning > info > critical), capped; `truncated`
 /// (`{shown, totalMatching, severitiesNotShown, hint}`) appears ONLY when `shown` is incomplete.
 ///
 /// `build_script_paths` is the analyzed tree's OWN manifest declaration of which files are build surface

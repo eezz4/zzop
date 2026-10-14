@@ -261,10 +261,18 @@ fn go_sprintf_percent_verb_connection_string_is_not_flagged() {
 /// The GAP the comment above declares, measured instead of asserted (2026-09-04). That veto's own
 /// paragraph says a literal sitting in the printf ARGUMENTS is silenced here and recovered by nothing
 /// downstream, and names four sibling rules with the reason each misses it. The sentence shipped on a
-/// reviewer's word; this is the check. It asserts the SILENCE of all five rules on a line that really
-/// does carry a credential, so the day a sibling widens to cover this shape the pin goes red and the
-/// paragraph has to be rewritten instead of quietly becoming false — which is the failure mode any
-/// documented blind spot has, since prose about an absence never breaks on its own.
+/// reviewer's word; this is the check. It asserts the SILENCE of **every rule this pack ships** on a
+/// line that really does carry a credential, so the day ANY of them widens to cover this shape the pin
+/// goes red and the paragraph has to be rewritten instead of quietly becoming false — which is the
+/// failure mode any documented blind spot has, since prose about an absence never breaks on its own.
+///
+/// 🟢 **The subject set is derived, and that is a 2026-10-12 subtraction** (inbox N53-ⓐ, fable round 9
+/// axis A8-41). This pin used to name FIVE rule ids in a literal array; `config()` loads
+/// `security_pack()` and nothing else, so filtering `out.findings` for `security/` covers all
+/// **51** rules in the pack — 46 more than the array did — while deleting the array. ⚠ The array was
+/// not merely narrow: a rule added to this pack next week would have been exempt from a blind-spot pin
+/// nobody remembered to extend, which is §5.5's named failure (*a guard's subject set must be derived;
+/// a hand list does not follow its own subject as it grows*).
 ///
 /// Re-derived from the declarations rather than trusted: `hardcoded-password` is `(?i)\.java$` and
 /// never opens this file; `hardcoded-secret` needs one of its name keywords, then a separator, then
@@ -279,21 +287,22 @@ fn a_literal_password_in_the_printf_arguments_is_silent_in_every_rule_of_this_pa
         "func dsn(user, host string) string {\n\treturn fmt.Sprintf(\"postgres://%s:%s@%s/db\", user, \"S3cr3tPw9!\", host)\n}\n",
     );
     let out = scan(&dir);
-    for rule in [
-        "conn-string-credentials",
-        "hardcoded-password",
-        "hardcoded-secret",
-        "high-entropy-secret",
-        "jwt-sign-literal-secret",
-    ] {
-        assert!(
-            hits(&out, rule).is_empty(),
-            "`{rule}` now reports the printf-argument shape. That is GOOD NEWS and a red test: the \
-             veto comment above still claims nothing downstream recovers this credential, and it is \
-             now wrong. Rewrite that paragraph, then narrow this pin to the rules still silent: {:?}",
-            out.findings
-        );
-    }
+    // The whole pack, derived — not a hand-written roster. `config()` loads `security_pack()` and
+    // nothing else, so any `security/*` finding here is this pack's, and asking for NONE of them is
+    // both shorter than the list and 46 rules wider than it was.
+    let reporting: Vec<&str> = out
+        .findings
+        .iter()
+        .map(|f| f.rule_id.as_str())
+        .filter(|id| id.starts_with("security/"))
+        .collect();
+    assert!(
+        reporting.is_empty(),
+        "{reporting:?} now report the printf-argument shape. That is GOOD NEWS and a red test: the \
+         veto comment above still claims nothing downstream recovers this credential, and it is now \
+         wrong. Rewrite that paragraph, then narrow this pin to the shape still missed: {:?}",
+        out.findings
+    );
 }
 
 #[test]

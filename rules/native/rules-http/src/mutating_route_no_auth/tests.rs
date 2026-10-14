@@ -1210,6 +1210,55 @@ fn the_message_never_claims_an_unbounded_walk_without_naming_the_hop_bound() {
     }
 }
 
+/// THE EXAMPLE MUST NOT QUOTE THE READER'S OWN ROUTE. The precision-limit sentence names the shape
+/// this check cannot see (route-level middleware) by example, and that example used to INTERPOLATE the
+/// finding's real path and real handler into an Express/Hono line — in every language.
+///
+/// 📏 Measured 2026-10-10, outside audit round 13, on macrozheng/mall `0504e86` (524 Java files, zero
+/// JS): 32 of the 50 shown rows carried
+/// ``apiRoutes.post("/order/update/delivery", requireAuth, delivery)`` as their own per-row
+/// `templateParts` segment, while `git grep -lE "apiRoutes|requireAuth"` over that tree returns ZERO
+/// files. Grammatically it is an "e.g."; on screen it is a code quote carrying the reader's own path,
+/// and the auditor had to work out that the engine was not claiming to have seen that line.
+///
+/// The example needed no interpolation to do its job, so removing it made the sentence true in every
+/// language AND removed per-row bytes: 📏 2,061 bytes of per-row segment on that reply against ~95
+/// added once to the template, a net ~1,966 of 91,576 (2.1%).
+#[test]
+fn the_middleware_example_names_a_shape_rather_than_quoting_the_finding() {
+    let msg = super::message::missing_auth_hint("POST", "/minio/upload", "upload", None, &[]);
+    // The subject still leads the message — this pin must not be satisfiable by dropping it.
+    assert!(
+        msg.contains("POST /minio/upload (handler `upload`)"),
+        "the row's own subject must still open the message: {msg}"
+    );
+    assert!(
+        !msg.contains("apiRoutes.post(\"/minio/upload\""),
+        "the middleware EXAMPLE must not be built from the finding's path — a stranger reads that as \
+         a quote from their own code: {msg}"
+    );
+    assert!(
+        !msg.contains("requireAuth, upload)"),
+        "nor from the finding's handler name: {msg}"
+    );
+    assert!(
+        msg.contains("apiRoutes.post(\"/path\", requireAuth, handler)"),
+        "the example stays, with placeholder identifiers that cannot be mistaken for the tree: {msg}"
+    );
+    // And it names shapes outside JS, because the rule covers `.java` and `.py` too — as RECOGNIZED
+    // shapes. The engine exempts a class-level `@PreAuthorize` (parser-java-21 `security.rs`) and a
+    // parsed global `SecurityFilterChain` before this rule runs, so calling them invisible told a
+    // reader to dismiss exactly the findings that mean neither was found (release audit 2026-10-14).
+    assert!(
+        msg.contains("SecurityFilterChain") && msg.contains("@PreAuthorize"),
+        "the message must name the non-JS guard shapes the engine credits: {msg}"
+    );
+    assert!(
+        !msg.contains("a Spring filter chain or a class-level `@PreAuthorize`"),
+        "the old sentence called recognized guards invisible: {msg}"
+    );
+}
+
 // --- Unresolved callees: a call the resolver could not place is still a name this rule can read ---
 
 /// The measured false positive, in miniature. A guard declared inside a factory is not a top-level

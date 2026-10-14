@@ -146,13 +146,27 @@ pub(super) fn build(
     // Go gets NO analogous exclusion, by deliberate analysis (not oversight): `merge_go_dep_edges` never
     // emits a same-package edge (two files in the SAME package share symbols with no import statement
     // between them at all — Go's own compilation-unit model), so every edge it emits is INTER-package.
-    // A cycle built entirely from `.go` edges therefore always reflects two (or more) DISTINCT packages
-    // importing each other, directly or transitively — a REAL Go import cycle, which `go build` itself
-    // rejects at compile time. Unlike Rust's intra-crate parent<->child shape, there is no idiomatic,
-    // compiler-accepted Go source shape that would produce an all-`.go` cycle through this pass's own
-    // file-fanout (package A's file importing package B fans out to EVERY B file; package B's file
-    // importing package A back fans out to EVERY A file — the resulting file-level cycle is a faithful,
-    // non-spurious projection of the real A<->B package cycle, not an artifact of the fanout itself).
+    // A cycle built entirely from `.go` edges therefore reflects two (or more) DISTINCT packages
+    // importing each other, directly or transitively — USUALLY a real Go import cycle, which `go build`
+    // itself rejects at compile time. Unlike Rust's intra-crate parent<->child shape, no ordinary Go
+    // source shape produces an all-`.go` cycle through this pass's own file-fanout (package A's file
+    // importing package B fans out to EVERY B file; package B's file importing package A back fans out
+    // to EVERY A file — the resulting file-level cycle is a faithful, non-spurious projection of the
+    // real A<->B package cycle, not an artifact of the fanout itself).
+    //
+    // 🔴 ONE EXCEPTION, MEASURED 2026-10-12, and the reason this paragraph no longer says "always" or
+    // "no idiomatic, compiler-accepted shape exists": THIS PASS DOES NOT READ BUILD CONSTRAINTS. A file
+    // carrying `//go:build never` (or any tag the build excludes) is not compiled, so a cycle running
+    // through it is one `go build` never sees and never rejects. That is not hypothetical — it is the
+    // ONLY all-`.go` cycle the corpus produces: grafana's
+    // `pkg/extensions/enterprise_imports.go`, a generated file whose first two lines are
+    // `//go:build never` / `// +build never`. The tree compiles; the cycle is reported anyway.
+    //
+    // The decision stands: Go keeps NO exclusion. A build-tag-excluded file is still source someone
+    // reads, and the finding names a real import relationship in it. What changed is the JUSTIFICATION
+    // — this is "report it, because the projection is faithful", not "report it, because the compiler
+    // would have". `crates/core/src/graph.rs`'s `from == to` drop already names `//go:build ignore` for
+    // the self-loop shape; nothing filters a MULTI-FILE cycle through an excluded file, deliberately.
     // Verified by construction, not just argued: `analyze_go_module.rs`'s
     // `cross_package_mutual_import_cycle_is_reported_not_excluded` builds exactly this two-package,
     // multi-file-per-package shape and asserts the cycle IS reported.

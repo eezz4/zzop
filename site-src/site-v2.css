@@ -138,9 +138,16 @@ code{font-family:var(--mono);font-size:.88em;background:var(--tint);padding:1px 
 .vs{display:grid;gap:0;border:var(--rule)}
 .vs__row{display:grid;grid-template-columns:1fr;gap:0}
 .vs__row + .vs__row{border-top:var(--hair)}
-.vs__k,.vs__v{padding:.85rem 1rem}
+.vs__k,.vs__v{padding:.85rem 1rem;min-width:0}
 .vs__k{font-weight:700;background:var(--tint);font-size:.92rem}
 .vs__v{color:var(--n800);font-size:.95rem}
+/* A grid item's default `min-width:auto` is its MIN-CONTENT width, so one unbreakable token sets a
+   floor the track cannot go under and the grid grows past its own container. Measured at 320px on
+   index.html: `.vs` box 276px, its single track resolved to 339px, document 363px against a 320px
+   viewport — a sideways scroll on the landing page. `min-width:0` above lets the track shrink; this
+   lets the token that set the floor wrap. Scoped to `code` inside the value cell: prose already
+   wraps on spaces, and `anywhere` on ordinary text would break words mid-syllable for no gain. */
+.vs__v code{overflow-wrap:anywhere}
 @media (min-width:44rem){
   .vs__row{grid-template-columns:11rem 1fr}
   .vs__k{border-right:var(--hair)}

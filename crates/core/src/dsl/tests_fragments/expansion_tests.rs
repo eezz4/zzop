@@ -70,7 +70,8 @@ fn expand_fragments_resolves_a_shared_bundled_fragment() {
             "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing|cypress|playwright)/|\\.tests?/|\
              \\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.|\
              _test\\.go$|(^|/)test_[^/]*\\.py$|_test\\.py$|(?-i:Tests?\\.java$)|\
-             (?-i:(^|/)Test[A-Z][^/]*\\.java$)|(?-i:Tests?\\.cs$))"
+             (?-i:(^|/)Test[A-Z][^/]*\\.java$)|(?-i:Tests?\\.cs$)|(^|/)tests?\\.rs$|\
+             _tests?\\.rs$)"
         ),
         "a byte-exact copy of the shared `test-paths` body: this pin is what makes an edit to the ONE \
          owner (`shared_fragments.json`, which `zzop_core::is_test_file` also reads since 2026-08-10) \

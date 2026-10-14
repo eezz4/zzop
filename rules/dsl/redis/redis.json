@@ -39,6 +39,7 @@
     {
       "id": "client-no-error-listener",
       "axis": "defect",
+      "caveat": "Note the cross-file limitation: the client may be created here and the `'error'` listener attached in another module — that's exactly the case `// zzop-client-no-error-listener-ok` is for.",
       "severity": "warning",
       "message": "A redis client created with `createClient(...)` (node-redis v4) or `new Redis(...)`/`new Redis.Cluster(...)` (ioredis) with no `.on('error', ...)` listener anywhere in this file — node-redis/ioredis's client is an EventEmitter that emits `'error'` on every connection blip, and with no listener attached Node's default unhandled-`error`-event behavior CRASHES the process on the first one. Note the cross-file limitation: the client may be created here and the `'error'` listener attached in another module — that's exactly the case `// zzop-client-no-error-listener-ok` is for. Attach `.on('error', ...)` where the client is created (log it, and let the reconnect strategy do its job) so a connection error degrades to a cache miss instead of killing the process.",
       "matcher": {

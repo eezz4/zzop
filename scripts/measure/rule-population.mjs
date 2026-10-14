@@ -149,7 +149,9 @@ const files = [];
   }
   for (const e of entries) {
     if (e.isSymbolicLink()) continue;
-    const p = path.join(dir, e.name);
+    // `/`-separated on every OS: the rule patterns this is tested against anchor on `(^|/)`, and a
+    // win32 `path.join` hands them backslashes that silently never match.
+    const p = path.join(dir, e.name).split(path.sep).join("/");
     if (e.isDirectory()) {
       if (!SKIP.has(e.name)) walk(p);
     } else if (e.isFile()) {

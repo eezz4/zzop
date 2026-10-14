@@ -30,6 +30,18 @@
 //! believing they are the ones at fault. So the message now names BOTH exits and prices them, and the
 //! disable hint covers both reasons rather than only the within-one-process one.
 //!
+//! A THIRD shape rides under that first reason since 2026-10-10 (outside audit round 11, measured on
+//! nocodb, where it was 2 of 2 shown rows): both registrations sit in ONE process's source and
+//! exactly ONE of them ever executes — two branches of one `if`/`else` in one function
+//! (`Noco.ts:238` vs `:254`), and a controller list a ternary picks
+//! (`...(process.env.NC_SECURE_ATTACHMENTS === 'true' ? [Secure] : [Plain])`). Neither exit the
+//! message priced reaches it: a `trees[]` split is meaningless inside one unit, and the disable hint's
+//! first reason described a convention that registers the route TWICE, which is not what happens. The
+//! auditor read the hedge, agreed the premise was false, and had nothing to do — a
+//! prescription-quality gap rather than a missing warning, which is why the repair is one clause in
+//! that reason and not a new exit. What the rule reads is registration SITES; branch exclusivity is
+//! reachability, and it has none.
+//!
 //! ## Manifest boundaries ride along, never clear — and since 2026-08-20 they move the SEVERITY
 //! The tree DOES carry one cheap hint about deployment: the nearest directory above each site holding a
 //! manifest that declares a deployable unit (`boundary::is_deployment_manifest` is the one place that
@@ -138,8 +150,11 @@ pub fn duplicate_route_findings(
                      is not worth paying, turning this rule off is the honest second answer and not a \
                      failure to take the first. {} — for EITHER reason: the repeat is intentional within \
                      one process (a framework convention that legitimately registers the same route \
-                     twice), or the units genuinely ship apart and the split above costs your other \
-                     analyses more than these findings are worth.",
+                     twice, or MUTUALLY EXCLUSIVE registrations of which exactly one ever runs — two \
+                     branches of one `if`/`else`, or a controller list a ternary picks — which this \
+                     rule counts as two because what it reads is registration SITES, not \
+                     reachability), or the units genuinely ship apart and the split above costs your \
+                     other analyses more than these findings are worth.",
                     zzop_core::disable_hint("duplicate-route")
             ));
             message.push_str(boundary_note.as_deref().unwrap_or(""));

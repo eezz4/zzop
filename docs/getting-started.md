@@ -426,7 +426,7 @@ pack prefix):
 
 **Three analyses ship OFF, and this is where you turn one on**: `unimported-export`,
 `dead-candidates` and `unreachable`. They are unused-code hygiene rather than defect claims — across
-the dogfood corpus they were 61.7% of every finding, and a first run whose top half is hygiene buries
+the six dogfood trees measured 2026-09-03 they were 61.7% of every finding (a dated snapshot — the corpus has grown since and the share is not recountable as written), and a first run whose top half is hygiene buries
 the findings that claim a defect. Naming the id is the whole gesture, in either spelling above: a
 severity (`"unreachable": "info"`) or the object form (`"dead-candidates": { "exclude": [...] }`,
 which turns it on and scopes it in one line). Nothing is removed from the build, and every run lists

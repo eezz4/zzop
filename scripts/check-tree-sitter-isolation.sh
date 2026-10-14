@@ -13,113 +13,70 @@
 # shared runtime underneath every GRAMMAR-based frontend this workspace adds, one crate per language
 # (parser-go today; a future parser-java-21, parser-c-sharp, ... each get their own tree-sitter-<grammar>
 # crate). Adding the next one is a one-line ALLOWLIST edit below, nothing else in this script changes.
+
+# Multi-crate allowlist: tree-sitter is the only vendor confined to more than one crate, one per
+# grammar. Adding the next grammar is a one-line edit here and nothing else.
 ALLOWLIST=(
   "parser/parser-go"
   "parser/parser-java-21"
   "parser/parser-csharp"
 )
 
-# Two checks, run once per allowlisted crate:
-#  1. Cargo.toml dependency lines declaring `tree-sitter` or `tree-sitter-<grammar>`, in any Cargo.toml
-#     except an allowlisted crate's own and the workspace root Cargo.toml (exempted for the same reason
-#     check-swc-isolation.sh/check-ruff-isolation.sh/check-syn-isolation.sh exempt the root Cargo.toml:
-#     not itself a dependency declaration site today, but a legitimate place for a future pin/isolation
-#     note).
-#  2. `use tree_sitter` or `tree_sitter::` in any .rs file outside an allowlisted crate's own src/.
-#
-# Scope: git-TRACKED files only (git ls-files), for the same reason as check-swc-isolation.sh /
-# check-ruff-isolation.sh / check-syn-isolation.sh — the working tree also holds gitignored/
-# untracked local corpora (cloned third-party repos, benchmark checkouts) whose own tree-sitter
-# usage is not ours to police, and `tree_sitter::` is ubiquitous in real Rust crates (a
-# `grep -r .` over the tree false-positives on every one of them). Anything that could ship must
-# be tracked, so tracked-only is exactly the isolation surface (and matches what CI checks out).
-#
-# Enumeration mechanism (TRACKED-file discovery + grep + the standard target/node_modules/.claude
-# exclusions) lives in scripts/lib/tracked-grep.sh, shared with check-syn-isolation.sh /
-# check-swc-isolation.sh / check-ruff-isolation.sh — this script keeps only ITS OWN pattern,
-# allowlist, and messages.
-#
-# No deps beyond git + grep -P (PCRE). Exit 1 on any violation, listing file:line.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-. ./scripts/lib/tracked-grep.sh
 
-violations=0
-
+# A stale entry must fail LOUDLY rather than silently shrinking the allowlist — an allowlist that
+# names a moved crate exempts nothing and the guard still prints clean.
 for dir in "${ALLOWLIST[@]}"; do
-  [ -d "$dir" ] || { echo "tree-sitter isolation guard: stale ALLOWLIST entry '$dir' -- directory does not exist (crate renamed/moved?)." >&2; exit 1; }
+  [ -d "$dir" ] || {
+    echo "tree-sitter isolation guard: stale ALLOWLIST entry '$dir' -- directory does not exist" >&2
+    echo "  (crate renamed or moved?). An allowlist entry that matches nothing exempts nothing." >&2
+    exit 1
+  }
 done
 
-# ## Subject-set floor (2026-07-29) — see check-swc-isolation.sh's identical block for the full
-# rationale. Short form: tracked_files_matching returns the same empty string for "no violations" and
-# for "the pathspec matched nothing", so without this the clean line cannot tell the two apart.
-# Measured 2026-07-29 by redirecting both pathspecs in a scratch copy: printed "tree-sitter isolation
-# guard: clean." and exited 0.
-#
-# This is a DIFFERENT axis from the stale-ALLOWLIST assert above, which the presence of that assert
-# made easy to mistake for coverage: that loop proves the three allowlisted crate DIRECTORIES still
-# exist, and says nothing about whether the two pathspecs below enumerated a single file. A guard that
-# asserts on one axis reads as asserted-on generally — the same misreading that let this class survive
-# the 2026-07-28 sweep. The glob arrays are the single owner of each scan's scope.
-CARGO_GLOBS=('Cargo.toml' '*/Cargo.toml')
-RS_GLOBS=('*.rs')
-cargo_scanned="$(git ls-files -- "${CARGO_GLOBS[@]}" | grep -c . || true)"
-rs_scanned="$(git ls-files -- "${RS_GLOBS[@]}" | grep -c . || true)"
-if [ "$cargo_scanned" -eq 0 ] || [ "$rs_scanned" -eq 0 ]; then
-  echo "tree-sitter isolation guard: FAILED -- enumerated $cargo_scanned Cargo.toml file(s) and"
-  echo "$rs_scanned .rs file(s). A zero on either axis means that pathspec matched nothing, so this run"
-  echo "proved nothing about where tree-sitter is used. An empty subject set is a broken guard, never a"
-  echo "clean tree."
+# Isolation is half of what the allowlist is for; the other half is the DEPTH CAP, and until
+# 2026-10-12 nothing checked it. A grammar frontend hands tree-sitter a file of arbitrary nesting, and
+# an unguarded recursive walk takes the PROCESS down rather than returning `degraded` -- so every crate
+# on this list must arm zzop_core::cst_depth::exceeds_max_depth. Measured when this check was written:
+# the three allowlisted crates each call it exactly once (parser/parser-*/src/util.rs) and the needle
+# had 0 hits anywhere under scripts/, .githooks/ or .github/ -- i.e. a fourth grammar could join by a
+# one-line edit above and parse with no depth guard at all, and both guards that WOULD go red
+# (check-dep-closure, this script's isolation half) are satisfied by that same one line and neither
+# says the word "depth".
+# The trailing '\(' matters: a bare substring needle also matches 'exceeds_max_depth_RENAMED', so a
+# suffix rename passes both halves of this check silently. Found by this check's own invalidation
+# drill. Not \b -- git grep's default engine is POSIX ERE and has no word boundary.
+HELPER='zzop_core::cst_depth::exceeds_max_depth\('
+# Floor value: if the shared helper itself is gone, every per-crate needle below reads 0 and this
+# check would blame the crates for a rename in core. A needle that matches nothing is not a clean
+# report, so say which of the two happened.
+if ! git grep -qE 'pub fn exceeds_max_depth[<(]' -- crates/core/src/cst_depth.rs; then
+  echo "tree-sitter isolation guard: the shared depth cap 'exceeds_max_depth' is gone from" >&2
+  echo "  crates/core/src/cst_depth.rs. This check's needle is dead -- 0 hits below would mean" >&2
+  echo "  'not looking', not 'nothing wrong'. Point HELPER at the new name." >&2
   exit 1
 fi
-assert_workspace_members_scanned "tree-sitter isolation guard" "${RS_GLOBS[@]}"
-
-echo "tree-sitter isolation guard: checking Cargo.toml dependency declarations..."
-# `(-[a-z0-9]+)*` (not `?`): grammar crate names can be multi-segment (`tree-sitter-c-sharp`) — a
-# single-suffix pattern would let such a dependency slip past the guard (opus review F3).
-DEP_PATTERN='^\s*(tree-sitter(-[a-z0-9]+)*)\s*=|^\s*package\s*=\s*"tree-sitter(-[a-z0-9]+)*"'
-# The enumeration call is kept OUTSIDE the `|| true` below on purpose: tracked_files_matching's own
-# failure must still trip `set -e` and abort loud (see its header comment); only the root-Cargo.toml
-# exclusion and the per-crate allowlist loop below are safe to swallow via `|| true`.
-cargo_matches=$(tracked_files_matching "$DEP_PATTERN" "${CARGO_GLOBS[@]}")
-cargo_files=$(grep -v -x 'Cargo.toml' < <(printf '%s\n' "$cargo_matches") || true)
-
 for dir in "${ALLOWLIST[@]}"; do
-  cargo_files=$(echo "$cargo_files" | grep -v -x "$dir/Cargo.toml" || true)
+  if ! git grep -qE "$HELPER" -- "$dir"; then
+    echo "tree-sitter isolation guard: '$dir' is allowlisted for tree-sitter but never arms the" >&2
+    echo "  CST depth cap ($HELPER)." >&2
+    echo "  A grammar frontend without it does not return 'degraded' on a pathologically nested file --" >&2
+    echo "  it overflows the stack and takes the process down. Call it from this crate's tree walk," >&2
+    echo "  the way parser/parser-go/src/util.rs does." >&2
+    echo "  And if this is a NEW language, re-take the census too: DEEPEST_REAL_CST_DEPTH_MEASURED in" >&2
+    echo "  crates/core/src/cst_depth.rs is the deepest real file over the languages measured so far," >&2
+    echo "  and a new grammar is a new population for that bound." >&2
+    exit 1
+  fi
 done
 
-if [ -n "$cargo_files" ]; then
-  echo "tree-sitter isolation guard: tree-sitter dependency declared outside the allowlisted parser crates:"
-  while IFS= read -r f; do
-    [ -n "$f" ] || continue
-    grep -nP "$DEP_PATTERN" "$f" | sed "s|^|  ${f#./}:|"
-  done < <(printf '%s\n' "$cargo_files")
-  violations=1
-fi
+. ./scripts/lib/vendor-isolation.sh
 
-echo "tree-sitter isolation guard: checking .rs source usage..."
-USE_PATTERN='\btree_sitter::[A-Za-z_]|use\s+tree_sitter(::|;|\s)|extern\s+crate\s+tree_sitter'
-rs_files=$(tracked_files_matching "$USE_PATTERN" "${RS_GLOBS[@]}")
-
-for dir in "${ALLOWLIST[@]}"; do
-  rs_files=$(echo "$rs_files" | grep -v "^$dir/src/" || true)
-done
-
-if [ -n "$rs_files" ]; then
-  echo "tree-sitter isolation guard: tree_sitter usage found outside the allowlisted parser crates' src/:"
-  while IFS= read -r f; do
-    [ -n "$f" ] || continue
-    grep -nP "$USE_PATTERN" "$f" | sed "s|^|  ${f#./}:|"
-  done < <(printf '%s\n' "$rs_files")
-  violations=1
-fi
-
-if [ "$violations" -ne 0 ]; then
-  echo
-  echo "tree-sitter must stay confined to the allowlisted parser crates (see crates/core/src/lib.rs's"
-  echo "isolation note, and check-swc-isolation.sh/check-ruff-isolation.sh/check-syn-isolation.sh's"
-  echo "identical discipline for swc/ruff/syn) -- the engine must never hold tree-sitter CSTs directly."
-  exit 1
-fi
-
-echo "tree-sitter isolation guard: clean ($cargo_scanned Cargo.toml + $rs_scanned .rs files scanned)."
+run_vendor_isolation "tree-sitter isolation guard" "tree-sitter" \
+  'tree-sitter(-[a-z0-9]+)*' \
+  '\btree_sitter(_[a-z0-9]+)*::|use\s+tree_sitter|extern\s+crate\s+tree[_-]sitter' \
+  'tree-sitter must stay confined to the grammar-backed parser crates -- the engine never holds a
+tree-sitter tree, and a grammar upgrade'"'"'s re-verification scope is one parser crate rather than the
+whole workspace.' \
+  "${ALLOWLIST[@]}"

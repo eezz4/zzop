@@ -55,6 +55,7 @@
 /corpus/frameworks/
 /corpus/audit/
 /corpus/legacy/
+/corpus/timing/
 /corpus/*.json
 /corpus/*.jsonc
 

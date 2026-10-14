@@ -1414,6 +1414,25 @@ h3 code {
   .cta-band__title {
     font-size: 24px;
   }
+
+  /* The definition grid's first track is `auto`, which sizes to its widest TERM, and grid items
+     default to `min-width: auto` so that track cannot shrink below it. On a phone that pushes the
+     whole grid past the viewport and the DOCUMENT scrolls sideways — measured at 375px on
+     `ko/reference.html`: document 385px against a 375px viewport, four cells ending at x=385.
+     English never showed it. Korean runs wider per character, and this page's definition list is
+     the one that was filled with Korean, so the same markup overflows in one locale and not the
+     other. One column below this breakpoint: the term sits above its description, which is what a
+     definition list degrades to anyway, and `minmax(0, 1fr)` lets the track shrink. */
+  .def-list__grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px 0;
+  }
+
+  /* Terms are the odd children; give each one air above it now that the row gap is gone. The first
+     needs none — the block above it already spaces it. */
+  .def-list__grid > *:nth-child(odd):not(:first-child) {
+    margin-top: 12px;
+  }
 }
 
 /* --------------------------------------------------------------------------

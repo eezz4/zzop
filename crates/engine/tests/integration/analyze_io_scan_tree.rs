@@ -25,9 +25,6 @@
 //! `analyze_attribute_injection.rs` (each `tests/*.rs` file is its own separate test binary/crate).
 
 use std::collections::BTreeMap;
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::json;
 
@@ -39,39 +36,7 @@ use zzop_core::{
 use zzop_engine::{analyze_envelope, analyze_tree, AnalyzeOutput, EngineConfig};
 use zzop_rules_http::mutating_route_no_auth::AUTH_GUARDED_ATTR;
 
-struct TempDir(PathBuf);
-
-impl TempDir {
-    fn new(prefix: &str) -> Self {
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let dir = std::env::temp_dir().join(format!("{prefix}-{}-{nanos}-{n}", std::process::id()));
-        fs::create_dir_all(&dir).unwrap();
-        TempDir(dir)
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-
-    fn write(&self, rel: &str, content: &str) {
-        let full = self.0.join(rel);
-        if let Some(parent) = full.parent() {
-            fs::create_dir_all(parent).unwrap();
-        }
-        fs::write(full, content).unwrap();
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
+use crate::temp_dir::TempDir;
 
 fn io_scan_rule(id: &str, m: IoScan) -> RuleDef {
     // Suppress marker is derived `zzop-<id>-ok` (see `RuleDef::suppress_marker`), so the rule's id alone

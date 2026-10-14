@@ -37,6 +37,29 @@ cd "$(dirname "$0")/.."
 require_gnu_xargs "max-file-lines guard"
 
 LIMIT=400
+# The number above is the SSOT, and CONTRIBUTING.md states it in prose for contributors. That prose
+# is the only cap declaration a reader of the public repository sees, and it drifted: the limit moved
+# 300 -> 400 on 2026-09-23 (5c76322) and the sentence still said 300 on 2026-10-07, having survived a
+# later edit of that very file. A contributor reading it splits a file that did not need splitting —
+# which is the "cut for line count, not along a seam" outcome the cap exists to avoid.
+#
+# So the prose is now DERIVED-CHECKED rather than trusted, the same way check-guards-wired.sh reads
+# core.hooksPath out of that file and for the reason it gives: a second hand-written copy of a policy
+# value is the class this repo keeps paying for. ⚠ The copy stays prose (a contributor should read a
+# sentence, not a variable), so what is removed is not the duplication but its ability to differ.
+contrib_cap="$(sed -n 's/.*Rust \*\*source\*\* files stay under \([0-9][0-9]*\) lines.*/\1/p' CONTRIBUTING.md | head -1)"
+if [ -z "$contrib_cap" ]; then
+  echo "check-max-file-lines: FAILED -- CONTRIBUTING.md no longer states the cap in the shape this" >&2
+  echo "  guard reads ('Rust **source** files stay under <N> lines'). Either restore that wording or" >&2
+  echo "  change this extraction -- do not delete the check: an unread declaration is how 300 outlived" >&2
+  echo "  the move to 400 by two weeks." >&2
+  exit 1
+fi
+if [ "$contrib_cap" != "$LIMIT" ]; then
+  echo "check-max-file-lines: FAILED -- CONTRIBUTING.md declares a $contrib_cap-line cap and this" >&2
+  echo "  guard enforces $LIMIT. The guard is the SSOT; fix the sentence." >&2
+  exit 1
+fi
 BASELINE=scripts/max-file-lines-baseline.txt
 
 # ONE `git ls-files` and ONE `grep -v`, where this was two ls-files and a seven-link grep chain

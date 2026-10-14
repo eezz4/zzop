@@ -32,7 +32,9 @@ pub fn circular_from_dep(dep: &crate::ir::DepGraph) -> Vec<Vec<String>> {
     circular_from_dep_excluding(dep, &std::collections::HashSet::new())
 }
 
-/// `circular_from_dep`, additionally skipping any `(from, to)` edge present in `excluded` — the ephemeral
+/// `circular_from_dep`, additionally skipping any `(from, to)` edge present in `excluded` — and, always,
+/// any edge whose source and target are the SAME FILE (see the inline note at the filter; two outside
+/// audits produced one-member "cycles" that way, in Go and in C#). The ephemeral
 /// type-only-edge set a caller computes alongside its own dep-graph build (e.g.
 /// `zzop_parser_typescript::lang::resolve::build_dep`/`build_dep_with_workspace`'s second return value):
 /// a file pair linked ONLY by `import type`/per-specifier `{ type X }` bindings must not read as a
@@ -54,6 +56,31 @@ pub fn circular_from_dep_excluding(
         for to in tos {
             node_set.insert(to.clone());
             if excluded.contains(&(from.clone(), to.clone())) {
+                continue;
+            }
+            // A FILE DOES NOT MODULE-LOAD ITSELF, so a `from == to` edge is never a cycle edge — it is
+            // an artifact of resolving an import to a CONTAINER that happens to hold the importer. Two
+            // outside audits found it the same week in two languages, neither of which can express the
+            // dependency the edge claims: a Go file whose own directory is the package it imports (legal
+            // only because `//go:build ignore` takes it out of that package), and a C# file carrying
+            // `using <the namespace it declares>` (a no-op the compiler accepts). Measured, one factor
+            // varied: the Go importer in the same directory gives 2 edges for ONE import and a cycle of
+            // ["oauthsrv/main.go"]; moved to a sibling directory, 1 edge and no finding.
+            //
+            // The cost of reporting it was measured on terraform `799c8d8963`, where excluding that one
+            // directory moved `architecture.pain` 94.1 -> 61.8, the `defect` axis 32.3 -> 0.0 (that axis
+            // is import cycles only, so the whole axis was this one artifact) and the top recommendation
+            // from `circular`/critical to `fat-fanout`/warning. On aspnetcore `cc827b0a0b` the same shape
+            // came back as the audit's only HARMFUL verdict: `circular`'s remedies are "extract the shared
+            // pieces into a module both sides import" and "invert one dependency direction", and with one
+            // member there is no second side — the only edit the row admits is deleting the `using`, which
+            // is CS0246 because an assembly-level attribute ahead of the file-scoped namespace resolves
+            // through it.
+            //
+            // Filtered HERE and not in `find_cycles`: a self-loop IS a cycle in a digraph and that
+            // function is a general graph utility. What is false is the EDGE, at the file-level dep-graph
+            // boundary — the same reason, and the same place, as `excluded` above.
+            if from == to {
                 continue;
             }
             edges.push(ComponentEdge {

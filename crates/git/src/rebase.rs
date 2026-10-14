@@ -12,7 +12,14 @@
 //! consumer classifies it happily and emits confident pairs; measured on the zzop repository on
 //! 2026-08-13, a 24-file subtree received 1903 co-change edges over 317 paths, none of them its own,
 //! byte-identical to the list the repository root produces. So the translation happens HERE, at the one
-//! place that knows both coordinate systems, rather than at each of the five consumers downstream.
+//! place that knows both coordinate systems, rather than at every consumer downstream.
+//!
+//! ⚠ That last clause said "each of the five consumers downstream" until 2026-10-12 (inbox N54-ⓔ).
+//! **The five was dropped rather than corrected**: no reading of this workspace produces it, and the
+//! argument does not need a number — it needs there to be MORE THAN ONE reader of a `GitCollection`,
+//! which `rebase_onto`'s single call site (`engine`'s `git_collect`) guarantees by rebasing once for
+//! all of them. A count with no way to re-derive it is the shape this repo's `deadline-scan` incident
+//! already named; the honest version of this sentence carries no count at all.
 //!
 //! **This is a projection, and projections lose things — deliberately, and only outward.** A path
 //! outside the tree is dropped rather than kept or renamed: it is not a file this tree has, and an

@@ -110,17 +110,20 @@ fn every_parser_fingerprint_arm_carries_the_engine_source_hash() {
     // answer. The suffix is applied once after the match so an arm cannot skip it — this asserts the
     // suffix stays SHARED if anyone ever moves it back into the arms.
     let config = EngineConfig::default();
-    for language in [
-        Some(Language::TypeScript),
-        Some(Language::Prisma),
-        Some(Language::Java21),
-        Some(Language::Python),
-        Some(Language::Rust),
-        Some(Language::Go),
-        Some(Language::Sql),
-        Some(Language::CSharp),
-        None,
-    ] {
+    // DERIVED plus the no-dispatch arm, for the reason the name states: "every arm". This was a
+    // hand-written list of eight until 2026-10-09, so a ninth frontend would have been forced into
+    // `parser_fingerprint`'s match (exhaustive, a real compile error) and then never checked HERE —
+    // its arm could have shipped without the shared `+engine=` suffix, which is the one thing this
+    // test exists to notice. Found alongside its sibling by external review round 9.
+    //
+    // `None` is appended rather than derived because it is not a frontend: it is the lexical-fallback
+    // arm, which has no parser crate and therefore no `zzop-parser-<slug>=` token to come from.
+    let subjects: Vec<Option<Language>> = crate::dispatch::shipped_parser_languages()
+        .into_iter()
+        .map(|(lang, _rel)| Some(lang))
+        .chain(std::iter::once(None))
+        .collect();
+    for language in subjects {
         let fp = parser_fingerprint(language, &config);
         assert!(
             fp.contains(&format!("+engine={FP_ENGINE}")),
@@ -213,8 +216,13 @@ fn surfaced_stamp_moves_with_the_source_hash_and_is_byte_stable_without_it() {
 
 /// The surfaced list and the cache key describe ONE set of parsers: every per-language arm of
 /// [`parser_fingerprint`] starts with exactly one surfaced value (its config-independent base), and
-/// every surfaced entry backs some arm. A ninth parser wired into dispatch fails here until it is
-/// surfaced; a surfaced entry no arm produces fails here too (a stamp for a parser that cannot run).
+/// every surfaced entry backs some arm. BOTH directions, and until 2026-10-09 only one of them was
+/// real: a surfaced entry no arm produces failed here (a stamp for a parser that cannot run), while
+/// the direction this doc led with — a ninth parser wired into dispatch but not surfaced — could not
+/// be observed at all, because the loop iterated a hand-written list and `matched` can only hold
+/// names that list reaches. 📏 Found by external review round 9. The subjects are derived now, so the
+/// sentence and the body agree; `crate::dispatch::shipped_parser_languages` holds the reasoning and
+/// the floor.
 #[test]
 fn parser_fingerprints_surface_matches_every_dispatch_arm() {
     let surfaced = surface::parser_fingerprints();
@@ -227,16 +235,13 @@ fn parser_fingerprints_surface_matches_every_dispatch_arm() {
 
     let config = EngineConfig::default();
     let mut matched: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
-    for language in [
-        Language::TypeScript,
-        Language::Prisma,
-        Language::Java21,
-        Language::Python,
-        Language::Rust,
-        Language::Go,
-        Language::Sql,
-        Language::CSharp,
-    ] {
+    // DERIVED, because this test's own doc promises a direction a hand-written list cannot observe:
+    // a ninth `Language` used to get an arm from `parser_fingerprint`'s exhaustive match (a real
+    // compile error, and the only red there was) and then never be ITERATED here, leaving
+    // `matched.len() == surfaced.len() == 8` and this test green on exactly the case it advertises.
+    // `shipped_parser_languages` reads the same `version_string()` SSOT
+    // `scripts/check-version-lists-parsers.sh` pins, and carries the population floor.
+    for (language, _rel) in crate::dispatch::shipped_parser_languages() {
         let fp = parser_fingerprint(Some(language), &config);
         let (name, _) = surfaced
             .iter()

@@ -119,3 +119,93 @@ impl ProjectedSpans {
         }
     }
 }
+
+/// The SCOPE claim of `test_spans`, pinned instead of repeated (inbox N43, 2026-10-07 bloat review).
+///
+/// 📏 The claim *"`test_spans` is Rust only"* is typed in **seven** places, each for a different
+/// audience and therefore NOT a duplication to merge: `crates/cache/src/ir_slice.rs:45` (the cache
+/// slice), `crates/core/src/dsl/eval.rs:226` (the interpreter's gate), this file's module doc and the
+/// `test_spans` arm above (the projection), `docs/ARCHITECTURE.md:188` (design),
+/// `docs/NORMALIZED_AST.md:493` (the IR cell) and `docs/rules/dsl-reference.md:613` (rule authors).
+/// What they share is only the SCOPE NUMBER, and that is the part that goes stale together.
+///
+/// This module is the device that makes them go red together. Nothing else did: the repo's standing
+/// prescription is CLAUDE.md's *"run one `git grep` when you overturn a decision"*, and that fires
+/// only if a person remembers to.
+#[cfg(test)]
+mod scope_pin {
+    use super::{project, Language};
+
+    /// Does this language fill `test_spans`? **A deliberately exhaustive match**, which is the whole
+    /// mechanism: a new `Language` variant does not compile until someone answers this question, and
+    /// answering `true` turns `the_test_span_axis_is_rust_only` red against the seven prose sites.
+    fn is_expected_to_fill_test_spans(language: Language) -> bool {
+        match language {
+            Language::Rust => true,
+            Language::TypeScript
+            | Language::Prisma
+            | Language::Java21
+            | Language::Python
+            | Language::Go
+            | Language::Sql
+            | Language::CSharp => false,
+        }
+    }
+
+    /// Every variant, for the behavioural half. ⚠ This array's COMPLETENESS is not machine-checked —
+    /// the exhaustive match above is what a new variant cannot slip past, and that is the direction
+    /// this pin exists for. A variant missing from this list weakens breadth; a variant missing from
+    /// the match is a compile error.
+    const EVERY_LANGUAGE: &[Language] = &[
+        Language::TypeScript,
+        Language::Prisma,
+        Language::Java21,
+        Language::Python,
+        Language::Rust,
+        Language::Go,
+        Language::Sql,
+        Language::CSharp,
+    ];
+
+    /// A file whose test region is INSIDE the shipping source — the shape the module doc says only
+    /// Rust has. Handed to every language on purpose: the question is which projector acts on it.
+    const RUST_SHAPED_TEST_REGION: &str =
+        "pub fn f() {}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn t() {}\n}\n";
+
+    #[test]
+    fn the_test_span_axis_is_rust_only() {
+        for &language in EVERY_LANGUAGE {
+            let spans =
+                project(Some(language), false, "src/lib.rs", RUST_SHAPED_TEST_REGION).test_spans;
+            let filled = !spans.is_empty();
+            assert_eq!(
+                filled,
+                is_expected_to_fill_test_spans(language),
+                "{language:?} fills test_spans = {filled}, which disagrees with the classifier above. \
+                 If a SECOND language now fills this axis, the scope claim has to be rewritten in all \
+                 seven places that state it -- crates/cache/src/ir_slice.rs, \
+                 crates/core/src/dsl/eval.rs, this file's module doc AND its test_spans arm, \
+                 docs/ARCHITECTURE.md, docs/NORMALIZED_AST.md, docs/rules/dsl-reference.md -- and then \
+                 the classifier. Spans: {spans:?}"
+            );
+        }
+    }
+
+    /// The degraded gate, on the one language that does fill it: a failed parse contributes nothing
+    /// rather than a guess, which is the property the `if !degraded` guard above carries and the
+    /// reason this axis can SUBTRACT safely.
+    #[test]
+    fn a_degraded_rust_file_subtracts_nothing() {
+        let spans = project(
+            Some(Language::Rust),
+            true,
+            "src/lib.rs",
+            RUST_SHAPED_TEST_REGION,
+        )
+        .test_spans;
+        assert!(
+            spans.is_empty(),
+            "a degraded parse must not subtract: {spans:?}"
+        );
+    }
+}

@@ -58,8 +58,9 @@
 //! ## Precision limit (and its injection completion)
 //! This is a vocabulary-based reachability check over the CALL graph only. Route-level middleware —
 //! `app.post("/x", requireAuth, handler)`, or a router-level `.use(authMiddleware)` — never appears as a
-//! call edge FROM the handler symbol itself, so it is invisible to this rule: a route guarded exclusively
-//! via middleware will false-positive. Severity starts at [`Severity::Info`] because of this.
+//! call edge FROM the handler symbol itself, so the BFS cannot see it; the shapes below are credited
+//! before the BFS instead, and a route guarded only by a middleware shape NOT among them will
+//! false-positive. Severity starts at [`Severity::Info`] because of this.
 //!
 //! Middleware is a per-project environment fact the native call-graph can't see — so, per zzop's design
 //! line (native sees the common case; everything else is injected), it is COMPLETED BY INJECTION rather

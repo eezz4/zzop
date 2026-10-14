@@ -48,6 +48,8 @@ GUARDS=(
   check-marker-claims
   check-pack-id-values
   check-docs-link-graph
+  check-markdown-code-spans
+  check-parser-unwind-census
   check-io-key-vocab
   check-policy-census
   check-retired-config-vocabulary

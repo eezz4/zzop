@@ -866,6 +866,175 @@ fn contract_unknown_name_exits_one_and_names_every_valid_contract() {
     assert!(stdout(&out).is_empty(), "nothing on stdout for a failure");
 }
 
+// ── The prescan population's stack, pinned through the BINARY ───────────────────────────────────
+//
+// 🔴 WHY THESE LIVE HERE AND NOT IN `crates/engine/tests/deep_input_survival.rs`, which is the file
+// named for exactly this property. That file says it itself, at `fn refused`'s doc: *"This harness
+// does not abort where the shipped binary does, so 'an answer came back' was green before the fix
+// and after it — a test whose name states a cause its body cannot reach."* It calls `analyze_tree`
+// in process, so it runs on a cargo test thread's stack, not the binary's main thread. A stack
+// pin written there would be green on broken code. These spawn the real executable.
+//
+// 📏 The defect (external review round 9, 2026-10-09). `analyze::assemble`'s prescan pass hands
+// `<script>`/frontmatter text to swc and ran on the CALLER's stack — which `lib.rs::analyze_tree`
+// makes the process's main thread. One file, one factor changed (the EXTENSION), expression and byte
+// count held at 49,900 `!` prefixes, ~50 KB:
+//
+//     src/app.ts      rc=0    stdout 17,185 B    dispatched — `pipeline.rs` already gave it the deep stack
+//     src/app.vue     rc=134  stdout      0 B    prescan host — ran on the caller's stack, aborted
+//     src/App.svelte  rc=134  stdout      0 B
+//     src/page.astro  rc=134  stdout      0 B
+//     doc.md          rc=134  stdout      0 B
+//     doc.mdx         rc=0    stdout 18,321 B    BareEsm mode, shallower path, survived
+//     notes.txt       rc=0    stdout 18,321 B    not a prescan host, nothing parsed it
+//
+// 🔴 And it was INSIDE every declared cap, which is why no gate or census saw it. `!` is not in
+// `scan.rs`'s operator set and opens no bracket, so only `MAX_TYPESCRIPT_STATEMENT_TOKENS` (50,000)
+// could see the shape — while the abort floor for this population bisects to 16,000-18,000. The cap
+// sat ~3x ABOVE the floor it is documented as sitting far below, because it was derived against the
+// TypeScript frontend's floor of 100,000-200,000, which is the floor ON the deep stack.
+
+/// Below the cap (50,000) and above the measured abort floor (16,000-18,000). A token count in that
+/// window is the only one that can see this defect: under the floor nothing aborts, over the cap the
+/// gate refuses the file and the parser is never reached.
+const PRESCAN_UNARY_TOKENS: usize = 30_000;
+
+/// Past the cap, for the companion test. The gate must still refuse here — a fix that bought survival
+/// by widening the cap would pass the four tests above and fail this one.
+const PRESCAN_OVER_CAP_TOKENS: usize = 60_000;
+
+fn unary_chain(n: usize) -> String {
+    format!("{}b", "!".repeat(n))
+}
+
+/// Spawn the real binary on a one-file tree and return (exit ok, stdout bytes).
+fn analyze_one(tag: &str, rel: &str, body: String) -> (bool, usize, String) {
+    let dir = TempDir::new(tag);
+    dir.write(rel, &body);
+    dir.write(
+        "zzop.config.jsonc",
+        "{ \"roots\": [\".\"], \"cacheDir\": null }\n",
+    );
+    let cfg = dir.path().join("zzop.config.jsonc").display().to_string();
+    let out = run(&["analyze", "--config", &cfg]);
+    (out.status.success(), out.stdout.len(), stderr(&out))
+}
+
+/// One test per prescan host that died, because a single test over all four cannot say which aborted:
+/// the first abort takes the process and the rest never run.
+macro_rules! prescan_survives {
+    ($name:ident, $tag:literal, $rel:literal, $body:expr) => {
+        #[test]
+        fn $name() {
+            let (ok, bytes, err) = analyze_one($tag, $rel, $body);
+            assert!(
+                ok && bytes > 0,
+                "{} must come back with an answer, not die: stdout {bytes} B, stderr: {err}",
+                $rel
+            );
+        }
+    };
+}
+
+prescan_survives!(
+    a_vue_prescan_host_inside_every_cap_does_not_kill_the_binary,
+    "vue-stack",
+    "src/app.vue",
+    format!(
+        "<script setup lang=\"ts\">\nconst b = true;\nexport const v = {};\n</script>\n",
+        unary_chain(PRESCAN_UNARY_TOKENS)
+    )
+);
+
+prescan_survives!(
+    a_svelte_prescan_host_inside_every_cap_does_not_kill_the_binary,
+    "svelte-stack",
+    "src/App.svelte",
+    format!(
+        "<script lang=\"ts\">\nconst b = true;\nexport const v = {};\n</script>\n",
+        unary_chain(PRESCAN_UNARY_TOKENS)
+    )
+);
+
+prescan_survives!(
+    an_astro_prescan_host_inside_every_cap_does_not_kill_the_binary,
+    "astro-stack",
+    "src/page.astro",
+    format!(
+        "---\nconst b = true;\nexport const v = {};\n---\n<div/>\n",
+        unary_chain(PRESCAN_UNARY_TOKENS)
+    )
+);
+
+prescan_survives!(
+    a_markdown_prescan_host_inside_every_cap_does_not_kill_the_binary,
+    "md-stack",
+    "doc.md",
+    format!(
+        "# t\n\n<script>\nconst b = true;\nexport const v = {};\n</script>\n",
+        unary_chain(PRESCAN_UNARY_TOKENS)
+    )
+);
+
+// The one host that did NOT die, kept because "it happened not to" is not a property — the day its
+// mode changes, this is the case that notices.
+prescan_survives!(
+    an_mdx_prescan_host_inside_every_cap_does_not_kill_the_binary,
+    "mdx-stack",
+    "doc.mdx",
+    format!(
+        "# t\n\nexport const b = true;\nexport const v = {};\n",
+        unary_chain(PRESCAN_UNARY_TOKENS)
+    )
+);
+
+/// 🔴 The companion that makes the five above mean what they say. A fix that bought survival by
+/// RAISING the cap would turn all five green and leave the gate unable to refuse anything — so this
+/// pins the other end: past the cap the file is still refused, by name, and the run still answers.
+#[test]
+fn a_prescan_host_past_the_cap_is_still_refused_by_name_rather_than_analyzed() {
+    let dir = TempDir::new("vue-overcap");
+    dir.write(
+        "src/app.vue",
+        &format!(
+            "<script setup lang=\"ts\">\nconst b = true;\nexport const v = {};\n</script>\n",
+            unary_chain(PRESCAN_OVER_CAP_TOKENS)
+        ),
+    );
+    dir.write(
+        "zzop.config.jsonc",
+        "{ \"roots\": [\".\"], \"cacheDir\": null }\n",
+    );
+    let cfg = dir.path().join("zzop.config.jsonc").display().to_string();
+    let out = run(&["analyze", "--config", &cfg]);
+    assert!(
+        out.status.success(),
+        "past the cap the run must still answer: {}",
+        stderr(&out)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("stdout must be JSON");
+    // ⚠ TWO KEYS SPELL `degraded` AND ONLY ONE OF THEM IS THE LIST. `coverage.degraded` is a COUNT
+    // (a JSON number); the top-level `degraded` is the array of refused paths. Asserting on the
+    // array, not the count, because the refusal this test is named for is refused BY NAME — a count
+    // of 1 cannot tell "this file was refused" from "some other file was".
+    //
+    // 🔴 And the count is where I first measured it wrong: `jq '(.coverage.degraded // []) | length'`
+    // returned 1 and read as a one-element array, because **jq's `length` on a NUMBER is that
+    // number's own value**. It agreed with the truth by coincidence; at a count of 3 it would have
+    // reported a 3-element list just as confidently.
+    let degraded: Vec<&str> = v["degraded"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|x| x.as_str()).collect())
+        .unwrap_or_default();
+    assert_eq!(
+        degraded,
+        vec!["src/app.vue"],
+        "past the cap the gate must refuse this file by name -- degraded was {:?}, coverage.degraded {:?}",
+        v["degraded"],
+        v["coverage"]["degraded"]
+    );
+}
+
 /// A throwaway fixture dir (same pattern as the crate's other tests — no tempfile dep).
 struct TempDir(PathBuf);
 

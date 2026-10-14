@@ -10,11 +10,22 @@
 //!
 //! DECISIONS — two language-limited rules are deliberately UNDECLARED here (2026-07-31, refuted
 //! candidates, not omissions):
-//! - `mutating-route-no-auth`: its trigger IS witnessed in every call-graph-covered extension
-//!   (`.go` routes included) — the gap is call-EDGE evidence, route-conditional, and owned by the
-//!   S8 framework-silence warning (`framework_silence::call_graph_language_gap_warning`), which the
-//!   coverage reply now forwards per tree. A sightline entry would mis-type a per-run conditional
-//!   disclosure as a build capability.
+//! - `mutating-route-no-auth`: its trigger — a mutating ROUTE — is witnessed wherever routes are
+//!   extracted, Go included; what is missing is call-EDGE evidence. That gap is route-conditional and
+//!   owned by the S8 framework-silence warning (`framework_silence::call_graph_language_gap_warning`),
+//!   which the coverage reply now forwards per tree. A sightline entry would mis-type a per-run
+//!   conditional disclosure as a build capability.
+//!
+//!   🔴 **Corrected 2026-10-12 (inbox N54-ⓒ, fable round 9 axis A8-41): the parenthetical contradicted
+//!   the clause it modified.** This read *"witnessed in every call-graph-covered extension (`.go`
+//!   routes included)"*, and `.go` is NOT call-graph-covered — 📏
+//!   `zzop_rules_http::mutating_route_no_auth::CALL_GRAPH_COVERED_EXTENSIONS` holds 12 extensions
+//!   (`ts tsx js jsx mjs cjs mts cts java py pyi rs`) and no `go`, and that constant's own
+//!   `is_call_graph_covered` doc says *"A file outside this set (Go, C#, ...) is exempt"* three lines
+//!   below it. Two evidence channels were being named with one phrase: routes are extracted for Go,
+//!   call edges are not, and the distinction is the whole reason this bullet exists. ⚠ The same
+//!   sentence was byte-identical in `tests/rule_contracts/catalog_sync.rs`, which is how the error
+//!   survived a reading — that copy now points here instead of restating.
 //! - `route-shadowing`: its language gate is an EXEMPTION on routing semantics (first-match vs
 //!   most-specific), not an evidence channel — semantic, not evidential, so an extension cross
 //!   cannot express it.

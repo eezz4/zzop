@@ -14,9 +14,30 @@
 /// code and what is a string, a comment or a regex body.
 ///
 /// A lexer-shaped scan rather than a parse, because the whole point is to answer before a parser runs.
-/// It is deliberately approximate in the safe direction: an unterminated string swallows the rest of the
-/// file (depth 0, gate does not fire, parser runs — the status quo), and a regex/division ambiguity
-/// resolved the wrong way can only LOWER the count. Nothing here can invent depth that is not there.
+/// It is approximate, and WHICH WAY it errs is the whole safety argument — so the two directions are
+/// named separately rather than both called "safe":
+///
+/// * **Never invents depth.** A regex/division ambiguity resolved the wrong way can only LOWER the
+///   count. That is the direction the 2026-09 grafana incident fixed, where a naive bracket count
+///   reported 563 on a real file and would have refused it.
+/// * **Never goes blind to EOF.** 🔴 This half was missing until 2026-10-07, and "safe" was being
+///   used for both. An unterminated `'` or `"` used to swallow the rest of the FILE: depth 0, gate
+///   silent, the real parser runs on input it exists to refuse, stack overflow. That is not a false
+///   refusal — it is the crash, and the gate is the only thing standing in front of it.
+///
+/// 📏 Measured on the shipped `zzop 0.38.0`, one byte apart. A tree of `app.ts` (holding an `eval()`
+/// and a hardcoded key) plus a `README.md` carrying a deep `<script>` block:
+/// ```text
+///   "It does not matter."   48,049 B   rc=0     stdout 23,522 B   2 findings, both critical
+///   "It doesn't matter."    48,048 B   rc=134   stdout 0 B        nothing reported at all
+/// ```
+/// The carriers are each language's own ordinary tokens, not malformed input: an apostrophe in
+/// Markdown prose, `don't` inside JSX text, `&'static` in Rust. Measured over this tree's 88,882
+/// gated files, 4,006 (4.5%) carried a quote body that ran to EOF.
+///
+/// So `'` and `"` are now LINE-BOUNDED and only a backtick may span lines. Where that over-counts —
+/// a genuinely multi-line SQL string, a Python triple-quote — the cost is a REFUSAL, which is the
+/// direction this gate is allowed to be wrong in.
 pub(crate) struct Depths {
     pub(crate) brackets: usize,
     pub(crate) operator_run: usize,
@@ -73,6 +94,9 @@ pub(crate) enum RecursionNeedle {
 /// ⚠ And the census that justified that cap was taken with the same needle, so
 /// `LONGEST_REAL_PYTHON_STATEMENT_MEASURED` was never a statement length either. Both numbers had to
 /// be re-derived, not just the comparison — the same shape as V129, one language later.
+// `Debug`/`PartialEq` for the boundary assertion in
+// `super::tests::every_dispatched_language_is_accounted_for_by_one_defence` (V140's fact).
+#[derive(Debug, PartialEq)]
 pub(crate) enum StatementEnd {
     /// C-family and Rust: `;` ends one, `{`/`}` open and close a block, `,` flattens a list.
     Delimiters,
@@ -152,18 +176,74 @@ pub(crate) fn scan_depths(text: &str, ends: StatementEnd) -> Depths {
             }
             b'"' | b'\'' | b'`' => {
                 let quote = c;
+                let open = i;
+
+                // A Rust RAW STRING legitimately spans lines: r"…", r#"…"#, r##"…"##. Count the
+                // `#` run between the `r` and this quote; the body then ends at `"` plus the same
+                // run. Without this, line-bounding below reads a help-text literal as code and the
+                // brackets inside it are counted — measured on clap's own 4,832-line
+                // `tests/builder/help.rs`, which that mistake refused outright (0 findings).
+                let raw_hashes = if quote == b'"' {
+                    let mut k = i;
+                    while k > 0 && b[k - 1] == b'#' {
+                        k -= 1;
+                    }
+                    if k > 0 && (b[k - 1] | 0x20) == b'r' {
+                        Some(i - k)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                // Only a `'`/`"` body is bounded to its line. A backtick is a template literal and a
+                // raw string carries its own terminator; both may legally cross newlines.
+                let line_bounded = quote != b'`' && raw_hashes.is_none();
+
                 i += 1;
+                let mut closed = false;
                 while i < b.len() {
-                    if b[i] == b'\\' {
+                    if raw_hashes.is_none() && b[i] == b'\\' {
                         i += 2;
                         continue;
                     }
                     if b[i] == quote {
+                        // For a raw string the terminator is the quote plus its own `#` run.
+                        if let Some(h) = raw_hashes {
+                            if b[i + 1..].iter().take(h).filter(|&&x| x == b'#').count() == h {
+                                i += 1 + h;
+                                closed = true;
+                                break;
+                            }
+                            i += 1;
+                            continue;
+                        }
                         i += 1;
+                        closed = true;
+                        break;
+                    }
+                    if line_bounded && b[i] == b'\n' {
+                        // Do NOT consume the newline: the rest of the line was prose or a lifetime,
+                        // and everything after it is code this gate must still see.
+                        closed = true;
                         break;
                     }
                     i += 1;
                 }
+
+                if !closed {
+                    // 🔴 It reached EOF without a terminator, so it was NOT a string — a real one
+                    // always closes. Withdraw the guess: step past the opening byte and keep
+                    // scanning. Anything else leaves this gate blind from here to the end of the
+                    // file, and the parser it exists to refuse then runs. Measured: an unmatched
+                    // backtick in one line of README prose took the whole run to exit 134 with zero
+                    // bytes of stdout, with `'` and `"` already line-bounded.
+                    i = open + 1;
+                    prev = quote;
+                    continue;
+                }
+
                 prev = quote;
                 toks += 1;
                 max_toks = max_toks.max(toks);

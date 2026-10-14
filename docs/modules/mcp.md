@@ -524,7 +524,8 @@ built to never lie by omission.
   are always computed over the FULL set — a `severity`/`rule` filter narrows only `shown`, never the
   counts. `shown` is the filtered list in the WINDOW ORDER
   (`crates/summary/src/output/ordering.rs`), capped at `limit` (default 50, max 1000). That order is
-  five keys: deployment role descending (see below), then severity descending within a role, then
+  five keys: deployment role descending (see below), then severity within a role — `warning`, then
+  `info`, then `critical` LAST (the reply's `shownMeaning` carries why) — then
   three keys that INTERLEAVE rather than rank — distinct `file:line` first, then distinct
   (rule, file), then every rule's Nth finding before any rule's N+1th — with the engine's own
   (severity, file, line, ruleId) order as the deterministic tiebreak, so the same analysis produces
@@ -562,7 +563,7 @@ built to never lie by omission.
 
   Findings sort by **deployment role** first, descending — shipped code, then test paths, then build
   surface — and severity orders WITHIN a role. The three diversity keys above act INSIDE one
-  (role, severity) band and demote nothing, which is why only this key has tiers to disclose. So a shipped `critical` is still row one, but a `critical`
+  (role, severity) band and demote nothing, which is why only this key has tiers to disclose. So a shipped `critical` still sits above every test or build finding (at the end of the shipped band), and a `critical`
   in a fixture or a build script sorts below every shipped finding, including shipped `info`. Reach and
   ranking are separate: the rules still SCAN those paths and every count includes what they find; only
   the reading order changed. Each demoted tier publishes its own `{count, meaning}` key, additive-only

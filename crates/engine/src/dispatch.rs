@@ -199,5 +199,87 @@ pub use non_source::{
     NonSourceKind,
 };
 
+/// Every frontend this build SHIPS, with one representative path each — derived, never listed.
+///
+/// # Why a derivation and not an array
+/// Two tests in this crate used to carry their own hand-written 8-element list of `Language`s, and
+/// both had the same hole: a ninth variant gets an arm from their `match` (those are exhaustive) and
+/// is then never ITERATED, so the loop still runs eight times and the assertion still holds. 📏 Found
+/// 2026-10-09, external review round 9, in `cache::tests::parser_fingerprints_surface_matches_every_dispatch_arm`
+/// — whose doc promises *"a ninth parser wired into dispatch fails here until it is surfaced"*, a
+/// direction its body could not observe — and in
+/// `pipeline::fresh::recursion::tests::every_dispatched_language_is_accounted_for_by_one_defence`.
+///
+/// The SSOT is the one `scripts/check-version-lists-parsers.sh` and
+/// `rule_contracts::capability_matrix` already pin: every `parser/*/Cargo.toml` crate appears as a
+/// `zzop-parser-<slug>=` token in `zzop_facade::version::version_string()`. This reads that file the
+/// same way `capability_matrix.rs` does, so a ninth parser crate reaches both callers by name.
+///
+/// # The floor, and why it is derived too
+/// A census that read nothing looks exactly like a clean one, so this panics when the token count
+/// disagrees with the number of crates on disk under `parser/`. That bound is counted, not typed:
+/// a remembered total would need re-tuning on the commit that adds the ninth crate, which is the
+/// commit it exists to catch.
+#[cfg(test)]
+pub(crate) fn shipped_parser_languages() -> Vec<(Language, &'static str)> {
+    let version_rs =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../facade/src/version.rs");
+    let text = std::fs::read_to_string(&version_rs)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", version_rs.display()));
+
+    let mut slugs: Vec<&str> = text
+        .match_indices("zzop-parser-")
+        .filter_map(|(at, _)| {
+            let rest = &text[at + "zzop-parser-".len()..];
+            let end = rest.find('=')?;
+            let slug = &rest[..end];
+            slug.chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+                .then_some(slug)
+        })
+        .collect();
+    slugs.sort_unstable();
+    slugs.dedup();
+
+    let crates_on_disk =
+        std::fs::read_dir(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../parser"))
+            .expect("parser/ must be readable")
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.file_name().to_string_lossy().starts_with("parser-")
+                    && e.path().join("Cargo.toml").exists()
+            })
+            .count();
+    assert_eq!(
+        slugs.len(),
+        crates_on_disk,
+        "REFUSING TO JUDGE: {} `zzop-parser-<slug>=` token(s) in {} against {crates_on_disk} \
+         crate(s) under parser/. Either version_string()'s format changed shape and this extraction \
+         is reading nothing, or a parser crate is missing from it -- and a loop over a short \
+         hand-written list would have passed either way.",
+        slugs.len(),
+        version_rs.display()
+    );
+
+    slugs
+        .into_iter()
+        .map(|slug| match slug {
+            "csharp" => (Language::CSharp, "a.cs"),
+            "go" => (Language::Go, "a.go"),
+            "java-21" => (Language::Java21, "A.java"),
+            "rust" => (Language::Rust, "a.rs"),
+            "typescript" => (Language::TypeScript, "a.ts"),
+            "python-3" => (Language::Python, "a.py"),
+            "sql" => (Language::Sql, "a.sql"),
+            "prisma" => (Language::Prisma, "schema.prisma"),
+            other => panic!(
+                "parser crate `zzop-parser-{other}` ships and version_string() names it, but this \
+                 function has no (Language, path) for it. Add one -- every caller of this list is a \
+                 test that exists so a new frontend cannot arrive unnoticed."
+            ),
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests;

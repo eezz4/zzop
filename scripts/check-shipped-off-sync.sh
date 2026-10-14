@@ -23,8 +23,12 @@
 #   - prose that DESCRIBES the set without enumerating it ("three analyses ship off") is not checked for
 #     its count. A guard cannot tell a deliberate round number from a stale one, and this file would be
 #     the wrong place to guess.
-#   - the 61.7% measurement quoted beside the list. It is a corpus reading, re-derived by
-#     `scripts/measure/`, and pinning it here would make a re-measurement a documentation failure.
+#   - the 61.7% measurement quoted beside the list. It is a DATED SNAPSHOT over six trees that
+#     nothing re-derives, and pinning it here would freeze a number whose population no longer
+#     exists as a set. ⚠ This clause said it was "re-derived by `scripts/measure/`" until
+#     2026-10-07, and no script there computes it: `grep -rl '61\.7' scripts/` returns this file
+#     and `policy-census.txt`, nothing else. An exemption justified by a derivation that does not
+#     exist is the shape this guard was built to catch, turned on the guard itself.
 #   - documents that mention ONE of the ids in passing (`docs/NORMALIZED_AST.md` names
 #     `dead-candidates` describing an envelope field). Those make no claim about the set, so they carry
 #     no marker and are not read — which is why the marker is required rather than the mention.

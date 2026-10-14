@@ -170,12 +170,12 @@ export default {
     pShippedOff: {
       ko: `<strong>아래 셋은 꺼진 채로 출하된다</strong>: <code>unimported-export</code>,
       <code>dead-candidates</code>, <code>unreachable</code>. 결함 주장이 아니라 미사용 코드 위생이고,
-      도그푸드 코퍼스 전체 발견의 61.7% 였다. <strong>켜려면 <code>rules</code> 에 심각도와 함께 이름을
+      2026-09-03 에 잰 도그푸드 여섯 트리에서 전체 발견의 61.7% 였다(날짜 박힌 스냅샷 — 그 뒤 코퍼스가 자라 지금은 그대로 재계수되지 않는다). <strong>켜려면 <code>rules</code> 에 심각도와 함께 이름을
       적는다</strong> — <code>"dead-candidates": "info"</code> — 다른 룰의 밴드를 바꾸는 것과 같은 동작이라
       옵트인을 위한 두 번째 어휘는 없다.`,
       en: `<strong>Three of the ids below ship OFF</strong>: <code>unimported-export</code>,
       <code>dead-candidates</code> and <code>unreachable</code>. They are unused-code hygiene rather than
-      defect claims, and they were 61.7% of every finding across the dogfood corpus. <strong>To turn one
+      defect claims, and they were 61.7% of every finding across the six dogfood trees measured 2026-09-03 (a dated snapshot; the corpus has grown since). <strong>To turn one
       on, name it in <code>rules</code> with a severity</strong> &mdash; <code>"dead-candidates":
       "info"</code> &mdash; the same gesture that changes any other rule's band, so there is no second
       vocabulary for opting in.`,

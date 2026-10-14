@@ -20,46 +20,10 @@
 //!   too (its extension is not in the table) — so a tree that is 90% house-extension files, natively
 //!   parsed, targeted by no DSL rule at all, was named by neither.
 
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-
 use zzop_core::RulePackDef;
 use zzop_engine::{analyze_tree, DispatchConfig, EngineConfig, Language};
 
-struct TempDir(PathBuf);
-
-impl TempDir {
-    fn new(prefix: &str) -> Self {
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let dir = std::env::temp_dir().join(format!("{prefix}-{}-{nanos}-{n}", std::process::id()));
-        fs::create_dir_all(&dir).unwrap();
-        TempDir(dir)
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-
-    fn write(&self, rel: &str, content: &str) {
-        let full = self.0.join(rel);
-        if let Some(parent) = full.parent() {
-            fs::create_dir_all(parent).unwrap();
-        }
-        fs::write(full, content).unwrap();
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
+use crate::temp_dir::TempDir;
 
 /// The published example, verbatim: a `.txt` that holds SQL DDL.
 const DDL: &str = "CREATE TABLE users (\n  id BIGINT PRIMARY KEY\n);\n";

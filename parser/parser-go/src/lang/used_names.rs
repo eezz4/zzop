@@ -43,7 +43,7 @@ pub fn parse_local_identifier_refs(text: &str) -> BTreeSet<String> {
     };
     let mut refs = BTreeSet::new();
     let mut cursor = tree.walk();
-    walk(&mut cursor, text, &mut refs, None);
+    walk(&mut cursor, text, &mut refs, None, None);
     refs
 }
 
@@ -58,20 +58,24 @@ pub fn parse_local_identifier_refs(text: &str) -> BTreeSet<String> {
 ///
 /// 🔵 Go carries the NODE where C# and Java carry only the kind, and the difference is real:
 /// [`is_short_var_decl_left`] has to read the GRANDparent and compare node ids, which a kind cannot
-/// answer. That one lookup stays O(depth) — but it now runs only for an identifier whose parent is
-/// an `expression_list`, instead of for every identifier in the file.
+/// answer. So the grandparent is threaded down too. Until 2026-10-14 it was looked up instead, for
+/// identifiers under an `expression_list` only — an O(depth) residual that made the depth-ratio
+/// test beside it machine-dependent (its clean ratio was 14x on one box and 20x on another, the
+/// regressed one 21x and 41x). Threading it removes the residual rather than calibrating around it:
+/// the walk now calls `parent()` nowhere.
 fn walk<'a>(
     cursor: &mut TreeCursor<'a>,
     src: &str,
     out: &mut BTreeSet<String>,
     parent: Option<Node<'a>>,
+    grandparent: Option<Node<'a>>,
 ) {
     loop {
         let node = cursor.node();
         if !node.is_error() && !node.is_missing() {
-            visit(node, cursor.field_name(), parent, src, out);
+            visit(node, cursor.field_name(), parent, grandparent, src, out);
             if cursor.goto_first_child() {
-                walk(cursor, src, out, Some(node));
+                walk(cursor, src, out, Some(node), parent);
                 cursor.goto_parent();
             }
         }
@@ -85,11 +89,12 @@ fn visit(
     node: Node,
     field: Option<&str>,
     parent: Option<Node>,
+    grandparent: Option<Node>,
     src: &str,
     out: &mut BTreeSet<String>,
 ) {
     match node.kind() {
-        "identifier" if !is_declared_var_name(parent, field) => {
+        "identifier" if !is_declared_var_name(parent, grandparent, field) => {
             out.insert(node_text(node, src).to_string());
         }
         "type_identifier" if !is_declared_type_name(parent, field) => {
@@ -116,14 +121,18 @@ const DECLARES_NAME_FIELD: &[&str] = &[
 
 /// See module doc's "excluded declaration positions": a `name`-field declaration, or the LHS of a
 /// `short_var_declaration`.
-fn is_declared_var_name(parent: Option<Node>, field: Option<&str>) -> bool {
+fn is_declared_var_name(
+    parent: Option<Node>,
+    grandparent: Option<Node>,
+    field: Option<&str>,
+) -> bool {
     let Some(parent) = parent else {
         return false;
     };
     if field == Some("name") && DECLARES_NAME_FIELD.contains(&parent.kind()) {
         return true;
     }
-    is_short_var_decl_left(parent)
+    is_short_var_decl_left(parent, grandparent)
 }
 
 /// A node qualifies when its immediate PARENT is the `expression_list` bound as a
@@ -131,11 +140,11 @@ fn is_declared_var_name(parent: Option<Node>, field: Option<&str>) -> bool {
 /// individual identifier inside it, so this checks one level up rather than `field` directly. Any
 /// `identifier` whose direct parent is that specific list is, by construction, one of the LHS targets
 /// (`a := ...` or `a, b := ...`) regardless of its position within it.
-fn is_short_var_decl_left(parent: Node) -> bool {
+fn is_short_var_decl_left(parent: Node, grandparent: Option<Node>) -> bool {
     if parent.kind() != "expression_list" {
         return false;
     }
-    let Some(grandparent) = parent.parent() else {
+    let Some(grandparent) = grandparent else {
         return false;
     };
     if grandparent.kind() != "short_var_declaration" {

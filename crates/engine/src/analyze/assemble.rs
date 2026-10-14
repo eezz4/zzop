@@ -83,8 +83,32 @@ pub(crate) fn assemble(
     // Assemble-time disk reads for references the cached per-file pass cannot see: pre-scanned
     // `<script>`/frontmatter imports, and Nuxt auto-import targets reached by bare symbol name (applied
     // as a `fan_in` bump, never a `dep` node, by `dep_graph`'s third fan-in arm).
-    let prescan =
-        prescan::collect_prescan(root, &prescan_rels, &ts_paths, &dead_export_names_by_file);
+    // 🔴 ON THE DEEP STACK, and that is a correctness requirement rather than a tuning choice.
+    // `collect_prescan` hands text to swc, so it is a PARSE call site, and until 2026-10-09 it ran on
+    // whatever stack the caller had — `lib.rs`'s `analyze_tree` runs `assemble` inline, so that is the
+    // process's main thread. The sibling doc at `provides/project_passes.rs` calls itself "the THIRD
+    // site and the last to be found"; it was the third of four.
+    //
+    // 📏 Reproduced at HEAD before this wrap (external review round 9). One file, one factor changed —
+    // the EXTENSION — holding the expression and the byte count fixed at 49,900 `!` prefixes (~50 KB):
+    //
+    //     src/app.ts      rc=0    stdout 17,185 B     dispatched, so `pipeline.rs` already gave it this stack
+    //     src/app.vue     rc=134  stdout      0 B     prescan host, ran here, aborted
+    //     src/App.svelte  rc=134  stdout      0 B
+    //     src/page.astro  rc=134  stdout      0 B
+    //     doc.md          rc=134  stdout      0 B
+    //     doc.mdx         rc=0    stdout 18,321 B     BareEsm mode, shallower path, survived
+    //     notes.txt       rc=0    stdout 18,321 B     not a prescan host, nothing parsed it
+    //
+    // 🔴 The abort floor for this population bisects to between 16,000 and 18,000 tokens, while
+    // `MAX_TYPESCRIPT_STATEMENT_TOKENS` is 50,000 — so the cap sat roughly THREE TIMES ABOVE the floor
+    // it was supposed to be far below. That cap is not wrong: it was derived against the TypeScript
+    // frontend's floor of 100,000-200,000, which is the floor ON THIS STACK. The gate was never the
+    // problem either — at 60,000 the same `.vue` comes back rc=0 with `degraded: ["src/app.vue"]`. The
+    // hole was strictly INSIDE every declared cap, which is why no gate, test or census saw it.
+    let prescan = crate::pipeline::with_parse_stack(|| {
+        prescan::collect_prescan(root, &prescan_rels, &ts_paths, &dead_export_names_by_file)
+    });
     let prescan_import_pairs = prescan.import_pairs;
     let provides::ProvidesResult {
         mut io_provides,

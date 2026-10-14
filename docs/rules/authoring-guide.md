@@ -174,6 +174,43 @@ sentence stands alone. That is not a loophole, it is the mechanism for the cases
 about: `security/config-file-secret` matches `.env`/`.yml`/`.toml`, where `//` is not a comment at all,
 so it writes its own `` `# zzop-config-file-secret-ok` `` sentence and keeps it.
 
+## `caveat` — the span of your message that ships on the first screen
+
+Optional. When present it must be a **verbatim substring of your own `message`** — you are not writing
+new text, you are pointing at the part of the text you already wrote that answers *what does a reader
+need to know before acting on this*. Three things qualify: the shape of the rule's common false
+positive, something the matcher cannot see, or what breaks if the fix is applied blind.
+
+It exists because the reply does not carry your `message`. A finding whose text a rule declared
+verbatim ships a `messageBy` pointer instead, so the first screen a reader sees carries your CLAIM and
+not your hedge. `findings.ruleCaveats` puts the hedge back, once per rule on the screen rather than
+once per finding — which is the only reason it fits where the full message did not.
+
+**Omit it rather than invent one.** A rule with no known false-positive shape and no remediation hazard
+says nothing, and absence is read as silence: the reply's own legend states that a rule missing from
+the map is not a rule promising to be right. Writing a caveat to fill the field is worse than leaving
+it empty, because it spends first-screen bytes telling a reader something that is not about this rule.
+
+Four things to know before you write one:
+
+- **It must read ALONE.** The reply ships the span without the sentences around it. A span opening on
+  `It`, `That gate`, `Three neighbours are NOT…` or `THE CLAUSE ABOVE` points at text the reader never
+  receives. Four shipped caveats had exactly this defect on the day the field landed.
+- **Do not cut a narrowing sentence off the end.** `browser/unsafe-html-sink`'s span keeps a SCOPE NOTE
+  saying that one of its own residuals is a residual only for components whose callers are all
+  readable — drop it and the caveat tells readers to suppress a finding that is correct.
+- **A false NEGATIVE is not a caveat.** "This rule does not judge `cookies.set`" and "a file this
+  engine cannot parse projects no site" are true and worth writing in `message`, but they say nothing
+  to someone looking at a finding that DID fire. Two rules were proposed for a swap onto spans like
+  these and the swap was refused for that reason.
+- **Only bundled packs reach the wire.** A caveat in a pack loaded from `zzop/rules/` or
+  `packs.extraDirs` is inert — the resolver reads compiled-in packs only — and those findings keep
+  their whole `message` inline instead, which is where the clause already is.
+
+`scripts/check-rule-caveat-substring.sh` fails the build unless `message` contains `caveat` byte for
+byte, so the copy cannot drift. What it does NOT check is whether a rule that should have one does:
+that has no mechanical test, which is why the paragraph above is a rule for you rather than a gate.
+
 ## Performance: `require_file`/`require_file_all` rare-token-first
 
 `require_file`/`require_file_all` are pre-skips evaluated against a file's **whole text** before the
@@ -191,9 +228,13 @@ performance pass over a 1,355-file corpus. Rule profiling (`EngineConfig::profil
 `require_file_all` pre-skip — plus, for `method-scan` generally, a whole-file "every `patterns` entry
 must match somewhere in the file" pre-skip ahead of the per-span loop (a strict subsumption of the
 per-span check, so findings are unchanged) — took the corpus's cold run from 4.15s to 3.04s with the
-finding count byte-for-byte identical. The lesson generalizes: **when authoring a pattern-heavy rule,
-reach for `rule_timings` before assuming a slow pack needs a native rewrite** — a cheap, rare-token-first
-pre-skip is usually enough.
+finding count byte-for-byte identical. ⚠ **That 1.11s is the sum of TWO interventions and was never
+split between them.** The measurement is a whole-run boundary value; the generalization below names
+only the first of the two, and the instrument that could have apportioned it (`rule_timings`, cited
+one sentence earlier for FINDING the hotspot) was not re-run afterwards. Read it as evidence that
+the pair is worth doing, not as a price for either one. The lesson still generalizes: **when
+authoring a pattern-heavy rule, reach for `rule_timings` before assuming a slow pack needs a native
+rewrite** — a cheap, rare-token-first pre-skip is usually enough.
 
 ## Testing convention
 

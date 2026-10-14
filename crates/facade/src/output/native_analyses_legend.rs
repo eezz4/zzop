@@ -125,9 +125,23 @@ from it. To get a verdict from one, stop disabling it.";
 /// recountable as written: that corpus has since grown past six trees, so "the six" no longer names a
 /// set anyone can rebuild. Re-deriving it means choosing a NEW population and saying so.
 ///
-/// What keeps the copies honest meanwhile is `scripts/check-shipped-off-sync.sh`, which anchors every
-/// surface carrying this claim -- this constant included, as of the same ledger row -- on the `61.7%`
-/// marker, so the number cannot move in one place only.
+/// What keeps SOME of the copies honest meanwhile is `scripts/check-shipped-off-sync.sh`. ⚠ This
+/// paragraph claimed it anchors EVERY surface carrying the claim, "so the number cannot move in one
+/// place only", and that was false. Measured 2026-10-07 by constructed differential — mutate `61.7%`
+/// to `71.7%` in one file at a time, run the guard, restore:
+///
+/// | surface | guard |
+/// |---|---|
+/// | `VERSIONING.md` | **green** |
+/// | `docs/rules/catalog.md` | **green** |
+/// | `docs/getting-started.md` | **green** |
+/// | `crates/config/src/config-template.jsonc` (shipped by `zzop init`) | **green** |
+/// | `site-src/content/usage.mjs` · `rules.page.mjs` · `reference.page.mjs`, this file, `surface-parity.json` | red |
+///
+/// Five of nine, and the five are pinned INCIDENTALLY: `61.7%` is those rows' paragraph LOCATOR, not
+/// an asserted value, and the guard says so itself. Three of the four free surfaces are public.
+/// The sentence was read off a `check_doc` call list rather than off the guard's contract, and it is
+/// exactly the kind of sentence that stops the next person from checking.
 ///
 /// Deliberately NOT added to the string: the date would be wire bytes, and the 2026-09-12 product
 /// decision on reply size runs the other way. Provenance belongs to the reader of the source, the

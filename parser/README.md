@@ -43,7 +43,7 @@ copy that would drift apart. **How many crates carry one is deliberately not sta
 directory is the list (`ls parser/*/tests/no_panic_proptest.rs` answers it), and a count here would be a
 hand-kept second copy of a set the tree already owns: right until the next frontend lands, wrong from
 then on, with nothing in the build to say so. Its module doc owns the rationale — why the property is
-worth running when `catch_unwind` already exists, what the generated inputs are, and how each crate's
+worth running when `catch_unwind` already exists (📏 it covers **11 of 125** engine-side parser call sites — `bash scripts/check-parser-unwind-census.sh` recounts, and `input_strategy.rs` carries the measurement and what it changed), what the generated inputs are, and how each crate's
 case count was set.
 
 ## The envelope path remains the default for the long tail (JSP, Ruby, ...)

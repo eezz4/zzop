@@ -36,87 +36,44 @@ Work on `main` past the top row below, so an id or a file named here may not be 
 be installable while the table below still ends at its predecessor, and an installed `zzop version`
 reading higher than the top row is the documented state rather than a gap in this file.
 
-Nothing on the compatibility surface broke since `v0.37.0`. That was **measured rather than
+Nothing on the compatibility surface broke since `v0.38.0`. That was **measured rather than
 assumed**, and each surface below carries what it was measured with — so a reader who doubts the
 sentence can re-run the check rather than take it.
 
-- **CLI JSON output.** `node scripts/measure/wire-key-census.mjs` was run against a `v0.37.0`
-  binary (built from `git archive v0.37.0`) and against this tree **with the same script**, so a
-  change in the instrument could not read as a change in the surface: **504 key paths then, 525 now —
-  21 added, 0 removed.** One qualification, because "the same script" is the whole weight of that
-  sentence: the baseline run used a copy with the two new `LANE_ASYMMETRY` waivers deleted. The
-  census refuses a waiver that waives nothing, and against a binary predating the key it waives
-  nothing by construction — so without the deletion the baseline cannot be taken at all. That list
-  is read only by the sibling-lane parity check and never by the path walk, so the counted surface
-  is identical either way; the path lists were also diffed outright rather than only their totals.
-
-  🔴 **And that baseline disagrees with the one this file published last time.** The `v0.37.0` row's own
-  `## Unreleased` text said **508** for the tree that became `v0.37.0`, and the archive build measures
-  **504**. The discrepancy could not be reproduced away: nothing between the commit that wrote "508" and
-  the tag touches the wire (`git log bd910c6..v0.37.0` is two commits — `.gitignore`, `ci.yml` and one
-  guard), the census script is byte-identical across the range, and `cases/` is unchanged. So one of the
-  two numbers was wrong when written, and on the evidence it is the older one, which was asserted
-  rather than re-derived from an archive build. What the compatibility claim rests on is not either
-  total but the **path-list diff**, which is direct: no path present at `v0.37.0` is missing now.
-
-  Two of the added are SCHEMA: `findings.ruleCaveats` and its legend
-  `findings.ruleCaveatsMeaning`. The rest are `findings.ruleCaveats.<ruleId>` entries, which this census
-  walks the same way it walks `ruleMessages.<ruleId>` — they move with the corpus a fixture happens to
-  hold, not with the surface. Both new keys are additive-only (absent, never empty) and shaped exactly
-  like `ruleMessages`/`ruleMessagesMeaning`: an object keyed by rule id beside a string legend.
-
-  What they carry is new, though, and it is worth a sentence because it is the first thing this
-  release gives a reader back rather than takes away. `v0.34.0` folded rule prose out of the reply, and
-  a rule's text is half *what the defect is* and half *when that reading is wrong* — the fold removed
-  both, so the claim reached the first screen and the refutation did not. `ruleCaveats` puts the second
-  half back, once per DISTINCT rule shown rather than once per finding, which is why it fits inline
-  when the full messages did not. 📏 `node scripts/measure/caveat-cost.mjs corpus/audit/{immich,nocodb,cal.com}/zzop.config.jsonc`
-  on the three audit trees at the default window: the full messages would have cost **52-80%** of
-  the reply, these clauses cost **8-11%**, and they cover **62-72%** of the findings on the screen.
-  Bounds rounded outward — the script prints them to a tenth, and a tenth moves when a legend is
-  reworded, so the prose keeps the figure a reader can rely on and the command keeps the exact one. That script fixes the metric as well as deriving it — the two cost figures first
-  published for this feature were taken through different windows and compared to each other. A rule's ABSENCE from the map is never a claim that the finding is
-  right: it means no caveat was written down, OR the rule is a native analysis with no field to
-  declare one, OR it comes from a pack this binary does not carry. In the last two cases the
-  finding keeps its `message` inline, so the clause is already in the reader's hands. The reply's own
-  legend states all three.
-
+- **CLI JSON output.** `node scripts/measure/wire-key-census.mjs` was run against a `v0.38.0`
+  binary (built from `git archive v0.38.0`, run from a real clone) and against this tree: **525 key
+  paths then, 526 now — 12 added, 11 gone, no new shape.** The paths diffed outright, not only their
+  totals, and every one of the 23 is a value inside an existing shape rather than the shape itself:
+  the `crossLayerFindings.truncated.severitiesNotShown` maps now observe `critical` where they
+  observed `warning` (the window order below moved which row `--limit 1` keeps), six
+  `findings.ruleCaveats.<ruleId>` entries came and one went with the rules a fixture happens to show,
+  and four `crossLayerFindings.shown[].data` keys left because that kept row is now a different
+  finding. The instrument itself needed one line changed first — its declared severity gap named the
+  old order — and that change is its own commit, so the before and after are the same script.
 - **Rule ids.** `bash scripts/check-rule-id-renames-recorded.sh`, which diffs the catalog against the
-  newest tag read off the REMOTE: **178 ids, none retired since `v0.37.0`.**
-- **Rule pack schema.** `docs/contracts/rule-pack.schema.json` gained one OPTIONAL property, `caveat`
-  (`["string", "null"]`). A pack that omits it is unchanged and still validates. Where a rule declares
-  it, the value must be a VERBATIM SUBSTRING of that rule's own `message` — enforced byte for byte by
-  `scripts/check-rule-caveat-substring.sh`, so the field can never state something the message does not.
-- **Findings cache (not a compatibility surface, but a cost this release charges).** Upgrading
-  invalidates every findings-cache entry, once. The ruleset fingerprint hashes the whole
-  `RulePackDef` debug form, so a new `RuleDef` field moves it even for packs that declare none of
-  it — measured on a 98-file tree: `hitFiles` 98/98 before, **0/98** on the first run after a
-  caveat-only edit, 98/98 again on the next. IR cache is unaffected (the ruleset is not in its key),
-  so this is one cold rule-evaluation pass, not a cold parse. Over-invalidation is the safe
-  direction and narrowing the fingerprint is a correctness change, so it is not being done inside a
-  release audit; the measurement and the precedent for narrowing are recorded in the backlog.
-- **CLI flags & config keys.** Nothing added, removed or repurposed
-  (`git diff v0.37.0..HEAD -- crates/config/config-surface.json` is empty).
-- **CLI exit codes `0`/`1`/`2`.** Unchanged in meaning and in what earns each one.
-  ⚠ Three codes, not four: `--fail-on`'s `3` is deliberately OUTSIDE the compatibility surface and
-  `VERSIONING.md` says why — it moves when a rule's severity band moves, so one verdict covering all
-  four would have to be wrong about one half. This bullet said `0`/`1`/`2`/`3` in draft, which
-  silently promised the thing that document exists to refuse.
-- **Normalized AST envelope.** The shape and its `version` are untouched. `docs/NORMALIZED_AST.md` changed
-  in this window, but the edit REMOVED a claim rather than adding one: the sentence listing five `client`
-  tags the native TS parser emits was a partial copy that drifted the moment a sixth landed, and it now
-  points at the `frameworkRecognizers` cell of `zzop coverage` — the authoritative set — instead of
-  restating part of it.
+  newest tag read off the REMOTE: **178 ids, none retired since `v0.38.0`.**
+- **Rule pack schema, CLI flags and config keys, exit codes, normalized AST envelope.** Unchanged:
+  `git diff v0.38.0..HEAD` is empty for `docs/contracts/rule-pack.schema.json`,
+  `crates/config/config-surface.json`, `packages/cli-bin/src` and `docs/NORMALIZED_AST.md`.
 
-The window's own work was one product repair and the corrections around it: the `explain` lane had kept a
-CLI-only parity exemption after gaining an MCP wire in September, two published disclosure numbers were
-wrong where the mechanism that would have caught them already existed, and the site's graph page claimed
-nothing wires its counts to CI when CI has wired them since July.
+Two changes are not on that surface but change what a reader sees, so they are named here:
+
+- **The window order puts `critical` last within a deployment role** — `warning`, then `info`, then
+  `critical`. A `critical` here means a construction is present, and the reply's
+  `findings.shownMeaning` carries the measurement behind ranking it last. Counts are untouched; only
+  the order of `shown` moved. The short folded form of that legend said "severity descending" until
+  this release's audit caught it.
+- **Rust test files are test surface.** The built-in `${test-paths}` fragments gained
+  `tests.rs` / `_test.rs` arms, so findings in them sort into `testPaths` with the other demoted rows.
+
+Upgrading invalidates every findings-cache entry once, as the last release did: rule packs gained
+`caveat` text, and the ruleset fingerprint hashes the pack definitions.
 
 ## Released
 
 | Version | Date | Commit | What the release said it was |
 |---|---|---|---|
+| `v0.38.0` | 2026-10-05 | `f0ea32c` | the rules wrote down when they are wrong, and the reply withheld it |
 | `v0.37.0` | 2026-10-03 | `606bbc9` | fix(ci): both v0.37.0 CI failures were green locally for different reasons |
 | `v0.36.0` | 2026-09-23 | `6649e8a` | the MCP registry gets the release it refused, and the limit it refused on is now read locally |
 | `v0.35.0` | 2026-09-23 | `a1ac023` | fix(guards): the rule-id rename guard reads its baseline, and reads the whole id |

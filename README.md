@@ -224,7 +224,12 @@ There is no progress output: the reply is one document, assembled and then writt
 interrupt gives you zero bytes rather than a partial answer — and while it works it looks
 indistinguishable from a hang. Measured on this project's own corpus: a 3,800-file tree is seconds,
 `zzop facts` over a 24,000-file monorepo is ~50s and 10.8 MB, and an ASP.NET-sized tree (17,000
-files, 1.26M resolved import edges) is ~8 minutes for `analyze`. Redirect to a file and wait; if you
+files, 1.26M resolved import edges) is ~8 minutes for `analyze`. ⚠ **Those are SHALLOW-CLONE
+numbers and your tree probably is not one.** The corpus trees they came from carry one commit each
+(`git -C corpus/frameworks/aspnetcore rev-list --count HEAD` → 1), so the git pass cost nothing in
+them. On a repository with history it can dominate everything else: `docs/modules/mcp.md` records
+548s of `git log --numstat` against 13s for all of the analysis on a 16,485-commit tree — 42x the
+work, from a factor these figures never had. Redirect to a file and wait; if you
 need a bound, wrap the call in your own `timeout` and treat a kill as no answer, never as a clean one.
 
 The manifest is deliberately uncapped and carries no file or line, so a pure refactor diffs empty while

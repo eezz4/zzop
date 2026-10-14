@@ -118,12 +118,19 @@ jobs:
         # A severity is the one cell in that table a user ACTS on: it decides whether --fail-on
         # warning breaks their build. It was also the one column nothing tied back to the packs --
         # 27 rules moved warning -> info and the catalog (and the site it feeds) kept the old value
-        # with all 40 guards and the whole test suite green. Text comparison, no build.
+        # with every guard and the whole test suite green. Text comparison, no build.
+        # (The guard count was "40" until 2026-10-12 and this file already runs more than that; a
+        # number whose only purpose is to say "and still nothing caught it" does not need to be one.)
         run: bash scripts/check-catalog-severity-sync.sh
-      - name: shipped-off set -> the six documents that enumerate it
+      - name: shipped-off set -> every document that enumerates it
         # Which analyses do NOT run by default is invisible in a reply's findings -- a shipped-off
         # analysis produces no key, exactly like one that ran clean -- so prose is the only channel that
-        # says so, and six files spell the same three ids out. A stale copy does not read as stale: it
+        # says so, and the guard's own `check_doc` roster is the population of files that spell the
+        # same three ids out -- this comment does not re-count it (2026-10-12: it said "six" and the
+        # roster held NINE, inbox N53-ⓒ -- and my first correction said "ten" because the needle
+        # `grep -c '^check_doc'` also matches the function DEFINITION; the guard prints its own
+        # population, "9 documents, 12 claims", and that is the number to read). A stale copy does
+        # not read as stale: it
         # reads as "this id runs by default" and sends a user to debug a rule that never ran. Total
         # accounting both ways, so a REMOVAL from the set fails too. Text comparison, no build.
         run: bash scripts/check-shipped-off-sync.sh
@@ -159,6 +166,10 @@ jobs:
         run: bash scripts/check-pack-id-values.sh
       - name: docs link-graph guard
         run: bash scripts/check-docs-link-graph.sh
+      - name: markdown inline code-span guard
+        run: bash scripts/check-markdown-code-spans.sh
+      - name: "guards: the parser catch_unwind census matches the sentence that states it"
+        run: bash scripts/check-parser-unwind-census.sh
       - name: io-key kind-vocabulary sync guard
         run: bash scripts/check-io-key-vocab.sh
       - name: policy-value census guard

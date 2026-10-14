@@ -104,9 +104,13 @@ pub(super) const MESSAGE_BY_ID_MEANING: &str =
 /// function's doc).
 ///
 /// # Why HERE and not at the facade, which is where it first shipped
-/// `zzop_facade::analyze_trees_json` is a DATA producer with nine consumers in this crate — `endpoint`,
-/// `file`, `facts`, `graph`, `manifest`, `coverage`, `cross`, `warnings` and this lane. Applying a
-/// presentation transform inside it reached all nine: `endpoint`'s `relatedFindings` began text-matching
+/// `zzop_facade::analyze_trees_json` is a DATA producer with **eight** consumers in this crate —
+/// `endpoint`, `file`, `facts`, `graph`, `manifest`, `coverage`, `cross` and this lane. 📏 Recount:
+/// `git grep -n "analyze_trees_json(" -- crates/summary/src` → 8. ⚠ This read "nine" and listed
+/// `warnings` until 2026-10-12 (inbox N54-ⓓ); that lane does not call the facade at all
+/// (`git grep -n "zzop_facade::" -- crates/summary/src/warnings.rs` → 0), so the list was wrong in the
+/// direction that matters: it claimed a consumer the transform could NOT have reached. Applying a
+/// presentation transform inside it reached all eight: `endpoint`'s `relatedFindings` began text-matching
 /// the pointer sentence (20 of 20 listed findings were pointers), and the `file` lane shipped the marker
 /// with no legend beside it because it does not run this module. Both were round-18 findings. A reply
 /// transform belongs in the reply builder, and this is it — the same module that owns the two fold
@@ -152,14 +156,16 @@ pub(super) const RULE_CAVEATS_MEANING: &str =
      rule's own `message`, not a summary of it and not text taken out of it, so `zzop explain \
      <ruleId>` and the `zzop://rule/<ruleId>` resource return the message with this clause still \
      inside it — resolving one of them gets you the surrounding prose, never a second, different \
-     caveat. ABSENCE means one of THREE things and none of them is a promise the finding is \
+     caveat. ABSENCE means one of FOUR things and none of them is a promise the finding is \
      right. (1) No caveat has been written down for that rule. (2) The rule is a NATIVE analysis \
      rather than a DSL rule: natives have no field to declare one and can never appear here, \
      however much their own prose hedges — and their prose is inline on the finding, so read it \
      there. (3) The rule comes from a pack this binary does not carry (`zzop/rules/`, \
      `packs.extraDirs`): the same exclusion `messageByIdMeaning` names, and those findings also \
-     keep their `message` inline. In cases 2 and 3 the caveat you want is in the `message` you \
-     already have.";
+     keep their `message` inline. (4) Every finding of that rule on this screen KEPT its prose, so \
+     the caveat is already inside the `message` you are reading and a row here would be the same \
+     sentence twice. In cases 2, 3 and 4 the caveat you want is in the `message` you already have; \
+     only case 1 means nobody has written one.";
 
 /// One caveat per distinct `ruleId` among `shown`, or `None` when no rule on this screen declares one.
 ///
@@ -183,9 +189,39 @@ pub(super) fn collect_caveats(shown: &[serde_json::Value]) -> Option<serde_json:
         if table.contains_key(rule_id) {
             continue;
         }
+        // A caveat is a VERBATIM SPAN of the rule's own message, so a finding that still holds that
+        // message has the caveat already — printing it again in the table is the same sentence twice.
+        if still_inline_on_this_screen(shown, rule_id) {
+            continue;
+        }
         if let Some(caveat) = zzop_facade::bundled_caveat(rule_id) {
             table.insert(rule_id.to_string(), caveat.into());
         }
     }
     (!table.is_empty()).then_some(serde_json::Value::Object(table))
+}
+
+/// True when NO shown finding of `rule_id` was replaced by a by-id pointer — i.e. every one of them
+/// still carries prose, so this rule's caveat is already on the screen inside it.
+///
+/// # Why `messageBy` is the whole test, and the two folds are not
+/// [`MESSAGE_BY`] is the one marker that costs a SECOND REQUEST: the prose it points at lives in the
+/// binary, not in this reply. `messageRef` and `templateParts` are addresses into `ruleMessages` and
+/// `ruleMessageTemplates`, which ship in the SAME reply — a reader holding one of those is holding the
+/// prose, caveat included. That is also why this runs where it does: `super::fold` calls it after the
+/// pointer pass and before both folds, which is the single moment when "pointer or prose" is a clean
+/// two-way question.
+///
+/// # The defect this closes
+/// 📏 2026-10-07, reproduced on a four-line fixture. A suppression comment with ONE typo
+/// (`// zzop-weakcrypto-ok` for `// zzop-weak-crypto-ok`) takes the near-miss path, which splices a
+/// token from the reader's own source into the message. `point_at_rule_id` then declines the finding —
+/// correctly, the text is no longer the bundled one — and `security/weak-crypto` ships **9,519 chars
+/// inline instead of 30**, with its 199-char caveat printed a second time in this table at offset 1,851
+/// of the message that already contained it. The user's attempt to SILENCE a finding made it 317x
+/// louder. The inline body is a separate defect and is not fixed here; the double print is.
+fn still_inline_on_this_screen(shown: &[serde_json::Value], rule_id: &str) -> bool {
+    !shown.iter().any(|f| {
+        f.get("ruleId").and_then(|v| v.as_str()) == Some(rule_id) && f.get(MESSAGE_BY).is_some()
+    })
 }

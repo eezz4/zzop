@@ -11,10 +11,11 @@
 //!   therefore stay OUT, as top-level standalone binaries — rule_contracts contract 20 pins both the
 //!   exclusion and the strict rule that they are the ONLY top-level `.rs` files left. Audited before
 //!   the fold: no other file mutates env vars or the working directory.
-//! - **TempDir name isolation.** Every module carries its own `TempDir` copy whose uniquifying
-//!   counter is a per-module static; `std::process::id()` no longer separates two modules using the
-//!   same prefix. Audited before the fold: the one cross-module prefix collision was renamed in the
-//!   guard commit, and same-module repeats share a counter and are safe.
+//! - **TempDir name isolation.** One shared [`temp_dir::TempDir`] serves every module. The hazard
+//!   this paragraph used to name is real — `std::process::id()` does not separate two modules that
+//!   pick the same prefix — but the remedy it described (a per-module counter, copied 78 times) was
+//!   the weaker half of the choice: 78 counters each start at 0, one counter cannot repeat. That
+//!   module's doc carries the measurement and the full argument.
 //!
 //! Selection changed shape: `cargo test -p zzop-engine --test analyze_cache` is now
 //! `cargo test -p zzop-engine --test integration analyze_cache::`. Note the trailing `::` — a bare
@@ -105,3 +106,4 @@ mod db_table_key_cross_crate_consistency;
 mod disclosure_capability_absent;
 mod pack_prisma_schema;
 mod policy_value_pins;
+mod temp_dir;

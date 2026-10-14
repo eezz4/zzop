@@ -80,7 +80,7 @@
   // are unused-code hygiene, not defects — an export nobody imports, a file nothing reaches, a branch
   // that cannot run — and they are written below in the spelling you would paste, because in THIS file
   // a backticked bare word means a config key and these are rule ids. Measured across the dogfood
-  // corpus they are 61.7% of every finding a run reports — and the knip tool produces the same list
+  // corpus's six trees, measured 2026-09-03, they were 61.7% of every finding a run reported — and the knip tool produces the same list
   // for a JS/TS project, more precisely, as its whole job. A first run whose top half is hygiene
   // buries the findings that claim a defect.
   //

@@ -9,11 +9,35 @@
 //! next to the crates: `scripts/check-max-file-lines.sh` exempts `tests/`, on the stated policy that the
 //! 300-line cap exists to keep SOURCE units small.
 //!
-//! ## Why these tests exist, given that panics are already caught
+//! ## Why these tests exist — and they are the PRIMARY defence, not a supplement
 //!
-//! `crates/engine/src/pipeline/parsers.rs` wraps every frontend in `std::panic::catch_unwind`, and the
-//! workspace does not set `panic = "abort"`, so a parser panic genuinely cannot take the engine down.
-//! That is exactly why a panic here is dangerous rather than loud: on `Err(_)` each of those arms
+//! 🔴 THIS SECTION SAID THE OPPOSITE UNTIL 2026-10-09, and the inversion mattered: it opened
+//! *"given that panics are already caught"* and asserted that
+//! `crates/engine/src/pipeline/parsers.rs` *"wraps every frontend in `std::panic::catch_unwind`, so a
+//! parser panic genuinely cannot take the engine down."* 📏 Measured (external review round 9):
+//! of the **125** places the engine's own non-test source calls a `zzop_parser_*` entry point,
+//! **11 of 125** are inside a `catch_unwind` — all eleven in `parsers.rs`. The other 114 are not,
+//! and `parsers.rs` does not mention `zzop_parser_sql` at all, so for SQL the sentence was false
+//! without qualification. Recount:
+//!
+//! ```text
+//! bash scripts/check-parser-unwind-census.sh
+//! ```
+//!
+//! So the property these files assert is not insurance behind a net — for 114 of 125 call sites it
+//! IS the net. `catch_unwind` is defense-in-depth for the eleven all-in-one `parse_*` calls, where
+//! the fused per-file pass has somewhere to degrade to. Everywhere else — `io.rs`'s extractors,
+//! `fresh/`'s fragment and span extractors, the call-graph guards, `assemble/`'s resolvers — a panic
+//! unwinds out through `analyze_tree` and `zzop_facade::analyze_trees_json` to the caller.
+//!
+//! ⚠ Wrapping the 114 is NOT the open item, and that is a judgement rather than an omission: each
+//! site would need its own answer to "what does this return on `Err`", which is 114 new degrade
+//! semantics to design, document and keep true — against a property that eight proptests already
+//! hold. What the measurement changed is the rationale, not the defences.
+//!
+//! The reason a panic HERE is still the dangerous kind rather than the loud kind holds for the
+//! eleven, and is unchanged:
+//! on `Err(_)` each of those arms
 //! returns `(Vec::new(), ImportMap::new(), lexical_loc(text), broken = true, Vec::new())`. The file
 //! keeps its line count and loses every symbol, every import, every io fact — silently demoted to the
 //! lexical fallback, indistinguishable in the output from a file that legitimately declares nothing.

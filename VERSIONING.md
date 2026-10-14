@@ -373,7 +373,7 @@ something it does not mean: that `1.0.0` cannot be declared while any of the six
 
 - **Whether a rule runs BY DEFAULT is not a settled property either, and three analyses now ship
   off.** `unimported-export`, `dead-candidates` and `unreachable` are unused-code hygiene rather than
-  defect claims, and across the dogfood corpus they were **61.7% of every finding a run reported** —
+  defect claims, and across the SIX dogfood trees measured 2026-09-03 they were **61.7% of every finding a run reported** (a dated snapshot; that corpus has grown since, so the share is not recountable as written) —
   a first run whose top half is hygiene buries the findings that claim a defect. Since 2026-09-03 the
   ENGINE ships them off; before that the same opinion sat as three `"off"` lines in the starter
   config, which reached only trees created after it landed. **A run that wants one must now name it**

@@ -231,7 +231,12 @@ pub fn model_decl_line(text: &str, name: &str) -> u32 {
 /// this is `split('\n')` and not `lines()`.
 ///
 /// CHANGED 2026-07-31 (user ruling). This used to count non-blank, non-`//`-comment lines — the only
-/// deviation among the eight shipped frontends, all seven others being `text.split('\n').count()`. The
+/// deviation among the **seven** frontends that report `loc` at all, the other **six** being
+/// `text.split('\n').count()`. 📏 Recount: `git grep -n "pub fn count_loc" -- parser` → 6 (csharp, go,
+/// java-21, python-3, rust, typescript), plus this crate's `count_schema_loc`. ⚠ The population is
+/// seven, not the eight parser crates: `parser-sql` reports no `loc` at all (`git grep -n loc --
+/// parser/parser-sql/src` → 0), so counting it made "all seven others" false by one
+/// (corrected 2026-10-12, inbox N54-ⓐ). The
 /// deviation was documented (in `zzop_core::MinimalIr::loc`) rather than fixed, and documenting it was
 /// not enough: `loc` is ONE field name on the wire, so a multi-tree reply could hand a reader two
 /// different definitions under it, with no per-tree marker saying which row was which. Aligning to the

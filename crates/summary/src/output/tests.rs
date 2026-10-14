@@ -110,8 +110,12 @@ fn counts_stay_full_while_filter_narrows_shown() {
     assert_eq!(shaped["bySeverity"]["info"], 1); // full-set counts, not filtered
     let shown = shaped["shown"].as_array().unwrap();
     assert_eq!(shown.len(), 2);
-    // severity-desc ordering: critical before warning
-    assert_eq!(shown[0]["severity"], "critical");
+    // 🔴 This assertion was `critical` before 2026-10-11 and the inversion is the point: the window's
+    // severity key puts `critical` LAST inside a role (ledger V367, user verdict (A)). The THRESHOLD did
+    // not move — `min_severity: "warning"` still admits the `critical` row, which is why `shown.len()`
+    // above is still 2. Placement changed; what the filter lets through did not.
+    assert_eq!(shown[0]["severity"], "warning");
+    assert_eq!(shown[1]["severity"], "critical");
     assert!(shaped.get("truncated").is_none()); // complete list => no truncation key
 }
 
@@ -171,10 +175,12 @@ fn deterministic_order_same_input_same_output() {
     assert_eq!(one, two);
     let shaped = shape(&findings, &filters);
     let shown = shaped["shown"].as_array().unwrap();
-    // critical first, then the two warnings in original order (stable tiebreak).
-    assert_eq!(shown[0]["ruleId"], "c");
-    assert_eq!(shown[1]["ruleId"], "a");
-    assert_eq!(shown[2]["ruleId"], "b");
+    // V367 flipped this (2026-10-11): the two warnings lead in engine order and the `critical` is
+    // LAST. The subject of this test is determinism — `one == two` above — and that did not move; only
+    // which band comes first did.
+    assert_eq!(shown[0]["ruleId"], "a");
+    assert_eq!(shown[1]["ruleId"], "b");
+    assert_eq!(shown[2]["ruleId"], "c");
 }
 
 #[test]
@@ -473,17 +479,20 @@ fn test_path_and_build_findings_sort_after_every_shipped_finding_and_are_counted
 
     let shown = shaped["shown"].as_array().unwrap();
     // All three roles in order — shipped, then test path, then build surface — and role OUTRANKS
-    // severity (2026-08-25): the shipped `warning` is row one and the test-path `critical` is row two.
-    // Severity still orders WITHIN a role, which is why the test-path `critical` precedes the test-path
-    // `warning` rather than merely landing somewhere below the shipped row.
+    // severity (2026-08-25): the shipped `warning` is row one and both test-path rows follow it.
+    // 🔴 V367 flipped this within a role (2026-10-11): severity still orders INSIDE a role, but the
+    // order is `warning` > `info` > `critical`, so the test-path `warning` now precedes the test-path
+    // `critical` instead of following it. The claim this test exists for — role is the OUTER key — is
+    // untouched, and is why the build-surface row is still last whatever severity it carries.
     assert_eq!(shown[0]["file"], "src/app/config.ts", "{shaped}");
     assert_eq!(shown[0]["severity"], "warning", "{shaped}");
-    assert_eq!(shown[1]["file"], "e2e/seed.ts", "{shaped}");
-    assert_eq!(shown[1]["severity"], "critical", "{shaped}");
     assert_eq!(
-        shown[2]["file"], "src/app/__tests__/login.spec.ts",
+        shown[1]["file"], "src/app/__tests__/login.spec.ts",
         "{shaped}"
     );
+    assert_eq!(shown[1]["severity"], "warning", "{shaped}");
+    assert_eq!(shown[2]["file"], "e2e/seed.ts", "{shaped}");
+    assert_eq!(shown[2]["severity"], "critical", "{shaped}");
     assert_eq!(
         shown[3]["file"], "scripts/create-sentry-release.js",
         "{shaped}"
@@ -628,8 +637,8 @@ fn a_declaration_that_matches_no_finding_leaves_the_reply_byte_identical() {
 /// stops at the end of the `critical` band — so a `critical` band made entirely of fixtures and build
 /// scripts is a first screen that found nothing, no matter how correct every row in it is. Role-first
 /// ordering says: a finding in code the tree does not ship sorts below EVERY shipped finding, whatever
-/// band it carries. Inside `SHIPPED` severity orders exactly as it always did, so a shipped `critical`
-/// is still row one overall.
+/// band it carries. Inside `SHIPPED` severity orders by the window key (warning > info > critical), so a shipped
+/// `critical` ends the shipped band and still sits above every test or build finding.
 ///
 /// The engine index stays the last tiebreak (`crates/core/src/registry/merge.rs`), so the same analysis
 /// still produces byte-identical output.
@@ -661,7 +670,7 @@ fn deployment_role_outranks_severity_so_a_shipped_warning_beats_an_unshipped_cri
     assert_eq!(
         order,
         vec![
-            // SHIPPED, severity-desc within the tier — unchanged from what it always was.
+            // SHIPPED, by the window's severity key within the tier.
             "packages/features/bookings/list.ts",
             "packages/features/bookings/create.ts",
             // TEST_PATH — a `critical` that does not ship, below every shipped row including the `info`.
@@ -993,6 +1002,28 @@ fn every_shown_list_ships_the_legend_that_says_it_is_not_a_ranking() {
         !meaning.contains("Never as: the N worst things in this tree"),
         "the folded note must not carry the full text's closing line: {meaning}"
     );
+    // THIS FIXTURE IS THE COUNTEREXAMPLE the note used to make false (outside audit, round 11).
+    // Neither finding is a test path or build surface, so neither `testPaths` nor `buildPaths` rides
+    // this reply — and the note said the two demoted tiers "disclose themselves in this same reply".
+    // An auditor reading that sentence beside a reply with no such key cannot tell an EMPTY tier from
+    // a MISSING channel, and the sentence promised presence. The absence is the contract
+    // (`deployment_role::build_paths_disclosure`: present when it has something to say, ABSENT
+    // otherwise), stated correctly by the long-form legend, by that module, and by
+    // `docs/contracts/surface-parity.json` — the in-reply copy was the one that had gone stale, which
+    // is the only copy a reader of one reply ever gets.
+    assert!(
+        shaped.get("testPaths").is_none() && shaped.get("buildPaths").is_none(),
+        "the fixture must keep BOTH tiers empty for the assertion below to mean anything: {shaped}"
+    );
+    assert!(
+        meaning.contains("anywhere in the FULL set") && meaning.contains("no row on this screen"),
+        "the note must say the condition is over the FULL set and that a present key can still have no \
+         row here — round 12 read the old wording both ways: {meaning}"
+    );
+    assert!(
+        !meaning.contains("disclose themselves in this"),
+        "the unconditional promise must not come back: {meaning}"
+    );
     // Presentation only: the legend adds no count and moves none.
     assert_eq!(shaped["total"], 2, "{shaped}");
     assert_eq!(shaped["shown"].as_array().unwrap().len(), 2, "{shaped}");
@@ -1028,10 +1059,13 @@ fn round_robin_counters_restart_per_severity_band_and_are_a_no_op_when_every_rul
     assert_eq!(
         order,
         vec![
-            // critical band: one `a` and one `b`, both occurrence 0 — engine order, untouched.
-            "f0.ts", "f4.ts",
+            // V367 flipped the BANDS (2026-10-11), not the inside of them: `warning` leads and
+            // `critical` is last. What this test pins is untouched — the counter is keyed on
+            // (role, band, rule), so a's turn in one band never spends its turn in the other.
             // warning band: a's counter RESTARTED here, so a#1 and b#1 lead and a#2 follows.
             "f1.ts", "f2.ts", "f3.ts",
+            // critical band: one `a` and one `b`, both occurrence 0 — engine order, untouched.
+            "f0.ts", "f4.ts",
         ],
         "{shaped}"
     );
@@ -1398,8 +1432,12 @@ fn the_silenced_band_names_how_many_rules_it_hid_not_only_how_many_rows() {
     );
 
     // The tail, not the population: with a limit that SHOWS one rule, that rule must not be counted
-    // among the hidden ones. `info` sorts below `critical`, so a limit of 1 shows a critical row and
-    // silences the whole `info` band.
+    // among the hidden ones.
+    // 🔴 V367 flipped this (2026-10-11) and the new expectation is a STRONGER test of the same claim.
+    // `critical` now sorts last, so a limit of 1 shows an `info` row — which means `info` is a band
+    // `shown` holds one of, and the channel must therefore not count it at all. Before the flip the
+    // shown band was `critical` and `info` was wholly silenced; now the roles swap and the field has to
+    // get the EXCLUSION right rather than the inclusion.
     let mixed = shape(
         &[
             finding("security/shown-rule", "critical", 1),
@@ -1415,7 +1453,7 @@ fn the_silenced_band_names_how_many_rules_it_hid_not_only_how_many_rows() {
     let hidden = &mixed["truncated"]["severitiesNotShown"];
     assert_eq!(
         hidden["ruleCounts"],
-        serde_json::json!({ "info": 2 }),
+        serde_json::json!({ "critical": 1 }),
         "only the CUT tail is counted, and only for a severity `shown` holds none of -- the shown \
          rule contributes nothing here: {mixed}"
     );
@@ -2071,4 +2109,104 @@ fn the_fold_judges_the_shown_window_not_the_full_finding_set() {
     assert_eq!(shaped["total"], 5, "{shaped}");
     assert_eq!(shaped["byRule"]["r"], 5, "{shaped}");
     assert_eq!(shaped["truncated"]["totalMatching"], 5, "{shaped}");
+}
+
+/// 🔴 `critical` sits at the BACK of its deployment role, not the front (ledger V367, user verdict (A),
+/// 2026-10-11). The band means *a CONSTRUCTION is present* — a PEM block, a `FLUSHALL`, a `TRUNCATE`,
+/// a `new Function` — and a construction can be present and inert.
+///
+/// 📏 The measurement that moved it: on three trees the same day, three evaluators who could not see each
+/// other's work and were not told the baseline judged **6 of 6 `critical` rows as needing no edit** — an
+/// e2e OIDC fixture keypair, an `ioredis-mock` client, a deliberate `destroy()` teardown flush, an
+/// env-guarded startup flush, and two functions that only GENERATE `TRUNCATE` text. Five of the six sit
+/// on production paths, so the deployment-role key above could not reach them.
+#[test]
+fn critical_sits_at_the_back_of_its_role() {
+    let findings = vec![
+        finding("a", "critical", 0),
+        finding("b", "info", 1),
+        finding("c", "warning", 2),
+    ];
+    let shaped = shape(
+        &findings,
+        &FindingFilters {
+            min_severity: None,
+            rule: None,
+            limit: None,
+        },
+    );
+    let shown = shaped["shown"].as_array().unwrap();
+    assert_eq!(shown.len(), 3);
+    assert_eq!(shown[0]["severity"], "warning");
+    assert_eq!(shown[1]["severity"], "info");
+    assert_eq!(shown[2]["severity"], "critical");
+}
+
+/// The half of the verdict that is NOT placement: the threshold is untouched. `severity_rank` is public,
+/// a host gate (`zzop --fail-on`) orders by it, and `min_severity` filters with it — so a caller who
+/// asks for `critical` still gets exactly the `critical` rows. Pinned separately from the ordering
+/// test because these two questions live on one word and the whole design is that neither answers the other.
+#[test]
+fn asking_for_critical_still_admits_exactly_the_critical_rows() {
+    let findings = vec![
+        finding("a", "critical", 0),
+        finding("b", "warning", 1),
+        finding("c", "info", 2),
+    ];
+    let filters = FindingFilters {
+        min_severity: Some("critical".into()),
+        rule: None,
+        limit: None,
+    };
+    let shaped = shape(&findings, &filters);
+    let shown = shaped["shown"].as_array().unwrap();
+    assert_eq!(shown.len(), 1);
+    assert_eq!(shown[0]["severity"], "critical");
+}
+
+/// Shaping only, in the direction that matters most here: moving the band must not move a single count.
+/// If this ever fails, the verdict turned into a filter — which it explicitly is not.
+#[test]
+fn moving_the_critical_band_moves_no_count() {
+    let findings = vec![
+        finding("a", "critical", 0),
+        finding("a", "critical", 1),
+        finding("b", "warning", 2),
+    ];
+    let shaped = shape(
+        &findings,
+        &FindingFilters {
+            min_severity: None,
+            rule: None,
+            limit: None,
+        },
+    );
+    assert_eq!(shaped["total"], 3);
+    assert_eq!(shaped["bySeverity"]["critical"], 2);
+    assert_eq!(shaped["bySeverity"]["warning"], 1);
+    assert_eq!(shaped["byRule"]["a"], 2);
+}
+
+/// 🔴 The condition the verdict shipped under: when the cap drops the band entirely, the reply SAYS so.
+/// A demotion nobody is told about is a silent filter, and this verdict was recorded with the disclosure
+/// as its condition rather than as a nicety. The band now sorts last, so it is the first thing a small
+/// window loses — which makes this pin the one that keeps the change honest.
+#[test]
+fn a_window_that_drops_the_critical_band_discloses_it() {
+    let mut findings: Vec<_> = (0..3).map(|i| finding("w", "warning", i)).collect();
+    findings.push(finding("k", "critical", 3));
+    let filters = FindingFilters {
+        min_severity: None,
+        rule: None,
+        limit: Some(3),
+    };
+    let shaped = shape(&findings, &filters);
+    let shown = shaped["shown"].as_array().unwrap();
+    assert_eq!(shown.len(), 3);
+    assert!(
+        shown.iter().all(|f| f["severity"] == "warning"),
+        "{shown:?}"
+    );
+    let not_shown = &shaped["truncated"]["severitiesNotShown"];
+    assert_eq!(not_shown["counts"]["critical"], 1, "{not_shown:?}");
 }

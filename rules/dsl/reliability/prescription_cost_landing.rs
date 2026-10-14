@@ -49,10 +49,26 @@ fn sync_fs_in_handler_landing_precedes_the_async_imperative() {
     );
 }
 
-/// cal.com `176037d0`: the flagged `rejectUnauthorized: false` was an element of a config-FIX table the
-/// connection wizard APPLIES when an Exchange server presents a self-signed certificate. Removing it
-/// does not harden a deployment; it makes that wizard unable to connect. nocodb produced the same
-/// verdict on a different shape the same day.
+/// The config-FIX table this landing was written for is NOCODB's, and until 2026-10-10 this comment
+/// credited it to cal.com — the two trees were SWAPPED, and the misattribution was load-bearing because
+/// it is the justification for the caveat's central example.
+///
+/// 📏 Measured on both trees at their fixed shas. nocodb
+/// `packages/nc-gui/utils/baseCreateUtils.ts:241` is the real table: an `errorHandlers` array whose entry
+/// keys on `SELF_SIGNED_CERT_IN_CHAIN` and carries `action.connection.ssl.rejectUnauthorized: false`, which
+/// a connection wizard applies — removing it does not harden a deployment, it makes the wizard unable to
+/// connect. cal.com `176037d0` holds NO such table: `git grep rejectUnauthorized` returns exactly two
+/// sites, `packages/lib/serverConfig.ts:43` (`rejectUnauthorized: !isENVDev`, already the env-gated shape
+/// this message prescribes) and `packages/app-store/exchangecalendar/lib/CalendarService.ts:204`, which is
+/// a SETTING in a live `new XhrApi({...})` constructor under an `authenticationMethod === NTLM` branch.
+///
+/// 🔴 That second site came back as the only HARMFUL verdict of outside-audit round 12, and the mechanism
+/// is why the caveat grew a branch: the caveat offered a SETTING-or-DATA test, described the false positive
+/// as the DATA case only, and closed with "if nothing executes it as configuration for THIS process … the
+/// edit is the wrong one". That line IS executed as configuration, so the caveat's own test returned "the
+/// edit is right" for a line whose removal breaks every on-prem NTLM tenant at connect time. It did not
+/// fail to warn — it CERTIFIED the edit. Self-signed certificates were named only inside the DATA branch,
+/// one branch away from the reader who needed them.
 #[test]
 fn debug_true_committed_landing_precedes_the_remove_imperative() {
     let dir = TempDir::new("zzop-be-rel");
@@ -68,6 +84,28 @@ fn debug_true_committed_landing_precedes_the_remove_imperative() {
         &h[0].message,
         "BEFORE YOU REMOVE IT",
         "Remove the flag, or gate it",
+    );
+    // The DELIBERATE-SETTING branch, pinned because its absence produced a HARMFUL verdict and its
+    // presence is one clause inside a 2,100-character message. Both halves have to be reachable: the
+    // DATA half (nocodb's wizard table) and this half (a transport setting on one auth path).
+    let m = &h[0].message;
+    assert!(
+        m.contains("AND A SETTING CAN STILL BE DELIBERATE"),
+        "the message must say a SETTING can be deliberate, not only that DATA can be: {m}"
+    );
+    assert!(
+        m.contains("on-prem NTLM or Kerberos")
+            && m.contains("breaks every such tenant at connect time"),
+        "and must name the shape and the cost, since the reader cannot open our notes: {m}"
+    );
+    // The sentence that CERTIFIED the harmful edit must not come back.
+    assert!(
+        !m.contains("the edit is the wrong one"),
+        "the old one-sided consumer test certified the edit on a live setting: {m}"
+    );
+    assert!(
+        m.contains("Read the line's consumer AND the branch that reaches it"),
+        "the consumer test must ask about the BRANCH as well: {m}"
     );
 }
 /// POSITION, for the third rule this measurement reached (2026-09-25, review ledger V378).

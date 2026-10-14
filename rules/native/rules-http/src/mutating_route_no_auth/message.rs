@@ -133,11 +133,18 @@ pub(super) fn missing_auth_hint(
          of this rule in a repo outside those extensions means NOT ANALYZED, never \"no missing auth\" — \
          and a run that saw such routes says so out loud in its own `warnings` (the call-graph coverage \
          gap self-report names the language and this rule id). \
-         Precision limit: this is a call-graph-BFS, vocabulary-based check — route-level middleware (e.g. \
-         `apiRoutes.post(\"{path}\", requireAuth, {handler_ref})`, or a router-wide `.use(authMiddleware)`) \
-         never appears as a call FROM the handler itself, so it is invisible to this check and WILL \
-         false-positive on a route guarded only that way — this finding starts at Info severity until \
-         this check becomes middleware-aware. Second precision limit, and the one \"anywhere in its \
+         Precision limit: this is a call-graph-BFS, vocabulary-based check, and route-level middleware \
+         never appears as a call FROM the handler itself. Some middleware shapes are recognized and \
+         exempt the route BEFORE this finding exists — among them an auth-named route-level argument \
+         (e.g. `apiRoutes.post(\"/path\", requireAuth, handler)`) or `.use(authMiddleware)` in Express, a \
+         class-level `@PreAuthorize` / `@Secured` / `@RolesAllowed`, and a Spring global \
+         `SecurityFilterChain` when it is the ONLY one in the tree, the route sits under the source \
+         root that declares it, and it is written in a form the posture reader accepts — so a finding here \
+         means none of those applied to this route, not that they are invisible. A guard spelled any \
+         other way (a name outside the auth vocabulary, a framework with no recognizer, a Spring filter \
+         chain in a form the reader declines, or MORE THAN ONE chain in the tree, which applies none of \
+         them) IS invisible to this check and WILL false-positive on a route guarded only that way — \
+         this finding starts at Info severity for that reason. Second precision limit, and the one \"anywhere in its \
          call graph\" above would otherwise overstate: how FAR the walk reaches is per-language. For \
          the JS/TS extensions a call is resolved across files, so the phrase is literal, and since \
          2026-09-07 it is literal for `.java` too — a Java import specifier is a dotted package/class \

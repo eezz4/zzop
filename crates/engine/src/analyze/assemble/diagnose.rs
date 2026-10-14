@@ -86,7 +86,12 @@ pub(super) fn sweep(
     if let Some(w) = degraded_files_warning(input.degraded, config) {
         warnings.push(w);
     }
-    warnings.extend(unparsed_extension_warning(input.unparsed_extensions));
+    // Takes the scope census computed above: the rule half of this disclosure is measured over the
+    // WHOLE walk, which is the only population that contains an unparsed file.
+    warnings.extend(unparsed_extension_warning(
+        input.unparsed_extensions,
+        &dsl_scope.in_scope_rels,
+    ));
     warnings.extend(unmatched_suppression_warnings(config, input.rels));
     // Sits with the other config-filter self-reports: the marker is a suppression the AUTHOR wrote, the
     // same axis as an `exclude` entry, and the only one whose effect leaves no number behind.

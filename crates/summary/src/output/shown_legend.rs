@@ -42,8 +42,17 @@ pub(crate) const SHOWN_MEANING: &str =
      THE KEYS, outermost first. (1) DEPLOYMENT ROLE, descending — code that ships, then test paths, \
      then build and release surface. This key demotes, so it announces itself: `testPaths` and \
      `buildPaths` ride the same reply with their own counts and sentences whenever they have \
-     something to say, because a demotion nobody is told about is a silent filter. (2) SEVERITY, \
-     descending, inside a role. (3) SITE — how many findings, of ANY rule, already pointed at this \
+     something to say, because a demotion nobody is told about is a silent filter. (2) SEVERITY — and this is the one key whose order is NOT \
+     the obvious one: `warning`, then `info`, then `critical` LAST, inside a role. A `critical` here \
+     means a CONSTRUCTION is present — a private-key block, a `FLUSHALL`, a `TRUNCATE`, a \
+     `new Function` — and a construction can be present and inert; this band reads the construction and \
+     cannot read whether anything executes it. Measured on three trees by three evaluators who could not \
+     see each other's work and were not told the baseline: 6 of 6 `critical` rows needed no edit — an e2e \
+     fixture keypair, a mock client, two deliberate cache flushes, and two functions that only GENERATE \
+     `TRUNCATE` text. So the band keeps its meaning and loses its place. It is still a full member of \
+     every count, and when the cap drops it entirely `truncated.severitiesNotShown` carries its count and \
+     its first omitted rows — a demotion nobody is told about is a silent filter, so that disclosure is \
+     the condition this order ships under. (3) SITE — how many findings, of ANY rule, already pointed at this \
      exact file and line; every distinct site takes a slot before any site takes a second. (4) \
      RULE-IN-FILE — the same question one step coarser: every rule-and-file pair before any pair \
      takes a second. (5) RULE — every rule's Nth finding before any rule's N+1th. Ties fall back on \
@@ -63,6 +72,8 @@ pub(crate) const SHOWN_MEANING: &str =
      distinct places and rules, and after that it is the letters in a file path. A rule that is right \
      about your tree every time and a rule that is wrong every time reach this window on the same \
      terms. The one lever that does move a rule up or down is its SEVERITY, which the rule catalog \
-     declares and your configuration can override; the ordering holds no second opinion about it.\n\n\
+     declares and your configuration can override; the ordering holds no second opinion about it — \
+     with the one exception stated in key (2): raising a rule to `critical` moves it to the BACK of its \
+     role rather than the front, because that band reads a construction and not a consequence.\n\n\
      So read `shown` as: a deterministic spread across this band's places and rules. Never as: the N \
      worst things in this tree.";

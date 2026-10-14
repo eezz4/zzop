@@ -44,7 +44,7 @@ import { execFileSync } from "node:child_process";
 const repoRoot = execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
 const OSS = path.join(repoRoot, "corpus/oss");
 const BASE = path.join(OSS, "zzop.config.jsonc");
-const BIN = path.join(repoRoot, "target/release/zzop");
+const BIN = path.join(repoRoot, `target/release/zzop${process.platform === "win32" ? ".exe" : ""}`);
 
 /**
  * The instrument, and the answer each pair gave on 2026-09-07 (the run that produced

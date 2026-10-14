@@ -11,7 +11,10 @@
 //!
 //! ONE CONSTANT FOR THE THREE, byte-identical. The property belongs to the wire protocol, not to what
 //! any one of these rules detects: `format!`, an f-string, `fmt.Sprintf` and Java `+` all reach the
-//! same placeholder, so the cost is the same sentence in all three languages. The rules diverge only
+//! same placeholder, so the cost is the same sentence in all **four** languages. ⚠ Three rules, four
+//! languages — `sql-interpolated-statement` carries Python AND Go (its own message: *"assembled at
+//! runtime in Python or Go"*), which is why the rule count and the language count differ and why this
+//! line said "three" until 2026-10-12 (inbox N54-ⓑ). The rules diverge only
 //! in their EXIT, which is each rule's own imperative and stays in each rule's own message. Same split
 //! `ROTATION_LANDING` uses for its eight, and the same reason: a position pin needs ONE spelling.
 //!

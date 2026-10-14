@@ -31,6 +31,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 SURFACE="crates/config/config-surface.json"
+# On Windows `python3` can resolve to the Microsoft Store stub, which prints "Python" and exits 49 —
+# a red guard that names no cause. Ask first, the way check-mcp-registry-limits.sh asks for jq.
+python3 -c 'import sys; sys.exit(0)' > /dev/null 2>&1 || { echo "check-config-surface-read-by: python3 is not runnable here (on Windows, likely the Microsoft Store stub) -- this guard cannot run." >&2; exit 1; }
 derived="$(python3 - "$SURFACE" <<'PY'
 import json, re, os, subprocess, sys, collections
 surface = json.load(open(sys.argv[1], encoding="utf-8"))
@@ -86,7 +89,7 @@ import json, sys, collections, io
 p = sys.argv[1]
 j = json.load(io.open(p, encoding="utf-8"), object_pairs_hook=collections.OrderedDict)
 j["vocabularyReadBy"] = json.loads(sys.argv[2], object_pairs_hook=collections.OrderedDict)
-io.open(p, "w", encoding="utf-8").write(json.dumps(j, indent=2, ensure_ascii=False) + "\n")
+io.open(p, "w", encoding="utf-8", newline="\n").write(json.dumps(j, indent=2, ensure_ascii=False) + "\n")
 PY
   echo "check-config-surface-read-by: rewrote vocabularyReadBy in $SURFACE"
   exit 0

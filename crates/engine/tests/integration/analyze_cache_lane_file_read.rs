@@ -9,45 +9,9 @@
 //! The rest is the invalidation discipline this repo applies to every guard: a check nobody has seen go
 //! red is not a check. Each test below plants exactly one thing and removes exactly one thing.
 
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-
 use zzop_engine::{analyze_tree, AnalyzeOutput, EngineConfig, VocabularyConfig};
 
-struct TempDir(PathBuf);
-
-impl TempDir {
-    fn new(prefix: &str) -> Self {
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let dir = std::env::temp_dir().join(format!("{prefix}-{}-{nanos}-{n}", std::process::id()));
-        fs::create_dir_all(&dir).unwrap();
-        TempDir(dir)
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-
-    fn write(&self, rel: &str, content: &str) {
-        let full = self.0.join(rel);
-        if let Some(parent) = full.parent() {
-            fs::create_dir_all(parent).unwrap();
-        }
-        fs::write(full, content).unwrap();
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
+use crate::temp_dir::TempDir;
 
 /// The engine's built-in vocabulary plus the one key that has no built-in — see
 /// `VocabularyConfig::cache_lane_anchor_pattern`'s own doc for why it ships undeclared.

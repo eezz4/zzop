@@ -103,6 +103,25 @@ pub(super) fn project_file_io(
         // above, this is NOT gated `if !degraded`: `extract_csharp_file_io` runs its route-PROVIDES side
         // unconditionally (Java-parity), gating only the consumes internally — see its own doc.
         Some(Language::CSharp) => crate::io::extract_csharp_file_io(rel, text, degraded, vocab),
-        _ => None,
+
+        // 🔴 NAMED RATHER THAN `_`, so the compiler owns the inventory the doc above keeps by hand.
+        // This match ended `_ => None` until 2026-10-09, which meant a ninth `Language` would project
+        // NO io at all — no routes, no egress consumes, no db-table facts — with nothing red anywhere:
+        // `cache.rs`'s `parser_fingerprint` and `fresh.rs`'s dispatch would both force an arm (they are
+        // exhaustive), and this one would compile. Every io-keyed rule would then be structurally
+        // silent for that language while the coverage census looked healthy, which is the failure
+        // `framework_silence::call_graph_language` names as the worst shape there is: a zero that reads
+        // as an all-clear. Measured when it was found (external review round 9): of the seven 8-way
+        // language dispatches in `crates/engine/src`, this was the only one on a wildcard.
+        //
+        // These four are NOT a no-op arm. Their counterparts above carry `if !degraded`, so a degraded
+        // file of those languages reaches here — that is the behaviour the old `_` was silently
+        // providing, and deleting the wildcard without naming them would have changed it.
+        Some(Language::TypeScript | Language::Python | Language::Rust | Language::Go) => None,
+
+        // No dispatch at all: an extension this engine does not parse. Separate from the arm above
+        // because the two answer different questions — "nothing parses this" versus "this parsed badly",
+        // and only the second is a degrade the coverage lane reports.
+        None => None,
     }
 }

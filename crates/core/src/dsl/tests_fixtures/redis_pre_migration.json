@@ -11,7 +11,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing|cypress|playwright)/|\\.tests?/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.|_test\\.go$|(^|/)test_[^/]*\\.py$|_test\\.py$|(?-i:Tests?\\.java$)|(?-i:(^|/)Test[A-Z][^/]*\\.java$)|(?-i:Tests?\\.cs$))",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing|cypress|playwright)/|\\.tests?/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.|_test\\.go$|(^|/)test_[^/]*\\.py$|_test\\.py$|(?-i:Tests?\\.java$)|(?-i:(^|/)Test[A-Z][^/]*\\.java$)|(?-i:Tests?\\.cs$)|(^|/)tests?\\.rs$|_tests?\\.rs$)",
         "require_file": "(?i)flush(all|db)",
         "skip_comment_lines": true,
         "line_pattern": "(?i)(\\.flush(all|db)\\s*\\(|[(\\[]\\s*['\"`]flush(all|db)['\"`])",
@@ -25,7 +25,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing|cypress|playwright)/|\\.tests?/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.|_test\\.go$|(^|/)test_[^/]*\\.py$|_test\\.py$|(?-i:Tests?\\.java$)|(?-i:(^|/)Test[A-Z][^/]*\\.java$)|(?-i:Tests?\\.cs$))",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing|cypress|playwright)/|\\.tests?/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.|_test\\.go$|(^|/)test_[^/]*\\.py$|_test\\.py$|(?-i:Tests?\\.java$)|(?-i:(^|/)Test[A-Z][^/]*\\.java$)|(?-i:Tests?\\.cs$)|(^|/)tests?\\.rs$|_tests?\\.rs$)",
         "require_file": "(?i)(\\.keys\\s*\\(|['\"`]KEYS['\"`])",
         "skip_comment_lines": true,
         "line_pattern": "\\.keys\\s*\\(\\s*['\"`]|[(\\[]\\s*['\"`]KEYS['\"`]",
@@ -34,12 +34,13 @@
     },
     {
       "id": "client-no-error-listener",
+      "caveat": "Note the cross-file limitation: the client may be created here and the `'error'` listener attached in another module — that's exactly the case `// zzop-client-no-error-listener-ok` is for.",
       "severity": "warning",
       "message": "A redis client created with `createClient(...)` (node-redis v4) or `new Redis(...)`/`new Redis.Cluster(...)` (ioredis) with no `.on('error', ...)` listener anywhere in this file — node-redis/ioredis's client is an EventEmitter that emits `'error'` on every connection blip, and with no listener attached Node's default unhandled-`error`-event behavior CRASHES the process on the first one. Note the cross-file limitation: the client may be created here and the `'error'` listener attached in another module — that's exactly the case `// zzop-client-no-error-listener-ok` is for. Attach `.on('error', ...)` where the client is created (log it, and let the reconnect strategy do its job) so a connection error degrades to a cache miss instead of killing the process.",
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing|cypress|playwright)/|\\.tests?/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.|_test\\.go$|(^|/)test_[^/]*\\.py$|_test\\.py$|(?-i:Tests?\\.java$)|(?-i:(^|/)Test[A-Z][^/]*\\.java$)|(?-i:Tests?\\.cs$))",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing|cypress|playwright)/|\\.tests?/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.|_test\\.go$|(^|/)test_[^/]*\\.py$|_test\\.py$|(?-i:Tests?\\.java$)|(?-i:(^|/)Test[A-Z][^/]*\\.java$)|(?-i:Tests?\\.cs$)|(^|/)tests?\\.rs$|_tests?\\.rs$)",
         "require_file": "['\"](ioredis|redis|@redis/client)['\"]",
         "require_file_absent": ["\\.on\\s*\\(\\s*['\"`]error"],
         "skip_comment_lines": true,
@@ -54,7 +55,7 @@
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing|cypress|playwright)/|\\.tests?/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.|_test\\.go$|(^|/)test_[^/]*\\.py$|_test\\.py$|(?-i:Tests?\\.java$)|(?-i:(^|/)Test[A-Z][^/]*\\.java$)|(?-i:Tests?\\.cs$))",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing|cypress|playwright)/|\\.tests?/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.|_test\\.go$|(^|/)test_[^/]*\\.py$|_test\\.py$|(?-i:Tests?\\.java$)|(?-i:(^|/)Test[A-Z][^/]*\\.java$)|(?-i:Tests?\\.cs$)|(^|/)tests?\\.rs$|_tests?\\.rs$)",
         "require_file": "(?i)redis|ioredis",
         "skip_comment_lines": true,
         "patterns": [
@@ -79,7 +80,7 @@
       "matcher": {
         "type": "line-scan",
         "file_pattern": "(?i)\\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing|cypress|playwright)/|\\.tests?/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.|_test\\.go$|(^|/)test_[^/]*\\.py$|_test\\.py$|(?-i:Tests?\\.java$)|(?-i:(^|/)Test[A-Z][^/]*\\.java$)|(?-i:Tests?\\.cs$))",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing|cypress|playwright)/|\\.tests?/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.|_test\\.go$|(^|/)test_[^/]*\\.py$|_test\\.py$|(?-i:Tests?\\.java$)|(?-i:(^|/)Test[A-Z][^/]*\\.java$)|(?-i:Tests?\\.cs$)|(^|/)tests?\\.rs$|_tests?\\.rs$)",
         "require_file": "(?i)redis|ioredis",
         "skip_comment_lines": true,
         "line_pattern": "(?i)\\bsetnx\\s*\\(|\\.set\\s*\\([^)]*\\bNX\\b",
@@ -94,7 +95,7 @@
       "matcher": {
         "type": "method-scan",
         "file_pattern": "(?i)\\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$",
-        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing|cypress|playwright)/|\\.tests?/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.|_test\\.go$|(^|/)test_[^/]*\\.py$|_test\\.py$|(?-i:Tests?\\.java$)|(?-i:(^|/)Test[A-Z][^/]*\\.java$)|(?-i:Tests?\\.cs$))",
+        "file_exclude_pattern": "(?i)((^|/)(e2e|tests?|__tests?__|spec|fixtures?|testing|cypress|playwright)/|\\.tests?/|\\.(test|spec)\\.|[.-]spec\\.|(^|/)(playwright|vitest|jest|cypress|vite)\\.config\\.|_test\\.go$|(^|/)test_[^/]*\\.py$|_test\\.py$|(?-i:Tests?\\.java$)|(?-i:(^|/)Test[A-Z][^/]*\\.java$)|(?-i:Tests?\\.cs$)|(^|/)tests?\\.rs$|_tests?\\.rs$)",
         "require_file": "(?i)redis|ioredis",
         "skip_comment_lines": true,
         "strip_string_literals": true,

@@ -192,7 +192,7 @@ they gate how a change must be SHAPED rather than merely whether it compiles:
   `check-syn-isolation.sh`, `check-tree-sitter-isolation.sh`) — each parser backend's dependencies and
   AST types stay confined to that parser crate; no other crate may hold one. An upgrade's
   re-verification scope is then one crate, not the workspace.
-- **Max file lines** (`check-max-file-lines.sh`) — Rust **source** files stay under 300 lines (oversized
+- **Max file lines** (`check-max-file-lines.sh`) — Rust **source** files stay under 400 lines (oversized
   files are split into directory modules). Test files are exempt and may grow freely — keep unit tests
   out of the source file, paired beside it (`foo.rs` + `foo_test.rs`, or `foo/tests.rs`); `tests/`
   directories and `rules/dsl` pack tests are exempt by path. Pre-existing source violations are frozen

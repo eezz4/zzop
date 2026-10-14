@@ -31,6 +31,20 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 
+// 🔴 TAKING A BASELINE AGAINST AN OLDER RELEASE — two traps, both measured on 2026-10-06.
+//
+// 1. RUN FROM A REAL CLONE, not from the extracted tree. `git archive` output has no `.git`, so every
+//    git-derived key drops out of the reply and this script's own `proves` check fails naming paths that
+//    did not move ("analyze island no longer reaches architecture.topRecommendation.idMeaning"). Build
+//    the old binary in the extracted tree, then point `--binary` at it and run from the repository.
+//
+// 2. DELETE THE WAIVERS THE OLD BINARY CANNOT SATISFY. `LANE_ASYMMETRY` fails on a waiver that waives
+//    nothing, and a waiver for a key the old binary never emitted waives nothing BY CONSTRUCTION — so a
+//    baseline against any binary older than the newest waiver cannot be taken without removing those
+//    rows from a copy. That is safe and the safety is checkable: `LANE_ASYMMETRY` and `OPEN_KEYED` are read
+//    only by `checkSiblingParity`, never by the path walk, so the counted surface is identical either way.
+//    Diff the two path LISTS as well as the totals — the totals are what rots, the lists are what the
+//    compatibility claim actually rests on.
 const args = process.argv.slice(2);
 const binIdx = args.indexOf("--binary");
 // The shipped binary has no `.exe` tail off Windows. Hardcoding one made this census refuse to run
@@ -180,12 +194,15 @@ const SEVERITY_MAPS = [
   "truncated.severitiesNotShown.firstOmitted",
 ];
 const SEVERITY_GAPS = [
-  { lane: "crossLayerFindings", token: "critical",
-    why: "no cases/ fixture omits a CRITICAL cross-layer finding under `--limit 1`: the join's own "
-       + "findings on that corpus are warning and info, so the critical arm of all three maps is "
-       + "emitted-but-never-censused. Closing it means a fixture whose join produces 2+ critical "
-       + "findings, which moves cases/EXPECTED.jsonc — the detection gate's ground truth — so the gap "
-       + "is declared here rather than closed by editing the answer key (2026-09-15, ledger V256)." },
+  { lane: "crossLayerFindings", token: "warning",
+    why: "no cases/ fixture omits a WARNING cross-layer finding under `--limit 1`. Since 664fb89 the "
+       + "window sorts warning > info > critical, so the one row `--limit 1` keeps is a warning and the "
+       + "omitted maps carry info and critical, never warning (until 2026-10-14 this entry was "
+       + "`critical`, for the old critical-first order — the release audit's re-run of this script "
+       + "is what flipped it). Closing it means a fixture whose join produces 2+ warning findings, "
+       + "which moves cases/EXPECTED.jsonc — the detection gate's ground truth — so the gap is "
+       + "declared here rather than closed by editing the answer key (first declared 2026-09-15, "
+       + "ledger V256)." },
 ];
 
 function checkSeverityLeafCoverage(paths) {

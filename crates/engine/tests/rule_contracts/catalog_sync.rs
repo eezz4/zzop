@@ -190,10 +190,11 @@ fn catalog_sightline_row_ids(text: &str) -> std::collections::BTreeSet<String> {
 /// undeclared (`crates/engine/src/sightlines.rs`) need no entry because their catalog rows carry no
 /// sightline paragraph either — both directions already agree — and the red a future marker on either
 /// row would raise is CORRECT, not noise:
-/// - `mutating-route-no-auth`: its trigger IS witnessed in every call-graph-covered extension (`.go`
-///   routes included) — the gap is call-EDGE evidence, route-conditional, owned by the S8
-///   framework-silence warning the coverage reply forwards per tree. A catalog sightline paragraph
-///   would mis-type that per-run conditional disclosure as a build capability: on red, remove the
+/// - `mutating-route-no-auth`: route evidence exists where call-EDGE evidence does not — the reason
+///   is owned by that DECISIONS bullet and **not restated here** (2026-10-12: the two files carried
+///   this sentence byte-identical, and the copy is how a false parenthetical about `.go` survived a
+///   reading — see inbox N54-ⓒ). What belongs to THIS file is the instruction: a catalog sightline
+///   paragraph would mis-type that per-run conditional disclosure as a build capability: on red, remove the
 ///   marker — unless the rule's disclosure has genuinely become extension-conditional, in which case
 ///   declare a `RuleSightline` next to the rule instead.
 /// - `route-shadowing`: its language gate is an EXEMPTION on routing semantics (first-match vs

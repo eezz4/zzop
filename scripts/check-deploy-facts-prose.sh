@@ -338,13 +338,44 @@ fi
 # `parser-java-21` -> `java`), so a new parser directory fails this until every surface names it.
 # Boundary-matched for the same reason as the platform axis above — and here it also stops `go` from
 # matching "GitHub"/"algorithm", which would make the whole axis vacuous for that language.
+#
+# 🔴 THE SECOND DIRECTION WAS DECLARED AND NOT CHECKED UNTIL 2026-10-09. The paragraph above and the
+# failure message below both promise over-advertising is caught — *"one named there that no longer
+# ships is an overclaim"* — and the loop iterated `parser/parser-*/`, i.e. the parsers that EXIST.
+# Nothing iterated the languages a SURFACE names, so no code path could observe a name with no parser
+# behind it. Found by external review round 9.
+#
+# Three smaller holes went with it, all in the same twenty lines:
+#   - no population floor: move `parser/` and the glob expands literally, `[ -d ]` fails, `continue`
+#     fires once, and this axis prints nothing while the four derived counts below still print clean.
+#   - a filesystem glob, so an untracked `parser/parser-foo/` invents a requirement every surface then
+#     fails. `check-version-lists-parsers.sh` states that rationale verbatim and uses `git ls-files`.
+#   - `[ -f "$surface" ] || continue`, which silently shrinks "these four surfaces" to three when one
+#     is renamed. ⚠ The IDENTITY axis in this same file exits 1 on a missing surface, 150 lines down:
+#     one file, two axes, opposite stances on a vanished subject.
 lang_surfaces="$CLI_PKG .claude-plugin/plugin.json packages/mcpb/manifest.json README.md"
 missing_lang=""
-for parser_dir in parser/parser-*/; do
-  [ -d "$parser_dir" ] || continue
-  slug="${parser_dir#parser/parser-}"
-  slug="${slug%/}"
-  slug="${slug%-[0-9]*}" # `python-3` -> `python`, `java-21` -> `java`
+
+# TRACKED, not on disk — see the sibling guard's reasoning. `-z` because a path with a space would
+# otherwise split into two phantom parsers.
+shipped_slugs=""
+while IFS= read -r -d '' manifest; do
+  dir="${manifest%/Cargo.toml}"
+  raw="${dir#parser/parser-}"
+  shipped_slugs="$shipped_slugs ${raw%-[0-9]*}"
+done < <(git ls-files -z -- 'parser/parser-*/Cargo.toml')
+
+# POPULATION FLOOR before any verdict. A zero here is a broken needle and reads exactly like a clean
+# tree; the bound is the thing that cannot be zero in this repo rather than a remembered total.
+shipped_count=$(printf "%s" "$shipped_slugs" | tr " " "\n" | grep -c . || true)
+if [ "$shipped_count" -lt 2 ]; then
+  echo "$SELF: REFUSING TO JUDGE the language axis -- git ls-files found $shipped_count parser" >&2
+  echo "  manifest(s) under parser/parser-*/. This engine ships more than one frontend, so a count" >&2
+  echo "  below two is this needle breaking, never a fact about the tree." >&2
+  exit 1
+fi
+
+for slug in $shipped_slugs; do
   # One alternation per language, so every surface is checked by a SINGLE grep. An alias is listed only
   # where the shipped spelling is not the slug case-insensitively — a future `parser-kotlin` needs no
   # entry, while one whose display name diverges fails loudly until it gets one rather than passing on a
@@ -354,13 +385,66 @@ for parser_dir in parser/parser-*/; do
     *) alts="$slug"; shown="$slug" ;;
   esac
   for surface in $lang_surfaces; do
-    [ -f "$surface" ] || continue
+    [ -f "$surface" ] || { echo "$SELF: missing language surface $surface -- re-anchor this axis." >&2; exit 1; }
     if grep -qiE "(^|[^A-Za-z0-9_-])($alts)([^A-Za-z0-9_-]|\$)" "$surface"; then
       continue
     fi
     missing_lang="$missing_lang\n  $surface: never names $shown (parser/parser-${slug}* exists)"
   done
 done
+
+# --- THE SECOND DIRECTION: a surface naming a language that does not ship ---------------------------
+#
+# Only the npm keywords can carry this axis, and that is a property of the surfaces rather than a
+# shortcut: `.claude-plugin/plugin.json`, `packages/mcpb/manifest.json` and `README.md` state their
+# languages inside free prose, so "the set of languages this file claims" is not extractable without
+# guessing. `$CLI_PKG`'s `keywords` is a JSON ARRAY — an enumerable set someone wrote on purpose — so
+# every entry can be asked to justify itself.
+#
+# ⚠ The non-language keywords are declared, and that IS an allowlist. The trade is deliberate: the
+# alternative is inferring which keywords name languages, and a wrong inference here fails in the
+# silent direction. This list fails LOUDLY instead — a new non-language keyword reds this guard until
+# it is named, which costs one line and cannot hide an overclaim.
+# `javascript` is an ALIAS, not a parser: `.js`/`.jsx`/`.mjs`/`.cjs` dispatch to the TypeScript
+# frontend (`dispatch::language_for_extension`), so the keyword is true and has no directory.
+not_a_language="sast static-analysis architecture code-analysis security cli"
+alias_of_shipped="javascript:typescript"
+overclaimed=""
+if [ -f "$CLI_PKG" ]; then
+  # The reader prints nothing rather than exiting non-zero on an empty array, so the REFUSING branch
+  # below is the one that speaks. 🔴 It did exit 3, and that was wrong in the way this repo keeps
+  # naming: `set -e` kills the script on a failing command substitution, so the guard died with a
+  # bare `exit 3` and no message at all — found by this axis's own canary, 2026-10-09.
+  keywords=$(node -e 'const k=require(process.argv[1]).keywords;if(Array.isArray(k))console.log(k.join(" "))' "./$CLI_PKG")
+  if [ -z "$keywords" ]; then
+    echo "$SELF: REFUSING TO JUDGE -- $CLI_PKG has no non-empty keywords array to check." >&2
+    exit 1
+  fi
+  for kw in $keywords; do
+    case " $not_a_language " in *" $kw "*) continue ;; esac
+    target="$kw"
+    for pair in $alias_of_shipped; do
+      [ "${pair%%:*}" = "$kw" ] && target="${pair#*:}"
+    done
+    case " $shipped_slugs " in
+      *" $target "*) ;;
+      *) overclaimed="$overclaimed\n  $CLI_PKG: keyword \"$kw\" names no shipped parser (parser/parser-${target}* does not exist)" ;;
+    esac
+  done
+else
+  echo "$SELF: missing language surface $CLI_PKG -- re-anchor this axis." >&2
+  exit 1
+fi
+
+if [ -n "$overclaimed" ]; then
+  echo "$SELF: a distribution surface advertises a language this build does not parse:" >&2
+  # shellcheck disable=SC2059
+  printf "$overclaimed\n" >&2
+  echo "  Either the parser was retired and this keyword outlived it -- an overclaim, which is the" >&2
+  echo "  half of this axis that went unchecked until 2026-10-09 -- or the keyword is not a language" >&2
+  echo "  and belongs in this guard's \$not_a_language list. Truth is git ls-files parser/parser-*/." >&2
+  exit 1
+fi
 
 if [ -n "$missing_lang" ]; then
   echo "$SELF: a shipped parser's language is missing from a distribution surface:" >&2
